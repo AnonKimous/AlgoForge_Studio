@@ -1,0 +1,47 @@
+# Build outputs
+build/
+out/
+bin/
+lib/
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+install_manifest.txt
+CTestTestfile.cmake
+_deps/
+third_party/
+
+# Visual Studio / MSBuild
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.VC.db
+*.VC.VC.opendb
+*.pdb
+*.ilk
+*.ipch
+*.obj
+*.exe
+*.dll
+*.lib
+*.exp
+*.log
+*.tlog
+*.recipe
+*.lastbuildstate
+
+# Editor settings
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS junk
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
