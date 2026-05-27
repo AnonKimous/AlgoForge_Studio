@@ -1,8 +1,12 @@
 #include "renderer.h"
 
 #include <imgui.h>
+#include <imgui_internal.h>
+#include <imgui_impl_sdl3.h>
 #include <imgui_impl_vulkan.h>
-#include <imgui_impl_win32.h>
+
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_vulkan.h>
 
 #include <algorithm>
 #include <array>
@@ -10,6 +14,7 @@
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <filesystem>
 #include <iterator>
 #include <stdexcept>
 #include <string>
@@ -24,15 +29,20 @@ std::vector<char> ReadBinaryFile(const char* path) {
   return std::vector<char>((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 }
 
-VkSurfaceKHR CreateWin32Surface(VkInstance instance, HINSTANCE hinstance, HWND hwnd) {
-  VkWin32SurfaceCreateInfoKHR info{};
-  info.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
-  info.hinstance = hinstance;
-  info.hwnd = hwnd;
+std::string ResolveImGuiIniPath() {
+  const char* base_path = SDL_GetBasePath();
+  if (!base_path || base_path[0] == '\0') {
+    return "imgui.ini";
+  }
+  std::filesystem::path path(base_path);
+  path = path.parent_path() / ".." / "imgui.ini";
+  return path.lexically_normal().string();
+}
 
+VkSurfaceKHR CreateSdlSurface(VkInstance instance, SDL_Window* window) {
   VkSurfaceKHR surface{};
-  if (vkCreateWin32SurfaceKHR(instance, &info, nullptr, &surface) != VK_SUCCESS) {
-    throw std::runtime_error("vkCreateWin32SurfaceKHR failed");
+  if (SDL_Vulkan_CreateSurface(window, instance, nullptr, &surface) == 0) {
+    throw std::runtime_error(std::string("SDL_Vulkan_CreateSurface failed: ") + SDL_GetError());
   }
   return surface;
 }
@@ -115,6 +125,25 @@ void AppendColoredLine(std::vector<GpuVertex>& vertices, Vec2 a, Vec2 b, float r
   vertices.push_back({b.x, b.y, 0.0f, r, g, bl});
 }
 
+struct MaterialPreset {
+  const char* name;
+  float gpa;
+};
+
+constexpr MaterialPreset kMaterialPresets[] = {
+  {"rubber", 0.01f},
+  {"leather", 0.05f},
+  {"plastic", 2.5f},
+  {"wood", 11.0f},
+  {"aluminum", 69.0f},
+  {"glass", 70.0f},
+  {"titanium", 116.0f},
+  {"steel", 200.0f},
+  {"high carbon steel", 210.0f},
+  {"tungsten", 411.0f},
+  {"diamond", 1220.0f},
+};
+
 void AppendHatchForTriangle(std::vector<GpuVertex>& vertices, const Mesh& mesh, uint32_t tri_index, float r, float g, float b) {
   const auto& tri = mesh.triangles[tri_index];
   Vec2 a{mesh.positions[tri[0]].x, mesh.positions[tri[0]].y};
@@ -161,7 +190,7 @@ void AppendHatchForTriangle(std::vector<GpuVertex>& vertices, const Mesh& mesh, 
   }
 }
 
-void AppendDashedArrow(std::vector<GpuVertex>& vertices, Vec3 a, Vec3 b, float r, float g, float bl, float phase) {
+void AppendDashedArrow(std::vector<GpuVertex>& vertices, Vec3 a, Vec3 b, float r, float g, float bl, float phase, float thickness = 0.0f) {
   Vec2 start{a.x, a.y};
   Vec2 end{b.x, b.y};
   Vec2 delta{end.x - start.x, end.y - start.y};
@@ -176,37 +205,59 @@ void AppendDashedArrow(std::vector<GpuVertex>& vertices, Vec3 a, Vec3 b, float r
   float offset = std::fmod(phase * 0.22f, period);
   if (offset < 0.0f) offset += period;
 
-  for (float t = -offset; t < length; t += period) {
-    float t0 = std::max(0.0f, t);
-    float t1 = std::min(length, t + dash);
-    if (t1 <= 0.0f || t0 >= length || t1 <= t0) continue;
-    Vec2 p0{start.x + dir.x * t0, start.y + dir.y * t0};
-    Vec2 p1{start.x + dir.x * t1, start.y + dir.y * t1};
-    AppendColoredLine(vertices, p0, p1, r, g, bl);
+  auto draw_shifted = [&](float shift) {
+    Vec2 shifted_start{start.x + normal.x * shift, start.y + normal.y * shift};
+    Vec2 shifted_end{end.x + normal.x * shift, end.y + normal.y * shift};
+    Vec2 shifted_delta{shifted_end.x - shifted_start.x, shifted_end.y - shifted_start.y};
+    float shifted_length = std::sqrt(shifted_delta.x * shifted_delta.x + shifted_delta.y * shifted_delta.y);
+    if (shifted_length <= 1e-5f) return;
+    Vec2 shifted_dir{shifted_delta.x / shifted_length, shifted_delta.y / shifted_length};
+    Vec2 shifted_normal{-shifted_dir.y, shifted_dir.x};
+
+    for (float t = -offset; t < shifted_length; t += period) {
+      float t0 = std::max(0.0f, t);
+      float t1 = std::min(shifted_length, t + dash);
+      if (t1 <= 0.0f || t0 >= shifted_length || t1 <= t0) continue;
+      Vec2 p0{shifted_start.x + shifted_dir.x * t0, shifted_start.y + shifted_dir.y * t0};
+      Vec2 p1{shifted_start.x + shifted_dir.x * t1, shifted_start.y + shifted_dir.y * t1};
+      AppendColoredLine(vertices, p0, p1, r, g, bl);
+    }
+
+    float head_len = std::min(0.055f, shifted_length * 0.28f);
+    float head_width = head_len * 0.65f;
+    Vec2 base{shifted_end.x - shifted_dir.x * head_len, shifted_end.y - shifted_dir.y * head_len};
+    Vec2 left{base.x + shifted_normal.x * head_width, base.y + shifted_normal.y * head_width};
+    Vec2 right{base.x - shifted_normal.x * head_width, base.y - shifted_normal.y * head_width};
+    AppendColoredLine(vertices, shifted_end, left, r, g, bl);
+    AppendColoredLine(vertices, shifted_end, right, r, g, bl);
+  };
+
+  if (thickness <= 0.0f) {
+    draw_shifted(0.0f);
+    return;
   }
 
-  float head_len = std::min(0.055f, length * 0.28f);
-  float head_width = head_len * 0.65f;
-  Vec2 base{end.x - dir.x * head_len, end.y - dir.y * head_len};
-  Vec2 left{base.x + normal.x * head_width, base.y + normal.y * head_width};
-  Vec2 right{base.x - normal.x * head_width, base.y - normal.y * head_width};
-  AppendColoredLine(vertices, end, left, r, g, bl);
-  AppendColoredLine(vertices, end, right, r, g, bl);
+  draw_shifted(-thickness);
+  draw_shifted(0.0f);
+  draw_shifted(thickness);
 }
 
 }  // namespace
 
-VulkanRenderer::VulkanRenderer(const Win32Window& window) {
+VulkanRenderer::VulkanRenderer(const WindowHandle& window) {
+  window_ = window;
   CreateInstanceAndDevice(window);
   CreateSwapchain();
   CreatePipeline();
   CreateFrameResources();
   CreateImGui(window);
   CreateVertexBuffer(256 * sizeof(GpuVertex));
+  CreateSceneTarget(swapchain_extent_);
 }
 
 VulkanRenderer::~VulkanRenderer() {
   if (device_) vkDeviceWaitIdle(device_);
+  DestroySceneTarget();
   DestroyImGui();
   DestroyBuffer(vertex_buffer_);
   DestroyFrameResources();
@@ -217,19 +268,27 @@ VulkanRenderer::~VulkanRenderer() {
   if (instance_) vkDestroyInstance(instance_, nullptr);
 }
 
-void VulkanRenderer::CreateInstanceAndDevice(const Win32Window& window) {
+void VulkanRenderer::CreateInstanceAndDevice(const WindowHandle& window) {
+  uint32_t sdl_extension_count = 0;
+  const char* const* sdl_extensions = SDL_Vulkan_GetInstanceExtensions(&sdl_extension_count);
+  if (!sdl_extensions || sdl_extension_count == 0) {
+    throw std::runtime_error(std::string("SDL_Vulkan_GetInstanceExtensions failed: ") + SDL_GetError());
+  }
+
   auto instance_ret = vkb::InstanceBuilder{}
     .set_app_name("Vulkan Mesh Editor")
     .request_validation_layers()
     .use_default_debug_messenger()
     .require_api_version(1, 3, 0)
-    .enable_extension(VK_KHR_SURFACE_EXTENSION_NAME)
-    .enable_extension(VK_KHR_WIN32_SURFACE_EXTENSION_NAME)
-    .build();
-  if (!instance_ret) throw std::runtime_error(instance_ret.error().message());
-  vkb::Instance vkb_instance = instance_ret.value();
+    ;
+  for (uint32_t i = 0; i < sdl_extension_count; ++i) {
+    instance_ret.enable_extension(sdl_extensions[i]);
+  }
+  auto built_instance = instance_ret.build();
+  if (!built_instance) throw std::runtime_error(built_instance.error().message());
+  vkb::Instance vkb_instance = built_instance.value();
   instance_ = vkb_instance.instance;
-  surface_ = CreateWin32Surface(instance_, window.hinstance(), window.hwnd());
+  surface_ = CreateSdlSurface(instance_, window.window);
 
   auto physical_ret = vkb::PhysicalDeviceSelector{vkb_instance}.set_surface(surface_).select();
   if (!physical_ret) throw std::runtime_error(physical_ret.error().message());
@@ -406,18 +465,15 @@ VkPipeline VulkanRenderer::CreateGraphicsPipeline(VkPrimitiveTopology topology, 
   input.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
   input.topology = topology;
 
-  VkViewport viewport{};
-  viewport.width = static_cast<float>(swapchain_extent_.width);
-  viewport.height = static_cast<float>(swapchain_extent_.height);
-  viewport.maxDepth = 1.0f;
-  VkRect2D scissor{};
-  scissor.extent = swapchain_extent_;
   VkPipelineViewportStateCreateInfo viewport_state{};
   viewport_state.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
   viewport_state.viewportCount = 1;
-  viewport_state.pViewports = &viewport;
   viewport_state.scissorCount = 1;
-  viewport_state.pScissors = &scissor;
+  VkDynamicState dynamic_states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+  VkPipelineDynamicStateCreateInfo dynamic{};
+  dynamic.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+  dynamic.dynamicStateCount = static_cast<uint32_t>(std::size(dynamic_states));
+  dynamic.pDynamicStates = dynamic_states;
 
   VkPipelineRasterizationStateCreateInfo raster{};
   raster.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
@@ -450,6 +506,7 @@ VkPipeline VulkanRenderer::CreateGraphicsPipeline(VkPrimitiveTopology topology, 
   info.pVertexInputState = &vertex_input;
   info.pInputAssemblyState = &input;
   info.pViewportState = &viewport_state;
+  info.pDynamicState = &dynamic;
   info.pRasterizationState = &raster;
   info.pMultisampleState = &ms;
   info.pColorBlendState = &blend;
@@ -495,7 +552,7 @@ void VulkanRenderer::CreateFrameResources() {
   }
 }
 
-void VulkanRenderer::CreateImGui(const Win32Window& window) {
+void VulkanRenderer::CreateImGui(const WindowHandle& window) {
   VkDescriptorPoolSize pool_sizes[] = {
     {VK_DESCRIPTOR_TYPE_SAMPLER, 1000},
     {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000},
@@ -522,9 +579,13 @@ void VulkanRenderer::CreateImGui(const Win32Window& window) {
 
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
+  ImGuiIO& io = ImGui::GetIO();
+  io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+  imgui_ini_path_ = ResolveImGuiIniPath();
+  io.IniFilename = imgui_ini_path_.c_str();
   ImGui::StyleColorsDark();
 
-  ImGui_ImplWin32_Init(window.hwnd());
+  ImGui_ImplSDL3_InitForVulkan(window.window);
 
   VkPipelineRenderingCreateInfoKHR pipeline_rendering{};
   pipeline_rendering.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR;
@@ -586,7 +647,7 @@ void VulkanRenderer::AppendHudVertices(std::vector<GpuVertex>& vertices, const F
 
 void VulkanRenderer::UpdateVertexBuffer(const Mesh& mesh, const TriangleOrientationAnalyzer& analyzer, int highlighted_vertex, const RenderUiState& ui_state, uint32_t& green_hatch_count, uint32_t& yellow_hatch_count, uint32_t& red_hatch_count, uint32_t& line_count, uint32_t& directive_line_count, uint32_t& point_count) {
   std::vector<GpuVertex> vertices;
-  vertices.reserve(mesh.edges.size() * 2 + mesh.positions.size() + mesh.triangles.size() * 80 + ui_state.phys_directives.size() * 48);
+  vertices.reserve(mesh.edges.size() * 2 + mesh.positions.size() + mesh.triangles.size() * 80 + ui_state.active_phys_directives.size() * 48);
   const auto& negative_edges = analyzer.edge_has_negative_triangle();
   const auto& negative_vertices = analyzer.vertex_has_negative_triangle();
   const auto& triangle_faces_viewer = analyzer.triangle_faces_viewer();
@@ -627,13 +688,20 @@ void VulkanRenderer::UpdateVertexBuffer(const Mesh& mesh, const TriangleOrientat
   line_count = static_cast<uint32_t>(vertices.size()) - line_start;
 
   uint32_t directive_start = static_cast<uint32_t>(vertices.size());
-  if (ui_state.mode == InteractionMode::Phys && ui_state.phys_sub_mode == PhysSubMode::Guide) {
-    for (const PhysDirective& directive : ui_state.phys_directives) {
+  if (ui_state.mode == InteractionMode::Phys && ui_state.phys_guide_enabled) {
+    for (uint32_t i = 0; i < ui_state.active_phys_directives.size(); ++i) {
+      const PhysDirective& directive = ui_state.active_phys_directives[i];
       if (directive.vertex < 0) continue;
+      if (directive.hidden) continue;
+      bool selected = static_cast<int>(i) == ui_state.selected_phys_directive;
+      float thickness = selected ? 0.0065f : 0.0f;
+      float allowed_r = selected ? 0.35f : 1.0f;
+      float allowed_g = selected ? 0.95f : 1.0f;
+      float allowed_b = selected ? 1.0f : 1.0f;
       if (!directive.valid) {
-        AppendDashedArrow(vertices, directive.start, directive.requested_target, 1.0f, 0.0f, 0.0f, ui_state.animation_time);
+        AppendDashedArrow(vertices, directive.start, directive.requested_target, 1.0f, 0.0f, 0.0f, ui_state.animation_time, thickness);
       }
-      AppendDashedArrow(vertices, directive.start, directive.allowed_target, 1.0f, 1.0f, 1.0f, ui_state.animation_time);
+      AppendDashedArrow(vertices, directive.start, directive.allowed_target, allowed_r, allowed_g, allowed_b, ui_state.animation_time, thickness);
     }
   }
   directive_line_count = static_cast<uint32_t>(vertices.size()) - directive_start;
@@ -664,6 +732,141 @@ void VulkanRenderer::UpdateVertexBuffer(const Mesh& mesh, const TriangleOrientat
   vkUnmapMemory(device_, vertex_buffer_.memory);
 }
 
+void VulkanRenderer::CreateSceneTarget(VkExtent2D extent) {
+  if (extent.width == 0 || extent.height == 0) {
+    extent = swapchain_extent_;
+  }
+  DestroySceneTarget();
+
+  VkImageCreateInfo image_info{};
+  image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+  image_info.imageType = VK_IMAGE_TYPE_2D;
+  image_info.format = swapchain_format_;
+  image_info.extent = {extent.width, extent.height, 1};
+  image_info.mipLevels = 1;
+  image_info.arrayLayers = 1;
+  image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+  image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+  image_info.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+  image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+  if (vkCreateImage(device_, &image_info, nullptr, &scene_target_.image) != VK_SUCCESS) {
+    throw std::runtime_error("vkCreateImage for scene target failed");
+  }
+
+  VkMemoryRequirements memory_requirements{};
+  vkGetImageMemoryRequirements(device_, scene_target_.image, &memory_requirements);
+
+  VkMemoryAllocateInfo alloc_info{};
+  alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+  alloc_info.allocationSize = memory_requirements.size;
+  alloc_info.memoryTypeIndex = FindMemoryType(memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+  if (vkAllocateMemory(device_, &alloc_info, nullptr, &scene_target_.memory) != VK_SUCCESS) {
+    throw std::runtime_error("vkAllocateMemory for scene target failed");
+  }
+  if (vkBindImageMemory(device_, scene_target_.image, scene_target_.memory, 0) != VK_SUCCESS) {
+    throw std::runtime_error("vkBindImageMemory for scene target failed");
+  }
+
+  VkImageViewCreateInfo view_info{};
+  view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+  view_info.image = scene_target_.image;
+  view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+  view_info.format = swapchain_format_;
+  view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  view_info.subresourceRange.levelCount = 1;
+  view_info.subresourceRange.layerCount = 1;
+  if (vkCreateImageView(device_, &view_info, nullptr, &scene_target_.view) != VK_SUCCESS) {
+    throw std::runtime_error("vkCreateImageView for scene target failed");
+  }
+
+  scene_target_.descriptor = ImGui_ImplVulkan_AddTexture(scene_target_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+  scene_target_.extent = extent;
+  scene_target_recreate_pending_ = false;
+  scene_target_pending_extent_ = extent;
+  scene_target_layout_ = VK_IMAGE_LAYOUT_UNDEFINED;
+}
+
+void VulkanRenderer::DestroySceneTarget() {
+  if (scene_target_.descriptor) {
+    ImGui_ImplVulkan_RemoveTexture(scene_target_.descriptor);
+    scene_target_.descriptor = VK_NULL_HANDLE;
+  }
+  if (scene_target_.view) vkDestroyImageView(device_, scene_target_.view, nullptr);
+  if (scene_target_.image) vkDestroyImage(device_, scene_target_.image, nullptr);
+  if (scene_target_.memory) vkFreeMemory(device_, scene_target_.memory, nullptr);
+  scene_target_ = {};
+  scene_target_layout_ = VK_IMAGE_LAYOUT_UNDEFINED;
+  scene_view_bounds_ = {};
+}
+
+void VulkanRenderer::RequestSceneTargetResize(VkExtent2D extent) {
+  if (extent.width == 0 || extent.height == 0) return;
+  if (scene_target_.extent.width == extent.width && scene_target_.extent.height == extent.height) return;
+  scene_target_recreate_pending_ = true;
+  scene_target_pending_extent_ = extent;
+}
+
+void VulkanRenderer::RenderScene(VkCommandBuffer cmd, const Mesh& mesh, const TriangleOrientationAnalyzer& analyzer, const RenderUiState& ui_state, uint32_t green_hatch_count, uint32_t yellow_hatch_count, uint32_t red_hatch_count, uint32_t line_count, uint32_t directive_line_count, uint32_t point_count, VkExtent2D extent) {
+  if (scene_target_.image == VK_NULL_HANDLE || extent.width == 0 || extent.height == 0) return;
+
+  TransitionImage(cmd, scene_target_.image, scene_target_layout_, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+  VkClearValue clear{};
+  clear.color = {{0.02f, 0.02f, 0.04f, 1.0f}};
+  VkRenderingAttachmentInfo color_attachment{};
+  color_attachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+  color_attachment.imageView = scene_target_.view;
+  color_attachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+  color_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+  color_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+  color_attachment.clearValue = clear;
+
+  VkRenderingInfo rendering{};
+  rendering.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+  rendering.renderArea.extent = extent;
+  rendering.layerCount = 1;
+  rendering.colorAttachmentCount = 1;
+  rendering.pColorAttachments = &color_attachment;
+  vkCmdBeginRendering(cmd, &rendering);
+
+  VkViewport viewport{};
+  viewport.x = 0.0f;
+  viewport.y = 0.0f;
+  viewport.width = static_cast<float>(extent.width);
+  viewport.height = static_cast<float>(extent.height);
+  viewport.minDepth = 0.0f;
+  viewport.maxDepth = 1.0f;
+  VkRect2D scissor{};
+  scissor.extent = extent;
+  vkCmdSetViewport(cmd, 0, 1, &viewport);
+  vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+  VkDeviceSize offset = 0;
+  vkCmdBindVertexBuffers(cmd, 0, 1, &vertex_buffer_.buffer, &offset);
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, line_pipeline_);
+  uint32_t first = 0;
+  vkCmdDraw(cmd, green_hatch_count, 1, first, 0);
+  first += green_hatch_count;
+  vkCmdDraw(cmd, yellow_hatch_count, 1, first, 0);
+  first += yellow_hatch_count;
+  vkCmdDraw(cmd, red_hatch_count, 1, first, 0);
+  first += red_hatch_count;
+  vkCmdDraw(cmd, line_count, 1, first, 0);
+  first += line_count;
+  vkCmdDraw(cmd, directive_line_count, 1, first, 0);
+  first += directive_line_count;
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, point_pipeline_);
+  vkCmdDraw(cmd, point_count, 1, first, 0);
+
+  vkCmdEndRendering(cmd);
+  TransitionImage(cmd, scene_target_.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+  scene_target_layout_ = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  (void)mesh;
+  (void)analyzer;
+  (void)ui_state;
+}
+
 RenderFrameResult VulkanRenderer::Draw(const Mesh& mesh, const TriangleOrientationAnalyzer& analyzer, int highlighted_vertex, const RenderUiState& ui_state) {
   uint32_t green_hatch_count = 0;
   uint32_t yellow_hatch_count = 0;
@@ -675,11 +878,31 @@ RenderFrameResult VulkanRenderer::Draw(const Mesh& mesh, const TriangleOrientati
   FrameStats stats{};
   stats.draw_calls = 6;
   bool save_requested = false;
+  bool phys_state_cache_requested = false;
+  bool phys_step_requested = false;
+  bool phys_state_restore_requested = false;
+  int phys_state_restore_index = -1;
+  bool recorded_frame_toggle_requested = false;
+  int recorded_frame_toggle_index = -1;
+  bool recorded_frame_toggle_expanded = false;
+  bool guide_keyframe_toggle_requested = false;
+  int guide_keyframe_toggle_index = -1;
+  bool guide_keyframe_toggle_enabled = false;
+  bool guide_keyframe_expand_requested = false;
+  int guide_keyframe_expand_index = -1;
+  bool guide_keyframe_expand_expanded = false;
+  bool triangle_material_change_requested = false;
+  int triangle_material_change_triangle = -1;
+  float triangle_material_change_gpa = 0.0f;
 
   VkResult fence_wait = vkWaitForFences(device_, 1, &in_flight_, VK_TRUE, kFrameTimeoutNs);
   if (fence_wait == VK_TIMEOUT) throw std::runtime_error("Timed out waiting for GPU fence");
   if (fence_wait != VK_SUCCESS) throw std::runtime_error("vkWaitForFences failed");
   vkResetFences(device_, 1, &in_flight_);
+
+  if (scene_target_recreate_pending_) {
+    CreateSceneTarget(scene_target_pending_extent_);
+  }
 
   uint32_t image_index = 0;
   VkResult acquire = vkAcquireNextImageKHR(device_, swapchain_, kFrameTimeoutNs, image_available_, VK_NULL_HANDLE, &image_index);
@@ -692,7 +915,9 @@ RenderFrameResult VulkanRenderer::Draw(const Mesh& mesh, const TriangleOrientati
   begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   vkBeginCommandBuffer(cmd, &begin);
 
-  TransitionSwapchainImage(cmd, swapchain_images_[image_index], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+  RenderScene(cmd, mesh, analyzer, ui_state, green_hatch_count, yellow_hatch_count, red_hatch_count, line_count, directive_line_count, point_count, scene_target_.extent);
+
+  TransitionImage(cmd, swapchain_images_[image_index], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
   VkClearValue clear{};
   clear.color = {{0.0f, 0.0f, 0.0f, 1.0f}};
@@ -712,46 +937,188 @@ RenderFrameResult VulkanRenderer::Draw(const Mesh& mesh, const TriangleOrientati
   rendering.pColorAttachments = &color_attachment;
   vkCmdBeginRendering(cmd, &rendering);
 
-  VkDeviceSize offset = 0;
-  vkCmdBindVertexBuffers(cmd, 0, 1, &vertex_buffer_.buffer, &offset);
-  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, line_pipeline_);
-  uint32_t first = 0;
-  vkCmdDraw(cmd, green_hatch_count, 1, first, 0);
-  first += green_hatch_count;
-  vkCmdDraw(cmd, yellow_hatch_count, 1, first, 0);
-  first += yellow_hatch_count;
-  vkCmdDraw(cmd, red_hatch_count, 1, first, 0);
-  first += red_hatch_count;
-  vkCmdDraw(cmd, line_count, 1, first, 0);
-  first += line_count;
-  vkCmdDraw(cmd, directive_line_count, 1, first, 0);
-  first += directive_line_count;
-  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, point_pipeline_);
-  vkCmdDraw(cmd, point_count, 1, first, 0);
-  stats.line_vertices = line_count;
-  stats.point_vertices = point_count;
-
   ImGui_ImplVulkan_NewFrame();
-  ImGui_ImplWin32_NewFrame();
+  ImGui_ImplSDL3_NewFrame();
   ImGui::NewFrame();
-  ImGui::SetNextWindowPos(ImVec2(10.0f, 10.0f), ImGuiCond_Always);
-  ImGui::SetNextWindowBgAlpha(0.65f);
-  ImGui::Begin("Stats", nullptr, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_AlwaysAutoResize);
-  ImGui::Text("drawcall: %u", stats.draw_calls);
-  if (ImGui::Button(mode_ == InteractionMode::Edit ? "mode: edit" : "mode: phys")) {
-    mode_ = mode_ == InteractionMode::Edit ? InteractionMode::Phys : InteractionMode::Edit;
+  ImGuiIO& io = ImGui::GetIO();
+  ImGuiViewport* main_viewport = ImGui::GetMainViewport();
+  constexpr float kToolbarHeight = 44.0f;
+  const float toolbar_height = show_toolbar_ ? kToolbarHeight : 0.0f;
+
+  if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_T, false)) {
+    show_toolbar_ = !show_toolbar_;
   }
-  if (mode_ == InteractionMode::Phys) {
-    if (ImGui::Button(phys_sub_mode_ == PhysSubMode::Guide ? "phys: guide" : "phys: run")) {
-      phys_sub_mode_ = phys_sub_mode_ == PhysSubMode::Guide ? PhysSubMode::Run : PhysSubMode::Guide;
+
+  if (show_toolbar_) {
+    ImGuiWindowFlags toolbar_flags =
+      ImGuiWindowFlags_NoDecoration |
+      ImGuiWindowFlags_NoMove |
+      ImGuiWindowFlags_NoSavedSettings |
+      ImGuiWindowFlags_NoBringToFrontOnFocus |
+      ImGuiWindowFlags_NoNav |
+      ImGuiWindowFlags_NoDocking;
+    ImGui::SetNextWindowPos(main_viewport->Pos, ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(main_viewport->Size.x, kToolbarHeight), ImGuiCond_Always);
+    ImGui::SetNextWindowViewport(main_viewport->ID);
+    ImGui::Begin("Toolbar", nullptr, toolbar_flags);
+    ImGui::TextUnformatted("Pages");
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("Show or hide the editor pages");
     }
+    ImGui::SameLine();
+    if (ImGui::Button("Toggle")) {
+      ImGui::OpenPopup("Page Visibility");
+    }
+    if (ImGui::BeginPopup("Page Visibility")) {
+      ImGui::MenuItem("Edit / Data", nullptr, &show_edit_data_window_);
+      ImGui::MenuItem("Frames", nullptr, &show_frames_window_);
+      ImGui::MenuItem("Phys", nullptr, &show_phys_window_);
+      ImGui::MenuItem("Animation", nullptr, &show_animation_window_);
+      ImGui::EndPopup();
+    }
+    ImGui::SameLine();
+    ImGui::Text("mode: %s", mode_ == InteractionMode::Edit ? "edit" : "phys");
+    ImGui::SameLine();
+    ImGui::Text("run: %s", phys_run_state_ == PhysRunState::Run ? "run" : (phys_run_state_ == PhysRunState::Pause ? "pause" : "stop"));
+    ImGui::SameLine();
+    ImGui::TextDisabled("Ctrl+T");
+    ImGui::End();
   }
+
+  ImGuiWindowFlags host_flags =
+    ImGuiWindowFlags_NoDecoration |
+    ImGuiWindowFlags_NoMove |
+    ImGuiWindowFlags_NoSavedSettings |
+    ImGuiWindowFlags_NoBringToFrontOnFocus |
+    ImGuiWindowFlags_NoNav |
+    ImGuiWindowFlags_NoBackground |
+    ImGuiWindowFlags_NoDocking;
+  ImGui::SetNextWindowPos(ImVec2(main_viewport->Pos.x, main_viewport->Pos.y + toolbar_height), ImGuiCond_Always);
+  ImGui::SetNextWindowSize(ImVec2(main_viewport->Size.x, std::max(0.0f, main_viewport->Size.y - toolbar_height)), ImGuiCond_Always);
+  ImGui::SetNextWindowViewport(main_viewport->ID);
+  ImGui::Begin("DockHost", nullptr, host_flags);
+  uint32_t dockspace_id = ImGui::GetID("MainDockSpace");
+  if (!dock_layout_initialized_) {
+    SetupDockLayout(dockspace_id, main_viewport->Size.x, std::max(0.0f, main_viewport->Size.y - toolbar_height));
+  }
+  ImGui::DockSpace(static_cast<ImGuiID>(dockspace_id), ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_PassthruCentralNode);
   ImGui::End();
 
-  if (mode_ == InteractionMode::Edit) {
-    ImGui::SetNextWindowPos(ImVec2(10.0f, 90.0f), ImGuiCond_Once);
-    ImGui::Begin("Edit Mode");
+  const int current_frame_index = ui_state.recorded_frames.empty() ? 0 : ui_state.recorded_frames.front().frame_index;
+  if (ui_state.selected_phys_directive >= 0) {
+    selected_phys_directive_ = ui_state.selected_phys_directive;
+  }
+  if (selected_phys_directive_ >= static_cast<int>(ui_state.active_phys_directives.size())) {
+    selected_phys_directive_ = -1;
+  }
+  if (ui_state.selection.kind == SelectionKind::Triangle && ui_state.selection.triangle >= 0) {
+    if (triangle_material_input_triangle_ != ui_state.selection.triangle) {
+      triangle_material_input_triangle_ = ui_state.selection.triangle;
+      triangle_material_input_gpa_ = ui_state.selected_triangle_material_gpa;
+    }
+  } else {
+    triangle_material_input_triangle_ = -1;
+  }
+
+  auto draw_recorded_frames = [&]() {
+    if (ImGui::BeginChild("RecordedFrames", ImVec2(0.0f, 220.0f), true)) {
+      ImGui::TextUnformatted("RecordedFrames");
+      for (uint32_t i = 0; i < ui_state.recorded_frames.size(); ++i) {
+        const PhysRecordedFrame& frame = ui_state.recorded_frames[i];
+        ImGui::PushID(static_cast<int>(i));
+        std::string label = frame.current ? ("current frame " + std::to_string(frame.frame_index)) : ("frame " + std::to_string(frame.frame_index));
+        ImGui::SetNextItemOpen(frame.expanded, ImGuiCond_Always);
+        ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnDoubleClick;
+        bool open = ImGui::TreeNodeEx(label.c_str(), flags);
+        if (ImGui::IsItemToggledOpen()) {
+          recorded_frame_toggle_requested = true;
+          recorded_frame_toggle_index = static_cast<int>(i);
+          recorded_frame_toggle_expanded = !frame.expanded;
+        }
+        if (ImGui::BeginDragDropSource()) {
+          int payload_index = static_cast<int>(i);
+          ImGui::SetDragDropPayload("RECORDED_FRAME_INDEX", &payload_index, sizeof(int));
+          ImGui::Text("frame %d", frame.frame_index);
+          ImGui::EndDragDropSource();
+        }
+        if (open) {
+          ImGui::Indent();
+          ImGui::Text("positions: %zu", frame.positions.size());
+          ImGui::Text("deltas: %zu", frame.vertex_deltas.size());
+          ImGui::TextUnformatted("drag this header onto the scene pane to restore");
+          ImGui::Unindent();
+          ImGui::TreePop();
+        }
+        ImGui::PopID();
+      }
+    }
+    ImGui::EndChild();
+  };
+
+  auto draw_guide_keyframes = [&]() {
+    if (ImGui::BeginChild("GuideKeyframes", ImVec2(0.0f, 0.0f), true)) {
+      ImGui::TextUnformatted("GuideKeyframes");
+      for (uint32_t i = 0; i < ui_state.guide_keyframes.size(); ++i) {
+        const PhysGuideKeyframe& keyframe = ui_state.guide_keyframes[i];
+        ImGui::PushID(static_cast<int>(i));
+        bool enabled = keyframe.enabled;
+        if (ImGui::Checkbox("##enabled", &enabled)) {
+          guide_keyframe_toggle_requested = true;
+          guide_keyframe_toggle_index = static_cast<int>(i);
+          guide_keyframe_toggle_enabled = enabled;
+        }
+        ImGui::SameLine();
+        std::string label = "GuideKeyframe frame " + std::to_string(keyframe.frame_index);
+        if (keyframe.frame_index == current_frame_index) {
+          label += " [current]";
+        }
+        if (!keyframe.enabled) {
+          label += " [off]";
+        }
+        ImGui::SetNextItemOpen(keyframe.expanded, ImGuiCond_Always);
+        ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnDoubleClick;
+        bool open = ImGui::TreeNodeEx(label.c_str(), flags);
+        if (ImGui::IsItemToggledOpen()) {
+          guide_keyframe_expand_requested = true;
+          guide_keyframe_expand_index = static_cast<int>(i);
+          guide_keyframe_expand_expanded = !keyframe.expanded;
+        }
+        if (open) {
+          ImGui::Indent();
+          ImGui::Text("directives: %zu", keyframe.directives.size());
+          for (uint32_t j = 0; j < keyframe.directives.size(); ++j) {
+            const PhysDirective& directive = keyframe.directives[j];
+            ImGui::PushID(static_cast<int>(j));
+            if (!directive.valid) {
+              ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "v%d blocked", directive.vertex);
+            } else {
+              ImGui::Text("v%d", directive.vertex);
+            }
+            ImGui::Text("requested (%.3f, %.3f)  allowed (%.3f, %.3f)",
+                        directive.requested_target.x, directive.requested_target.y,
+                        directive.allowed_target.x, directive.allowed_target.y);
+            Vec3 delta_move = ExtractTranslation(directive.delta);
+            ImGui::Text("delta move (%.3f, %.3f, %.3f)", delta_move.x, delta_move.y, delta_move.z);
+            ImGui::PopID();
+          }
+          ImGui::Unindent();
+          ImGui::TreePop();
+        }
+        ImGui::PopID();
+      }
+    }
+    ImGui::EndChild();
+  };
+
+  auto draw_edit_data_window = [&]() {
+    if (!show_edit_data_window_) return;
+    ImGui::Begin("Edit / Data");
     ImGui::Text("mesh: %s", ui_state.mesh_file_name.c_str());
+    ImGui::Text("drawcall: %u", stats.draw_calls);
+    if (ImGui::Button(mode_ == InteractionMode::Edit ? "mode: edit" : "mode: phys")) {
+      mode_ = mode_ == InteractionMode::Edit ? InteractionMode::Phys : InteractionMode::Edit;
+    }
+    ImGui::Spacing();
     if (ui_state.selection.kind == SelectionKind::Vertex && ui_state.selection.vertex >= 0) {
       ImGui::Text("vertex %d", ui_state.selection.vertex);
       ImGui::Text("x: %.4f", ui_state.selected_vertex_position.x);
@@ -759,18 +1126,175 @@ RenderFrameResult VulkanRenderer::Draw(const Mesh& mesh, const TriangleOrientati
       ImGui::Text("z: %.4f", ui_state.selected_vertex_position.z);
     } else if (ui_state.selection.kind == SelectionKind::Triangle && ui_state.selection.triangle >= 0) {
       ImGui::Text("triangle %d", ui_state.selection.triangle);
+      ImGui::Text("material: %.3f GPa", ui_state.selected_triangle_material_gpa);
+      if (ImGui::InputFloat("triangle material GPa", &triangle_material_input_gpa_, 0.0f, 0.0f, "%.3f")) {
+        if (ImGui::IsItemDeactivatedAfterEdit()) {
+          triangle_material_change_requested = true;
+          triangle_material_change_triangle = ui_state.selection.triangle;
+          triangle_material_change_gpa = triangle_material_input_gpa_;
+        }
+      }
+      if (ImGui::Button("Apply Material")) {
+        triangle_material_change_requested = true;
+        triangle_material_change_triangle = ui_state.selection.triangle;
+        triangle_material_change_gpa = triangle_material_input_gpa_;
+      }
+      ImGui::SameLine();
+      if (ImGui::Button("Materials")) {
+        ImGui::OpenPopup("Material Presets");
+      }
+      if (ImGui::BeginDragDropTarget()) {
+        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("MAT_GPA")) {
+          triangle_material_change_requested = true;
+          triangle_material_change_triangle = ui_state.selection.triangle;
+          triangle_material_change_gpa = *static_cast<const float*>(payload->Data);
+        }
+        ImGui::EndDragDropTarget();
+      }
+      if (ImGui::BeginPopup("Material Presets")) {
+        ImGui::TextUnformatted("Drag a material onto the selected triangle");
+        if (ImGui::BeginTable("MaterialPresetTable", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_Borders | ImGuiTableFlags_SizingStretchSame)) {
+          ImGui::TableSetupColumn("Material");
+          ImGui::TableSetupColumn("GPa");
+          ImGui::TableHeadersRow();
+          for (const MaterialPreset& preset : kMaterialPresets) {
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            if (ImGui::Selectable(preset.name, false, ImGuiSelectableFlags_SpanAllColumns)) {
+              triangle_material_change_requested = true;
+              triangle_material_change_triangle = ui_state.selection.triangle;
+              triangle_material_change_gpa = preset.gpa;
+            }
+            if (ImGui::BeginDragDropSource()) {
+              ImGui::SetDragDropPayload("MAT_GPA", &preset.gpa, sizeof(float));
+              ImGui::Text("%s", preset.name);
+              ImGui::Text("%.3f GPa", preset.gpa);
+              ImGui::EndDragDropSource();
+            }
+            ImGui::TableSetColumnIndex(1);
+            ImGui::Text("%.3f", preset.gpa);
+          }
+          ImGui::EndTable();
+        }
+        if (ImGui::InputFloat("Custom GPa", &triangle_material_input_gpa_, 0.0f, 0.0f, "%.3f")) {
+          if (ImGui::IsItemDeactivatedAfterEdit()) {
+            triangle_material_change_requested = true;
+            triangle_material_change_triangle = ui_state.selection.triangle;
+            triangle_material_change_gpa = triangle_material_input_gpa_;
+          }
+        }
+        if (ImGui::Button("Apply Custom")) {
+          triangle_material_change_requested = true;
+          triangle_material_change_triangle = ui_state.selection.triangle;
+          triangle_material_change_gpa = triangle_material_input_gpa_;
+        }
+        ImGui::EndPopup();
+      }
     }
     if (ImGui::Button("Save")) {
       save_requested = true;
     }
     ImGui::End();
-  }
+  };
+
+  auto draw_frames_window = [&]() {
+    if (!show_frames_window_) return;
+    ImGui::Begin("Frames");
+    draw_recorded_frames();
+    ImGui::Separator();
+    draw_guide_keyframes();
+    ImGui::End();
+  };
+
+  auto draw_phys_window = [&]() {
+    if (!show_phys_window_) return;
+    ImGui::Begin("Phys");
+    ImGui::Text("current frame: %d", current_frame_index);
+    ImGui::Text("selected directive: %d", selected_phys_directive_);
+    ImGui::Spacing();
+    ImGui::TextUnformatted("physRun");
+    if (ImGui::Button("PhysRun")) {
+      phys_run_state_ = PhysRunState::Run;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("PhysPause")) {
+      phys_run_state_ = PhysRunState::Pause;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("PhysStop")) {
+      phys_run_state_ = PhysRunState::Stop;
+    }
+    ImGui::SameLine();
+    if (phys_run_state_ == PhysRunState::Pause) {
+      if (ImGui::Button("PhysStep")) {
+        phys_step_requested = true;
+      }
+    } else {
+      ImGui::BeginDisabled();
+      ImGui::Button("PhysStep");
+      ImGui::EndDisabled();
+    }
+    ImGui::Text("run state: %s", phys_run_state_ == PhysRunState::Run ? "Run" : (phys_run_state_ == PhysRunState::Pause ? "Pause" : "Stop"));
+
+    ImGui::Spacing();
+    ImGui::TextUnformatted("physGuide");
+    if (ImGui::Button("enable")) {
+      phys_guide_enabled_ = true;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("disable")) {
+      phys_guide_enabled_ = false;
+    }
+
+    ImGui::Spacing();
+    if (phys_run_state_ == PhysRunState::Pause && ImGui::Button("Cache Current")) {
+      phys_state_cache_requested = true;
+    }
+
+    ImGui::End();
+  };
+
+  auto draw_animation_window = [&]() {
+    if (!show_animation_window_) return;
+    ImGui::Begin("Animation");
+    if (ImGui::IsWindowCollapsed()) {
+      ImGui::TextDisabled("Animation view is collapsed");
+      ImGui::End();
+      return;
+    }
+    ImVec2 scene_avail = ImGui::GetContentRegionAvail();
+    if (scene_avail.x < 20.0f) scene_avail.x = 20.0f;
+    if (scene_avail.y < 20.0f) scene_avail.y = 20.0f;
+    VkExtent2D requested_extent{static_cast<uint32_t>(scene_avail.x), static_cast<uint32_t>(scene_avail.y)};
+    RequestSceneTargetResize(requested_extent);
+    ImGui::Image(static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(scene_target_.descriptor)), scene_avail);
+    ImVec2 scene_min = ImGui::GetItemRectMin();
+    ImVec2 scene_max = ImGui::GetItemRectMax();
+    scene_view_bounds_.x = scene_min.x;
+    scene_view_bounds_.y = scene_min.y;
+    scene_view_bounds_.width = scene_max.x - scene_min.x;
+    scene_view_bounds_.height = scene_max.y - scene_min.y;
+    scene_view_bounds_.valid = scene_view_bounds_.width > 0.0f && scene_view_bounds_.height > 0.0f;
+    if (ImGui::BeginDragDropTarget()) {
+      if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("RECORDED_FRAME_INDEX")) {
+        phys_state_restore_requested = true;
+        phys_state_restore_index = *static_cast<const int*>(payload->Data);
+      }
+      ImGui::EndDragDropTarget();
+    }
+    ImGui::End();
+  };
+
+  draw_edit_data_window();
+  draw_frames_window();
+  draw_phys_window();
+  draw_animation_window();
 
   ImGui::Render();
   ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
 
   vkCmdEndRendering(cmd);
-  TransitionSwapchainImage(cmd, swapchain_images_[image_index], VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+  TransitionImage(cmd, swapchain_images_[image_index], VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
   if (vkEndCommandBuffer(cmd) != VK_SUCCESS) throw std::runtime_error("vkEndCommandBuffer failed");
 
   VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
@@ -798,7 +1322,49 @@ RenderFrameResult VulkanRenderer::Draw(const Mesh& mesh, const TriangleOrientati
   if (present_result != VK_SUCCESS && present_result != VK_SUBOPTIMAL_KHR) {
     throw std::runtime_error("vkQueuePresentKHR failed");
   }
-  return RenderFrameResult{stats.draw_calls, mode_, phys_sub_mode_, save_requested};
+  RenderFrameResult result{};
+  result.draw_calls = stats.draw_calls;
+  result.mode = mode_;
+  result.phys_run_state = phys_run_state_;
+  result.phys_guide_enabled = phys_guide_enabled_;
+  result.selected_phys_directive = selected_phys_directive_;
+  result.phys_state_cache_requested = phys_state_cache_requested;
+  result.phys_step_requested = phys_step_requested;
+  result.phys_state_restore_requested = phys_state_restore_requested;
+  result.phys_state_restore_index = phys_state_restore_index;
+  result.recorded_frame_toggle_requested = recorded_frame_toggle_requested;
+  result.recorded_frame_toggle_index = recorded_frame_toggle_index;
+  result.recorded_frame_toggle_expanded = recorded_frame_toggle_expanded;
+  result.guide_keyframe_toggle_requested = guide_keyframe_toggle_requested;
+  result.guide_keyframe_toggle_index = guide_keyframe_toggle_index;
+  result.guide_keyframe_toggle_enabled = guide_keyframe_toggle_enabled;
+  result.guide_keyframe_expand_requested = guide_keyframe_expand_requested;
+  result.guide_keyframe_expand_index = guide_keyframe_expand_index;
+  result.guide_keyframe_expand_expanded = guide_keyframe_expand_expanded;
+  result.triangle_material_change_requested = triangle_material_change_requested;
+  result.triangle_material_triangle = triangle_material_change_triangle;
+  result.triangle_material_gpa = triangle_material_change_gpa;
+  result.save_requested = save_requested;
+  return result;
+}
+
+void VulkanRenderer::SetupDockLayout(uint32_t dockspace_id, float width, float height) {
+  ImGui::DockBuilderRemoveNode(static_cast<ImGuiID>(dockspace_id));
+  ImGui::DockBuilderAddNode(static_cast<ImGuiID>(dockspace_id), ImGuiDockNodeFlags_DockSpace);
+  ImGui::DockBuilderSetNodeSize(static_cast<ImGuiID>(dockspace_id), ImVec2(width, height));
+
+  ImGuiID dock_right = 0;
+  ImGuiID dock_left = ImGui::DockBuilderSplitNode(static_cast<ImGuiID>(dockspace_id), ImGuiDir_Left, 0.42f, nullptr, &dock_right);
+  ImGuiID dock_left_bottom = 0;
+  ImGuiID dock_left_top = ImGui::DockBuilderSplitNode(dock_left, ImGuiDir_Down, 0.52f, nullptr, &dock_left_bottom);
+  ImGuiID dock_right_bottom = 0;
+  ImGuiID dock_right_top = ImGui::DockBuilderSplitNode(dock_right, ImGuiDir_Down, 0.78f, nullptr, &dock_right_bottom);
+  ImGui::DockBuilderDockWindow("Edit / Data", dock_left_top);
+  ImGui::DockBuilderDockWindow("Frames", dock_left_bottom);
+  ImGui::DockBuilderDockWindow("Animation", dock_right_top);
+  ImGui::DockBuilderDockWindow("Phys", dock_right_bottom);
+  ImGui::DockBuilderFinish(static_cast<ImGuiID>(dockspace_id));
+  dock_layout_initialized_ = true;
 }
 
 uint32_t VulkanRenderer::FindMemoryType(uint32_t type_filter, VkMemoryPropertyFlags properties) const {
@@ -812,7 +1378,7 @@ uint32_t VulkanRenderer::FindMemoryType(uint32_t type_filter, VkMemoryPropertyFl
   throw std::runtime_error("No suitable memory type found");
 }
 
-void VulkanRenderer::TransitionSwapchainImage(VkCommandBuffer cmd, VkImage image, VkImageLayout old_layout, VkImageLayout new_layout) {
+void VulkanRenderer::TransitionImage(VkCommandBuffer cmd, VkImage image, VkImageLayout old_layout, VkImageLayout new_layout) {
   VkImageMemoryBarrier2 barrier{};
   barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
   barrier.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
@@ -831,11 +1397,21 @@ void VulkanRenderer::TransitionSwapchainImage(VkCommandBuffer cmd, VkImage image
     barrier.srcAccessMask = 0;
     barrier.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
     barrier.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+  } else if (old_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL && new_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
+    barrier.srcStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+    barrier.srcAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
+    barrier.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+    barrier.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
   } else if (old_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL && new_layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
     barrier.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
     barrier.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
     barrier.dstStageMask = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
     barrier.dstAccessMask = 0;
+  } else if (old_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL && new_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+    barrier.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+    barrier.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+    barrier.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+    barrier.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
   }
 
   VkDependencyInfo dependency{};
@@ -861,7 +1437,7 @@ void VulkanRenderer::DestroyFrameResources() {
 void VulkanRenderer::DestroyImGui() {
   if (!imgui_descriptor_pool_) return;
   ImGui_ImplVulkan_Shutdown();
-  ImGui_ImplWin32_Shutdown();
+  ImGui_ImplSDL3_Shutdown();
   ImGui::DestroyContext();
   vkDestroyDescriptorPool(device_, imgui_descriptor_pool_, nullptr);
   imgui_descriptor_pool_ = VK_NULL_HANDLE;

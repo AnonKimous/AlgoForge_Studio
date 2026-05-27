@@ -3,7 +3,7 @@
 #include "interaction_state.h"
 #include "../mesh.h"
 #include "../viewport_transform.h"
-#include "../win32_window.h"
+#include "window/input_state.h"
 
 class EditModeController {
  public:
@@ -16,4 +16,3 @@ class EditModeController {
   int FindHoveredVertex(const Mesh& mesh, const ViewportTransform& viewport, Vec2 mouse_pixel) const;
   int FindTriangleAt(const Mesh& mesh, Vec2 mouse_ndc) const;
 };
-
