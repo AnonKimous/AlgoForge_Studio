@@ -86,6 +86,8 @@ bool SdlWindow::ProcessEvents() {
     input_.mouse_y = static_cast<int>(mouse_y);
   }
 
+  input_.ctrl_down = (SDL_GetModState() & SDL_KMOD_CTRL) != 0;
+
   return !quit_requested_;
 }
 

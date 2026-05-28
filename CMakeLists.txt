@@ -143,11 +143,13 @@ add_custom_target(shaders DEPENDS
 
 add_executable(min_vulkan_win32 WIN32
   src/main.cpp
+  src/interaction/guide_ui_controller.cpp
   src/interaction/edit_mode_controller.cpp
   src/interaction/phys_mode_controller.cpp
   src/mesh.cpp
   src/physics/physics_solver.cpp
   src/validation_bridge/validation_bridge.cpp
+  src/validation_bridge/validation_action_bridge.cpp
   src/triangle_orientation_analyzer.cpp
   src/viewport_transform.cpp
   src/render/vulkan_renderer.cpp
@@ -159,6 +161,10 @@ if(WIN32)
 else()
   target_sources(min_vulkan_win32 PRIVATE src/validation_layer/validation_layer_stub.cpp)
 endif()
+
+target_sources(min_vulkan_win32 PRIVATE
+  src/validation_layer/validation_script.cpp
+)
 
 add_library(imgui_static STATIC
   ${IMGUI_SOURCE_DIR}/imgui.cpp

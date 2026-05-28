@@ -1,4 +1,5 @@
 #include "validation_layer.h"
+#include "validation_script.h"
 
 #include <windows.h>
 #include <sddl.h>
@@ -7,6 +8,7 @@
 #include <array>
 #include <cctype>
 #include <cwctype>
+#include <cstdlib>
 #include <iomanip>
 #include <ios>
 #include <limits>
@@ -49,6 +51,59 @@ bool BuildPipeSecurityAttributes(SECURITY_ATTRIBUTES& attributes, PSECURITY_DESC
   attributes.lpSecurityDescriptor = descriptor;
   attributes.bInheritHandle = FALSE;
   return true;
+}
+
+std::string TrimText(std::string_view text) {
+  size_t begin = 0;
+  size_t end = text.size();
+  while (begin < end && std::isspace(static_cast<unsigned char>(text[begin]))) ++begin;
+  while (end > begin && std::isspace(static_cast<unsigned char>(text[end - 1]))) --end;
+  return std::string(text.substr(begin, end - begin));
+}
+
+std::string ExtractJsonStringFieldText(std::string_view text, std::string_view key) {
+  std::string needle = "\"" + std::string(key) + "\"";
+  size_t pos = text.find(needle);
+  if (pos == std::string_view::npos) return {};
+  pos = text.find(':', pos + needle.size());
+  if (pos == std::string_view::npos) return {};
+  ++pos;
+  while (pos < text.size() && std::isspace(static_cast<unsigned char>(text[pos]))) ++pos;
+  if (pos >= text.size() || text[pos] != '"') return {};
+  ++pos;
+  std::string value;
+  bool escaped = false;
+  for (; pos < text.size(); ++pos) {
+    char ch = text[pos];
+    if (escaped) {
+      value.push_back(ch);
+      escaped = false;
+      continue;
+    }
+    if (ch == '\\') {
+      escaped = true;
+      continue;
+    }
+    if (ch == '"') {
+      return value;
+    }
+    value.push_back(ch);
+  }
+  return {};
+}
+
+std::string ReadRequestCommand(const std::string& request) {
+  std::string trimmed = TrimText(request);
+  if (trimmed.empty()) return {};
+
+  if (trimmed.front() == '{') {
+    std::string cmd = ExtractJsonStringFieldText(trimmed, "cmd");
+    if (!cmd.empty()) {
+      return TrimText(cmd);
+    }
+  }
+
+  return trimmed;
 }
 
 std::string JsonNumber(float value) {
@@ -142,6 +197,45 @@ void ValidationLayerApi::PublishFrame(const ValidationFrameSnapshot& snapshot) {
   }
 }
 
+void ValidationLayerApi::QueueAction(ValidationAction action) {
+  std::lock_guard<std::mutex> lock(action_mutex_);
+  pending_actions_.push_back(std::move(action));
+}
+
+void ValidationLayerApi::QueueActions(const std::vector<ValidationAction>& actions) {
+  if (actions.empty()) return;
+  std::lock_guard<std::mutex> lock(action_mutex_);
+  pending_actions_.insert(pending_actions_.end(), actions.begin(), actions.end());
+}
+
+std::vector<ValidationAction> ValidationLayerApi::ConsumeActions() {
+  std::lock_guard<std::mutex> lock(action_mutex_);
+  std::vector<ValidationAction> actions;
+  actions.swap(pending_actions_);
+  return actions;
+}
+
+void ValidationLayerApi::RequestPhysStep(uint32_t count) {
+  if (count == 0) return;
+  QueueAction(ValidationAction{ValidationActionKind::PhysStep, count});
+}
+
+uint32_t ValidationLayerApi::ConsumePhysStepRequests() {
+  std::lock_guard<std::mutex> lock(action_mutex_);
+  uint32_t count = 0;
+  std::vector<ValidationAction> remaining;
+  remaining.reserve(pending_actions_.size());
+  for (ValidationAction& action : pending_actions_) {
+    if (action.kind == ValidationActionKind::PhysStep) {
+      count += action.step_count;
+    } else {
+      remaining.push_back(std::move(action));
+    }
+  }
+  pending_actions_.swap(remaining);
+  return count;
+}
+
 bool ValidationLayerApi::ParseStartupFlag(const std::vector<std::string>& args) {
   bool enabled = false;
   for (size_t i = 1; i < args.size(); ++i) {
@@ -204,8 +298,12 @@ void ValidationLayerApi::WorkerLoop() {
 }
 
 std::string ValidationLayerApi::HandleRequest(const std::string& request) {
-  std::string lowered = ToLower(Trim(request));
-  if (lowered.empty() || lowered.find("snapshot") != std::string::npos) {
+  std::string trimmed = Trim(request);
+  std::string command_text = ReadRequestCommand(trimmed);
+  std::string lowered = ToLower(command_text);
+  std::string first_token = ToLower(FirstToken(lowered));
+
+  if (lowered.empty() || first_token == "snapshot") {
     std::lock_guard<std::mutex> lock(snapshot_mutex_);
     if (latest_snapshot_json_.empty()) {
       return "{\"ok\":false,\"error\":\"snapshot not ready\"}";
@@ -213,11 +311,51 @@ std::string ValidationLayerApi::HandleRequest(const std::string& request) {
     return latest_snapshot_json_;
   }
 
-  if (lowered.find("health") != std::string::npos) {
+  if (first_token == "health") {
     return BuildHealthJson();
   }
 
-  if (lowered.find("shutdown") != std::string::npos) {
+  if (first_token == "script") {
+    std::string script_body = ExtractJsonStringField(trimmed, "script");
+    if (script_body.empty()) {
+      const size_t first_space = command_text.find_first_of(" \t");
+      if (first_space != std::string::npos && first_space + 1 < command_text.size()) {
+        script_body = command_text.substr(first_space + 1);
+      }
+    }
+    ValidationScriptParseResult parsed = ParseValidationScript(script_body);
+    if (!parsed.ok) {
+      std::ostringstream out;
+      out << "{\"ok\":false,\"error\":\"" << EscapeJson(parsed.error) << "\"}";
+      return out.str();
+    }
+    QueueActions(parsed.actions);
+    return BuildActionResponseJson(parsed.actions, "script");
+  }
+
+  if (first_token == "physstep" || first_token == "step") {
+    ValidationScriptParseResult parsed = ParseValidationScript(command_text);
+    if (!parsed.ok) {
+      std::ostringstream out;
+      out << "{\"ok\":false,\"error\":\"" << EscapeJson(parsed.error) << "\"}";
+      return out.str();
+    }
+    QueueActions(parsed.actions);
+    return BuildActionResponseJson(parsed.actions, "physstep");
+  }
+
+  if (first_token == "run" || first_token == "pause" || first_token == "reset" || first_token == "guide" || first_token == "guides") {
+    ValidationScriptParseResult parsed = ParseValidationScript(command_text);
+    if (!parsed.ok) {
+      std::ostringstream out;
+      out << "{\"ok\":false,\"error\":\"" << EscapeJson(parsed.error) << "\"}";
+      return out.str();
+    }
+    QueueActions(parsed.actions);
+    return BuildActionResponseJson(parsed.actions, first_token);
+  }
+
+  if (first_token == "shutdown") {
     stop_requested_.store(true);
     return "{\"ok\":true,\"shutdown\":true}";
   }
@@ -236,16 +374,36 @@ std::string ValidationLayerApi::BuildHealthJson() const {
   return out.str();
 }
 
+std::string ValidationLayerApi::BuildActionResponseJson(const std::vector<ValidationAction>& actions, const std::string& command_name) const {
+  std::ostringstream out;
+  out << "{\"ok\":true";
+  out << ",\"cmd\":\"" << EscapeJson(command_name) << "\"";
+  out << ",\"queued_actions\":" << JsonUnsigned(static_cast<uint64_t>(actions.size()));
+  out << ",\"actions\":[";
+  for (size_t i = 0; i < actions.size(); ++i) {
+    if (i > 0) out << ",";
+    out << ActionJson(actions[i]);
+  }
+  out << "]}";
+  return out.str();
+}
+
 std::string ValidationLayerApi::BuildSnapshotJson(const ValidationFrameSnapshot& snapshot, uint64_t sequence) const {
   std::ostringstream out;
   out << std::fixed << std::setprecision(6);
   out << "{";
-  out << "\"schema\":\"validation_layer.snapshot.v1\"";
+  out << "\"schema\":\"validation_layer.snapshot.v2\"";
   out << ",\"sequence\":" << JsonUnsigned(sequence);
   out << ",\"frame_index\":" << JsonSigned(snapshot.frame_index);
   out << ",\"mode\":\"" << ModeToString(snapshot.mode) << "\"";
   out << ",\"run_state\":\"" << RunStateToString(snapshot.run_state) << "\"";
   out << ",\"guide_enabled\":" << BoolJson(snapshot.guide_enabled);
+  out << ",\"guide_velocity_magnitude\":" << JsonNumber(snapshot.guide_velocity_magnitude);
+  out << ",\"guide_velocity_delay_frames\":" << JsonUnsigned(snapshot.guide_velocity_delay_frames);
+  out << ",\"guide_velocity_duration_frames\":" << JsonUnsigned(snapshot.guide_velocity_duration_frames);
+  out << ",\"guide_force_magnitude\":" << JsonNumber(snapshot.guide_force_magnitude);
+  out << ",\"guide_force_delay_frames\":" << JsonUnsigned(snapshot.guide_force_delay_frames);
+  out << ",\"guide_force_duration_frames\":" << JsonUnsigned(snapshot.guide_force_duration_frames);
   out << ",\"highlighted_vertex\":" << JsonSigned(snapshot.highlighted_vertex);
   out << ",\"draw_calls\":" << JsonUnsigned(snapshot.draw_calls);
   out << ",\"frame_dt_seconds\":" << JsonNumber(snapshot.frame_dt_seconds);
@@ -295,25 +453,85 @@ std::string ValidationLayerApi::BuildSnapshotJson(const ValidationFrameSnapshot&
   out << "}";
 
   out << ",\"physics\":{";
-  out << "\"vertex_deltas\":[";
-  for (size_t i = 0; i < snapshot.physics.vertex_deltas.size(); ++i) {
+  out << "\"total_velocities\":[";
+  for (size_t i = 0; i < snapshot.physics.total_velocities.size(); ++i) {
     if (i > 0) out << ",";
-    out << MatrixJson(snapshot.physics.vertex_deltas[i]);
+    out << MatrixJson(snapshot.physics.total_velocities[i]);
   }
   out << "]";
 
-  out << ",\"active_directives\":[";
-  for (size_t i = 0; i < snapshot.physics.active_directives.size(); ++i) {
+  out << ",\"linear_velocities\":[";
+  for (size_t i = 0; i < snapshot.physics.linear_velocities.size(); ++i) {
     if (i > 0) out << ",";
-    const ValidationDirective& directive = snapshot.physics.active_directives[i];
+    out << MatrixJson(snapshot.physics.linear_velocities[i]);
+  }
+  out << "]";
+
+  out << ",\"angular_velocities\":[";
+  for (size_t i = 0; i < snapshot.physics.angular_velocities.size(); ++i) {
+    if (i > 0) out << ",";
+    out << MatrixJson(snapshot.physics.angular_velocities[i]);
+  }
+  out << "]";
+
+  out << ",\"active_velocity_guidances\":[";
+  for (size_t i = 0; i < snapshot.physics.active_velocity_guidances.size(); ++i) {
+    if (i > 0) out << ",";
+    const ValidationVelocityGuidance& guidance = snapshot.physics.active_velocity_guidances[i];
     out << "{";
-    out << "\"vertex\":" << JsonSigned(directive.vertex);
-    out << ",\"hidden\":" << BoolJson(directive.hidden);
-    out << ",\"valid\":" << BoolJson(directive.valid);
-    out << ",\"start\":" << Vec3Json(directive.start);
-    out << ",\"requested_target\":" << Vec3Json(directive.requested_target);
-    out << ",\"allowed_target\":" << Vec3Json(directive.allowed_target);
-    out << ",\"delta\":" << MatrixJson(directive.delta);
+    out << "\"vertex\":" << JsonSigned(guidance.vertex);
+    out << ",\"vertices\":[";
+    for (size_t v = 0; v < guidance.vertices.size(); ++v) {
+      if (v > 0) out << ",";
+      out << JsonSigned(guidance.vertices[v]);
+    }
+    out << "]";
+    out << ",\"hidden\":" << BoolJson(guidance.hidden);
+    out << ",\"valid\":" << BoolJson(guidance.valid);
+    out << ",\"start\":" << Vec3Json(guidance.start);
+    out << ",\"requested_target\":" << Vec3Json(guidance.requested_target);
+    out << ",\"allowed_target\":" << Vec3Json(guidance.allowed_target);
+    out << ",\"total_velocity\":" << MatrixJson(guidance.total_velocity);
+    out << "}";
+  }
+  out << "]";
+
+  out << ",\"active_guide_velocities\":[";
+  for (size_t i = 0; i < snapshot.physics.active_guide_velocities.size(); ++i) {
+    if (i > 0) out << ",";
+    const ValidationGuideVelocity& guide_velocity = snapshot.physics.active_guide_velocities[i];
+    out << "{";
+    out << "\"vertices\":[";
+    for (size_t v = 0; v < guide_velocity.vertices.size(); ++v) {
+      if (v > 0) out << ",";
+      out << JsonSigned(guide_velocity.vertices[v]);
+    }
+    out << "]";
+    out << ",\"hidden\":" << BoolJson(guide_velocity.hidden);
+    out << ",\"valid\":" << BoolJson(guide_velocity.valid);
+    out << ",\"velocity\":" << MatrixJson(guide_velocity.velocity);
+    out << ",\"start_frame_offset\":" << JsonUnsigned(guide_velocity.start_frame_offset);
+    out << ",\"duration_frames\":" << JsonUnsigned(guide_velocity.duration_frames);
+    out << "}";
+  }
+  out << "]";
+
+  out << ",\"active_guide_forces\":[";
+  for (size_t i = 0; i < snapshot.physics.active_guide_forces.size(); ++i) {
+    if (i > 0) out << ",";
+    const ValidationGuideForce& guide_force = snapshot.physics.active_guide_forces[i];
+    out << "{";
+    out << "\"vertices\":[";
+    for (size_t v = 0; v < guide_force.vertices.size(); ++v) {
+      if (v > 0) out << ",";
+      out << JsonSigned(guide_force.vertices[v]);
+    }
+    out << "]";
+    out << ",\"hidden\":" << BoolJson(guide_force.hidden);
+    out << ",\"valid\":" << BoolJson(guide_force.valid);
+    out << ",\"force\":" << Vec3Json(guide_force.force);
+    out << ",\"start_frame_offset\":" << JsonUnsigned(guide_force.start_frame_offset);
+    out << ",\"duration_frames\":" << JsonUnsigned(guide_force.duration_frames);
     out << "}";
   }
   out << "]";
@@ -327,7 +545,9 @@ std::string ValidationLayerApi::BuildSnapshotJson(const ValidationFrameSnapshot&
     out << ",\"current\":" << BoolJson(frame.current);
     out << ",\"expanded\":" << BoolJson(frame.expanded);
     out << ",\"position_count\":" << JsonUnsigned(frame.position_count);
-    out << ",\"delta_count\":" << JsonUnsigned(frame.delta_count);
+    out << ",\"total_velocity_count\":" << JsonUnsigned(frame.total_velocity_count);
+    out << ",\"linear_velocity_count\":" << JsonUnsigned(frame.linear_velocity_count);
+    out << ",\"angular_velocity_count\":" << JsonUnsigned(frame.angular_velocity_count);
     out << "}";
   }
   out << "]";
@@ -340,7 +560,7 @@ std::string ValidationLayerApi::BuildSnapshotJson(const ValidationFrameSnapshot&
     out << "\"frame_index\":" << JsonSigned(keyframe.frame_index);
     out << ",\"enabled\":" << BoolJson(keyframe.enabled);
     out << ",\"expanded\":" << BoolJson(keyframe.expanded);
-    out << ",\"directive_count\":" << JsonUnsigned(keyframe.directive_count);
+    out << ",\"guidance_count\":" << JsonUnsigned(keyframe.guidance_count);
     out << "}";
   }
   out << "]";
@@ -381,11 +601,50 @@ std::string ValidationLayerApi::Trim(const std::string& text) {
   return text.substr(begin, end - begin);
 }
 
+std::string ValidationLayerApi::FirstToken(std::string_view text) {
+  size_t begin = 0;
+  while (begin < text.size() && std::isspace(static_cast<unsigned char>(text[begin]))) ++begin;
+  size_t end = begin;
+  while (end < text.size() && !std::isspace(static_cast<unsigned char>(text[end]))) ++end;
+  return std::string(text.substr(begin, end - begin));
+}
+
 std::string ValidationLayerApi::ToLower(std::string text) {
   std::transform(text.begin(), text.end(), text.begin(), [](unsigned char ch) {
     return static_cast<char>(std::tolower(ch));
   });
   return text;
+}
+
+std::string ValidationLayerApi::ExtractJsonStringField(std::string_view text, std::string_view key) {
+  std::string needle = "\"" + std::string(key) + "\"";
+  size_t pos = text.find(needle);
+  if (pos == std::string_view::npos) return {};
+  pos = text.find(':', pos + needle.size());
+  if (pos == std::string_view::npos) return {};
+  ++pos;
+  while (pos < text.size() && std::isspace(static_cast<unsigned char>(text[pos]))) ++pos;
+  if (pos >= text.size() || text[pos] != '"') return {};
+  ++pos;
+  std::string value;
+  bool escaped = false;
+  for (; pos < text.size(); ++pos) {
+    char ch = text[pos];
+    if (escaped) {
+      value.push_back(ch);
+      escaped = false;
+      continue;
+    }
+    if (ch == '\\') {
+      escaped = true;
+      continue;
+    }
+    if (ch == '"') {
+      return value;
+    }
+    value.push_back(ch);
+  }
+  return {};
 }
 
 std::string ValidationLayerApi::EscapeJson(std::string_view text) {
@@ -414,6 +673,37 @@ std::string ValidationLayerApi::EscapeJson(std::string_view text) {
   return out.str();
 }
 
+std::string ValidationLayerApi::ActionKindToString(ValidationActionKind kind) {
+  switch (kind) {
+    case ValidationActionKind::PhysStep: return "physstep";
+    case ValidationActionKind::Reset: return "reset";
+    case ValidationActionKind::SetRunState: return "set_run_state";
+    case ValidationActionKind::SetGuideEnabled: return "set_guide_enabled";
+  }
+  return "unknown";
+}
+
+std::string ValidationLayerApi::ActionJson(const ValidationAction& action) {
+  std::ostringstream out;
+  out << "{";
+  out << "\"kind\":\"" << ActionKindToString(action.kind) << "\"";
+  switch (action.kind) {
+    case ValidationActionKind::PhysStep:
+      out << ",\"step_count\":" << JsonUnsigned(action.step_count);
+      break;
+    case ValidationActionKind::Reset:
+      break;
+    case ValidationActionKind::SetRunState:
+      out << ",\"run_state\":\"" << RunStateToString(action.run_state) << "\"";
+      break;
+    case ValidationActionKind::SetGuideEnabled:
+      out << ",\"enabled\":" << BoolJson(action.enabled);
+      break;
+  }
+  out << "}";
+  return out.str();
+}
+
 std::string ValidationLayerApi::ModeToString(ValidationInteractionMode mode) {
   switch (mode) {
     case ValidationInteractionMode::Edit: return "Edit";
@@ -426,9 +716,8 @@ std::string ValidationLayerApi::RunStateToString(ValidationPhysRunState state) {
   switch (state) {
     case ValidationPhysRunState::Run: return "Run";
     case ValidationPhysRunState::Pause: return "Pause";
-    case ValidationPhysRunState::Stop: return "Stop";
   }
-  return "Stop";
+  return "Pause";
 }
 
 std::string ValidationLayerApi::SelectionKindToString(ValidationSelectionKind kind) {

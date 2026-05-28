@@ -34,9 +34,8 @@ ValidationPhysRunState ToValidationRunState(PhysRunState state) {
   switch (state) {
     case PhysRunState::Run: return ValidationPhysRunState::Run;
     case PhysRunState::Pause: return ValidationPhysRunState::Pause;
-    case PhysRunState::Stop: return ValidationPhysRunState::Stop;
   }
-  return ValidationPhysRunState::Stop;
+  return ValidationPhysRunState::Pause;
 }
 
 ValidationSelectionKind ToValidationSelectionKind(SelectionKind kind) {
@@ -87,6 +86,12 @@ ValidationFrameSnapshot BuildValidationFrameSnapshot(
   snapshot.mode = ToValidationMode(ui_state.mode);
   snapshot.run_state = ToValidationRunState(ui_state.phys_run_state);
   snapshot.guide_enabled = ui_state.phys_guide_enabled;
+  snapshot.guide_velocity_magnitude = ui_state.guide_velocity_magnitude;
+  snapshot.guide_velocity_delay_frames = ui_state.guide_velocity_delay_frames;
+  snapshot.guide_velocity_duration_frames = ui_state.guide_velocity_duration_frames;
+  snapshot.guide_force_magnitude = ui_state.guide_force_magnitude;
+  snapshot.guide_force_delay_frames = ui_state.guide_force_delay_frames;
+  snapshot.guide_force_duration_frames = ui_state.guide_force_duration_frames;
   snapshot.highlighted_vertex = highlighted_vertex;
   snapshot.draw_calls = frame_result.draw_calls;
   snapshot.frame_dt_seconds = frame_dt_seconds;
@@ -110,22 +115,57 @@ ValidationFrameSnapshot BuildValidationFrameSnapshot(
     snapshot.mesh.normals.push_back(ToValidationVec3(normal));
   }
 
-  snapshot.physics.vertex_deltas.reserve(ui_state.vertex_deltas.size());
-  for (const DeltaMatrix& delta : ui_state.vertex_deltas) {
-    snapshot.physics.vertex_deltas.push_back(ToValidationMatrix4(delta));
+  snapshot.physics.total_velocities.reserve(ui_state.total_velocities.size());
+  for (const VelocityMatrix& velocity : ui_state.total_velocities) {
+    snapshot.physics.total_velocities.push_back(ToValidationMatrix4(velocity));
   }
 
-  snapshot.physics.active_directives.reserve(ui_state.active_phys_directives.size());
-  for (const PhysDirective& directive : ui_state.active_phys_directives) {
-    ValidationDirective converted{};
-    converted.vertex = directive.vertex;
-    converted.hidden = directive.hidden;
-    converted.valid = directive.valid;
-    converted.start = ToValidationVec3(directive.start);
-    converted.requested_target = ToValidationVec3(directive.requested_target);
-    converted.allowed_target = ToValidationVec3(directive.allowed_target);
-    converted.delta = ToValidationMatrix4(directive.delta);
-    snapshot.physics.active_directives.push_back(converted);
+  snapshot.physics.linear_velocities.reserve(ui_state.linear_velocities.size());
+  for (const VelocityMatrix& velocity : ui_state.linear_velocities) {
+    snapshot.physics.linear_velocities.push_back(ToValidationMatrix4(velocity));
+  }
+
+  snapshot.physics.angular_velocities.reserve(ui_state.angular_velocities.size());
+  for (const VelocityMatrix& velocity : ui_state.angular_velocities) {
+    snapshot.physics.angular_velocities.push_back(ToValidationMatrix4(velocity));
+  }
+
+  snapshot.physics.active_velocity_guidances.reserve(ui_state.active_velocity_guidances.size());
+  for (const VelocityGuidance& guidance : ui_state.active_velocity_guidances) {
+    ValidationVelocityGuidance converted{};
+    converted.vertex = guidance.vertex;
+    converted.vertices = guidance.vertices;
+    converted.hidden = guidance.hidden;
+    converted.valid = guidance.valid;
+    converted.start = ToValidationVec3(guidance.start);
+    converted.requested_target = ToValidationVec3(guidance.requested_target);
+    converted.allowed_target = ToValidationVec3(guidance.allowed_target);
+    converted.total_velocity = ToValidationMatrix4(guidance.total_velocity);
+    snapshot.physics.active_velocity_guidances.push_back(converted);
+  }
+
+  snapshot.physics.active_guide_velocities.reserve(ui_state.active_guide_velocities.size());
+  for (const VelocityGuideVelocity& guide_velocity : ui_state.active_guide_velocities) {
+    ValidationGuideVelocity converted{};
+    converted.vertices = guide_velocity.vertices;
+    converted.hidden = guide_velocity.hidden;
+    converted.valid = guide_velocity.valid;
+    converted.velocity = ToValidationMatrix4(guide_velocity.velocity);
+    converted.start_frame_offset = guide_velocity.start_frame_offset;
+    converted.duration_frames = guide_velocity.duration_frames;
+    snapshot.physics.active_guide_velocities.push_back(converted);
+  }
+
+  snapshot.physics.active_guide_forces.reserve(ui_state.active_guide_forces.size());
+  for (const VelocityGuideForce& guide_force : ui_state.active_guide_forces) {
+    ValidationGuideForce converted{};
+    converted.vertices = guide_force.vertices;
+    converted.hidden = guide_force.hidden;
+    converted.valid = guide_force.valid;
+    converted.force = ToValidationVec3(guide_force.force);
+    converted.start_frame_offset = guide_force.start_frame_offset;
+    converted.duration_frames = guide_force.duration_frames;
+    snapshot.physics.active_guide_forces.push_back(converted);
   }
 
   snapshot.physics.recorded_frames.reserve(ui_state.recorded_frames.size());
@@ -135,7 +175,9 @@ ValidationFrameSnapshot BuildValidationFrameSnapshot(
     converted.current = frame.current;
     converted.expanded = frame.expanded;
     converted.position_count = frame.positions.size();
-    converted.delta_count = frame.vertex_deltas.size();
+    converted.total_velocity_count = frame.total_velocities.size();
+    converted.linear_velocity_count = frame.linear_velocities.size();
+    converted.angular_velocity_count = frame.angular_velocities.size();
     snapshot.physics.recorded_frames.push_back(converted);
   }
 
@@ -145,7 +187,7 @@ ValidationFrameSnapshot BuildValidationFrameSnapshot(
     converted.frame_index = keyframe.frame_index;
     converted.enabled = keyframe.enabled;
     converted.expanded = keyframe.expanded;
-    converted.directive_count = keyframe.directives.size();
+    converted.guidance_count = keyframe.guidances.size();
     snapshot.physics.guide_keyframes.push_back(converted);
   }
 
@@ -184,8 +226,8 @@ ValidationFrameSnapshot BuildValidationFrameSnapshot(
     snapshot.analysis.triangles.push_back(tri_snapshot);
   }
 
-  for (const DeltaMatrix& delta : ui_state.vertex_deltas) {
-    Vec3 translation = ExtractTranslation(delta);
+  for (const VelocityMatrix& velocity : ui_state.linear_velocities) {
+    Vec3 translation = ExtractLinearVelocity(velocity);
     float magnitude = std::sqrt(translation.x * translation.x + translation.y * translation.y + translation.z * translation.z);
     max_delta_translation = std::max(max_delta_translation, magnitude);
   }

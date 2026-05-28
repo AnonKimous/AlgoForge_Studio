@@ -7,4 +7,5 @@ struct InputState {
   bool left_pressed{};
   bool left_released{};
   bool left_double_clicked{};
+  bool ctrl_down{};
 };

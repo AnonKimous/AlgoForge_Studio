@@ -42,13 +42,27 @@ Supported commands:
 
 - `snapshot`
 - `health`
+- `physstep`
+- `physstep 5`
+- `script physstep 5; pause; reset`
 - `shutdown`
 
 Equivalent JSON forms also work:
 
 - `{"cmd":"snapshot"}`
 - `{"cmd":"health"}`
+- `{"cmd":"physstep"}`
+- `{"cmd":"script","script":"run; guide off; physstep 5"}`
 - `{"cmd":"shutdown"}`
+
+The validation layer now emits abstract actions instead of touching renderer or physics internals directly. The app consumes those actions through a glue layer that maps them to the real runtime APIs.
+
+Current guide model:
+
+- `guide displacement` is checked for legality and can be shared by multiple selected vertices.
+- `guide velocity` directly replaces the selected vertices' velocity matrices.
+- `guide force` is scheduled by frame offset and duration, then applied later by the physics layer.
+- `Ctrl` multi-select in the UI makes multiple vertices share one guide group.
 
 ## What `snapshot` Returns
 
@@ -67,10 +81,12 @@ It includes:
 - recorded frame summaries
 - guide keyframe summaries
 - triangle area and deformation analysis
+- physics run state is now `Run` or `Pause`
+- `Reset` returns the simulation to the initial state instead of using a stop state
 
 The schema field is:
 
-- `validation_layer.snapshot.v1`
+- `validation_layer.snapshot.v2`
 
 ## Minimal PowerShell Client Example
 

@@ -39,6 +39,8 @@ class VulkanRenderer {
   InteractionMode mode() const { return mode_; }
   PhysRunState phys_run_state() const { return phys_run_state_; }
   bool phys_guide_enabled() const { return phys_guide_enabled_; }
+  void SetPhysRunState(PhysRunState state) { phys_run_state_ = state; }
+  void SetPhysGuideEnabled(bool enabled) { phys_guide_enabled_ = enabled; }
   SceneViewBounds scene_view_bounds() const { return scene_view_bounds_; }
 
  private:
@@ -111,9 +113,16 @@ class VulkanRenderer {
   SceneTarget scene_target_{};
   SceneViewBounds scene_view_bounds_{};
   InteractionMode mode_{InteractionMode::Edit};
-  PhysRunState phys_run_state_{PhysRunState::Stop};
+  PhysRunState phys_run_state_{PhysRunState::Pause};
   bool phys_guide_enabled_{true};
-  int selected_phys_directive_{-1};
+  GuideEditMode guide_edit_mode_{GuideEditMode::Displacement};
+  float guide_velocity_magnitude_{1.0f};
+  int guide_velocity_delay_frames_{0};
+  int guide_velocity_duration_frames_{1};
+  float guide_force_magnitude_{1.0f};
+  int guide_force_delay_frames_{0};
+  int guide_force_duration_frames_{1};
+  int selected_velocity_guidance_{-1};
   float triangle_material_input_gpa_{0.0f};
   int triangle_material_input_triangle_{-1};
   bool dock_layout_initialized_{false};

@@ -6,6 +6,7 @@
 #include "window/window.h"
 #include "triangle_orientation_analyzer.h"
 #include "validation_bridge/validation_bridge.h"
+#include "validation_bridge/validation_action_bridge.h"
 #include "validation_layer/validation_layer.h"
 #include "viewport_transform.h"
 
@@ -80,6 +81,10 @@ int main(int argc, char** argv) {
       }
       previous_mode = mode;
 
+      const std::vector<ValidationAction> validation_actions = validation_layer.ConsumeActions();
+      if (!validation_actions.empty()) {
+        ApplyValidationActions(validation_actions, renderer, phys_controller, mesh);
+      }
       phys_controller.SetRunState(renderer.phys_run_state());
       phys_controller.SetGuideEnabled(renderer.phys_guide_enabled());
       interaction = mode == InteractionMode::Edit
@@ -91,12 +96,24 @@ int main(int argc, char** argv) {
       ui.mode = mode;
       ui.phys_run_state = renderer.phys_run_state();
       ui.phys_guide_enabled = renderer.phys_guide_enabled();
-      ui.selected_phys_directive = phys_controller.selected_directive();
+      ui.guide_edit_mode = phys_controller.guide_edit_mode();
+      ui.guide_velocity_magnitude = phys_controller.guide_velocity_magnitude();
+      ui.guide_velocity_delay_frames = phys_controller.guide_velocity_delay_frames();
+      ui.guide_velocity_duration_frames = phys_controller.guide_velocity_duration_frames();
+      ui.guide_force_magnitude = phys_controller.guide_force_magnitude();
+      ui.guide_force_delay_frames = phys_controller.guide_force_delay_frames();
+      ui.guide_force_duration_frames = phys_controller.guide_force_duration_frames();
+      ui.selected_velocity_guidance = phys_controller.selected_velocity_guidance();
       ui.phys_current_frame_index = phys_controller.current_frame_index();
       ui.mesh_file_name = mesh_path.filename().string();
       ui.selection = interaction.selection;
-      ui.vertex_deltas = phys_controller.vertex_deltas();
-      ui.active_phys_directives = phys_controller.active_directives();
+      ui.selected_guide_vertices = phys_controller.selected_guide_vertices();
+      ui.total_velocities = phys_controller.total_velocities();
+      ui.linear_velocities = phys_controller.linear_velocities();
+      ui.angular_velocities = phys_controller.angular_velocities();
+      ui.active_velocity_guidances = phys_controller.active_velocity_guidances();
+      ui.active_guide_velocities = phys_controller.active_guide_velocities();
+      ui.active_guide_forces = phys_controller.active_guide_forces();
       ui.recorded_frames = phys_controller.recorded_frames();
       ui.guide_keyframes = phys_controller.guide_keyframes();
       ui.animation_time = std::chrono::duration<float>(std::chrono::steady_clock::now() - start_time).count();
@@ -109,6 +126,15 @@ int main(int argc, char** argv) {
       }
 
       RenderFrameResult frame = renderer.Draw(mesh, orientation, interaction.highlighted_vertex, ui);
+      phys_controller.SetGuideEditMode(frame.guide_edit_mode);
+      phys_controller.SetGuideVelocitySettings(frame.guide_velocity_magnitude, frame.guide_velocity_delay_frames, frame.guide_velocity_duration_frames);
+      phys_controller.SetGuideForceSettings(frame.guide_force_magnitude, frame.guide_force_delay_frames, frame.guide_force_duration_frames);
+      ui.guide_velocity_magnitude = frame.guide_velocity_magnitude;
+      ui.guide_velocity_delay_frames = frame.guide_velocity_delay_frames;
+      ui.guide_velocity_duration_frames = frame.guide_velocity_duration_frames;
+      ui.guide_force_magnitude = frame.guide_force_magnitude;
+      ui.guide_force_delay_frames = frame.guide_force_delay_frames;
+      ui.guide_force_duration_frames = frame.guide_force_duration_frames;
       ValidationFrameSnapshot validation_snapshot = BuildValidationFrameSnapshot(
         mesh,
         reference_mesh,
@@ -123,6 +149,9 @@ int main(int argc, char** argv) {
       }
       if (frame.phys_state_cache_requested) {
         phys_controller.CacheCurrentState();
+      }
+      if (frame.phys_reset_requested) {
+        phys_controller.Reset(mesh);
       }
       if (frame.phys_step_requested) {
         phys_controller.StepOnce(mesh);

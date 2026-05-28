@@ -20,6 +20,23 @@ void ValidationLayerApi::Stop() {
 void ValidationLayerApi::PublishFrame(const ValidationFrameSnapshot&) {
 }
 
+void ValidationLayerApi::QueueAction(ValidationAction) {
+}
+
+void ValidationLayerApi::QueueActions(const std::vector<ValidationAction>&) {
+}
+
+std::vector<ValidationAction> ValidationLayerApi::ConsumeActions() {
+  return {};
+}
+
+void ValidationLayerApi::RequestPhysStep(uint32_t) {
+}
+
+uint32_t ValidationLayerApi::ConsumePhysStepRequests() {
+  return 0;
+}
+
 bool ValidationLayerApi::ParseStartupFlag(const std::vector<std::string>& args) {
   bool enabled = false;
   for (size_t i = 1; i < args.size(); ++i) {
