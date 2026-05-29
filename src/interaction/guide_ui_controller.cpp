@@ -11,12 +11,12 @@ void RemoveVertex(std::vector<int>& vertices, int vertex) {
 
 }  // namespace
 
-GuideUiFrame GuideUiController::Tick(const Mesh& mesh, const ViewportTransform& viewport, const InputState& input, Vec2 mouse_pixel) {
-  GuideUiFrame frame{};
-  frame.hovered_vertex = FindHoveredVertex(mesh, viewport, mouse_pixel);
-  frame.selected_vertices = selected_vertices_;
+namespace interaction_analysis {
 
-  Vec2 mouse_ndc = viewport.WindowToNdc(mouse_pixel);
+GuideUiFrame GuideUiController::Tick(const Mesh& mesh, const ViewportTransform& viewport, const SceneCamera& camera, const InputState& input, Vec2 mouse_pixel) {
+  GuideUiFrame frame{};
+  frame.hovered_vertex = FindHoveredVertex(mesh, viewport, camera, mouse_pixel);
+  frame.selected_vertices = selected_vertices_;
 
   if (input.left_pressed) {
     if (frame.hovered_vertex >= 0) {
@@ -46,7 +46,7 @@ GuideUiFrame GuideUiController::Tick(const Mesh& mesh, const ViewportTransform& 
   if (input.left_down && dragging_vertex_ >= 0) {
     frame.dragging = true;
     frame.dragging_vertex = dragging_vertex_;
-    frame.drag_target = Vec3{mouse_ndc.x, mouse_ndc.y, mesh.positions[dragging_vertex_].z};
+    frame.drag_target = camera.WindowToWorld(mouse_pixel, viewport, mesh.positions[dragging_vertex_].z);
     if (!ContainsVertex(selected_vertices_, dragging_vertex_)) {
       selected_vertices_.push_back(dragging_vertex_);
     }
@@ -61,11 +61,11 @@ void GuideUiController::ClearSelection() {
   dragging_vertex_ = -1;
 }
 
-int GuideUiController::FindHoveredVertex(const Mesh& mesh, const ViewportTransform& viewport, Vec2 mouse_pixel) const {
+int GuideUiController::FindHoveredVertex(const Mesh& mesh, const ViewportTransform& viewport, const SceneCamera& camera, Vec2 mouse_pixel) const {
   int highlighted = -1;
   float best_pixels2 = 22.0f * 22.0f;
   for (uint32_t i = 0; i < mesh.positions.size(); ++i) {
-    Vec2 vertex_pixel = viewport.NdcToWindow(Vec2{mesh.positions[i].x, mesh.positions[i].y});
+    Vec2 vertex_pixel = camera.WorldToWindow(mesh.positions[i], viewport);
     float dx = vertex_pixel.x - mouse_pixel.x;
     float dy = vertex_pixel.y - mouse_pixel.y;
     float dist2 = dx * dx + dy * dy;
@@ -80,3 +80,5 @@ int GuideUiController::FindHoveredVertex(const Mesh& mesh, const ViewportTransfo
 bool GuideUiController::ContainsVertex(const std::vector<int>& vertices, int vertex) {
   return std::find(vertices.begin(), vertices.end(), vertex) != vertices.end();
 }
+
+}  // namespace interaction_analysis

@@ -16,6 +16,7 @@
 #include <fstream>
 #include <filesystem>
 #include <iterator>
+#include <optional>
 #include <stdexcept>
 #include <string>
 
@@ -246,6 +247,38 @@ void AppendDashedArrow(std::vector<GpuVertex>& vertices, Vec3 a, Vec3 b, float r
   draw_shifted(thickness);
 }
 
+struct QueueFamilies {
+  std::optional<uint32_t> graphics;
+  std::optional<uint32_t> present;
+};
+
+QueueFamilies FindQueueFamilies(VkPhysicalDevice physical_device, VkSurfaceKHR surface) {
+  QueueFamilies queues{};
+
+  uint32_t queue_family_count = 0;
+  vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, nullptr);
+  std::vector<VkQueueFamilyProperties> queue_families(queue_family_count);
+  vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &queue_family_count, queue_families.data());
+
+  for (uint32_t i = 0; i < queue_family_count; ++i) {
+    if (!queues.graphics && (queue_families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0) {
+      queues.graphics = i;
+    }
+
+    if (!queues.present) {
+      VkBool32 supported = VK_FALSE;
+      vkGetPhysicalDeviceSurfaceSupportKHR(physical_device, i, surface, &supported);
+      if (supported == VK_TRUE) {
+        queues.present = i;
+      }
+    }
+
+    if (queues.graphics && queues.present) break;
+  }
+
+  return queues;
+}
+
 void AppendArrow(std::vector<GpuVertex>& vertices, Vec3 a, Vec3 b, float r, float g, float bl) {
   AppendColoredLine(vertices, a, b, r, g, bl);
   Vec2 delta{b.x - a.x, b.y - a.y};
@@ -290,11 +323,31 @@ void AppendRingWithTicks(std::vector<GpuVertex>& vertices, Vec3 center, float ra
   }
 }
 
+Vec3 VisualEndPoint(Vec3 start, Vec3 display_delta, Vec3 fallback_delta) {
+  Vec3 delta = display_delta;
+  float display_length2 = delta.x * delta.x + delta.y * delta.y + delta.z * delta.z;
+  if (display_length2 <= 1e-8f) {
+    delta = fallback_delta;
+  }
+  return Vec3{start.x + delta.x, start.y + delta.y, start.z + delta.z};
+}
+
+std::array<float, 16> ToColumnMajorArray(const Eigen::Matrix4f& matrix) {
+  std::array<float, 16> out{};
+  for (int row = 0; row < 4; ++row) {
+    for (int col = 0; col < 4; ++col) {
+      out[static_cast<size_t>(col) * 4u + static_cast<size_t>(row)] = matrix(row, col);
+    }
+  }
+  return out;
+}
+
 }  // namespace
 
 VulkanRenderer::VulkanRenderer(const WindowHandle& window) {
   window_ = window;
   CreateInstanceAndDevice(window);
+  CreateAllocator();
   CreateSwapchain();
   CreatePipeline();
   CreateFrameResources();
@@ -311,6 +364,7 @@ VulkanRenderer::~VulkanRenderer() {
   DestroyFrameResources();
   DestroyPipeline();
   DestroySwapchain();
+  if (allocator_) vmaDestroyAllocator(allocator_);
   if (device_) vkDestroyDevice(device_, nullptr);
   if (surface_) vkDestroySurfaceKHR(instance_, surface_, nullptr);
   if (instance_) vkDestroyInstance(instance_, nullptr);
@@ -343,14 +397,13 @@ void VulkanRenderer::CreateInstanceAndDevice(const WindowHandle& window) {
   vkb::PhysicalDevice selected = physical_ret.value();
   physical_device_ = selected.physical_device;
 
-  auto graphics_q = selected.get_queue_index(VK_QUEUE_GRAPHICS_BIT);
-  auto present_q = selected.get_queue_index(surface_);
-  if (!graphics_q || !present_q) throw std::runtime_error("No required queue family found");
-  graphics_queue_family_ = graphics_q.value();
-  present_queue_family_ = present_q.value();
+  QueueFamilies queue_families = FindQueueFamilies(physical_device_, surface_);
+  if (!queue_families.graphics || !queue_families.present) throw std::runtime_error("No required queue family found");
+  graphics_queue_family_ = queue_families.graphics.value();
+  present_queue_family_ = queue_families.present.value();
 
   float priority = 1.0f;
-  std::vector<VkDeviceQueueCreateInfo> queues;
+  std::vector<VkDeviceQueueCreateInfo> queue_create_infos;
   std::vector<uint32_t> families = {graphics_queue_family_};
   if (present_queue_family_ != graphics_queue_family_) families.push_back(present_queue_family_);
   for (uint32_t family : families) {
@@ -359,7 +412,7 @@ void VulkanRenderer::CreateInstanceAndDevice(const WindowHandle& window) {
     queue.queueFamilyIndex = family;
     queue.queueCount = 1;
     queue.pQueuePriorities = &priority;
-    queues.push_back(queue);
+    queue_create_infos.push_back(queue);
   }
 
   const char* extensions[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
@@ -370,8 +423,8 @@ void VulkanRenderer::CreateInstanceAndDevice(const WindowHandle& window) {
   VkDeviceCreateInfo info{};
   info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
   info.pNext = &features13;
-  info.queueCreateInfoCount = static_cast<uint32_t>(queues.size());
-  info.pQueueCreateInfos = queues.data();
+  info.queueCreateInfoCount = static_cast<uint32_t>(queue_create_infos.size());
+  info.pQueueCreateInfos = queue_create_infos.data();
   info.pEnabledFeatures = &features;
   info.enabledExtensionCount = 1;
   info.ppEnabledExtensionNames = extensions;
@@ -381,6 +434,17 @@ void VulkanRenderer::CreateInstanceAndDevice(const WindowHandle& window) {
   }
   vkGetDeviceQueue(device_, graphics_queue_family_, 0, &graphics_queue_);
   vkGetDeviceQueue(device_, present_queue_family_, 0, &present_queue_);
+}
+
+void VulkanRenderer::CreateAllocator() {
+  VmaAllocatorCreateInfo info{};
+  info.instance = instance_;
+  info.physicalDevice = physical_device_;
+  info.device = device_;
+  info.vulkanApiVersion = VK_API_VERSION_1_3;
+  if (vmaCreateAllocator(&info, &allocator_) != VK_SUCCESS) {
+    throw std::runtime_error("vmaCreateAllocator failed");
+  }
 }
 
 void VulkanRenderer::CreateSwapchain() {
@@ -467,8 +531,15 @@ VkShaderModule VulkanRenderer::CreateShaderModule(const char* path) const {
 }
 
 void VulkanRenderer::CreatePipeline() {
+  VkPushConstantRange push_constant{};
+  push_constant.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+  push_constant.offset = 0;
+  push_constant.size = sizeof(float) * 16;
+
   VkPipelineLayoutCreateInfo layout{};
   layout.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  layout.pushConstantRangeCount = 1;
+  layout.pPushConstantRanges = &push_constant;
   if (vkCreatePipelineLayout(device_, &layout, nullptr, &pipeline_layout_) != VK_SUCCESS) {
     throw std::runtime_error("vkCreatePipelineLayout failed");
   }
@@ -663,20 +734,12 @@ void VulkanRenderer::CreateVertexBuffer(size_t size) {
   buffer.size = size;
   buffer.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
   buffer.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-  if (vkCreateBuffer(device_, &buffer, nullptr, &vertex_buffer_.buffer) != VK_SUCCESS) {
-    throw std::runtime_error("vkCreateBuffer failed");
+  VmaAllocationCreateInfo alloc_info{};
+  alloc_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST;
+  alloc_info.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+  if (vmaCreateBuffer(allocator_, &buffer, &alloc_info, &vertex_buffer_.buffer, &vertex_buffer_.allocation, &vertex_buffer_.allocation_info) != VK_SUCCESS) {
+    throw std::runtime_error("vmaCreateBuffer failed");
   }
-
-  VkMemoryRequirements req{};
-  vkGetBufferMemoryRequirements(device_, vertex_buffer_.buffer, &req);
-  VkMemoryAllocateInfo alloc{};
-  alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  alloc.allocationSize = req.size;
-  alloc.memoryTypeIndex = FindMemoryType(req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-  if (vkAllocateMemory(device_, &alloc, nullptr, &vertex_buffer_.memory) != VK_SUCCESS) {
-    throw std::runtime_error("vkAllocateMemory failed");
-  }
-  vkBindBufferMemory(device_, vertex_buffer_.buffer, vertex_buffer_.memory, 0);
 }
 
 void VulkanRenderer::EnsureVertexBufferSize(size_t size) {
@@ -693,12 +756,12 @@ void VulkanRenderer::AppendHudVertices(std::vector<GpuVertex>& vertices, const F
   AppendText(vertices, "drawcall:" + std::to_string(stats.draw_calls), x, y, pixel);
 }
 
-void VulkanRenderer::UpdateVertexBuffer(const Mesh& mesh, const TriangleOrientationAnalyzer& analyzer, int highlighted_vertex, const RenderUiState& ui_state, uint32_t& green_hatch_count, uint32_t& yellow_hatch_count, uint32_t& red_hatch_count, uint32_t& line_count, uint32_t& directive_line_count, uint32_t& point_count) {
+void VulkanRenderer::UpdateVertexBuffer(const Mesh& mesh, const TriangleOrientationState& orientation_state, int highlighted_vertex, const RenderUiState& ui_state, uint32_t& green_hatch_count, uint32_t& yellow_hatch_count, uint32_t& red_hatch_count, uint32_t& line_count, uint32_t& directive_line_count, uint32_t& point_count) {
   std::vector<GpuVertex> vertices;
   vertices.reserve(mesh.edges.size() * 2 + mesh.positions.size() + mesh.triangles.size() * 80 + ui_state.active_velocity_guidances.size() * 96 + ui_state.active_guide_velocities.size() * 96 + ui_state.active_guide_forces.size() * 96);
-  const auto& negative_edges = analyzer.edge_has_negative_triangle();
-  const auto& negative_vertices = analyzer.vertex_has_negative_triangle();
-  const auto& triangle_faces_viewer = analyzer.triangle_faces_viewer();
+  const auto& negative_edges = orientation_state.edge_has_negative_triangle;
+  const auto& negative_vertices = orientation_state.vertex_has_negative_triangle;
+  const auto& triangle_faces_viewer = orientation_state.triangle_faces_viewer;
   const SelectionState& selection = ui_state.selection;
   std::vector<bool> active_vertices(mesh.positions.size(), false);
 
@@ -779,10 +842,9 @@ void VulkanRenderer::UpdateVertexBuffer(const Mesh& mesh, const TriangleOrientat
       int primary_vertex = guide_velocity.vertices.front();
       if (primary_vertex < 0 || static_cast<size_t>(primary_vertex) >= mesh.positions.size()) continue;
       Vec3 start = mesh.positions[primary_vertex];
-      Vec3 delta = ExtractTranslation(guide_velocity.velocity);
-      Vec3 end{start.x + delta.x, start.y + delta.y, start.z + delta.z};
+      Vec3 end = VisualEndPoint(start, guide_velocity.display_delta, ExtractTranslation(guide_velocity.velocity));
       AppendArrow(vertices, start, end, 0.25f, 0.65f, 1.0f);
-      AppendRingWithTicks(vertices, start, 0.028f, 0.25f, 0.65f, 1.0f, ui_state.animation_time);
+      AppendRingWithTicks(vertices, start, 0.04f, 0.25f, 0.65f, 1.0f, ui_state.animation_time);
     }
 
     for (const VelocityGuideForce& guide_force : ui_state.active_guide_forces) {
@@ -790,9 +852,9 @@ void VulkanRenderer::UpdateVertexBuffer(const Mesh& mesh, const TriangleOrientat
       int primary_vertex = guide_force.vertices.front();
       if (primary_vertex < 0 || static_cast<size_t>(primary_vertex) >= mesh.positions.size()) continue;
       Vec3 start = mesh.positions[primary_vertex];
-      Vec3 end{start.x + guide_force.force.x, start.y + guide_force.force.y, start.z + guide_force.force.z};
+      Vec3 end = VisualEndPoint(start, guide_force.display_delta, guide_force.force);
       AppendArrow(vertices, start, end, 1.0f, 0.7f, 0.15f);
-      AppendRingWithTicks(vertices, start, 0.028f, 1.0f, 0.7f, 0.15f, ui_state.animation_time);
+      AppendRingWithTicks(vertices, start, 0.04f, 1.0f, 0.7f, 0.15f, ui_state.animation_time);
     }
   }
   directive_line_count = static_cast<uint32_t>(vertices.size()) - directive_start;
@@ -818,10 +880,9 @@ void VulkanRenderer::UpdateVertexBuffer(const Mesh& mesh, const TriangleOrientat
   size_t bytes = vertices.size() * sizeof(GpuVertex);
   EnsureVertexBufferSize(bytes);
 
-  void* mapped = nullptr;
-  vkMapMemory(device_, vertex_buffer_.memory, 0, bytes, 0, &mapped);
-  std::memcpy(mapped, vertices.data(), bytes);
-  vkUnmapMemory(device_, vertex_buffer_.memory);
+  if (bytes > 0 && vertex_buffer_.allocation_info.pMappedData) {
+    std::memcpy(vertex_buffer_.allocation_info.pMappedData, vertices.data(), bytes);
+  }
 }
 
 void VulkanRenderer::CreateSceneTarget(VkExtent2D extent) {
@@ -842,22 +903,10 @@ void VulkanRenderer::CreateSceneTarget(VkExtent2D extent) {
   image_info.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
   image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
-  if (vkCreateImage(device_, &image_info, nullptr, &scene_target_.image) != VK_SUCCESS) {
-    throw std::runtime_error("vkCreateImage for scene target failed");
-  }
-
-  VkMemoryRequirements memory_requirements{};
-  vkGetImageMemoryRequirements(device_, scene_target_.image, &memory_requirements);
-
-  VkMemoryAllocateInfo alloc_info{};
-  alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  alloc_info.allocationSize = memory_requirements.size;
-  alloc_info.memoryTypeIndex = FindMemoryType(memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-  if (vkAllocateMemory(device_, &alloc_info, nullptr, &scene_target_.memory) != VK_SUCCESS) {
-    throw std::runtime_error("vkAllocateMemory for scene target failed");
-  }
-  if (vkBindImageMemory(device_, scene_target_.image, scene_target_.memory, 0) != VK_SUCCESS) {
-    throw std::runtime_error("vkBindImageMemory for scene target failed");
+  VmaAllocationCreateInfo allocation_info{};
+  allocation_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+  if (vmaCreateImage(allocator_, &image_info, &allocation_info, &scene_target_.image, &scene_target_.allocation, nullptr) != VK_SUCCESS) {
+    throw std::runtime_error("vmaCreateImage for scene target failed");
   }
 
   VkImageViewCreateInfo view_info{};
@@ -885,8 +934,7 @@ void VulkanRenderer::DestroySceneTarget() {
     scene_target_.descriptor = VK_NULL_HANDLE;
   }
   if (scene_target_.view) vkDestroyImageView(device_, scene_target_.view, nullptr);
-  if (scene_target_.image) vkDestroyImage(device_, scene_target_.image, nullptr);
-  if (scene_target_.memory) vkFreeMemory(device_, scene_target_.memory, nullptr);
+  if (scene_target_.image) vmaDestroyImage(allocator_, scene_target_.image, scene_target_.allocation);
   scene_target_ = {};
   scene_target_layout_ = VK_IMAGE_LAYOUT_UNDEFINED;
   scene_view_bounds_ = {};
@@ -899,7 +947,7 @@ void VulkanRenderer::RequestSceneTargetResize(VkExtent2D extent) {
   scene_target_pending_extent_ = extent;
 }
 
-void VulkanRenderer::RenderScene(VkCommandBuffer cmd, const Mesh& mesh, const TriangleOrientationAnalyzer& analyzer, const RenderUiState& ui_state, uint32_t green_hatch_count, uint32_t yellow_hatch_count, uint32_t red_hatch_count, uint32_t line_count, uint32_t directive_line_count, uint32_t point_count, VkExtent2D extent) {
+void VulkanRenderer::RenderScene(VkCommandBuffer cmd, const Mesh& mesh, const TriangleOrientationState& orientation_state, const SceneCamera& camera, const RenderUiState& ui_state, uint32_t green_hatch_count, uint32_t yellow_hatch_count, uint32_t red_hatch_count, uint32_t line_count, uint32_t directive_line_count, uint32_t point_count, VkExtent2D extent) {
   if (scene_target_.image == VK_NULL_HANDLE || extent.width == 0 || extent.height == 0) return;
 
   TransitionImage(cmd, scene_target_.image, scene_target_layout_, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
@@ -936,6 +984,8 @@ void VulkanRenderer::RenderScene(VkCommandBuffer cmd, const Mesh& mesh, const Tr
 
   VkDeviceSize offset = 0;
   vkCmdBindVertexBuffers(cmd, 0, 1, &vertex_buffer_.buffer, &offset);
+  const std::array<float, 16> mvp = ToColumnMajorArray(camera.MvpMatrix());
+  vkCmdPushConstants(cmd, pipeline_layout_, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(mvp), mvp.data());
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, line_pipeline_);
   uint32_t first = 0;
   vkCmdDraw(cmd, green_hatch_count, 1, first, 0);
@@ -955,18 +1005,18 @@ void VulkanRenderer::RenderScene(VkCommandBuffer cmd, const Mesh& mesh, const Tr
   TransitionImage(cmd, scene_target_.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
   scene_target_layout_ = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
   (void)mesh;
-  (void)analyzer;
+  (void)orientation_state;
   (void)ui_state;
 }
 
-RenderFrameResult VulkanRenderer::Draw(const Mesh& mesh, const TriangleOrientationAnalyzer& analyzer, int highlighted_vertex, const RenderUiState& ui_state) {
+RenderFrameResult VulkanRenderer::Draw(const Mesh& mesh, const TriangleOrientationState& orientation_state, const SceneCamera& camera, int highlighted_vertex, const RenderUiState& ui_state) {
   uint32_t green_hatch_count = 0;
   uint32_t yellow_hatch_count = 0;
   uint32_t red_hatch_count = 0;
   uint32_t line_count = 0;
   uint32_t directive_line_count = 0;
   uint32_t point_count = 0;
-  UpdateVertexBuffer(mesh, analyzer, highlighted_vertex, ui_state, green_hatch_count, yellow_hatch_count, red_hatch_count, line_count, directive_line_count, point_count);
+  UpdateVertexBuffer(mesh, orientation_state, highlighted_vertex, ui_state, green_hatch_count, yellow_hatch_count, red_hatch_count, line_count, directive_line_count, point_count);
   FrameStats stats{};
   stats.draw_calls = 6;
   bool save_requested = false;
@@ -1008,7 +1058,7 @@ RenderFrameResult VulkanRenderer::Draw(const Mesh& mesh, const TriangleOrientati
   begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   vkBeginCommandBuffer(cmd, &begin);
 
-  RenderScene(cmd, mesh, analyzer, ui_state, green_hatch_count, yellow_hatch_count, red_hatch_count, line_count, directive_line_count, point_count, scene_target_.extent);
+  RenderScene(cmd, mesh, orientation_state, camera, ui_state, green_hatch_count, yellow_hatch_count, red_hatch_count, line_count, directive_line_count, point_count, scene_target_.extent);
 
   TransitionImage(cmd, swapchain_images_[image_index], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
@@ -1211,7 +1261,7 @@ RenderFrameResult VulkanRenderer::Draw(const Mesh& mesh, const TriangleOrientati
             ImGui::Text("vertices: %zu", guide_velocity.vertices.size());
             Vec3 move = ExtractTranslation(guide_velocity.velocity);
             ImGui::Text("velocity (%.3f, %.3f, %.3f)", move.x, move.y, move.z);
-            ImGui::Text("start in %u frame(s), duration %u", guide_velocity.start_frame_offset, guide_velocity.duration_frames);
+            ImGui::Text("starts after %u frame(s), lasts %u frame(s)", guide_velocity.start_frame_offset, guide_velocity.duration_frames);
             ImGui::PopID();
           }
           ImGui::Spacing();
@@ -1221,7 +1271,7 @@ RenderFrameResult VulkanRenderer::Draw(const Mesh& mesh, const TriangleOrientati
             ImGui::PushID(static_cast<int>(j) + 2000);
             ImGui::Text("vertices: %zu", guide_force.vertices.size());
             ImGui::Text("force (%.3f, %.3f, %.3f)", guide_force.force.x, guide_force.force.y, guide_force.force.z);
-            ImGui::Text("start in %u frame(s), duration %u", guide_force.start_frame_offset, guide_force.duration_frames);
+            ImGui::Text("starts after %u frame(s), lasts %u frame(s)", guide_force.start_frame_offset, guide_force.duration_frames);
             ImGui::PopID();
           }
           ImGui::Unindent();
@@ -1333,8 +1383,18 @@ RenderFrameResult VulkanRenderer::Draw(const Mesh& mesh, const TriangleOrientati
     if (!show_phys_window_) return;
     ImGui::Begin("Phys");
     ImGui::Text("current frame: %d", current_frame_index);
+    ImGui::Text("solver: %s", ui_state.phys_solver_kind == PhysSolverKind::Gpu ? "gpu" : "cpu");
+    ImGui::Text("algorithm: %s", ui_state.phys_algorithm_name.empty() ? "<none>" : ui_state.phys_algorithm_name.c_str());
     ImGui::Text("selected velocity guidance: %d", selected_velocity_guidance_);
     ImGui::Text("selected guide vertices: %zu", ui_state.selected_guide_vertices.size());
+    if (ui_state.gpu_dispatch_debug.valid) {
+      const GpuPhysicsDispatchDebugInfo& debug = ui_state.gpu_dispatch_debug;
+      ImGui::Text("gpu shader: %s", debug.shader_name.c_str());
+      ImGui::Text("gpu demo size: %ux%u", debug.width, debug.height);
+      if (!debug.values.empty()) {
+        ImGui::Text("gpu sample[0]: %.3f", debug.values.front());
+      }
+    }
     ImGui::Spacing();
     ImGui::TextUnformatted("physRun");
     if (ImGui::Button("PhysRun")) {
@@ -1386,13 +1446,14 @@ RenderFrameResult VulkanRenderer::Draw(const Mesh& mesh, const TriangleOrientati
     }
 
     ImGui::Spacing();
-    ImGui::TextUnformatted("direction comes from dragging the selected vertex");
+    ImGui::TextUnformatted("drag the selected vertex to set the arrow direction and UI length");
+    ImGui::TextDisabled("magnitude still controls physics, delay is the start offset in frames");
     if (guide_edit_mode_ == GuideEditMode::Velocity) {
       ImGui::TextUnformatted("velocity params");
       ImGui::SliderFloat("velocity magnitude", &guide_velocity_magnitude_, 0.0f, 20.0f, "%.3f");
       ImGui::InputFloat("velocity magnitude##input", &guide_velocity_magnitude_, 0.0f, 0.0f, "%.3f");
-      ImGui::SliderInt("velocity delay", &guide_velocity_delay_frames_, 0, 240);
-      ImGui::InputInt("velocity delay##input", &guide_velocity_delay_frames_);
+      ImGui::SliderInt("velocity start delay", &guide_velocity_delay_frames_, 0, 240);
+      ImGui::InputInt("velocity start delay##input", &guide_velocity_delay_frames_);
       ImGui::SliderInt("velocity duration", &guide_velocity_duration_frames_, 1, 240);
       ImGui::InputInt("velocity duration##input", &guide_velocity_duration_frames_);
       if (guide_velocity_magnitude_ < 0.0f) guide_velocity_magnitude_ = 0.0f;
@@ -1402,8 +1463,8 @@ RenderFrameResult VulkanRenderer::Draw(const Mesh& mesh, const TriangleOrientati
       ImGui::TextUnformatted("force params");
       ImGui::SliderFloat("force magnitude", &guide_force_magnitude_, 0.0f, 100.0f, "%.3f");
       ImGui::InputFloat("force magnitude##input", &guide_force_magnitude_, 0.0f, 0.0f, "%.3f");
-      ImGui::SliderInt("force delay", &guide_force_delay_frames_, 0, 240);
-      ImGui::InputInt("force delay##input", &guide_force_delay_frames_);
+      ImGui::SliderInt("force start delay", &guide_force_delay_frames_, 0, 240);
+      ImGui::InputInt("force start delay##input", &guide_force_delay_frames_);
       ImGui::SliderInt("force duration", &guide_force_duration_frames_, 1, 240);
       ImGui::InputInt("force duration##input", &guide_force_duration_frames_);
       if (guide_force_delay_frames_ < 0) guide_force_delay_frames_ = 0;
@@ -1595,8 +1656,7 @@ void VulkanRenderer::TransitionImage(VkCommandBuffer cmd, VkImage image, VkImage
 }
 
 void VulkanRenderer::DestroyBuffer(Buffer& buffer) {
-  if (buffer.buffer) vkDestroyBuffer(device_, buffer.buffer, nullptr);
-  if (buffer.memory) vkFreeMemory(device_, buffer.memory, nullptr);
+  if (buffer.buffer) vmaDestroyBuffer(allocator_, buffer.buffer, buffer.allocation);
   buffer = {};
 }
 

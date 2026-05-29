@@ -73,10 +73,12 @@ float TriangleArea(const Mesh& mesh, const Mesh& reference_mesh, size_t tri_inde
 
 }  // namespace
 
+namespace interaction_analysis {
+
 ValidationFrameSnapshot BuildValidationFrameSnapshot(
   const Mesh& mesh,
   const Mesh& reference_mesh,
-  const TriangleOrientationAnalyzer& analyzer,
+  const TriangleOrientationState& orientation_state,
   const RenderUiState& ui_state,
   const RenderFrameResult& frame_result,
   int highlighted_vertex,
@@ -191,8 +193,8 @@ ValidationFrameSnapshot BuildValidationFrameSnapshot(
     snapshot.physics.guide_keyframes.push_back(converted);
   }
 
-  const auto& matrices = analyzer.matrices();
-  const auto& faces = analyzer.triangle_faces_viewer();
+  const auto& matrices = orientation_state.matrices;
+  const auto& faces = orientation_state.triangle_faces_viewer;
   snapshot.analysis.triangles.reserve(mesh.triangles.size());
 
   float min_area = std::numeric_limits<float>::max();
@@ -242,3 +244,5 @@ ValidationFrameSnapshot BuildValidationFrameSnapshot(
 
   return snapshot;
 }
+
+}  // namespace interaction_analysis

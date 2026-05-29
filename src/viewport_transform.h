@@ -1,6 +1,6 @@
 #pragma once
 
-#include "math_types.h"
+#include "math/common/vector_types.h"
 
 class ViewportTransform {
  public:
@@ -16,4 +16,3 @@ class ViewportTransform {
   int width_{1};
   int height_{1};
 };
-

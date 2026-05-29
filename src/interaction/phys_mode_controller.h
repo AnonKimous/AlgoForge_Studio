@@ -1,17 +1,21 @@
 #pragma once
 
 #include "interaction_state.h"
-#include "guide_ui_controller.h"
 #include "../mesh.h"
 #include "../physics/physics_module.h"
+#include "../render/scene_camera.h"
 #include "../viewport_transform.h"
 #include "window/input_state.h"
 
 #include <cstdint>
 #include <vector>
 
+namespace interaction_analysis {
+
 class PhysModeController {
  public:
+  void SetPhysicsConfig(const PhysManagerConfig& config) { solver_.SetConfig(config); }
+  void SetGpuComputeContext(const VulkanComputeContextView& context) { solver_.SetGpuContext(context); }
   void PhysInit(const Mesh& mesh);
   void SetRunState(PhysRunState run_state);
   void SetGuideEnabled(bool enabled) { guide_enabled_ = enabled; }
@@ -19,6 +23,9 @@ class PhysModeController {
   void SetGuideVelocityMagnitude(float magnitude);
   void SetGuideVelocitySettings(float magnitude, uint32_t delay_frames, uint32_t duration_frames);
   void SetGuideForceSettings(float magnitude, uint32_t delay_frames, uint32_t duration_frames);
+  void SetSelectedGuideVertices(const std::vector<int>& vertices) { selected_guide_vertices_ = vertices; }
+  IoBufferEndpoint io_endpoint() { return solver_.io_endpoint(); }
+  void ResolveIncomingIoBuffers(const Mesh& mesh);
   void CacheCurrentState();
   void RestoreRecordedFrame(Mesh& mesh, int state_index);
   void SetRecordedFrameExpanded(int state_index, bool expanded);
@@ -49,8 +56,11 @@ class PhysModeController {
   const std::vector<int>& selected_guide_vertices() const { return selected_guide_vertices_; }
   GuideEditMode guide_edit_mode() const { return guide_edit_mode_; }
   int current_frame_index() const { return static_cast<int>(frame_index_); }
+  PhysSolverKind solver_kind() const { return solver_.solver_kind(); }
+  const std::string& algorithm_name() const { return solver_.algorithm_name(); }
+  const GpuPhysicsDispatchDebugInfo& gpu_dispatch_debug_info() const { return solver_.gpu_dispatch_debug_info(); }
 
-  InteractionFrame Tick(Mesh& mesh, const ViewportTransform& viewport, const InputState& input, Vec2 mouse_pixel, float dt_seconds);
+  InteractionFrame Tick(Mesh& mesh, const ViewportTransform& viewport, const SceneCamera& camera, const InputState& input, Vec2 mouse_pixel, float dt_seconds);
 
  private:
   bool initialized_{false};
@@ -73,8 +83,7 @@ class PhysModeController {
   uint32_t guide_force_delay_frames_{0};
   uint32_t guide_force_duration_frames_{1};
   std::vector<Vec3> initial_positions_;
-  PhysicsSolver solver_;
-  GuideUiController guide_ui_;
+  core_services::PhysManager solver_;
 
   void ResetSimulation(Mesh& mesh);
   void RefreshCurrentRecordedFrame(const Mesh& mesh);
@@ -84,9 +93,11 @@ class PhysModeController {
   const PhysGuideKeyframe* FindGuideKeyframe(int frame_index) const;
   PhysGuideKeyframe& EnsureGuideKeyframe(int frame_index);
   void RefreshActiveGuides(const Mesh& mesh);
-  int FindHoveredVertex(const Mesh& mesh, const ViewportTransform& viewport, Vec2 mouse_pixel) const;
-  int FindDirectiveAt(const Mesh& mesh, const ViewportTransform& viewport, Vec2 mouse_pixel) const;
+  int FindHoveredVertex(const Mesh& mesh, const ViewportTransform& viewport, const SceneCamera& camera, Vec2 mouse_pixel) const;
+  int FindDirectiveAt(const Mesh& mesh, const ViewportTransform& viewport, const SceneCamera& camera, Vec2 mouse_pixel) const;
   static float DistanceToSegmentSquared(Vec2 p, Vec2 a, Vec2 b);
-  void UpdateGuideFromUi(const Mesh& mesh, const GuideUiFrame& ui_frame);
+  void MergeDecodedGuideBuffersIntoCurrentKeyframe();
   PhysGuideKeyframe& EnsureCurrentGuideKeyframe();
 };
+
+}  // namespace interaction_analysis

@@ -4,6 +4,8 @@
 #include <cmath>
 #include <utility>
 
+namespace interaction_analysis {
+
 void PhysModeController::PhysInit(const Mesh& mesh) {
   solver_.Init(mesh);
   initialized_ = true;
@@ -43,6 +45,26 @@ void PhysModeController::SetGuideForceSettings(float magnitude, uint32_t delay_f
   guide_force_duration_frames_ = std::max(1u, duration_frames);
 }
 
+void PhysModeController::ResolveIncomingIoBuffers(const Mesh& mesh) {
+  if (!initialized_) {
+    PhysInit(mesh);
+  }
+  if (solver_.signal_buffer().empty() || solver_.data_buffer().empty()) {
+    return;
+  }
+  if (!solver_.ResolveSignalDataBuffers(mesh)) {
+    return;
+  }
+
+  MergeDecodedGuideBuffersIntoCurrentKeyframe();
+  if (!selected_guide_vertices_.empty()) {
+    selected_velocity_guidance_ = selected_guide_vertices_.front();
+  } else if (!solver_.decoded_velocity_guidances().empty()) {
+    selected_velocity_guidance_ = solver_.decoded_velocity_guidances().front().vertex;
+  }
+  RefreshActiveGuides(mesh);
+}
+
 void PhysModeController::CacheCurrentState() {
   if (!initialized_ || run_state_ != PhysRunState::Pause || recorded_frames_.empty()) return;
   PhysRecordedFrame snapshot = recorded_frames_[0];
@@ -64,7 +86,6 @@ void PhysModeController::RestoreRecordedFrame(Mesh& mesh, int state_index) {
   selected_velocity_guidance_ = -1;
   physics_accumulator_ = 0.0f;
   selected_guide_vertices_.clear();
-  guide_ui_.ClearSelection();
   RefreshCurrentRecordedFrame(mesh);
   RefreshActiveGuides(mesh);
 }
@@ -208,7 +229,6 @@ void PhysModeController::ResetSimulation(Mesh& mesh) {
   run_state_ = PhysRunState::Pause;
   guide_enabled_ = true;
   selected_guide_vertices_.clear();
-  guide_ui_.ClearSelection();
   recorded_frames_.push_back(BuildRecordedFrame(mesh, true));
   RefreshActiveGuides(mesh);
 }
@@ -230,87 +250,50 @@ void PhysModeController::Reset(Mesh& mesh) {
   ResetSimulation(mesh);
 }
 
-void PhysModeController::UpdateGuideFromUi(const Mesh& mesh, const GuideUiFrame& ui_frame) {
-  if (ui_frame.selected_vertices.empty()) return;
-
-  const int primary_vertex = ui_frame.selected_vertices.front();
-  if (primary_vertex < 0 || static_cast<size_t>(primary_vertex) >= mesh.positions.size()) return;
-
+void PhysModeController::MergeDecodedGuideBuffersIntoCurrentKeyframe() {
   PhysGuideKeyframe& keyframe = EnsureCurrentGuideKeyframe();
-  const Vec3& primary_start = mesh.positions[primary_vertex];
-  Vec3 drag_delta{
-    ui_frame.drag_target.x - primary_start.x,
-    ui_frame.drag_target.y - primary_start.y,
-    ui_frame.drag_target.z - primary_start.z,
-  };
-  float drag_length = std::sqrt(
-    drag_delta.x * drag_delta.x +
-    drag_delta.y * drag_delta.y +
-    drag_delta.z * drag_delta.z);
-  Vec3 drag_direction{};
-  if (drag_length > 1e-6f) {
-    drag_direction = Vec3{drag_delta.x / drag_length, drag_delta.y / drag_length, drag_delta.z / drag_length};
-  }
-
-  switch (guide_edit_mode_) {
-    case GuideEditMode::Displacement: {
-      Vec3 requested{ui_frame.drag_target.x, ui_frame.drag_target.y, primary_start.z};
-      UpsertVelocityGuidanceAtCurrentFrame(mesh, ui_frame.selected_vertices, primary_start, requested);
-      break;
+  for (const VelocityGuidance& guidance : solver_.decoded_velocity_guidances()) {
+    bool updated = false;
+    for (VelocityGuidance& existing : keyframe.guidances) {
+      if ((!existing.vertices.empty() && existing.vertices == guidance.vertices) ||
+          (existing.vertices.empty() && existing.vertex == guidance.vertex)) {
+        existing = guidance;
+        updated = true;
+        break;
+      }
     }
-    case GuideEditMode::Velocity: {
-      Vec3 velocity_vector{
-        drag_direction.x * guide_velocity_magnitude_,
-        drag_direction.y * guide_velocity_magnitude_,
-        drag_direction.z * guide_velocity_magnitude_,
-      };
-      VelocityGuideVelocity guide{};
-      guide.vertices = ui_frame.selected_vertices;
-      guide.velocity = MakeLinearVelocityMatrix(velocity_vector);
-      guide.start_frame_offset = guide_velocity_delay_frames_;
-      guide.duration_frames = guide_velocity_duration_frames_;
-      guide.valid = true;
-      bool updated = false;
-      for (VelocityGuideVelocity& existing : keyframe.guide_velocities) {
-        if (existing.vertices == guide.vertices) {
-          existing = guide;
-          updated = true;
-          break;
-        }
-      }
-      if (!updated) {
-        keyframe.guide_velocities.push_back(guide);
-      }
-      break;
-    }
-    case GuideEditMode::Force: {
-      VelocityGuideForce guide{};
-      guide.vertices = ui_frame.selected_vertices;
-      guide.force = Vec3{
-        drag_direction.x * guide_force_magnitude_,
-        drag_direction.y * guide_force_magnitude_,
-        drag_direction.z * guide_force_magnitude_,
-      };
-      guide.start_frame_offset = guide_force_delay_frames_;
-      guide.duration_frames = guide_force_duration_frames_;
-      guide.valid = true;
-      bool updated = false;
-      for (VelocityGuideForce& existing : keyframe.guide_forces) {
-        if (existing.vertices == guide.vertices && existing.start_frame_offset == guide.start_frame_offset) {
-          existing = guide;
-          updated = true;
-          break;
-        }
-      }
-      if (!updated) {
-        keyframe.guide_forces.push_back(guide);
-      }
-      break;
+    if (!updated) {
+      keyframe.guidances.push_back(guidance);
     }
   }
 
-  selected_velocity_guidance_ = static_cast<int>(ui_frame.selected_vertices.front());
-  RefreshActiveGuides(mesh);
+  for (const VelocityGuideVelocity& guide : solver_.decoded_guide_velocities()) {
+    bool updated = false;
+    for (VelocityGuideVelocity& existing : keyframe.guide_velocities) {
+      if (existing.vertices == guide.vertices) {
+        existing = guide;
+        updated = true;
+        break;
+      }
+    }
+    if (!updated) {
+      keyframe.guide_velocities.push_back(guide);
+    }
+  }
+
+  for (const VelocityGuideForce& guide : solver_.decoded_guide_forces()) {
+    bool updated = false;
+    for (VelocityGuideForce& existing : keyframe.guide_forces) {
+      if (existing.vertices == guide.vertices && existing.start_frame_offset == guide.start_frame_offset) {
+        existing = guide;
+        updated = true;
+        break;
+      }
+    }
+    if (!updated) {
+      keyframe.guide_forces.push_back(guide);
+    }
+  }
 }
 
 void PhysModeController::RefreshActiveGuides(const Mesh& mesh) {
@@ -357,16 +340,14 @@ void PhysModeController::RefreshActiveGuides(const Mesh& mesh) {
   }
 }
 
-InteractionFrame PhysModeController::Tick(Mesh& mesh, const ViewportTransform& viewport, const InputState& input, Vec2 mouse_pixel, float dt_seconds) {
+InteractionFrame PhysModeController::Tick(Mesh& mesh, const ViewportTransform& viewport, const SceneCamera& camera, const InputState& input, Vec2 mouse_pixel, float dt_seconds) {
   if (!initialized_) {
     PhysInit(mesh);
   }
-
-  GuideUiFrame guide_ui = guide_ui_.Tick(mesh, viewport, input, mouse_pixel);
-  selected_guide_vertices_ = guide_ui.selected_vertices;
+  const int hovered_vertex = FindHoveredVertex(mesh, viewport, camera, mouse_pixel);
 
   if (input.left_double_clicked) {
-    int directive = FindDirectiveAt(mesh, viewport, mouse_pixel);
+    int directive = FindDirectiveAt(mesh, viewport, camera, mouse_pixel);
     if (directive >= 0) {
       selected_velocity_guidance_ = directive;
     }
@@ -384,7 +365,7 @@ InteractionFrame PhysModeController::Tick(Mesh& mesh, const ViewportTransform& v
     if (!selected_guide_vertices_.empty()) {
       selection = SelectionState{SelectionKind::Vertex, selected_guide_vertices_.front(), -1};
     }
-    return InteractionFrame{guide_ui.hovered_vertex, selection};
+    return InteractionFrame{hovered_vertex, selection};
   }
 
   physics_accumulator_ = 0.0f;
@@ -395,11 +376,7 @@ InteractionFrame PhysModeController::Tick(Mesh& mesh, const ViewportTransform& v
     if (!selected_guide_vertices_.empty()) {
       selection = SelectionState{SelectionKind::Vertex, selected_guide_vertices_.front(), -1};
     }
-    return InteractionFrame{guide_ui.hovered_vertex, selection};
-  }
-
-  if (guide_ui.dragging && !guide_ui.selected_vertices.empty()) {
-    UpdateGuideFromUi(mesh, guide_ui);
+    return InteractionFrame{hovered_vertex, selection};
   }
 
   RefreshActiveGuides(mesh);
@@ -408,14 +385,14 @@ InteractionFrame PhysModeController::Tick(Mesh& mesh, const ViewportTransform& v
   if (!selected_guide_vertices_.empty()) {
     selection = SelectionState{SelectionKind::Vertex, selected_guide_vertices_.front(), -1};
   }
-  return InteractionFrame{guide_ui.hovered_vertex, selection};
+  return InteractionFrame{hovered_vertex, selection};
 }
 
-int PhysModeController::FindHoveredVertex(const Mesh& mesh, const ViewportTransform& viewport, Vec2 mouse_pixel) const {
+int PhysModeController::FindHoveredVertex(const Mesh& mesh, const ViewportTransform& viewport, const SceneCamera& camera, Vec2 mouse_pixel) const {
   int highlighted = -1;
   float best_pixels2 = 22.0f * 22.0f;
   for (uint32_t i = 0; i < mesh.positions.size(); ++i) {
-    Vec2 vertex_pixel = viewport.NdcToWindow(Vec2{mesh.positions[i].x, mesh.positions[i].y});
+    Vec2 vertex_pixel = camera.WorldToWindow(mesh.positions[i], viewport);
     float dx = vertex_pixel.x - mouse_pixel.x;
     float dy = vertex_pixel.y - mouse_pixel.y;
     float dist2 = dx * dx + dy * dy;
@@ -444,7 +421,7 @@ float PhysModeController::DistanceToSegmentSquared(Vec2 p, Vec2 a, Vec2 b) {
   return dx * dx + dy * dy;
 }
 
-int PhysModeController::FindDirectiveAt(const Mesh& mesh, const ViewportTransform& viewport, Vec2 mouse_pixel) const {
+int PhysModeController::FindDirectiveAt(const Mesh& mesh, const ViewportTransform& viewport, const SceneCamera& camera, Vec2 mouse_pixel) const {
   (void)mesh;
   const auto& guidances = solver_.guidances();
   int hovered = -1;
@@ -453,9 +430,9 @@ int PhysModeController::FindDirectiveAt(const Mesh& mesh, const ViewportTransfor
     const VelocityGuidance& guidance = guidances[i];
     if (guidance.vertex < 0) continue;
     if (guidance.hidden) continue;
-    Vec2 start = viewport.NdcToWindow(Vec2{guidance.start.x, guidance.start.y});
-    Vec2 requested = viewport.NdcToWindow(Vec2{guidance.requested_target.x, guidance.requested_target.y});
-    Vec2 allowed = viewport.NdcToWindow(Vec2{guidance.allowed_target.x, guidance.allowed_target.y});
+    Vec2 start = camera.WorldToWindow(guidance.start, viewport);
+    Vec2 requested = camera.WorldToWindow(guidance.requested_target, viewport);
+    Vec2 allowed = camera.WorldToWindow(guidance.allowed_target, viewport);
     float dist2 = DistanceToSegmentSquared(mouse_pixel, start, allowed);
     if (!guidance.valid) {
       dist2 = std::min(dist2, DistanceToSegmentSquared(mouse_pixel, start, requested));
@@ -467,3 +444,5 @@ int PhysModeController::FindDirectiveAt(const Mesh& mesh, const ViewportTransfor
   }
   return hovered;
 }
+
+}  // namespace interaction_analysis

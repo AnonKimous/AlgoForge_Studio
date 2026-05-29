@@ -33,9 +33,9 @@ float DefaultMaterialValue() {
 
 void GenerateSubdividedTriangleMeshFile(const std::string& path) {
   std::vector<Vec3> base = {
-    {-0.275f, -0.225f, 0.0f},
-    { 0.275f, -0.225f, 0.0f},
-    { 0.000f,  0.250f, 0.0f},
+    {-0.110f, -0.090f, 0.0f},
+    { 0.110f, -0.090f, 0.0f},
+    { 0.000f,  0.100f, 0.0f},
   };
 
   std::vector<Vec3> vertices = base;

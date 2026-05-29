@@ -3,7 +3,7 @@
 #include "input_state.h"
 #include "window_handle.h"
 
-#include "../math_types.h"
+#include "../math/common/vector_types.h"
 
 #include <SDL3/SDL.h>
 

@@ -12,6 +12,8 @@ PhysRunState ToPhysRunState(ValidationPhysRunState state) {
 
 }  // namespace
 
+namespace interaction_analysis {
+
 void ApplyValidationAction(ValidationAction action, VulkanRenderer& renderer, PhysModeController& phys_controller, Mesh& mesh) {
   switch (action.kind) {
     case ValidationActionKind::PhysStep: {
@@ -49,3 +51,5 @@ void ApplyValidationActions(const std::vector<ValidationAction>& actions, Vulkan
     ApplyValidationAction(action, renderer, phys_controller, mesh);
   }
 }
+
+}  // namespace interaction_analysis

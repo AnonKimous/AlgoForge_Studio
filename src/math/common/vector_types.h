@@ -10,4 +10,3 @@ struct Vec3 {
   float y{};
   float z{};
 };
-

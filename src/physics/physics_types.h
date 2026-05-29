@@ -1,72 +1,10 @@
 #pragma once
 
-#include <Eigen/Dense>
+#include "../math/common/vector_types.h"
+#include "../math/phys_algorithm/velocity_math.h"
 
-#include "../math_types.h"
-
-#include <cmath>
 #include <cstdint>
 #include <vector>
-
-using VelocityMatrix = Eigen::Matrix4f;
-using DeltaMatrix = VelocityMatrix;
-
-inline VelocityMatrix MakeIdentityVelocity() {
-  return VelocityMatrix::Identity();
-}
-
-inline VelocityMatrix MakeLinearVelocityMatrix(Vec3 translation) {
-  VelocityMatrix velocity = VelocityMatrix::Identity();
-  velocity(0, 3) = translation.x;
-  velocity(1, 3) = translation.y;
-  velocity(2, 3) = translation.z;
-  return velocity;
-}
-
-inline VelocityMatrix MakeAngularVelocityMatrix(float radians) {
-  VelocityMatrix velocity = VelocityMatrix::Identity();
-  float c = std::cos(radians);
-  float s = std::sin(radians);
-  velocity(0, 0) = c;
-  velocity(0, 1) = -s;
-  velocity(1, 0) = s;
-  velocity(1, 1) = c;
-  return velocity;
-}
-
-inline VelocityMatrix ComposeVelocity(const VelocityMatrix& angular_velocity, const VelocityMatrix& linear_velocity) {
-  return linear_velocity * angular_velocity;
-}
-
-inline DeltaMatrix MakeIdentityDelta() {
-  return MakeIdentityVelocity();
-}
-
-inline DeltaMatrix MakeTranslationDelta(Vec3 translation) {
-  return MakeLinearVelocityMatrix(translation);
-}
-
-inline Vec3 ApplyVelocityToPoint(const VelocityMatrix& velocity, Vec3 position) {
-  Eigen::Vector4f point{position.x, position.y, position.z, 1.0f};
-  Eigen::Vector4f moved = velocity * point;
-  if (std::fabs(moved.w) > 1e-6f) {
-    float inv_w = 1.0f / moved.w;
-    return Vec3{moved.x * inv_w, moved.y * inv_w, moved.z * inv_w};
-  }
-  return Vec3{moved.x, moved.y, moved.z};
-}
-
-inline Vec3 ApplyDeltaToPoint(const DeltaMatrix& delta, Vec3 position) {
-  return ApplyVelocityToPoint(delta, position);
-}
-
-inline Vec3 ExtractLinearVelocity(const VelocityMatrix& velocity) {
-  return Vec3{velocity(0, 3), velocity(1, 3), velocity(2, 3)};
-}
-
-inline Vec3 ExtractTranslation(const DeltaMatrix& delta) {
-  return ExtractLinearVelocity(delta);
-}
 
 enum class PhysRunState {
   Run,
@@ -89,6 +27,7 @@ using PhysDirective = VelocityGuidance;
 struct VelocityGuideVelocity {
   std::vector<int> vertices;
   VelocityMatrix velocity{};
+  Vec3 display_delta{};
   uint32_t start_frame_offset{0};
   uint32_t duration_frames{1};
   bool hidden{false};
@@ -98,6 +37,7 @@ struct VelocityGuideVelocity {
 struct VelocityGuideForce {
   std::vector<int> vertices;
   Vec3 force{};
+  Vec3 display_delta{};
   uint32_t start_frame_offset{0};
   uint32_t duration_frames{1};
   bool hidden{false};
@@ -116,6 +56,7 @@ struct PhysicsRestTriangle {
 
 struct PhysicsStepInput {
   std::vector<Vec3> positions;
+  std::vector<Vec3> rest_positions;
   std::vector<VelocityMatrix> total_velocities;
   std::vector<VelocityMatrix> linear_velocities;
   std::vector<VelocityMatrix> angular_velocities;
@@ -134,3 +75,14 @@ struct PhysicsStepOutput {
   std::vector<VelocityGuideVelocity> guide_velocities;
   std::vector<VelocityGuideForce> guide_forces;
 };
+
+namespace data_protocol {
+using ::PhysDirective;
+using ::PhysRunState;
+using ::PhysicsRestTriangle;
+using ::PhysicsStepInput;
+using ::PhysicsStepOutput;
+using ::VelocityGuideForce;
+using ::VelocityGuidance;
+using ::VelocityGuideVelocity;
+}  // namespace data_protocol

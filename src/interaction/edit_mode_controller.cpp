@@ -19,16 +19,17 @@ bool PointInTriangle(Vec2 p, Vec2 a, Vec2 b, Vec2 c) {
 
 }  // namespace
 
-InteractionFrame EditModeController::Tick(Mesh& mesh, const ViewportTransform& viewport, const InputState& input, Vec2 mouse_pixel) {
-  Vec2 mouse_ndc = viewport.WindowToNdc(mouse_pixel);
-  int hovered_vertex = FindHoveredVertex(mesh, viewport, mouse_pixel);
+namespace interaction_analysis {
+
+InteractionFrame EditModeController::Tick(Mesh& mesh, const ViewportTransform& viewport, const SceneCamera& camera, const InputState& input, Vec2 mouse_pixel) {
+  int hovered_vertex = FindHoveredVertex(mesh, viewport, camera, mouse_pixel);
 
   if (input.left_pressed) {
     if (hovered_vertex >= 0) {
       dragging_vertex_ = hovered_vertex;
       selection_ = SelectionState{SelectionKind::Vertex, hovered_vertex, -1};
     } else {
-      int triangle = FindTriangleAt(mesh, mouse_ndc);
+      int triangle = FindTriangleAt(mesh, camera, viewport, mouse_pixel);
       dragging_vertex_ = -1;
       selection_ = triangle >= 0 ? SelectionState{SelectionKind::Triangle, -1, triangle} : SelectionState{};
     }
@@ -39,8 +40,9 @@ InteractionFrame EditModeController::Tick(Mesh& mesh, const ViewportTransform& v
   }
 
   if (input.left_down && dragging_vertex_ >= 0) {
-    mesh.positions[dragging_vertex_].x = mouse_ndc.x;
-    mesh.positions[dragging_vertex_].y = mouse_ndc.y;
+    Vec3 mouse_world = camera.WindowToWorld(mouse_pixel, viewport, mesh.positions[dragging_vertex_].z);
+    mesh.positions[dragging_vertex_].x = mouse_world.x;
+    mesh.positions[dragging_vertex_].y = mouse_world.y;
     selection_ = SelectionState{SelectionKind::Vertex, dragging_vertex_, -1};
     hovered_vertex = dragging_vertex_;
   }
@@ -48,11 +50,11 @@ InteractionFrame EditModeController::Tick(Mesh& mesh, const ViewportTransform& v
   return InteractionFrame{hovered_vertex, selection_};
 }
 
-int EditModeController::FindHoveredVertex(const Mesh& mesh, const ViewportTransform& viewport, Vec2 mouse_pixel) const {
+int EditModeController::FindHoveredVertex(const Mesh& mesh, const ViewportTransform& viewport, const SceneCamera& camera, Vec2 mouse_pixel) const {
   int highlighted = -1;
   float best_pixels2 = 22.0f * 22.0f;
   for (uint32_t i = 0; i < mesh.positions.size(); ++i) {
-    Vec2 vertex_pixel = viewport.NdcToWindow(Vec2{mesh.positions[i].x, mesh.positions[i].y});
+    Vec2 vertex_pixel = camera.WorldToWindow(mesh.positions[i], viewport);
     float dx = vertex_pixel.x - mouse_pixel.x;
     float dy = vertex_pixel.y - mouse_pixel.y;
     float dist2 = dx * dx + dy * dy;
@@ -64,16 +66,19 @@ int EditModeController::FindHoveredVertex(const Mesh& mesh, const ViewportTransf
   return highlighted;
 }
 
-int EditModeController::FindTriangleAt(const Mesh& mesh, Vec2 mouse_ndc) const {
+int EditModeController::FindTriangleAt(const Mesh& mesh, const SceneCamera& camera, const ViewportTransform& viewport, Vec2 mouse_pixel) const {
+  Vec3 mouse_world = camera.WindowToWorld(mouse_pixel, viewport, 0.0f);
+  Vec2 mouse_xy{mouse_world.x, mouse_world.y};
   for (uint32_t i = 0; i < mesh.triangles.size(); ++i) {
     const auto& tri = mesh.triangles[i];
     Vec2 a{mesh.positions[tri[0]].x, mesh.positions[tri[0]].y};
     Vec2 b{mesh.positions[tri[1]].x, mesh.positions[tri[1]].y};
     Vec2 c{mesh.positions[tri[2]].x, mesh.positions[tri[2]].y};
-    if (PointInTriangle(mouse_ndc, a, b, c)) {
+    if (PointInTriangle(mouse_xy, a, b, c)) {
       return static_cast<int>(i);
     }
   }
   return -1;
 }
 
+}  // namespace interaction_analysis

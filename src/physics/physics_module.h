@@ -1,5 +1,5 @@
 #pragma once
 
-#include "physics_solver.h"
+#include "../algorithm/algorithm_types.h"
+#include "phys_manager.h"
 #include "physics_types.h"
-

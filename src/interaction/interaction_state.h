@@ -1,6 +1,7 @@
 #pragma once
 
-#include "../math_types.h"
+#include "../algorithm/algorithm_types.h"
+#include "../math/common/vector_types.h"
 #include "../physics/physics_types.h"
 
 #include <cstdint>
@@ -35,6 +36,14 @@ struct InteractionFrame {
   SelectionState selection{};
 };
 
+struct GuideUiFrame {
+  int hovered_vertex{-1};
+  std::vector<int> selected_vertices;
+  bool dragging{false};
+  int dragging_vertex{-1};
+  Vec3 drag_target{};
+};
+
 struct PhysRecordedFrame {
   int frame_index{-1};
   bool current{false};
@@ -58,6 +67,8 @@ struct RenderUiState {
   InteractionMode mode{InteractionMode::Edit};
   PhysRunState phys_run_state{PhysRunState::Pause};
   bool phys_guide_enabled{true};
+  PhysSolverKind phys_solver_kind{PhysSolverKind::Cpu};
+  std::string phys_algorithm_name;
   GuideEditMode guide_edit_mode{GuideEditMode::Displacement};
   float guide_velocity_magnitude{1.0f};
   uint32_t guide_velocity_delay_frames{0};
@@ -80,6 +91,7 @@ struct RenderUiState {
   std::vector<VelocityGuidance> active_velocity_guidances;
   std::vector<VelocityGuideVelocity> active_guide_velocities;
   std::vector<VelocityGuideForce> active_guide_forces;
+  GpuPhysicsDispatchDebugInfo gpu_dispatch_debug;
   float animation_time{};
 };
 
@@ -115,3 +127,16 @@ struct RenderFrameResult {
   float triangle_material_gpa{0.0f};
   bool save_requested{};
 };
+
+namespace data_protocol {
+using ::GuideEditMode;
+using ::GuideUiFrame;
+using ::InteractionFrame;
+using ::InteractionMode;
+using ::PhysGuideKeyframe;
+using ::PhysRecordedFrame;
+using ::RenderFrameResult;
+using ::RenderUiState;
+using ::SelectionKind;
+using ::SelectionState;
+}  // namespace data_protocol

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "math_types.h"
+#include "math/common/vector_types.h"
 
 #include <array>
 #include <string>
@@ -22,3 +22,15 @@ void SaveMeshSnapshotFile(const Mesh& mesh, const std::string& path);
 void NormalizeTriangleMaterials(Mesh& mesh);
 void RebuildEdges(Mesh& mesh);
 int FindNearestVertex(const Mesh& mesh, Vec2 xy, float max_distance);
+
+namespace data_protocol {
+using ::FindNearestVertex;
+using ::GenerateSubdividedTriangleMeshFile;
+using ::LoadMeshFile;
+using ::LoadMeshWithSnapshot;
+using ::Mesh;
+using ::NormalizeTriangleMaterials;
+using ::RebuildEdges;
+using ::SaveMeshFile;
+using ::SaveMeshSnapshotFile;
+}  // namespace data_protocol

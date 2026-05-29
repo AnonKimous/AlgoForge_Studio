@@ -7,5 +7,9 @@
 
 #include <vector>
 
+namespace interaction_analysis {
+
 void ApplyValidationAction(ValidationAction action, VulkanRenderer& renderer, PhysModeController& phys_controller, Mesh& mesh);
 void ApplyValidationActions(const std::vector<ValidationAction>& actions, VulkanRenderer& renderer, PhysModeController& phys_controller, Mesh& mesh);
+
+}  // namespace interaction_analysis

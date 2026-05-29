@@ -1,12 +1,15 @@
 #pragma once
 
+#include "../algorithm/algorithm_types.h"
 #include "../interaction/interaction_state.h"
 #include "../mesh.h"
-#include "../triangle_orientation_analyzer.h"
+#include "../triangle_orientation_state.h"
+#include "scene_camera.h"
 #include "window/window_handle.h"
 
 #include <vulkan/vulkan.h>
 #include <vkb/VkBootstrap.h>
+#include <vk_mem_alloc.h>
 
 #include <cstdint>
 #include <vector>
@@ -35,30 +38,42 @@ class VulkanRenderer {
   explicit VulkanRenderer(const WindowHandle& window);
   ~VulkanRenderer();
 
-  RenderFrameResult Draw(const Mesh& mesh, const TriangleOrientationAnalyzer& analyzer, int highlighted_vertex, const RenderUiState& ui_state);
+  RenderFrameResult Draw(const Mesh& mesh, const TriangleOrientationState& orientation_state, const SceneCamera& camera, int highlighted_vertex, const RenderUiState& ui_state);
   InteractionMode mode() const { return mode_; }
   PhysRunState phys_run_state() const { return phys_run_state_; }
   bool phys_guide_enabled() const { return phys_guide_enabled_; }
   void SetPhysRunState(PhysRunState state) { phys_run_state_ = state; }
   void SetPhysGuideEnabled(bool enabled) { phys_guide_enabled_ = enabled; }
   SceneViewBounds scene_view_bounds() const { return scene_view_bounds_; }
+  VulkanComputeContextView compute_context() const {
+    return VulkanComputeContextView{
+      instance_,
+      physical_device_,
+      device_,
+      graphics_queue_,
+      graphics_queue_family_,
+      device_ != VK_NULL_HANDLE && graphics_queue_ != VK_NULL_HANDLE,
+    };
+  }
 
  private:
   struct Buffer {
     VkBuffer buffer{};
-    VkDeviceMemory memory{};
+    VmaAllocation allocation{};
+    VmaAllocationInfo allocation_info{};
     size_t size{};
   };
 
   struct SceneTarget {
     VkImage image{};
-    VkDeviceMemory memory{};
+    VmaAllocation allocation{};
     VkImageView view{};
     VkDescriptorSet descriptor{};
     VkExtent2D extent{};
   };
 
   void CreateInstanceAndDevice(const WindowHandle& window);
+  void CreateAllocator();
   void CreateSwapchain();
   void CreatePipeline();
   void CreateFrameResources();
@@ -68,8 +83,8 @@ class VulkanRenderer {
   void RequestSceneTargetResize(VkExtent2D extent);
   void CreateVertexBuffer(size_t size);
   void EnsureVertexBufferSize(size_t size);
-  void UpdateVertexBuffer(const Mesh& mesh, const TriangleOrientationAnalyzer& analyzer, int highlighted_vertex, const RenderUiState& ui_state, uint32_t& green_hatch_count, uint32_t& yellow_hatch_count, uint32_t& red_hatch_count, uint32_t& line_count, uint32_t& directive_line_count, uint32_t& point_count);
-  void RenderScene(VkCommandBuffer cmd, const Mesh& mesh, const TriangleOrientationAnalyzer& analyzer, const RenderUiState& ui_state, uint32_t green_hatch_count, uint32_t yellow_hatch_count, uint32_t red_hatch_count, uint32_t line_count, uint32_t directive_line_count, uint32_t point_count, VkExtent2D extent);
+  void UpdateVertexBuffer(const Mesh& mesh, const TriangleOrientationState& orientation_state, int highlighted_vertex, const RenderUiState& ui_state, uint32_t& green_hatch_count, uint32_t& yellow_hatch_count, uint32_t& red_hatch_count, uint32_t& line_count, uint32_t& directive_line_count, uint32_t& point_count);
+  void RenderScene(VkCommandBuffer cmd, const Mesh& mesh, const TriangleOrientationState& orientation_state, const SceneCamera& camera, const RenderUiState& ui_state, uint32_t green_hatch_count, uint32_t yellow_hatch_count, uint32_t red_hatch_count, uint32_t line_count, uint32_t directive_line_count, uint32_t point_count, VkExtent2D extent);
   void AppendHudVertices(std::vector<GpuVertex>& vertices, const FrameStats& stats);
   void DestroyFrameResources();
   void DestroyImGui();
@@ -88,6 +103,7 @@ class VulkanRenderer {
   VkSurfaceKHR surface_{};
   VkPhysicalDevice physical_device_{};
   VkDevice device_{};
+  VmaAllocator allocator_{};
   VkQueue graphics_queue_{};
   VkQueue present_queue_{};
   uint32_t graphics_queue_family_{};

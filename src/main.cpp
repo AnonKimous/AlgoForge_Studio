@@ -1,14 +1,12 @@
-#include "interaction/edit_mode_controller.h"
+#include "algorithm/legacy_corotated_cpu_algorithm_contract.h"
+#include "algorithm/physics_convolution_gpu_algorithm_contract.h"
+#include "app/module_agents.h"
+#include "communication/io_protocol.h"
+#include "glue/app_frame_sync_glue.h"
+#include "glue/guide_ui_frame_relay_on_phys_manager_buffers.h"
 #include "interaction/interaction_module.h"
-#include "interaction/phys_mode_controller.h"
 #include "mesh.h"
-#include "render/render_module.h"
-#include "window/window.h"
-#include "triangle_orientation_analyzer.h"
 #include "validation_bridge/validation_bridge.h"
-#include "validation_bridge/validation_action_bridge.h"
-#include "validation_layer/validation_layer.h"
-#include "viewport_transform.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
@@ -22,6 +20,10 @@
 
 int main(int argc, char** argv) {
   try {
+    using namespace agents;
+    using namespace app_orchestration;
+    using namespace interaction_analysis;
+
     std::vector<std::string> args;
     args.reserve(argc);
     for (int i = 0; i < argc; ++i) {
@@ -42,141 +44,125 @@ int main(int argc, char** argv) {
     Mesh reference_mesh;
     Mesh mesh = LoadMeshWithSnapshot(mesh_path.string(), snapshot_path.string(), &reference_mesh);
 
-    SdlWindow window("Vulkan Mesh Vertex Editor", 1280, 720);
-    VulkanRenderer renderer(window.native_handle());
-    ViewportTransform viewport;
-    TriangleOrientationAnalyzer orientation;
-    EditModeController edit_controller;
-    PhysModeController phys_controller;
-    ValidationLayerApi validation_layer;
-    if (validation_layer_enabled) {
-      validation_layer.Start();
+    WindowAgent window_agent;
+    window_agent.Init("Vulkan Mesh Vertex Editor", 1280, 720);
+    RenderAgent render_agent;
+    render_agent.Init(window_agent.native_handle());
+    SceneViewAgent scene_view_agent;
+    scene_view_agent.Init(mesh);
+    TriangleAnalysisAgent triangle_analysis_agent;
+    triangle_analysis_agent.Init(reference_mesh);
+    EditModeAgent edit_agent;
+    edit_agent.Init();
+    GuideUiAgent guide_ui_agent;
+    guide_ui_agent.Init();
+    IoBusAgent io_bus_agent;
+    io_bus_agent.Init();
+    CreatePhysSolverInfo phys_solver_info{};
+    phys_solver_info.solver_kind = PhysSolverKind::Cpu;
+    phys_solver_info.algorithm_name = kLegacyCorotatedCpuAlgorithmName;
+    phys_solver_info.run_algorithm_on_init = true;
+    phys_solver_info.gpu_shader.shader_name = SHADER_PHYSICS_CONV_PATH;
+    phys_solver_info.gpu_shader.shader_mask.assign(9, 1u);
+    phys_solver_info.gpu_shader.shader_data.assign(9, 1.0f);
+    if (phys_solver_info.solver_kind == PhysSolverKind::Cpu) {
+      phys_solver_info.data_reflection_info = CreateLegacyCorotatedCpuDataReflectionInfo(
+        static_cast<uint32_t>(mesh.positions.size()),
+        static_cast<uint32_t>(mesh.triangles.size()));
+    } else {
+      phys_solver_info.algorithm_name = kPhysicsConvolutionGpuAlgorithmName;
+      phys_solver_info.data_reflection_info = CreatePhysicsConvolutionGpuDataReflectionInfo(16u);
     }
+    PhysAgent phys_agent;
+    phys_agent.Init(phys_solver_info, render_agent.compute_context());
+    ValidationAgent validation_agent;
+    validation_agent.Init(validation_layer_enabled);
+    io_bus_agent.BindSharedEndpoint("phys_agent", phys_agent.io_endpoint());
+    io_bus_agent.BindSharedEndpoint("render_agent", render_agent.io_endpoint());
+    io_bus_agent.BindSharedEndpoint("validation_agent", validation_agent.io_endpoint());
+    io_bus_agent.BindGuideUiDirectLine(phys_agent.io_endpoint());
 
     InteractionFrame interaction{};
-    InteractionMode previous_mode = renderer.mode();
     auto start_time = std::chrono::steady_clock::now();
     auto last_frame_time = start_time;
-    while (window.ProcessEvents()) {
+    while (window_agent.Tick()) {
       auto now = std::chrono::steady_clock::now();
       float frame_dt = std::chrono::duration<float>(now - last_frame_time).count();
       if (frame_dt < 0.0f) frame_dt = 0.0f;
       if (frame_dt > 0.05f) frame_dt = 0.05f;
       last_frame_time = now;
-      SceneViewBounds scene_bounds = renderer.scene_view_bounds();
-      Vec2 mouse_pixel = window.MousePosition();
-      if (scene_bounds.valid) {
-        mouse_pixel.x -= scene_bounds.x;
-        mouse_pixel.y -= scene_bounds.y;
-        viewport.SetSize(static_cast<int>(scene_bounds.width), static_cast<int>(scene_bounds.height));
-      } else {
-        viewport.SetSize(window.width(), window.height());
-      }
-      InteractionMode mode = renderer.mode();
-      if (mode == InteractionMode::Phys && previous_mode != InteractionMode::Phys) {
-        phys_controller.PhysInit(mesh);
-        if (!std::filesystem::exists(snapshot_path)) {
-          SaveMeshSnapshotFile(mesh, snapshot_path.string());
-        }
-      }
-      previous_mode = mode;
+      SceneViewFrameState scene_view_frame = scene_view_agent.Tick(render_agent.scene_view_bounds(), window_agent);
+      InteractionMode mode = render_agent.mode();
+      AppFrameSyncGlue::SyncPhysModeLifecycleFromRenderAgent(render_agent, &phys_agent, &mesh, snapshot_path);
 
-      const std::vector<ValidationAction> validation_actions = validation_layer.ConsumeActions();
+      const std::vector<ValidationAction> validation_actions = validation_agent.Tick();
       if (!validation_actions.empty()) {
-        ApplyValidationActions(validation_actions, renderer, phys_controller, mesh);
+        IoBufferPacket validation_packet = BuildValidationActionsIoPacket(validation_actions);
+        io_bus_agent.PublishToSharedEndpoint("render_agent", validation_packet);
+        render_agent.ResolveIncomingIoBuffers();
+        io_bus_agent.PublishToSharedEndpoint("phys_agent", validation_packet);
+        phys_agent.ResolveIncomingIoBuffers(mesh);
       }
-      phys_controller.SetRunState(renderer.phys_run_state());
-      phys_controller.SetGuideEnabled(renderer.phys_guide_enabled());
+      IoBufferPacket runtime_control_packet = BuildPhysRuntimeControlIoPacket(
+        render_agent.phys_run_state(),
+        render_agent.phys_guide_enabled());
+      io_bus_agent.PublishToSharedEndpoint("phys_agent", runtime_control_packet);
+      phys_agent.ResolveIncomingIoBuffers(mesh);
+
+      GuideUiFrame guide_ui_frame{};
+      if (mode == InteractionMode::Phys) {
+        guide_ui_frame = guide_ui_agent.Tick(mesh, scene_view_agent.viewport(), scene_view_agent.camera(), window_agent.input(), scene_view_frame.mouse_pixel);
+        GuideUiPhysBufferCommit guide_commit = BuildGuideUiFrameRelayOnPhysManagerBuffers(
+          mesh,
+          guide_ui_frame,
+          phys_agent.guide_edit_mode(),
+          phys_agent.guide_velocity_magnitude(),
+          phys_agent.guide_velocity_delay_frames(),
+          phys_agent.guide_velocity_duration_frames(),
+          phys_agent.guide_force_magnitude(),
+          phys_agent.guide_force_delay_frames(),
+          phys_agent.guide_force_duration_frames());
+        phys_agent.SetSelectedGuideVertices(guide_commit.selected_vertices);
+        io_bus_agent.PublishGuideUiDirectLine(guide_commit.packet);
+        phys_agent.ResolveIncomingIoBuffers(mesh);
+      }
       interaction = mode == InteractionMode::Edit
-        ? edit_controller.Tick(mesh, viewport, window.input(), mouse_pixel)
-        : phys_controller.Tick(mesh, viewport, window.input(), mouse_pixel, frame_dt);
+        ? edit_agent.Tick(mesh, scene_view_agent.viewport(), scene_view_agent.camera(), window_agent.input(), scene_view_frame.mouse_pixel)
+        : phys_agent.Tick(mesh, scene_view_agent.viewport(), scene_view_agent.camera(), window_agent.input(), scene_view_frame.mouse_pixel, frame_dt);
 
-      orientation.Tick(mesh, reference_mesh);
-      RenderUiState ui{};
-      ui.mode = mode;
-      ui.phys_run_state = renderer.phys_run_state();
-      ui.phys_guide_enabled = renderer.phys_guide_enabled();
-      ui.guide_edit_mode = phys_controller.guide_edit_mode();
-      ui.guide_velocity_magnitude = phys_controller.guide_velocity_magnitude();
-      ui.guide_velocity_delay_frames = phys_controller.guide_velocity_delay_frames();
-      ui.guide_velocity_duration_frames = phys_controller.guide_velocity_duration_frames();
-      ui.guide_force_magnitude = phys_controller.guide_force_magnitude();
-      ui.guide_force_delay_frames = phys_controller.guide_force_delay_frames();
-      ui.guide_force_duration_frames = phys_controller.guide_force_duration_frames();
-      ui.selected_velocity_guidance = phys_controller.selected_velocity_guidance();
-      ui.phys_current_frame_index = phys_controller.current_frame_index();
-      ui.mesh_file_name = mesh_path.filename().string();
-      ui.selection = interaction.selection;
-      ui.selected_guide_vertices = phys_controller.selected_guide_vertices();
-      ui.total_velocities = phys_controller.total_velocities();
-      ui.linear_velocities = phys_controller.linear_velocities();
-      ui.angular_velocities = phys_controller.angular_velocities();
-      ui.active_velocity_guidances = phys_controller.active_velocity_guidances();
-      ui.active_guide_velocities = phys_controller.active_guide_velocities();
-      ui.active_guide_forces = phys_controller.active_guide_forces();
-      ui.recorded_frames = phys_controller.recorded_frames();
-      ui.guide_keyframes = phys_controller.guide_keyframes();
-      ui.animation_time = std::chrono::duration<float>(std::chrono::steady_clock::now() - start_time).count();
-      if (interaction.selection.kind == SelectionKind::Vertex && interaction.selection.vertex >= 0) {
-        ui.selected_vertex_position = mesh.positions[interaction.selection.vertex];
-      }
-      if (interaction.selection.kind == SelectionKind::Triangle && interaction.selection.triangle >= 0 &&
-          static_cast<size_t>(interaction.selection.triangle) < mesh.triangle_material_gpa.size()) {
-        ui.selected_triangle_material_gpa = mesh.triangle_material_gpa[interaction.selection.triangle];
-      }
+      triangle_analysis_agent.Tick(mesh);
+      RenderUiState ui = AppFrameSyncGlue::BuildRenderUiStateFromRenderAgentAndPhysAgentAndInteraction(
+        render_agent,
+        phys_agent,
+        mesh,
+        mesh_path,
+        interaction,
+        std::chrono::duration<float>(std::chrono::steady_clock::now() - start_time).count());
 
-      RenderFrameResult frame = renderer.Draw(mesh, orientation, interaction.highlighted_vertex, ui);
-      phys_controller.SetGuideEditMode(frame.guide_edit_mode);
-      phys_controller.SetGuideVelocitySettings(frame.guide_velocity_magnitude, frame.guide_velocity_delay_frames, frame.guide_velocity_duration_frames);
-      phys_controller.SetGuideForceSettings(frame.guide_force_magnitude, frame.guide_force_delay_frames, frame.guide_force_duration_frames);
-      ui.guide_velocity_magnitude = frame.guide_velocity_magnitude;
-      ui.guide_velocity_delay_frames = frame.guide_velocity_delay_frames;
-      ui.guide_velocity_duration_frames = frame.guide_velocity_duration_frames;
-      ui.guide_force_magnitude = frame.guide_force_magnitude;
-      ui.guide_force_delay_frames = frame.guide_force_delay_frames;
-      ui.guide_force_duration_frames = frame.guide_force_duration_frames;
+      RenderFrameResult frame = render_agent.Tick(mesh, triangle_analysis_agent.state(), scene_view_agent.camera(), interaction.highlighted_vertex, ui);
       ValidationFrameSnapshot validation_snapshot = BuildValidationFrameSnapshot(
         mesh,
         reference_mesh,
-        orientation,
+        triangle_analysis_agent.state(),
         ui,
         frame,
         interaction.highlighted_vertex,
         frame_dt);
-      validation_layer.PublishFrame(validation_snapshot);
-      if (frame.phys_state_restore_requested && frame.phys_state_restore_index >= 0) {
-        phys_controller.RestoreRecordedFrame(mesh, frame.phys_state_restore_index);
-      }
-      if (frame.phys_state_cache_requested) {
-        phys_controller.CacheCurrentState();
-      }
-      if (frame.phys_reset_requested) {
-        phys_controller.Reset(mesh);
-      }
-      if (frame.phys_step_requested) {
-        phys_controller.StepOnce(mesh);
-      }
-      if (frame.recorded_frame_toggle_requested && frame.recorded_frame_toggle_index >= 0) {
-        phys_controller.SetRecordedFrameExpanded(frame.recorded_frame_toggle_index, frame.recorded_frame_toggle_expanded);
-      }
-      if (frame.guide_keyframe_toggle_requested && frame.guide_keyframe_toggle_index >= 0) {
-        const auto& guide_keyframes = phys_controller.guide_keyframes();
-        if (frame.guide_keyframe_toggle_index < static_cast<int>(guide_keyframes.size())) {
-          phys_controller.SetGuideKeyframeEnabled(guide_keyframes[frame.guide_keyframe_toggle_index].frame_index, frame.guide_keyframe_toggle_enabled);
-        }
-      }
-      if (frame.guide_keyframe_expand_requested && frame.guide_keyframe_expand_index >= 0) {
-        phys_controller.SetGuideKeyframeExpandedByIndex(frame.guide_keyframe_expand_index, frame.guide_keyframe_expand_expanded);
-      }
-      if (frame.triangle_material_change_requested && frame.triangle_material_triangle >= 0 &&
-          static_cast<size_t>(frame.triangle_material_triangle) < mesh.triangle_material_gpa.size()) {
-        mesh.triangle_material_gpa[frame.triangle_material_triangle] = frame.triangle_material_gpa > 0.0f ? frame.triangle_material_gpa : 0.001f;
-      }
+      validation_agent.PublishFrame(validation_snapshot);
+      AppFrameSyncGlue::ApplyRenderFrameResultOnPhysAgentAndMesh(frame, &phys_agent, &mesh);
       if (frame.save_requested) {
         SaveMeshSnapshotFile(mesh, snapshot_path.string());
       }
     }
-    validation_layer.Stop();
+    triangle_analysis_agent.Destroy();
+    io_bus_agent.Destroy();
+    phys_agent.Destroy();
+    guide_ui_agent.Destroy();
+    edit_agent.Destroy();
+    validation_agent.Destroy();
+    scene_view_agent.Destroy();
+    render_agent.Destroy();
+    window_agent.Destroy();
     SDL_Quit();
     return 0;
   } catch (const std::exception& e) {
