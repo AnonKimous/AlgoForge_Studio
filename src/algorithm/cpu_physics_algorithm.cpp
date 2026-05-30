@@ -4,6 +4,8 @@
 #include <cmath>
 #include <vector>
 
+namespace algorithm {
+
 namespace {
 
 constexpr float kPhysicsFps = 120.0f;
@@ -27,15 +29,6 @@ struct _Mat2 {
 
 bool _SupportsCpuAlgorithm(const std::string& algorithm_name) {
   return algorithm_name == "legacy_corotated_cpu" || algorithm_name == "legacy_corotated";
-}
-
-bool _HasReflectionArray(const DataReflectionCommit& reflection_commit, const char* name) {
-  for (const ReflectionMemoryBlock& block : reflection_commit.arrays) {
-    if (block.name == name) {
-      return true;
-    }
-  }
-  return false;
 }
 
 Vec3 _Add(Vec3 a, Vec3 b) {
@@ -490,12 +483,6 @@ bool CpuPhysicsAlgorithm_Run(const PhysicsAlgorithmRequest& request, PhysicsAlgo
   if (!_SupportsCpuAlgorithm(request.config.algorithm_name)) {
     return false;
   }
-  if (!request.reflection_commit.valid) {
-    return false;
-  }
-  if (!_HasReflectionArray(request.reflection_commit, "positions")) {
-    return false;
-  }
   if (request.input.rest_positions.size() < request.input.positions.size()) {
     return false;
   }
@@ -505,3 +492,5 @@ bool CpuPhysicsAlgorithm_Run(const PhysicsAlgorithmRequest& request, PhysicsAlgo
   result->executed = true;
   return true;
 }
+
+}  // namespace algorithm

@@ -5,7 +5,7 @@
 Every algorithm in this folder must provide two things together:
 
 1. Its execution implementation.
-2. Its reflection contract data structures for the reflector.
+2. Its algorithm compliance descriptor data structures for the codec and manager.
 
 Do not only write the compute logic and leave the reflection layout in upper modules.
 
@@ -18,7 +18,8 @@ For each algorithm, add:
 3. `*_algorithm_contract.cpp`
 4. `*_algorithm_contract.h`
 
-The `*_contract.*` files are the only place where the algorithm's reflection-visible memory layout should be declared.
+The `*_contract.*` files are the only place where the algorithm's compliance descriptor should be declared.
+Do not put extra algorithm-specific helper value structs in these files unless they are truly part of the public contract.
 
 ## CPU And GPU Separation
 
@@ -66,8 +67,8 @@ Contract:
 ## Integration Flow
 
 1. Upper layer selects backend and algorithm name.
-2. Upper layer asks the algorithm contract for `CreateDataReflectionInfo`.
-3. `PhysManager` builds `DataReflectionCommit`.
+2. Upper layer asks the algorithm contract for `Create...AlgorithmComplianceDescriptor`.
+3. `PhysManager` inspects the algorithm compliance descriptor.
 4. Pipeline dispatches by backend and algorithm name.
 5. Algorithm implementation only consumes data that matches its own contract.
 
@@ -77,9 +78,9 @@ Upper layers should not manually assemble raw reflection requests inline for a s
 
 Bad:
 
-- Build `ReflectionMemoryRequest` directly in `main.cpp` for a concrete algorithm.
+- Build a one-off reflection request directly in `main.cpp` for a concrete algorithm.
 
 Good:
 
-- Call `CreateLegacyCorotatedCpuDataReflectionInfo(...)`
-- Call `CreatePhysicsConvolutionGpuDataReflectionInfo(...)`
+- Call `CreateLegacyCorotatedCpuAlgorithmComplianceDescriptor(...)`
+- Call `CreatePhysicsConvolutionGpuAlgorithmComplianceDescriptor(...)`

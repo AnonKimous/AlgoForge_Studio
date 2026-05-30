@@ -13,6 +13,8 @@
 #include <string>
 #include <vector>
 
+namespace algorithm {
+
 namespace {
 
 constexpr VkFormat kConvolutionImageFormat = VK_FORMAT_R32_SFLOAT;
@@ -59,15 +61,6 @@ std::vector<char> _ReadBinaryFile(const std::string& path) {
 
 bool _SupportsGpuAlgorithm(const std::string& algorithm_name) {
   return algorithm_name == "physics_convolution_demo" || algorithm_name == "convolution_demo";
-}
-
-const ReflectionMemoryBlock* _FindReflectionArray(const DataReflectionCommit& reflection_commit, const char* name) {
-  for (const ReflectionMemoryBlock& block : reflection_commit.arrays) {
-    if (block.name == name) {
-      return &block;
-    }
-  }
-  return nullptr;
 }
 
 VmaAllocator _CreateAllocator(const VulkanComputeContextView& context) {
@@ -257,9 +250,6 @@ bool _RunConvolutionDemo(const PhysicsAlgorithmRequest& request, PhysicsAlgorith
   if (!context.valid || !context.instance || !context.device || !context.physical_device || !context.queue) {
     return false;
   }
-  if (!request.reflection_commit.valid) {
-    return false;
-  }
   if (request.config.gpu_shader.shader_name.empty()) {
     return false;
   }
@@ -327,11 +317,9 @@ bool _RunConvolutionDemo(const PhysicsAlgorithmRequest& request, PhysicsAlgorith
     }
 
     std::vector<float> upload_values(static_cast<size_t>(element_count), 1.0f);
-    if (const ReflectionMemoryBlock* shader_input = _FindReflectionArray(request.reflection_commit, "shader_input")) {
-      const size_t copy_count = std::min(upload_values.size() * sizeof(float), shader_input->bytes.size());
-      if (copy_count > 0) {
-        std::memcpy(upload_values.data(), shader_input->bytes.data(), copy_count);
-      }
+    const size_t upload_count = std::min(upload_values.size(), request.config.gpu_shader.shader_data.size());
+    for (size_t i = 0; i < upload_count; ++i) {
+      upload_values[i] = request.config.gpu_shader.shader_data[i];
     }
     if (!upload_buffer.allocation_info.pMappedData || !readback_buffer.allocation_info.pMappedData) {
       throw std::runtime_error("GPU algorithm mapped allocation was not available");
@@ -564,3 +552,5 @@ bool GpuPhysicsAlgorithm_Run(const PhysicsAlgorithmRequest& request, PhysicsAlgo
   }
   return _RunConvolutionDemo(request, result);
 }
+
+}  // namespace algorithm

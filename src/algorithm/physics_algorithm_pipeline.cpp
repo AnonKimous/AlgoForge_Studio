@@ -3,6 +3,8 @@
 #include "cpu_physics_algorithm.h"
 #include "gpu_physics_algorithm.h"
 
+namespace algorithm {
+
 bool PhysicsAlgorithmPipeline_Run(const PhysicsAlgorithmRequest& request, PhysicsAlgorithmResult* result) {
   if (!result) return false;
   *result = PhysicsAlgorithmResult{};
@@ -16,3 +18,5 @@ bool PhysicsAlgorithmPipeline_Run(const PhysicsAlgorithmRequest& request, Physic
 
   return false;
 }
+
+}  // namespace algorithm

@@ -2,19 +2,13 @@
 
 #include "algorithm_types.h"
 
+namespace algorithm {
+
 inline constexpr const char* kPhysicsConvolutionGpuAlgorithmName = "physics_convolution_demo";
-inline constexpr const char* kPhysicsConvolutionGpuAlgorithmAlias = "convolution_demo";
 
-struct PhysicsConvolutionGpuInputValue {
-  float value{};
-};
+AlgorithmComplianceDescriptor CreatePhysicsConvolutionGpuAlgorithmComplianceDescriptor(uint32_t element_count);
 
-struct PhysicsConvolutionGpuRegisterValue {
-  float value{};
-};
+}  // namespace algorithm
 
-struct PhysicsConvolutionGpuCacheValue {
-  float value{};
-};
-
-CreateDataReflectionInfo CreatePhysicsConvolutionGpuDataReflectionInfo(uint32_t element_count);
+using algorithm::CreatePhysicsConvolutionGpuAlgorithmComplianceDescriptor;
+using algorithm::kPhysicsConvolutionGpuAlgorithmName;

@@ -1,22 +1,28 @@
 #include "physics_convolution_gpu_algorithm_contract.h"
 
-#include "data_reflection.h"
+namespace algorithm {
 
-CreateDataReflectionInfo CreatePhysicsConvolutionGpuDataReflectionInfo(uint32_t element_count) {
-  return CreateGpuShaderDataReflectionInfo(
-    {
-      ReflectionMemoryRequest{"shader_input", element_count, static_cast<uint32_t>(sizeof(PhysicsConvolutionGpuInputValue))}
-    },
-    {
-      ReflectionMemoryRequest{"shader_registers", element_count, static_cast<uint32_t>(sizeof(PhysicsConvolutionGpuRegisterValue))}
-    },
-    {
-      ReflectionMemoryRequest{"shader_cache", element_count, static_cast<uint32_t>(sizeof(PhysicsConvolutionGpuCacheValue))}
-    },
-    {
-      ReflectionDataFormat{"shader_input", element_count, static_cast<uint32_t>(sizeof(PhysicsConvolutionGpuInputValue))}
-    },
-    {
-      ReflectionDataFormat{"physics_convolution_demo_input", element_count, static_cast<uint32_t>(sizeof(PhysicsConvolutionGpuInputValue))}
-    });
+AlgorithmComplianceDescriptor CreatePhysicsConvolutionGpuAlgorithmComplianceDescriptor(uint32_t element_count) {
+  AlgorithmComplianceDescriptor descriptor{};
+  descriptor.algorithm_name = kPhysicsConvolutionGpuAlgorithmName;
+  descriptor.cpu_available = false;
+  descriptor.gpu_available = true;
+  descriptor.data_contract.arrays_to_allocate = {
+    AlgorithmBufferRequirement{"shader_input", element_count, static_cast<uint32_t>(sizeof(float))}
+  };
+  descriptor.data_contract.temporary_registers_to_allocate = {
+    AlgorithmBufferRequirement{"shader_registers", element_count, static_cast<uint32_t>(sizeof(float))}
+  };
+  descriptor.data_contract.temporary_caches_to_allocate = {
+    AlgorithmBufferRequirement{"shader_cache", element_count, static_cast<uint32_t>(sizeof(float))}
+  };
+  descriptor.data_contract.filled_data_formats = {
+    AlgorithmDataFormat{"shader_input", element_count, static_cast<uint32_t>(sizeof(float))}
+  };
+  descriptor.data_contract.algorithm_required_formats = {
+    AlgorithmDataFormat{"physics_convolution_demo_input", element_count, static_cast<uint32_t>(sizeof(float))}
+  };
+  return descriptor;
 }
+
+}  // namespace algorithm

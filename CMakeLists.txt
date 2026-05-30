@@ -184,43 +184,32 @@ add_custom_target(shaders DEPENDS
 )
 
 add_executable(min_vulkan_win32 WIN32
-  src/main.cpp
-  src/app/module_agents.cpp
+  src/app_orchestration/main.cpp
+  src/agents/agents.cpp
+  src/algorithm/algorithm_manager.cpp
   src/algorithm/cpu_job_scheduler.cpp
   src/algorithm/cpu_physics_algorithm.cpp
-  src/algorithm/data_reflection.cpp
   src/algorithm/gpu_physics_algorithm.cpp
-  src/communication/io_bus.cpp
-  src/communication/io_protocol.cpp
-  src/glue/app_frame_sync_glue.cpp
-  src/glue/guide_ui_frame_relay_on_phys_manager_buffers.cpp
+  src/messaging/io_bus.cpp
+  src/app_orchestration/app_frame_sync_glue.cpp
+  src/app_orchestration/guide_ui_frame_relay_on_phys_agent_buffers.cpp
   src/algorithm/legacy_corotated_cpu_algorithm_contract.cpp
   src/algorithm/physics_algorithm_pipeline.cpp
   src/algorithm/physics_convolution_gpu_algorithm_contract.cpp
   src/algorithm/triangle_orientation_cpu_algorithm.cpp
   src/algorithm/triangle_orientation_cpu_algorithm_contract.cpp
-  src/interaction/guide_ui_controller.cpp
-  src/interaction/edit_mode_controller.cpp
-  src/interaction/phys_mode_controller.cpp
-  src/mesh.cpp
-  src/physics/phys_manager.cpp
-  src/physics/phys_manager_buffer_reflectors.cpp
-  src/validation_bridge/validation_bridge.cpp
-  src/viewport_transform.cpp
-  src/render/vma_impl.cpp
-  src/render/scene_camera.cpp
-  src/render/vulkan_renderer.cpp
-  src/window/sdl_window.cpp
-)
-
-if(WIN32)
-  target_sources(min_vulkan_win32 PRIVATE src/validation_layer/validation_layer.cpp)
-else()
-  target_sources(min_vulkan_win32 PRIVATE src/validation_layer/validation_layer_stub.cpp)
-endif()
-
-target_sources(min_vulkan_win32 PRIVATE
-  src/validation_layer/validation_script.cpp
+  src/decomposition/decomposition_manager.cpp
+  src/interaction_analysis/guide_ui_controller.cpp
+  src/interaction_analysis/edit_mode_controller.cpp
+  src/interaction_analysis/phys_mode_controller.cpp
+  src/interaction_analysis/interaction_agents.cpp
+  src/data_protocol/mesh.cpp
+  src/service_domains/physics/phys_manager.cpp
+  src/foundation/viewport_transform.cpp
+  src/runtime_systems/render/vma_impl.cpp
+  src/service_domains/render/scene_camera.cpp
+  src/service_domains/render/vulkan_renderer.cpp
+  src/runtime_systems/window/sdl_window.cpp
 )
 
 add_library(imgui_static STATIC

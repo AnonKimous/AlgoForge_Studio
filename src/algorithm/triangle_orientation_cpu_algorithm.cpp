@@ -4,6 +4,8 @@
 
 #include <array>
 
+namespace algorithm {
+
 namespace {
 
 bool _SameUndirectedEdge(const std::array<uint32_t, 2>& edge, uint32_t a, uint32_t b) {
@@ -99,3 +101,5 @@ bool RunTriangleOrientationCpuAlgorithm(
 
   return true;
 }
+
+}  // namespace algorithm

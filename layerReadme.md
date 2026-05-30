@@ -12,7 +12,7 @@
 - `foundation`
 - `runtime_systems`
 - `data_protocol`
-- `communication`
+- `messaging`
 - `algorithm_contract`
 - `algorithm_implementation`
 - `core_services`
@@ -97,8 +97,8 @@ Responsibility:
 - algorithm-visible data definitions
 - render/interaction/validation shared data language
 
-### 4. Communication
-Namespace: `communication`
+### 4. Messaging
+Namespace: `messaging`
 
 Files:
 
@@ -109,14 +109,14 @@ Files:
 Responsibility:
 
 - shared bus transport
-- dedicated point-to-point line transport
-- protocol packet serialization / decoding
+- protocol translation
+- packet routing / dispatch
 - no business execution logic
 
 Rule:
 
 - modules prepare their own receive buffers
-- the bus only reads/writes common packets
+- the messaging layer only reads/writes common packets
 - endpoint binding happens during initialization, not every frame
 
 ### 5. Algorithm Contract
@@ -231,8 +231,8 @@ Namespace: `agents`
 
 Files:
 
-- `src/app/module_agents.h`
-- `src/app/module_agents.cpp`
+- `src/app/agents.h`
+- `src/app/agents.cpp`
 
 Responsibility:
 
@@ -249,8 +249,8 @@ Files:
 - `src/main.cpp`
 - `src/glue/app_frame_sync_glue.h`
 - `src/glue/app_frame_sync_glue.cpp`
-- `src/glue/guide_ui_frame_relay_on_phys_manager_buffers.h`
-- `src/glue/guide_ui_frame_relay_on_phys_manager_buffers.cpp`
+- `src/glue/guide_ui_frame_relay_on_phys_agent_buffers.h`
+- `src/glue/guide_ui_frame_relay_on_phys_agent_buffers.cpp`
 
 Responsibility:
 

@@ -1,14 +1,14 @@
 #pragma once
 
-#include "../physics/physics_types.h"
+#include "data_protocol/physics/physics_types.h"
 
 #include <vulkan/vulkan.h>
 
-#include <cstddef>
 #include <cstdint>
-#include <functional>
 #include <string>
 #include <vector>
+
+namespace algorithm {
 
 enum class PhysSolverKind {
   Cpu,
@@ -21,59 +21,41 @@ struct GpuPhysicsShaderSpec {
   std::vector<float> shader_data;
 };
 
-struct ReflectionMemoryRequest {
+struct AlgorithmBufferRequirement {
   std::string name;
   uint32_t element_count{};
   uint32_t element_stride{};
 };
 
-struct ReflectionDataFormat {
+struct AlgorithmDataFormat {
   std::string name;
   uint32_t element_count{};
   uint32_t element_stride{};
 };
 
-struct ReflectionMemoryBlock {
-  std::string name;
-  uint32_t element_count{};
-  uint32_t element_stride{};
-  std::vector<std::byte> bytes;
-};
-
-struct DataReflectionCommit {
-  std::vector<ReflectionMemoryBlock> arrays;
-  std::vector<ReflectionMemoryBlock> temporary_registers;
-  std::vector<ReflectionMemoryBlock> temporary_caches;
-  std::vector<ReflectionDataFormat> filled_data_formats;
-  std::vector<ReflectionDataFormat> algorithm_required_formats;
-  bool valid{false};
-};
-
-struct CreateDataReflectionInfo;
-using DataReflectionCallback = std::function<void(
-  const CreateDataReflectionInfo& reflection_info,
-  const std::vector<const void*>& real_data_addresses,
-  DataReflectionCommit* reflection_commit)>;
-
-struct CreateDataReflectionInfo {
-  std::vector<ReflectionMemoryRequest> arrays_to_allocate;
-  std::vector<ReflectionMemoryRequest> temporary_registers_to_allocate;
-  std::vector<ReflectionMemoryRequest> temporary_caches_to_allocate;
-  std::vector<ReflectionDataFormat> filled_data_formats;
-  std::vector<ReflectionDataFormat> algorithm_required_formats;
-  DataReflectionCallback reflection_callback;
+struct AlgorithmDataContract {
+  std::vector<AlgorithmBufferRequirement> arrays_to_allocate;
+  std::vector<AlgorithmBufferRequirement> temporary_registers_to_allocate;
+  std::vector<AlgorithmBufferRequirement> temporary_caches_to_allocate;
+  std::vector<AlgorithmDataFormat> filled_data_formats;
+  std::vector<AlgorithmDataFormat> algorithm_required_formats;
 };
 
 struct CreatePhysSolverInfo {
   PhysSolverKind solver_kind{PhysSolverKind::Cpu};
   std::string algorithm_name;
-  CreateDataReflectionInfo data_reflection_info{};
-  std::vector<const void*> real_data_addresses;
   GpuPhysicsShaderSpec gpu_shader{};
   bool run_algorithm_on_init{false};
 };
 
-using PhysManagerConfig = CreatePhysSolverInfo;
+using PhysSolverConfig = CreatePhysSolverInfo;
+
+struct AlgorithmComplianceDescriptor {
+  std::string algorithm_name;
+  bool cpu_available{true};
+  bool gpu_available{false};
+  AlgorithmDataContract data_contract{};
+};
 
 struct VulkanComputeContextView {
   VkInstance instance{};
@@ -93,9 +75,8 @@ struct GpuPhysicsDispatchDebugInfo {
 };
 
 struct PhysicsAlgorithmRequest {
-  PhysManagerConfig config{};
+  PhysSolverConfig config{};
   PhysicsStepInput input{};
-  DataReflectionCommit reflection_commit{};
   VulkanComputeContextView compute_context{};
 };
 
@@ -105,19 +86,17 @@ struct PhysicsAlgorithmResult {
   GpuPhysicsDispatchDebugInfo gpu_dispatch_debug{};
 };
 
-namespace data_protocol {
-using ::CreateDataReflectionInfo;
-using ::CreatePhysSolverInfo;
-using ::DataReflectionCallback;
-using ::DataReflectionCommit;
-using ::GpuPhysicsDispatchDebugInfo;
-using ::GpuPhysicsShaderSpec;
-using ::PhysManagerConfig;
-using ::PhysicsAlgorithmRequest;
-using ::PhysicsAlgorithmResult;
-using ::PhysSolverKind;
-using ::ReflectionDataFormat;
-using ::ReflectionMemoryBlock;
-using ::ReflectionMemoryRequest;
-using ::VulkanComputeContextView;
-}  // namespace data_protocol
+}  // namespace algorithm
+
+using algorithm::AlgorithmBufferRequirement;
+using algorithm::AlgorithmComplianceDescriptor;
+using algorithm::AlgorithmDataContract;
+using algorithm::AlgorithmDataFormat;
+using algorithm::CreatePhysSolverInfo;
+using algorithm::GpuPhysicsDispatchDebugInfo;
+using algorithm::GpuPhysicsShaderSpec;
+using algorithm::PhysSolverConfig;
+using algorithm::PhysicsAlgorithmRequest;
+using algorithm::PhysicsAlgorithmResult;
+using algorithm::PhysSolverKind;
+using algorithm::VulkanComputeContextView;
