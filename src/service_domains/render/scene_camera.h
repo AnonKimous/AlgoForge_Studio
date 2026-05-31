@@ -1,8 +1,8 @@
 #pragma once
 
-#include "foundation/common/vector_types.h"
-#include "data_protocol/mesh.h"
-#include "foundation/viewport_transform.h"
+#include "common_data/vector_types.h"
+#include "common_data/mesh.h"
+#include "common_data/viewport_transform.h"
 
 #include <Eigen/Dense>
 

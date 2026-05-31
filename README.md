@@ -1,130 +1,34 @@
-# min_vulkan_win32 Intervention Guide
+# min_vulkan_win32
 
-This project exposes a realtime validation interface that lets other programs or AI agents inspect the live simulation state while the app is running.
+This project is a layered Vulkan + SDL3 physics/render sandbox.
 
-## Platform Layout
+## Current Runtime Controls
 
-The runtime windowing layer is organized under `src/window/` and is built on SDL3.
+The UI keeps only these simulation controls:
 
-The validation layer is intentionally Windows-first:
+- Run simulation
+- Pause simulation
+- Step one frame
+- Reset simulation
+- Animation page
 
-- On Windows, it opens the named-pipe inspection channel documented below.
-- On other platforms, the same API compiles but becomes a no-op stub.
-- This keeps the main app and windowing code portable while preserving the current Windows debugging workflow.
+## Current High-Level Flow
 
-## How To Enable The Validation Layer
+- `agents` own lifecycle and host-facing API wrappers.
+- `codec` converts resource + descriptor data into algorithm-compliance payloads and keeps the algorithm intervention channel.
+- `algorithm` executes CPU/GPU physics and exposes compliance contracts.
+- `common_data` is the unified shared data layer.
 
-Start the app with one of these command-line flags:
+## Build
 
-- `validationlayer:on`
-- `vaildlayer:on`
+Use the project script:
 
-To disable it explicitly:
-
-- `validationlayer:off`
-- `vaildlayer:off`
-
-If the app is already running without the validation layer, stop it and relaunch it with one of the `:on` flags above.
-
-## Validation Transport
-
-When enabled, the app opens a Windows named pipe:
-
-- `\\.\pipe\min_vulkan_win32_validation_layer`
-
-This pipe is the realtime control/inspection channel for external tools.
-
-## Supported Requests
-
-Send a short text request or a small JSON object.
-
-Supported commands:
-
-- `snapshot`
-- `health`
-- `physstep`
-- `physstep 5`
-- `script physstep 5; pause; reset`
-- `shutdown`
-
-Equivalent JSON forms also work:
-
-- `{"cmd":"snapshot"}`
-- `{"cmd":"health"}`
-- `{"cmd":"physstep"}`
-- `{"cmd":"script","script":"run; guide off; physstep 5"}`
-- `{"cmd":"shutdown"}`
-
-The validation layer now emits abstract actions instead of touching renderer or physics internals directly. The app consumes those actions through a glue layer that maps them to the real runtime APIs.
-
-Current guide model:
-
-- `guide displacement` is checked for legality and can be shared by multiple selected vertices.
-- `guide velocity` directly replaces the selected vertices' velocity matrices.
-- `guide force` is scheduled by frame offset and duration, then applied later by the physics layer.
-- `Ctrl` multi-select in the UI makes multiple vertices share one guide group.
-
-## What `snapshot` Returns
-
-The `snapshot` response is JSON and describes the current frame in realtime.
-
-It includes:
-
-- current frame index
-- interaction mode
-- physics run state
-- whether guides are enabled
-- selected vertex / triangle state
-- current mesh positions, normals, triangles, and triangle materials
-- per-vertex `delta` matrices
-- active physics directives
-- recorded frame summaries
-- guide keyframe summaries
-- triangle area and deformation analysis
-- physics run state is now `Run` or `Pause`
-- `Reset` returns the simulation to the initial state instead of using a stop state
-
-The schema field is:
-
-- `validation_layer.snapshot.v2`
-
-## Minimal PowerShell Client Example
-
-```powershell
-$pipe = New-Object System.IO.Pipes.NamedPipeClientStream(
-  '.',
-  'min_vulkan_win32_validation_layer',
-  [System.IO.Pipes.PipeDirection]::InOut
-)
-$pipe.Connect(5000)
-
-$writer = New-Object System.IO.StreamWriter($pipe)
-$writer.AutoFlush = $true
-$reader = New-Object System.IO.StreamReader($pipe)
-
-$writer.Write('{"cmd":"snapshot"}')
-$pipe.WaitForPipeDrain()
-
-$response = $reader.ReadToEnd()
-$response
-
-$pipe.Dispose()
+```bat
+build_msvc.cmd build
 ```
 
-For a quick status check, send `{"cmd":"health"}` instead.
+If needed, run configure + build:
 
-## Recommended Intervention Workflow For An Agent
-
-1. Launch the app with `validationlayer:on`.
-2. Connect to `\\.\pipe\min_vulkan_win32_validation_layer`.
-3. Request `health` or `snapshot`.
-4. Inspect the returned JSON to understand the current state.
-5. If the agent needs to observe another frame, request `snapshot` again.
-
-## Notes
-
-- The validation layer is realtime and read-oriented.
-- It is meant for inspection first, and control later.
-- Do not assume the app will expose this interface unless it was launched with the validation flag.
-- The app currently updates the snapshot every frame.
-- If you are porting or extending this project, keep platform-specific debugging helpers behind the validation layer boundary instead of mixing them into the renderer or window modules.
+```bat
+build_msvc.cmd
+```

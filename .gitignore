@@ -45,3 +45,6 @@ third_party/
 Thumbs.db
 Desktop.ini
 $RECYCLE.BIN/
+# Local build helper scripts (temporary; do not commit)
+build.ps1
+build_msvc.cmd

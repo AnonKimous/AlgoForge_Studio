@@ -1,8 +1,5 @@
 #include "agents.h"
 
-#include "messaging/io_bus.h"
-#include "algorithm/triangle_orientation_cpu_algorithm.h"
-
 namespace agents {
 
 bool WindowAgent::Init(const char* title, int width, int height) {
@@ -68,8 +65,8 @@ bool RenderAgent::Init(const WindowHandle& window_handle) {
   return true;
 }
 
-RenderFrameResult RenderAgent::Tick(const Mesh& mesh, const TriangleOrientationState& orientation_state, const SceneCamera& camera, int highlighted_vertex, const RenderUiState& ui_state) {
-  return renderer_->Draw(mesh, orientation_state, camera, highlighted_vertex, ui_state);
+RenderFrameResult RenderAgent::Tick(const Mesh& mesh, const SceneCamera& camera, const RenderUiState& ui_state) {
+  return renderer_->Draw(mesh, camera, ui_state);
 }
 
 void RenderAgent::Destroy() {
@@ -84,16 +81,8 @@ PhysRunState RenderAgent::phys_run_state() const {
   return renderer_ ? renderer_->phys_run_state() : PhysRunState::Pause;
 }
 
-bool RenderAgent::phys_guide_enabled() const {
-  return renderer_ ? renderer_->phys_guide_enabled() : true;
-}
-
 void RenderAgent::SetPhysRunState(PhysRunState state) {
   if (renderer_) renderer_->SetPhysRunState(state);
-}
-
-void RenderAgent::SetPhysGuideEnabled(bool enabled) {
-  if (renderer_) renderer_->SetPhysGuideEnabled(enabled);
 }
 
 SceneViewBounds RenderAgent::scene_view_bounds() const {
@@ -102,28 +91,6 @@ SceneViewBounds RenderAgent::scene_view_bounds() const {
 
 VulkanComputeContextView RenderAgent::compute_context() const {
   return renderer_ ? renderer_->compute_context() : VulkanComputeContextView{};
-}
-
-void IoBusAgent::Init() {}
-
-void IoBusAgent::Destroy() {
-  shared_bus_ = messaging::SharedIoBus{};
-}
-
-IoBufferEndpoint IoBusAgent::AllocateBuffer(const std::string& module_name, uint32_t buffer_id, bool lock_required) {
-  return shared_bus_.AllocateBuffer(module_name, buffer_id, lock_required);
-}
-
-std::array<IoBufferEndpoint, 2> IoBusAgent::AllocateFastChannel(const std::string& channel_name, bool lock_required) {
-  return shared_bus_.AllocateFastChannel(channel_name, lock_required);
-}
-
-bool IoBusAgent::PublishToBuffer(const std::string& module_name, uint32_t buffer_id, const IoBufferPacket& packet) {
-  return shared_bus_.PublishToBuffer(module_name, buffer_id, packet);
-}
-
-bool IoBusAgent::PublishToFastChannel(const std::string& channel_name, const IoBufferPacket& packet) {
-  return shared_bus_.PublishToFastChannel(channel_name, packet);
 }
 
 }  // namespace agents

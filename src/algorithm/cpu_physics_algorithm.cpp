@@ -28,7 +28,7 @@ struct _Mat2 {
 };
 
 bool _SupportsCpuAlgorithm(const std::string& algorithm_name) {
-  return algorithm_name == "legacy_corotated_cpu" || algorithm_name == "legacy_corotated";
+  return algorithm_name == "corotated_cpu";
 }
 
 Vec3 _Add(Vec3 a, Vec3 b) {
@@ -277,9 +277,9 @@ PhysicsStepOutput _BuildInitialOutput(const PhysicsStepInput& input) {
   output.total_velocities = input.total_velocities;
   output.linear_velocities = input.linear_velocities;
   output.angular_velocities = input.angular_velocities;
-  output.guidances = input.guidances;
-  output.guide_velocities = input.guide_velocities;
-  output.guide_forces = input.guide_forces;
+  output.displacement_interventions = input.displacement_interventions;
+  output.velocity_interventions = input.velocity_interventions;
+  output.force_interventions = input.force_interventions;
   if (output.total_velocities.size() < output.positions.size()) {
     output.total_velocities.resize(output.positions.size(), MakeIdentityVelocity());
   }
@@ -292,11 +292,11 @@ PhysicsStepOutput _BuildInitialOutput(const PhysicsStepInput& input) {
   return output;
 }
 
-void _RunLegacyCorotated(const PhysicsStepInput& input, PhysicsStepOutput* output) {
+void _RunCorotated(const PhysicsStepInput& input, PhysicsStepOutput* output) {
   std::vector<bool> displacement_target_set(output->positions.size(), false);
   std::vector<Vec3> displacement_targets(output->positions.size(), Vec3{});
 
-  for (VelocityGuidance& guidance : output->guidances) {
+  for (InterventionDisplacement& guidance : output->displacement_interventions) {
     std::vector<int> vertices = guidance.vertices;
     if (vertices.empty() && guidance.vertex >= 0) {
       vertices.push_back(guidance.vertex);
@@ -340,7 +340,7 @@ void _RunLegacyCorotated(const PhysicsStepInput& input, PhysicsStepOutput* outpu
     }
   }
 
-  for (const VelocityGuideVelocity& guide_velocity : output->guide_velocities) {
+  for (const InterventionVelocity& guide_velocity : output->velocity_interventions) {
     if (guide_velocity.hidden || !guide_velocity.valid) continue;
     for (int vertex : guide_velocity.vertices) {
       if (vertex < 0 || static_cast<size_t>(vertex) >= output->positions.size()) continue;
@@ -403,7 +403,7 @@ void _RunLegacyCorotated(const PhysicsStepInput& input, PhysicsStepOutput* outpu
   std::vector<Vec3> linear_force(output->positions.size(), Vec3{});
   std::vector<float> angular_force(output->positions.size(), 0.0f);
 
-  for (const VelocityGuideForce& force_guide : output->guide_forces) {
+  for (const InterventionForce& force_guide : output->force_interventions) {
     if (force_guide.hidden || !force_guide.valid) continue;
     for (int vertex : force_guide.vertices) {
       if (vertex < 0 || static_cast<size_t>(vertex) >= output->positions.size()) continue;
@@ -488,9 +488,10 @@ bool CpuPhysicsAlgorithm_Run(const PhysicsAlgorithmRequest& request, PhysicsAlgo
   }
 
   result->step_output = _BuildInitialOutput(request.input);
-  _RunLegacyCorotated(request.input, &result->step_output);
+  _RunCorotated(request.input, &result->step_output);
   result->executed = true;
   return true;
 }
 
 }  // namespace algorithm
+

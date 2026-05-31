@@ -1,11 +1,10 @@
 #pragma once
 
 #include "algorithm/algorithm_types.h"
-#include "data_protocol/interaction/interaction_state.h"
-#include "data_protocol/mesh.h"
-#include "data_protocol/triangle_orientation_state.h"
+#include "common_data/interaction/interaction_state.h"
+#include "common_data/mesh.h"
 #include "scene_camera.h"
-#include "foundation/window_handle.h"
+#include "common_data/window_handle.h"
 
 #include <vulkan/vulkan.h>
 #include <vkb/VkBootstrap.h>
@@ -40,12 +39,10 @@ class VulkanRenderer {
   explicit VulkanRenderer(const WindowHandle& window);
   ~VulkanRenderer();
 
-  RenderFrameResult Draw(const Mesh& mesh, const TriangleOrientationState& orientation_state, const SceneCamera& camera, int highlighted_vertex, const RenderUiState& ui_state);
+  RenderFrameResult Draw(const Mesh& mesh, const SceneCamera& camera, const RenderUiState& ui_state);
   InteractionMode mode() const { return mode_; }
   PhysRunState phys_run_state() const { return phys_run_state_; }
-  bool phys_guide_enabled() const { return phys_guide_enabled_; }
   void SetPhysRunState(PhysRunState state) { phys_run_state_ = state; }
-  void SetPhysGuideEnabled(bool enabled) { phys_guide_enabled_ = enabled; }
   SceneViewBounds scene_view_bounds() const { return scene_view_bounds_; }
   VulkanComputeContextView compute_context() const {
     return VulkanComputeContextView{
@@ -85,8 +82,8 @@ class VulkanRenderer {
   void RequestSceneTargetResize(VkExtent2D extent);
   void CreateVertexBuffer(size_t size);
   void EnsureVertexBufferSize(size_t size);
-  void UpdateVertexBuffer(const Mesh& mesh, const TriangleOrientationState& orientation_state, int highlighted_vertex, const RenderUiState& ui_state, uint32_t& green_hatch_count, uint32_t& yellow_hatch_count, uint32_t& red_hatch_count, uint32_t& line_count, uint32_t& directive_line_count, uint32_t& point_count);
-  void RenderScene(VkCommandBuffer cmd, const Mesh& mesh, const TriangleOrientationState& orientation_state, const SceneCamera& camera, const RenderUiState& ui_state, uint32_t green_hatch_count, uint32_t yellow_hatch_count, uint32_t red_hatch_count, uint32_t line_count, uint32_t directive_line_count, uint32_t point_count, VkExtent2D extent);
+  void UpdateVertexBuffer(const Mesh& mesh, const RenderUiState& ui_state, uint32_t& green_hatch_count, uint32_t& yellow_hatch_count, uint32_t& red_hatch_count, uint32_t& line_count, uint32_t& directive_line_count, uint32_t& point_count);
+  void RenderScene(VkCommandBuffer cmd, const Mesh& mesh, const SceneCamera& camera, const RenderUiState& ui_state, uint32_t green_hatch_count, uint32_t yellow_hatch_count, uint32_t red_hatch_count, uint32_t line_count, uint32_t directive_line_count, uint32_t point_count, VkExtent2D extent);
   void AppendHudVertices(std::vector<GpuVertex>& vertices, const FrameStats& stats);
   void DestroyFrameResources();
   void DestroyImGui();
@@ -132,20 +129,7 @@ class VulkanRenderer {
   SceneViewBounds scene_view_bounds_{};
   InteractionMode mode_{InteractionMode::Edit};
   PhysRunState phys_run_state_{PhysRunState::Pause};
-  bool phys_guide_enabled_{true};
-  GuideEditMode guide_edit_mode_{GuideEditMode::Displacement};
-  float guide_velocity_magnitude_{1.0f};
-  int guide_velocity_delay_frames_{0};
-  int guide_velocity_duration_frames_{1};
-  float guide_force_magnitude_{1.0f};
-  int guide_force_delay_frames_{0};
-  int guide_force_duration_frames_{1};
-  int selected_velocity_guidance_{-1};
-  float triangle_material_input_gpa_{0.0f};
-  int triangle_material_input_triangle_{-1};
   bool dock_layout_initialized_{false};
-  bool show_edit_data_window_{true};
-  bool show_frames_window_{true};
   bool show_phys_window_{true};
   bool show_animation_window_{true};
   bool show_toolbar_{true};

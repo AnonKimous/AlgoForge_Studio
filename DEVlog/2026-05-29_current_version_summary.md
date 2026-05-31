@@ -24,9 +24,9 @@ The project currently builds successfully with:
 
 The codebase is now organized around these layer namespaces:
 
-- `foundation`
+- `common_data`
 - `runtime_systems`
-- `data_protocol`
+- `common_data`
 - `communication`
 - `algorithm_contract`
 - `algorithm_implementation`
@@ -37,7 +37,7 @@ The codebase is now organized around these layer namespaces:
 
 The intended dependency direction is:
 
-`foundation -> runtime_systems -> data_protocol -> communication -> algorithm_contract -> algorithm_implementation -> core_services -> interaction_analysis -> agents -> app_orchestration`
+`common_data -> runtime_systems -> common_data -> communication -> algorithm_contract -> algorithm_implementation -> core_services -> interaction_analysis -> agents -> app_orchestration`
 
 Rules currently being enforced:
 
@@ -200,7 +200,7 @@ The current version should be treated as a stable transition point, not the fina
 
 Remaining important work:
 
-- continue hard migration of `data_protocol` away from transition aliases
+- continue hard migration of `common_data` away from transition aliases
 - keep removing leftover global-name compatibility surfaces
 - continue tightening cross-layer ownership boundaries
 - improve deployment robustness for new machines

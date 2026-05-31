@@ -1,289 +1,222 @@
 #include "interaction_agents.h"
 
-#include "algorithm/triangle_orientation_cpu_algorithm.h"
+#include "algorithm/physics_algorithm_pipeline.h"
+
+#include <algorithm>
+#include <cmath>
 
 namespace interaction_analysis {
 
 namespace {
 
-void CopyEndpointToPacket(IoBufferPacket* destination, const IoBufferEndpoint& source) {
-  if (!destination) {
-    return;
-  }
-  if (!source.valid()) {
-    *destination = IoBufferPacket{};
-    return;
-  }
-  destination->protocol = *source.protocol;
-  destination->signal_buffer = *source.signal_buffer;
-  destination->data_buffer = *source.data_buffer;
+bool IsMoreLowerLeft(const Vec3& candidate, const Vec3& current) {
+  float candidate_score = candidate.x + candidate.y;
+  float current_score = current.x + current.y;
+  if (candidate_score != current_score) return candidate_score < current_score;
+  if (candidate.y != current.y) return candidate.y < current.y;
+  return candidate.x < current.x;
 }
 
-void ConsumeEndpointToPacket(IoBufferPacket* destination, const IoBufferEndpoint& source) {
-  CopyEndpointToPacket(destination, source);
-  if (!source.valid()) {
-    return;
+float ClampMaterialGpa(float material_gpa) {
+  if (!(std::isfinite(material_gpa) && material_gpa > 0.0f)) {
+    return 1000000.0f;
   }
-  *source.protocol = IoProtocolDescriptor{};
-  source.signal_buffer->clear();
-  source.data_buffer->clear();
+  return material_gpa;
+}
+
+std::vector<PhysicsRestTriangle> BuildRestTriangles(const Mesh& mesh) {
+  std::vector<PhysicsRestTriangle> rest_triangles;
+  rest_triangles.reserve(mesh.triangles.size());
+
+  for (uint32_t tri_index = 0; tri_index < mesh.triangles.size(); ++tri_index) {
+    const auto& tri = mesh.triangles[tri_index];
+    uint32_t origin_slot = 0;
+    for (uint32_t slot = 1; slot < 3; ++slot) {
+      if (IsMoreLowerLeft(mesh.positions[tri[slot]], mesh.positions[tri[origin_slot]])) {
+        origin_slot = slot;
+      }
+    }
+
+    uint32_t origin = tri[origin_slot];
+    uint32_t first = tri[(origin_slot + 1) % 3];
+    uint32_t second = tri[(origin_slot + 2) % 3];
+    const Vec3& o = mesh.positions[origin];
+    const Vec3& a = mesh.positions[first];
+    const Vec3& b = mesh.positions[second];
+    float m00 = a.x - o.x;
+    float m10 = a.y - o.y;
+    float m01 = b.x - o.x;
+    float m11 = b.y - o.y;
+    float det = m00 * m11 - m01 * m10;
+    if (std::fabs(det) < 1e-6f) det = det < 0.0f ? -1e-6f : 1e-6f;
+
+    PhysicsRestTriangle rest{};
+    rest.origin = origin;
+    rest.first = first;
+    rest.second = second;
+    rest.inv00 = m11 / det;
+    rest.inv01 = -m01 / det;
+    rest.inv10 = -m10 / det;
+    rest.inv11 = m00 / det;
+    rest.rest_area = 0.5f * std::fabs(det);
+    if (tri_index < mesh.triangle_material_gpa.size()) {
+      rest.material_gpa = ClampMaterialGpa(mesh.triangle_material_gpa[tri_index]);
+    }
+    rest_triangles.push_back(rest);
+  }
+
+  return rest_triangles;
 }
 
 }  // namespace
 
-void TriangleAnalysisAgent::Init(const Mesh& reference_mesh) {
-  reference_mesh_ = reference_mesh;
-  state_ = TriangleOrientationState{};
-  initialized_ = true;
-}
-
-void TriangleAnalysisAgent::Tick(const Mesh& mesh) {
-  CodecManager codec{};
-  TriangleOrientationCpuResourcePack resource_pack = codec.BuildTriangleOrientationCpuResourcePack(mesh, reference_mesh_);
-  if (!initialized_ || !resource_pack.valid || !RunTriangleOrientationCpuAlgorithm(mesh, reference_mesh_, &state_)) {
-    state_ = TriangleOrientationState{};
-  }
-}
-
-void TriangleAnalysisAgent::Destroy() {
-  reference_mesh_ = Mesh{};
-  state_ = TriangleOrientationState{};
-  initialized_ = false;
-}
-
-void EditModeAgent::Init() {
-  controller_ = std::make_unique<EditModeController>();
-}
-
-InteractionFrame EditModeAgent::Tick(Mesh& mesh, const ViewportTransform& viewport, const SceneCamera& camera, const InputState& input, Vec2 mouse_pixel) {
-  return controller_->Tick(mesh, viewport, camera, input, mouse_pixel);
-}
-
-void EditModeAgent::Destroy() {
-  controller_.reset();
-}
-
-void GuideUiAgent::Init() {
-  controller_ = std::make_unique<GuideUiController>();
-}
-
-GuideUiFrame GuideUiAgent::Tick(const Mesh& mesh, const ViewportTransform& viewport, const SceneCamera& camera, const InputState& input, Vec2 mouse_pixel) {
-  return controller_->Tick(mesh, viewport, camera, input, mouse_pixel);
-}
-
-void GuideUiAgent::Destroy() {
-  if (controller_) {
-    controller_->ClearSelection();
-  }
-  controller_.reset();
-}
-
 void PhysAgent::Init(
   const PhysSolverConfig& config,
   const VulkanComputeContextView& compute_context,
-  const AlgorithmComplianceDescriptor& compliance_descriptor,
-  IoBufferEndpoint guide_ui_io_endpoint) {
-  controller_ = std::make_unique<PhysModeController>();
-  controller_->SetPhysicsConfig(config);
-  controller_->SetGpuComputeContext(compute_context);
-  controller_->SetAlgorithmComplianceDescriptor(compliance_descriptor);
-  guide_ui_io_endpoint_ = guide_ui_io_endpoint;
-  previous_mode_ = InteractionMode::Edit;
+  const AlgorithmComplianceDescriptor& compliance_descriptor) {
+  config_ = config;
+  compute_context_ = compute_context;
+  compliance_descriptor_ = compliance_descriptor;
+  run_state_ = PhysRunState::Pause;
+  algorithm_intervention_ = AlgorithmInterventionDescriptor{};
+  initialized_ = false;
 }
 
-void PhysAgent::TickModeTransition(InteractionMode mode, Mesh& mesh, const std::filesystem::path& snapshot_path) {
-  if (!controller_) return;
-  if (mode == InteractionMode::Phys && previous_mode_ != InteractionMode::Phys) {
-    controller_->PhysInit(mesh);
-    if (!std::filesystem::exists(snapshot_path)) {
-      SaveMeshSnapshotFile(mesh, snapshot_path.string());
+void PhysAgent::EnsureInitialized(const Mesh& mesh) {
+  if (initialized_) return;
+
+  rest_mesh_ = mesh;
+  rest_triangles_ = BuildRestTriangles(mesh);
+  initial_positions_ = mesh.positions;
+  total_velocities_.assign(mesh.positions.size(), MakeIdentityVelocity());
+  linear_velocities_.assign(mesh.positions.size(), MakeIdentityVelocity());
+  angular_velocities_.assign(mesh.positions.size(), MakeIdentityVelocity());
+  initialized_ = true;
+}
+
+void PhysAgent::ApplyAlgorithmIntervention(const AlgorithmInterventionDescriptor& intervention, Mesh& mesh) {
+  (void)mesh;
+  CodecManager codec{};
+  IoBufferPacket packet = codec.BuildAlgorithmInterventionPacket(intervention);
+  AlgorithmInterventionDescriptor decoded{};
+  if (codec.DecodeAlgorithmInterventionPacket(packet, &decoded)) {
+    algorithm_intervention_ = decoded;
+  }
+}
+
+PhysicsAlgorithmRequest PhysAgent::BuildRequest(const Mesh& mesh) const {
+  PhysicsAlgorithmRequest request{};
+  request.config = config_;
+  request.compute_context = compute_context_;
+  request.input.positions = mesh.positions;
+  request.input.rest_positions = rest_mesh_.positions;
+  request.input.total_velocities = total_velocities_;
+  request.input.linear_velocities = linear_velocities_;
+  request.input.angular_velocities = angular_velocities_;
+  request.input.rest_triangles = rest_triangles_;
+  request.input.displacement_interventions = active_displacement_interventions_;
+  request.input.velocity_interventions = active_velocity_interventions_;
+  request.input.force_interventions = active_force_interventions_;
+  if (request.input.total_velocities.size() < request.input.positions.size()) {
+    request.input.total_velocities.resize(request.input.positions.size(), MakeIdentityVelocity());
+  }
+  if (request.input.linear_velocities.size() < request.input.positions.size()) {
+    request.input.linear_velocities.resize(request.input.positions.size(), MakeIdentityVelocity());
+  }
+  if (request.input.angular_velocities.size() < request.input.positions.size()) {
+    request.input.angular_velocities.resize(request.input.positions.size(), MakeIdentityVelocity());
+  }
+  for (size_t i = 0; i < request.input.rest_triangles.size(); ++i) {
+    if (i < mesh.triangle_material_gpa.size()) {
+      request.input.rest_triangles[i].material_gpa = ClampMaterialGpa(mesh.triangle_material_gpa[i]);
     }
   }
-  previous_mode_ = mode;
+  return request;
 }
 
-void PhysAgent::SetSelectedGuideVertices(const std::vector<int>& vertices) {
-  if (controller_) {
-    controller_->SetSelectedGuideVertices(vertices);
-  }
-}
-
-void PhysAgent::ResolveIncomingIoBuffers(Mesh& mesh) {
-  if (!controller_) {
+void PhysAgent::AdvancePhysicsStep(Mesh& mesh) {
+  EnsureInitialized(mesh);
+  PhysicsAlgorithmResult result{};
+  PhysicsAlgorithmRequest request = BuildRequest(mesh);
+  if (!PhysicsAlgorithmPipeline_Run(request, &result) || !result.executed) {
     return;
   }
-
-  IoBufferPacket guide_ui_packet{};
-  ConsumeEndpointToPacket(&guide_ui_packet, guide_ui_io_endpoint_);
-  IoBufferEndpoint controller_endpoint = controller_->io_endpoint();
-  if (!controller_endpoint.valid()) {
-    return;
+  mesh.positions = std::move(result.step_output.positions);
+  total_velocities_ = std::move(result.step_output.total_velocities);
+  linear_velocities_ = std::move(result.step_output.linear_velocities);
+  angular_velocities_ = std::move(result.step_output.angular_velocities);
+  active_displacement_interventions_ = std::move(result.step_output.displacement_interventions);
+  active_velocity_interventions_ = std::move(result.step_output.velocity_interventions);
+  active_force_interventions_ = std::move(result.step_output.force_interventions);
+  if (result.gpu_dispatch_debug.valid) {
+    gpu_dispatch_debug_info_ = std::move(result.gpu_dispatch_debug);
   }
-  *controller_endpoint.protocol = guide_ui_packet.protocol;
-  *controller_endpoint.signal_buffer = guide_ui_packet.signal_buffer;
-  *controller_endpoint.data_buffer = guide_ui_packet.data_buffer;
-  controller_->ResolveIncomingIoBuffers(mesh);
+  ++frame_index_;
 }
 
-InteractionFrame PhysAgent::Tick(Mesh& mesh, const ViewportTransform& viewport, const SceneCamera& camera, const InputState& input, Vec2 mouse_pixel, float dt_seconds) {
-  return controller_->Tick(mesh, viewport, camera, input, mouse_pixel, dt_seconds);
+void PhysAgent::Tick(
+  Mesh& mesh,
+  const ViewportTransform& viewport,
+  const SceneCamera& camera,
+  const InputState& input,
+  Vec2 mouse_pixel,
+  float dt_seconds) {
+  (void)viewport;
+  (void)camera;
+  (void)input;
+  (void)mouse_pixel;
+  EnsureInitialized(mesh);
+  if (run_state_ == PhysRunState::Run) {
+    physics_accumulator_ += std::max(dt_seconds, 0.0f);
+    constexpr float kPhysicsStepSeconds = 1.0f / 120.0f;
+    while (physics_accumulator_ >= kPhysicsStepSeconds) {
+      AdvancePhysicsStep(mesh);
+      physics_accumulator_ -= kPhysicsStepSeconds;
+    }
+  } else {
+    physics_accumulator_ = 0.0f;
+  }
 }
 
 void PhysAgent::Destroy() {
-  controller_.reset();
-  previous_mode_ = InteractionMode::Edit;
-  guide_ui_io_endpoint_ = IoBufferEndpoint{};
-}
-
-void PhysAgent::SetRunState(PhysRunState run_state) {
-  if (controller_) controller_->SetRunState(run_state);
-}
-
-void PhysAgent::SetGuideEnabled(bool enabled) {
-  if (controller_) controller_->SetGuideEnabled(enabled);
-}
-
-void PhysAgent::SetGuideEditMode(GuideEditMode mode) {
-  if (controller_) controller_->SetGuideEditMode(mode);
-}
-
-void PhysAgent::SetGuideVelocitySettings(float magnitude, uint32_t delay_frames, uint32_t duration_frames) {
-  if (controller_) controller_->SetGuideVelocitySettings(magnitude, delay_frames, duration_frames);
-}
-
-void PhysAgent::SetGuideForceSettings(float magnitude, uint32_t delay_frames, uint32_t duration_frames) {
-  if (controller_) controller_->SetGuideForceSettings(magnitude, delay_frames, duration_frames);
-}
-
-PhysRunState PhysAgent::run_state() const {
-  return controller_ ? controller_->run_state() : PhysRunState::Pause;
-}
-
-bool PhysAgent::guide_enabled() const {
-  return controller_ ? controller_->guide_enabled() : true;
-}
-
-int PhysAgent::selected_velocity_guidance() const {
-  return controller_ ? controller_->selected_velocity_guidance() : -1;
-}
-
-float PhysAgent::guide_velocity_magnitude() const {
-  return controller_ ? controller_->guide_velocity_magnitude() : 1.0f;
-}
-
-uint32_t PhysAgent::guide_velocity_delay_frames() const {
-  return controller_ ? controller_->guide_velocity_delay_frames() : 0u;
-}
-
-uint32_t PhysAgent::guide_velocity_duration_frames() const {
-  return controller_ ? controller_->guide_velocity_duration_frames() : 1u;
-}
-
-float PhysAgent::guide_force_magnitude() const {
-  return controller_ ? controller_->guide_force_magnitude() : 1.0f;
-}
-
-uint32_t PhysAgent::guide_force_delay_frames() const {
-  return controller_ ? controller_->guide_force_delay_frames() : 0u;
-}
-
-uint32_t PhysAgent::guide_force_duration_frames() const {
-  return controller_ ? controller_->guide_force_duration_frames() : 1u;
-}
-
-const std::vector<VelocityMatrix>& PhysAgent::total_velocities() const {
-  static const std::vector<VelocityMatrix> kEmpty{};
-  return controller_ ? controller_->total_velocities() : kEmpty;
-}
-
-const std::vector<VelocityMatrix>& PhysAgent::linear_velocities() const {
-  static const std::vector<VelocityMatrix> kEmpty{};
-  return controller_ ? controller_->linear_velocities() : kEmpty;
-}
-
-const std::vector<VelocityMatrix>& PhysAgent::angular_velocities() const {
-  static const std::vector<VelocityMatrix> kEmpty{};
-  return controller_ ? controller_->angular_velocities() : kEmpty;
-}
-
-const std::vector<PhysRecordedFrame>& PhysAgent::recorded_frames() const {
-  static const std::vector<PhysRecordedFrame> kEmpty{};
-  return controller_ ? controller_->recorded_frames() : kEmpty;
-}
-
-const std::vector<PhysGuideKeyframe>& PhysAgent::guide_keyframes() const {
-  static const std::vector<PhysGuideKeyframe> kEmpty{};
-  return controller_ ? controller_->guide_keyframes() : kEmpty;
-}
-
-const std::vector<VelocityGuidance>& PhysAgent::active_velocity_guidances() const {
-  static const std::vector<VelocityGuidance> kEmpty{};
-  return controller_ ? controller_->active_velocity_guidances() : kEmpty;
-}
-
-const std::vector<VelocityGuideVelocity>& PhysAgent::active_guide_velocities() const {
-  static const std::vector<VelocityGuideVelocity> kEmpty{};
-  return controller_ ? controller_->active_guide_velocities() : kEmpty;
-}
-
-const std::vector<VelocityGuideForce>& PhysAgent::active_guide_forces() const {
-  static const std::vector<VelocityGuideForce> kEmpty{};
-  return controller_ ? controller_->active_guide_forces() : kEmpty;
-}
-
-const std::vector<int>& PhysAgent::selected_guide_vertices() const {
-  static const std::vector<int> kEmpty{};
-  return controller_ ? controller_->selected_guide_vertices() : kEmpty;
-}
-
-GuideEditMode PhysAgent::guide_edit_mode() const {
-  return controller_ ? controller_->guide_edit_mode() : GuideEditMode::Displacement;
-}
-
-int PhysAgent::current_frame_index() const {
-  return controller_ ? controller_->current_frame_index() : 0;
-}
-
-PhysSolverKind PhysAgent::solver_kind() const {
-  return controller_ ? controller_->solver_kind() : PhysSolverKind::Cpu;
-}
-
-const std::string& PhysAgent::algorithm_name() const {
-  static const std::string kEmpty{};
-  return controller_ ? controller_->algorithm_name() : kEmpty;
-}
-
-const GpuPhysicsDispatchDebugInfo& PhysAgent::gpu_dispatch_debug_info() const {
-  static const GpuPhysicsDispatchDebugInfo kEmpty{};
-  return controller_ ? controller_->gpu_dispatch_debug_info() : kEmpty;
+  initialized_ = false;
+  run_state_ = PhysRunState::Pause;
+  physics_accumulator_ = 0.0f;
+  frame_index_ = 0;
+  rest_mesh_ = Mesh{};
+  rest_triangles_.clear();
+  initial_positions_.clear();
+  total_velocities_.clear();
+  linear_velocities_.clear();
+  angular_velocities_.clear();
+  active_displacement_interventions_.clear();
+  active_velocity_interventions_.clear();
+  active_force_interventions_.clear();
+  algorithm_intervention_ = AlgorithmInterventionDescriptor{};
+  gpu_dispatch_debug_info_ = GpuPhysicsDispatchDebugInfo{};
 }
 
 void PhysAgent::StepOnce(Mesh& mesh) {
-  if (controller_) controller_->StepOnce(mesh);
+  EnsureInitialized(mesh);
+  if (run_state_ != PhysRunState::Pause) return;
+  physics_accumulator_ = 0.0f;
+  AdvancePhysicsStep(mesh);
 }
 
 void PhysAgent::Reset(Mesh& mesh) {
-  if (controller_) controller_->Reset(mesh);
-}
-
-void PhysAgent::CacheCurrentState() {
-  if (controller_) controller_->CacheCurrentState();
-}
-
-void PhysAgent::RestoreRecordedFrame(Mesh& mesh, int state_index) {
-  if (controller_) controller_->RestoreRecordedFrame(mesh, state_index);
-}
-
-void PhysAgent::SetRecordedFrameExpanded(int state_index, bool expanded) {
-  if (controller_) controller_->SetRecordedFrameExpanded(state_index, expanded);
-}
-
-void PhysAgent::SetGuideKeyframeEnabled(int frame_index, bool enabled) {
-  if (controller_) controller_->SetGuideKeyframeEnabled(frame_index, enabled);
-}
-
-void PhysAgent::SetGuideKeyframeExpandedByIndex(int index, bool expanded) {
-  if (controller_) controller_->SetGuideKeyframeExpandedByIndex(index, expanded);
+  EnsureInitialized(mesh);
+  if (initial_positions_.size() == mesh.positions.size()) {
+    mesh.positions = initial_positions_;
+  }
+  total_velocities_.assign(mesh.positions.size(), MakeIdentityVelocity());
+  linear_velocities_.assign(mesh.positions.size(), MakeIdentityVelocity());
+  angular_velocities_.assign(mesh.positions.size(), MakeIdentityVelocity());
+  active_displacement_interventions_.clear();
+  active_velocity_interventions_.clear();
+  active_force_interventions_.clear();
+  frame_index_ = 0;
+  physics_accumulator_ = 0.0f;
+  run_state_ = PhysRunState::Pause;
 }
 
 }  // namespace interaction_analysis

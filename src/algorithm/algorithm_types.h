@@ -1,6 +1,6 @@
 #pragma once
 
-#include "data_protocol/physics/physics_types.h"
+#include "common_data/physics/physics_types.h"
 
 #include <vulkan/vulkan.h>
 

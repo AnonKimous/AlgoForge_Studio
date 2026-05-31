@@ -504,9 +504,9 @@ bool _RunConvolutionDemo(const PhysicsAlgorithmRequest& request, PhysicsAlgorith
     result->step_output.total_velocities = request.input.total_velocities;
     result->step_output.linear_velocities = request.input.linear_velocities;
     result->step_output.angular_velocities = request.input.angular_velocities;
-    result->step_output.guidances = request.input.guidances;
-    result->step_output.guide_velocities = request.input.guide_velocities;
-    result->step_output.guide_forces = request.input.guide_forces;
+    result->step_output.displacement_interventions = request.input.displacement_interventions;
+    result->step_output.velocity_interventions = request.input.velocity_interventions;
+    result->step_output.force_interventions = request.input.force_interventions;
     result->gpu_dispatch_debug.shader_name = request.config.gpu_shader.shader_name;
     result->gpu_dispatch_debug.width = width;
     result->gpu_dispatch_debug.height = height;
@@ -554,3 +554,4 @@ bool GpuPhysicsAlgorithm_Run(const PhysicsAlgorithmRequest& request, PhysicsAlgo
 }
 
 }  // namespace algorithm
+

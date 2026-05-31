@@ -15,135 +15,139 @@ endif()
 
 find_package(Vulkan REQUIRED)
 find_program(GLSLC glslc REQUIRED)
-include(FetchContent)
 
-set(SDL3_REQUIRED_VERSION "3.5.0")
-set(EIGEN_REQUIRED_VERSION "3.4.0")
-set(IMGUI_REQUIRED_VERSION_NUM "19280")
-set(IMGUI_REQUIRED_TAG "v1.92.8-docking")
-set(VKB_REQUIRED_TAG "v1.4.352")
-set(VMA_REQUIRED_TAG "v3.3.0")
-set(SPIRV_REFLECT_REQUIRED_TAG "vulkan-sdk-1.4.350.0")
+set(DEPS_ROOT "${CMAKE_BINARY_DIR}/_deps" CACHE PATH "Root path for third-party sources and binaries")
 
-set(SDL3_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/SDL-main")
-set(SDL3_USE_LOCAL OFF)
-if(EXISTS "${SDL3_SOURCE_DIR}/CMakeLists.txt")
-  file(READ "${SDL3_SOURCE_DIR}/CMakeLists.txt" SDL3_CMAKE_CONTENTS)
-  string(FIND "${SDL3_CMAKE_CONTENTS}" "VERSION \"${SDL3_REQUIRED_VERSION}\"" SDL3_VERSION_INDEX)
-  if(SDL3_VERSION_INDEX GREATER -1)
-    set(SDL3_USE_LOCAL ON)
+set(SDL3_INCLUDE_DIR "${DEPS_ROOT}/sdl3-src/include" CACHE PATH "SDL3 include directory")
+set(SDL3_LIBRARY_DEBUG "${DEPS_ROOT}/sdl3-build/Debug/SDL3.lib" CACHE FILEPATH "SDL3 debug import/static library")
+set(SDL3_LIBRARY_RELEASE "${DEPS_ROOT}/sdl3-build/Release/SDL3.lib" CACHE FILEPATH "SDL3 release import/static library")
+set(SDL3_DLL_DEBUG "${DEPS_ROOT}/sdl3-build/Debug/SDL3.dll" CACHE FILEPATH "SDL3 debug runtime DLL")
+set(SDL3_DLL_RELEASE "${DEPS_ROOT}/sdl3-build/Release/SDL3.dll" CACHE FILEPATH "SDL3 release runtime DLL")
+
+set(EIGEN_INCLUDE_DIR "${DEPS_ROOT}/eigen-src" CACHE PATH "Eigen include directory")
+set(IMGUI_SOURCE_DIR "${DEPS_ROOT}/imgui-src" CACHE PATH "Dear ImGui source directory")
+set(VKB_SOURCE_DIR "${DEPS_ROOT}/vk_bootstrap-src" CACHE PATH "VkBootstrap source directory")
+set(VMA_INCLUDE_DIR "${DEPS_ROOT}/vma-src/include" CACHE PATH "VMA include directory")
+set(SPIRV_REFLECT_SOURCE_DIR "${DEPS_ROOT}/spirv_reflect-src" CACHE PATH "SPIRV-Reflect source directory")
+
+function(require_file path hint)
+  if(NOT EXISTS "${path}")
+    message(FATAL_ERROR "Missing required dependency file: ${path}\nHint: ${hint}")
   endif()
+endfunction()
+
+require_file("${SDL3_INCLUDE_DIR}/SDL3/SDL.h" "Set SDL3_INCLUDE_DIR or prepare dependencies under ${DEPS_ROOT}.")
+require_file("${SDL3_LIBRARY_DEBUG}" "Set SDL3_LIBRARY_DEBUG to a valid SDL3 import/static library.")
+require_file("${EIGEN_INCLUDE_DIR}/Eigen/Dense" "Set EIGEN_INCLUDE_DIR to a valid Eigen root.")
+require_file("${IMGUI_SOURCE_DIR}/imgui.h" "Set IMGUI_SOURCE_DIR to a valid Dear ImGui source root.")
+require_file("${VKB_SOURCE_DIR}/src/VkBootstrap.h" "Set VKB_SOURCE_DIR to a valid VkBootstrap source root.")
+require_file("${VKB_SOURCE_DIR}/src/VkBootstrap.cpp" "Set VKB_SOURCE_DIR to a valid VkBootstrap source root.")
+require_file("${VMA_INCLUDE_DIR}/vk_mem_alloc.h" "Set VMA_INCLUDE_DIR to a valid VMA include directory.")
+require_file("${SPIRV_REFLECT_SOURCE_DIR}/spirv_reflect.h" "Set SPIRV_REFLECT_SOURCE_DIR to a valid SPIRV-Reflect source root.")
+require_file("${SPIRV_REFLECT_SOURCE_DIR}/spirv_reflect.c" "Set SPIRV_REFLECT_SOURCE_DIR to a valid SPIRV-Reflect source root.")
+
+set(SDL3_EFFECTIVE_LIBRARY_RELEASE "${SDL3_LIBRARY_RELEASE}")
+set(SDL3_EFFECTIVE_DLL_RELEASE "${SDL3_DLL_RELEASE}")
+if(NOT EXISTS "${SDL3_EFFECTIVE_LIBRARY_RELEASE}")
+  set(SDL3_EFFECTIVE_LIBRARY_RELEASE "${SDL3_LIBRARY_DEBUG}")
 endif()
-if(SDL3_USE_LOCAL)
-  message(STATUS "Using local SDL3 source at ${SDL3_SOURCE_DIR}")
-  set(SDL_SHARED ON CACHE BOOL "Build shared SDL3" FORCE)
-  set(SDL_STATIC OFF CACHE BOOL "Build static SDL3" FORCE)
-  set(SDL_TEST_LIBRARY OFF CACHE BOOL "Build SDL3_test library" FORCE)
-  set(SDL_TESTS OFF CACHE BOOL "Build SDL test suite" FORCE)
-  set(SDL_INSTALL OFF CACHE BOOL "Install SDL3" FORCE)
-  add_subdirectory("${SDL3_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/_deps/sdl3-build" EXCLUDE_FROM_ALL)
-else()
-  message(STATUS "Using SDL3 ${SDL3_REQUIRED_VERSION} from GitHub")
-  FetchContent_Declare(
-    sdl3
-    GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
-    GIT_TAG release-${SDL3_REQUIRED_VERSION}
-    GIT_SHALLOW TRUE
-  )
-  set(SDL_SHARED ON CACHE BOOL "Build shared SDL3" FORCE)
-  set(SDL_STATIC OFF CACHE BOOL "Build static SDL3" FORCE)
-  set(SDL_TEST_LIBRARY OFF CACHE BOOL "Build SDL3_test library" FORCE)
-  set(SDL_TESTS OFF CACHE BOOL "Build SDL test suite" FORCE)
-  set(SDL_INSTALL OFF CACHE BOOL "Install SDL3" FORCE)
-  FetchContent_MakeAvailable(sdl3)
+if(NOT EXISTS "${SDL3_EFFECTIVE_DLL_RELEASE}")
+  set(SDL3_EFFECTIVE_DLL_RELEASE "${SDL3_DLL_DEBUG}")
 endif()
 
-set(EIGEN_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/eigen")
-if(EXISTS "${EIGEN_SOURCE_DIR}/Eigen/Dense")
-  message(STATUS "Using local Eigen source at ${EIGEN_SOURCE_DIR}")
-  set(EIGEN_INCLUDE_DIR "${EIGEN_SOURCE_DIR}")
-else()
-  message(STATUS "Using Eigen ${EIGEN_REQUIRED_VERSION} release archive from GitLab")
-  FetchContent_Declare(
-    eigen
-    URL https://gitlab.com/libeigen/eigen/-/archive/${EIGEN_REQUIRED_VERSION}/eigen-${EIGEN_REQUIRED_VERSION}.tar.gz
-  )
-  FetchContent_Populate(eigen)
-  set(EIGEN_INCLUDE_DIR "${eigen_SOURCE_DIR}")
-endif()
+set(VKB_COMPAT_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated_vkb_include")
+file(MAKE_DIRECTORY "${VKB_COMPAT_INCLUDE_DIR}/vkb")
+file(WRITE "${VKB_COMPAT_INCLUDE_DIR}/vkb/VkBootstrap.h" "#pragma once\n#include <VkBootstrap.h>\n")
 
-set(IMGUI_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui-1.92.8-docking")
-set(IMGUI_USE_LOCAL OFF)
-if(EXISTS "${IMGUI_SOURCE_DIR}/imgui.h")
-  file(READ "${IMGUI_SOURCE_DIR}/imgui.h" IMGUI_HEADER_CONTENTS)
-  string(REGEX MATCH "#define[ \t]+IMGUI_VERSION_NUM[ \t]+([0-9]+)" IMGUI_VERSION_MATCH "${IMGUI_HEADER_CONTENTS}")
-  string(FIND "${IMGUI_HEADER_CONTENTS}" "DockSpaceOverViewport" IMGUI_DOCKING_API_INDEX)
-  if(CMAKE_MATCH_1 STREQUAL "${IMGUI_REQUIRED_VERSION_NUM}" AND IMGUI_DOCKING_API_INDEX GREATER -1)
-    set(IMGUI_USE_LOCAL ON)
-  endif()
-endif()
-if(IMGUI_USE_LOCAL)
-  message(STATUS "Using local Dear ImGui source at ${IMGUI_SOURCE_DIR}")
-else()
-  message(STATUS "Using Dear ImGui ${IMGUI_REQUIRED_TAG} from GitHub")
-  FetchContent_Declare(
-    imgui
-    GIT_REPOSITORY https://github.com/ocornut/imgui.git
-    GIT_TAG ${IMGUI_REQUIRED_TAG}
-    GIT_SHALLOW TRUE
-  )
-  FetchContent_MakeAvailable(imgui)
-  set(IMGUI_SOURCE_DIR "${imgui_SOURCE_DIR}")
-endif()
+set(PROJECT_INCLUDE_DIRS
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${SDL3_INCLUDE_DIR}
+  ${EIGEN_INCLUDE_DIR}
+  ${VMA_INCLUDE_DIR}
+  ${SPIRV_REFLECT_SOURCE_DIR}
+  ${VKB_SOURCE_DIR}/src
+  ${VKB_COMPAT_INCLUDE_DIR}
+  ${IMGUI_SOURCE_DIR}
+  ${IMGUI_SOURCE_DIR}/backends
+)
 
-set(VKB_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/vkb")
-if(EXISTS "${VKB_SOURCE_DIR}/VkBootstrap.h")
-  message(STATUS "Using local VkBootstrap header at ${VKB_SOURCE_DIR}")
-else()
-  message(STATUS "Using VkBootstrap ${VKB_REQUIRED_TAG} from GitHub")
-  set(VK_BOOTSTRAP_TEST OFF CACHE BOOL "Build VkBootstrap tests" FORCE)
-  get_target_property(VULKAN_INCLUDE_DIRS Vulkan::Vulkan INTERFACE_INCLUDE_DIRECTORIES)
-  if(VULKAN_INCLUDE_DIRS)
-    set(VK_BOOTSTRAP_VULKAN_HEADER_DIR "${VULKAN_INCLUDE_DIRS}" CACHE PATH "Vulkan headers directory" FORCE)
-  endif()
-  FetchContent_Declare(
-    vk_bootstrap
-    GIT_REPOSITORY https://github.com/charles-lunarg/vk-bootstrap.git
-    GIT_TAG ${VKB_REQUIRED_TAG}
-    GIT_SHALLOW TRUE
-  )
-  FetchContent_MakeAvailable(vk_bootstrap)
-endif()
+set(SDL3_LINK_LIBS
+  debug "${SDL3_LIBRARY_DEBUG}"
+  optimized "${SDL3_EFFECTIVE_LIBRARY_RELEASE}"
+)
 
-set(VMA_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/VulkanMemoryAllocator-3.3.0")
-if(EXISTS "${VMA_SOURCE_DIR}/include/vk_mem_alloc.h")
-  message(STATUS "Using local VulkanMemoryAllocator source at ${VMA_SOURCE_DIR}")
-else()
-  message(STATUS "Using VulkanMemoryAllocator ${VMA_REQUIRED_TAG} from GitHub")
-  FetchContent_Declare(
-    vma
-    GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
-    GIT_TAG ${VMA_REQUIRED_TAG}
-    GIT_SHALLOW TRUE
-  )
-  FetchContent_Populate(vma)
-  set(VMA_SOURCE_DIR "${vma_SOURCE_DIR}")
-endif()
+add_library(common_data STATIC
+  src/common_data/mesh.cpp
+  src/common_data/viewport_transform.cpp
+)
+target_include_directories(common_data PUBLIC ${PROJECT_INCLUDE_DIRS})
 
-set(SPIRV_REFLECT_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/SPIRV-Reflect-vulkan-sdk-1.4.350.0")
-if(EXISTS "${SPIRV_REFLECT_SOURCE_DIR}/spirv_reflect.h" AND EXISTS "${SPIRV_REFLECT_SOURCE_DIR}/spirv_reflect.c")
-  message(STATUS "Using local SPIRV-Reflect source at ${SPIRV_REFLECT_SOURCE_DIR}")
-else()
-  message(STATUS "Using SPIRV-Reflect ${SPIRV_REFLECT_REQUIRED_TAG} from GitHub")
-  FetchContent_Declare(
-    spirv_reflect
-    GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Reflect.git
-    GIT_TAG ${SPIRV_REFLECT_REQUIRED_TAG}
-    GIT_SHALLOW TRUE
-  )
-  FetchContent_Populate(spirv_reflect)
-  set(SPIRV_REFLECT_SOURCE_DIR "${spirv_reflect_SOURCE_DIR}")
-endif()
+add_library(messaging STATIC
+  src/messaging/io_bus.cpp
+)
+target_include_directories(messaging PUBLIC ${PROJECT_INCLUDE_DIRS})
+
+add_library(codec STATIC
+  src/codec/codec_manager.cpp
+)
+target_include_directories(codec PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_link_libraries(codec PUBLIC common_data messaging)
+
+add_library(algorithm STATIC
+  src/algorithm/cpu_physics_algorithm.cpp
+  src/algorithm/gpu_physics_algorithm.cpp
+  src/algorithm/physics_algorithm_pipeline.cpp
+  src/algorithm/corotated_cpu_algorithm_contract.cpp
+  src/algorithm/physics_convolution_gpu_algorithm_contract.cpp
+  ${SPIRV_REFLECT_SOURCE_DIR}/spirv_reflect.c
+)
+target_include_directories(algorithm PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_link_libraries(algorithm PUBLIC common_data Vulkan::Vulkan)
+
+add_library(runtime_systems STATIC
+  src/runtime_systems/window/sdl_window.cpp
+  src/runtime_systems/render/vma_impl.cpp
+)
+target_include_directories(runtime_systems PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_link_libraries(runtime_systems PUBLIC common_data Vulkan::Vulkan ${SDL3_LINK_LIBS})
+
+add_library(service_domains STATIC
+  src/service_domains/render/scene_camera.cpp
+  src/service_domains/render/vulkan_renderer.cpp
+  ${VKB_SOURCE_DIR}/src/VkBootstrap.cpp
+  ${IMGUI_SOURCE_DIR}/imgui.cpp
+  ${IMGUI_SOURCE_DIR}/imgui_draw.cpp
+  ${IMGUI_SOURCE_DIR}/imgui_tables.cpp
+  ${IMGUI_SOURCE_DIR}/imgui_widgets.cpp
+  ${IMGUI_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp
+  ${IMGUI_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp
+)
+target_include_directories(service_domains PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_link_libraries(service_domains PUBLIC
+  common_data
+  algorithm
+  runtime_systems
+  Vulkan::Vulkan
+  ${SDL3_LINK_LIBS}
+)
+
+add_library(interaction_analysis STATIC
+  src/interaction_analysis/interaction_agents.cpp
+)
+target_include_directories(interaction_analysis PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_link_libraries(interaction_analysis PUBLIC common_data codec algorithm)
+
+add_library(agents STATIC
+  src/agents/agents.cpp
+)
+target_include_directories(agents PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_link_libraries(agents PUBLIC common_data runtime_systems service_domains)
+
+add_library(app_orchestration STATIC
+  src/app_orchestration/app_frame_sync_glue.cpp
+)
+target_include_directories(app_orchestration PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_link_libraries(app_orchestration PUBLIC common_data agents interaction_analysis)
 
 set(SHADER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
 set(SHADER_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/shaders)
@@ -183,109 +187,47 @@ add_custom_target(shaders DEPENDS
   ${SHADER_OUTPUT_DIR}/physics_convolution.comp.spv
 )
 
+target_compile_definitions(service_domains PRIVATE
+  WIN32_LEAN_AND_MEAN
+  NOMINMAX
+  SHADER_VERT_PATH="${SHADER_VERT_PATH}"
+  SHADER_FRAG_PATH="${SHADER_FRAG_PATH}"
+)
+
 add_executable(min_vulkan_win32 WIN32
   src/app_orchestration/main.cpp
-  src/agents/agents.cpp
-  src/algorithm/algorithm_manager.cpp
-  src/algorithm/cpu_job_scheduler.cpp
-  src/algorithm/cpu_physics_algorithm.cpp
-  src/algorithm/gpu_physics_algorithm.cpp
-  src/messaging/io_bus.cpp
-  src/app_orchestration/app_frame_sync_glue.cpp
-  src/app_orchestration/guide_ui_frame_relay_on_phys_agent_buffers.cpp
-  src/algorithm/legacy_corotated_cpu_algorithm_contract.cpp
-  src/algorithm/physics_algorithm_pipeline.cpp
-  src/algorithm/physics_convolution_gpu_algorithm_contract.cpp
-  src/algorithm/triangle_orientation_cpu_algorithm.cpp
-  src/algorithm/triangle_orientation_cpu_algorithm_contract.cpp
-  src/decomposition/decomposition_manager.cpp
-  src/interaction_analysis/guide_ui_controller.cpp
-  src/interaction_analysis/edit_mode_controller.cpp
-  src/interaction_analysis/phys_mode_controller.cpp
-  src/interaction_analysis/interaction_agents.cpp
-  src/data_protocol/mesh.cpp
-  src/service_domains/physics/phys_manager.cpp
-  src/foundation/viewport_transform.cpp
-  src/runtime_systems/render/vma_impl.cpp
-  src/service_domains/render/scene_camera.cpp
-  src/service_domains/render/vulkan_renderer.cpp
-  src/runtime_systems/window/sdl_window.cpp
-)
-
-add_library(imgui_static STATIC
-  ${IMGUI_SOURCE_DIR}/imgui.cpp
-  ${IMGUI_SOURCE_DIR}/imgui_draw.cpp
-  ${IMGUI_SOURCE_DIR}/imgui_tables.cpp
-  ${IMGUI_SOURCE_DIR}/imgui_widgets.cpp
-  ${IMGUI_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp
-  ${IMGUI_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp
-)
-
-target_include_directories(imgui_static PUBLIC
-  ${IMGUI_SOURCE_DIR}
-  ${IMGUI_SOURCE_DIR}/backends
-)
-
-target_link_libraries(imgui_static PUBLIC Vulkan::Vulkan)
-target_link_libraries(imgui_static PUBLIC SDL3::SDL3)
-
-add_library(eigen_headers INTERFACE)
-target_include_directories(eigen_headers INTERFACE
-  ${EIGEN_INCLUDE_DIR}
-)
-
-add_library(vma_headers INTERFACE)
-target_include_directories(vma_headers INTERFACE
-  ${VMA_SOURCE_DIR}/include
-)
-
-add_library(spirv_reflect_static STATIC
-  ${SPIRV_REFLECT_SOURCE_DIR}/spirv_reflect.c
-)
-target_include_directories(spirv_reflect_static PUBLIC
-  ${SPIRV_REFLECT_SOURCE_DIR}
 )
 
 add_dependencies(min_vulkan_win32 shaders)
 
-if(USE_FETCHED_VKB)
-  set(VKB_COMPAT_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated_vkb_include")
-  file(MAKE_DIRECTORY "${VKB_COMPAT_INCLUDE_DIR}/vkb")
-  file(WRITE "${VKB_COMPAT_INCLUDE_DIR}/vkb/VkBootstrap.h" "#pragma once\n#include <VkBootstrap.h>\n")
-  target_include_directories(min_vulkan_win32 PRIVATE
-    ${CMAKE_CURRENT_BINARY_DIR}/generated_vkb_include
-  )
-endif()
-
-target_include_directories(min_vulkan_win32 PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/src
-  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+target_include_directories(min_vulkan_win32 PRIVATE ${PROJECT_INCLUDE_DIRS})
+target_link_libraries(min_vulkan_win32 PRIVATE
+  app_orchestration
+  agents
+  interaction_analysis
+  service_domains
+  runtime_systems
+  codec
+  algorithm
+  messaging
+  common_data
+  Vulkan::Vulkan
+  ${SDL3_LINK_LIBS}
 )
 
 target_compile_definitions(min_vulkan_win32 PRIVATE
   WIN32_LEAN_AND_MEAN
   NOMINMAX
-  SHADER_VERT_PATH="${SHADER_VERT_PATH}"
-  SHADER_FRAG_PATH="${SHADER_FRAG_PATH}"
   SHADER_PHYSICS_CONV_PATH="${SHADER_PHYSICS_CONV_PATH}"
   MESH_PATH="${MESH_PATH}"
 )
 
-target_link_libraries(min_vulkan_win32
-  PRIVATE
-    eigen_headers
-    imgui_static
-    spirv_reflect_static
-    SDL3::SDL3
-    Vulkan::Vulkan
-    vma_headers
-)
-
 if(WIN32)
-  target_compile_definitions(min_vulkan_win32 PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
   target_link_libraries(min_vulkan_win32 PRIVATE advapi32 user32 gdi32 shell32)
-endif()
 
-if(USE_FETCHED_VKB)
-  target_link_libraries(min_vulkan_win32 PRIVATE vk-bootstrap::vk-bootstrap)
+  add_custom_command(TARGET min_vulkan_win32 POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "$<IF:$<CONFIG:Debug>,${SDL3_DLL_DEBUG},${SDL3_EFFECTIVE_DLL_RELEASE}>"
+    "$<TARGET_FILE_DIR:min_vulkan_win32>"
+  )
 endif()

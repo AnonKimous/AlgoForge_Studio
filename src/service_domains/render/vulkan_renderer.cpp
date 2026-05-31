@@ -107,22 +107,6 @@ void AppendText(std::vector<GpuVertex>& vertices, const std::string& text, float
   }
 }
 
-bool SelectionContainsEdge(const Mesh& mesh, const SelectionState& selection, const std::array<uint32_t, 2>& edge) {
-  if (selection.kind != SelectionKind::Triangle || selection.triangle < 0) return false;
-  const auto& tri = mesh.triangles[selection.triangle];
-  auto same = [](const std::array<uint32_t, 2>& e, uint32_t a, uint32_t b) {
-    return (e[0] == a && e[1] == b) || (e[0] == b && e[1] == a);
-  };
-  return same(edge, tri[0], tri[1]) || same(edge, tri[1], tri[2]) || same(edge, tri[2], tri[0]);
-}
-
-bool SelectionContainsVertex(const Mesh& mesh, const SelectionState& selection, uint32_t vertex) {
-  if (selection.kind == SelectionKind::Vertex) return selection.vertex == static_cast<int>(vertex);
-  if (selection.kind != SelectionKind::Triangle || selection.triangle < 0) return false;
-  const auto& tri = mesh.triangles[selection.triangle];
-  return tri[0] == vertex || tri[1] == vertex || tri[2] == vertex;
-}
-
 void AppendColoredLine(std::vector<GpuVertex>& vertices, Vec2 a, Vec2 b, float r, float g, float bl) {
   vertices.push_back({a.x, a.y, 0.0f, r, g, bl});
   vertices.push_back({b.x, b.y, 0.0f, r, g, bl});
@@ -131,25 +115,6 @@ void AppendColoredLine(std::vector<GpuVertex>& vertices, Vec2 a, Vec2 b, float r
 void AppendColoredLine(std::vector<GpuVertex>& vertices, Vec3 a, Vec3 b, float r, float g, float bl) {
   AppendColoredLine(vertices, Vec2{a.x, a.y}, Vec2{b.x, b.y}, r, g, bl);
 }
-
-struct MaterialPreset {
-  const char* name;
-  float gpa;
-};
-
-constexpr MaterialPreset kMaterialPresets[] = {
-  {"rubber", 0.01f},
-  {"leather", 0.05f},
-  {"plastic", 2.5f},
-  {"wood", 11.0f},
-  {"aluminum", 69.0f},
-  {"glass", 70.0f},
-  {"titanium", 116.0f},
-  {"steel", 200.0f},
-  {"high carbon steel", 210.0f},
-  {"tungsten", 411.0f},
-  {"diamond", 1220.0f},
-};
 
 void AppendHatchForTriangle(std::vector<GpuVertex>& vertices, const Mesh& mesh, uint32_t tri_index, float r, float g, float b) {
   const auto& tri = mesh.triangles[tri_index];
@@ -758,49 +723,16 @@ void VulkanRenderer::AppendHudVertices(std::vector<GpuVertex>& vertices, const F
   AppendText(vertices, "drawcall:" + std::to_string(stats.draw_calls), x, y, pixel);
 }
 
-void VulkanRenderer::UpdateVertexBuffer(const Mesh& mesh, const TriangleOrientationState& orientation_state, int highlighted_vertex, const RenderUiState& ui_state, uint32_t& green_hatch_count, uint32_t& yellow_hatch_count, uint32_t& red_hatch_count, uint32_t& line_count, uint32_t& directive_line_count, uint32_t& point_count) {
+void VulkanRenderer::UpdateVertexBuffer(const Mesh& mesh, const RenderUiState& ui_state, uint32_t& green_hatch_count, uint32_t& yellow_hatch_count, uint32_t& red_hatch_count, uint32_t& line_count, uint32_t& directive_line_count, uint32_t& point_count) {
   std::vector<GpuVertex> vertices;
-  vertices.reserve(mesh.edges.size() * 2 + mesh.positions.size() + mesh.triangles.size() * 80 + ui_state.active_velocity_guidances.size() * 96 + ui_state.active_guide_velocities.size() * 96 + ui_state.active_guide_forces.size() * 96);
-  const auto& negative_edges = orientation_state.edge_has_negative_triangle;
-  const auto& negative_vertices = orientation_state.vertex_has_negative_triangle;
-  const auto& triangle_faces_viewer = orientation_state.triangle_faces_viewer;
-  const SelectionState& selection = ui_state.selection;
+  vertices.reserve(mesh.edges.size() * 2 + mesh.positions.size() + mesh.triangles.size() * 80);
   std::vector<bool> active_vertices(mesh.positions.size(), false);
-
-  auto mark_vertices_active = [&](const std::vector<int>& vertices_list) {
-    for (int vertex : vertices_list) {
-      if (vertex < 0 || static_cast<size_t>(vertex) >= active_vertices.size()) continue;
-      active_vertices[vertex] = true;
-    }
-  };
-
-  for (const VelocityGuideVelocity& guide_velocity : ui_state.active_guide_velocities) {
-    if (guide_velocity.hidden || !guide_velocity.valid) continue;
-    mark_vertices_active(guide_velocity.vertices);
-  }
-  for (const VelocityGuideForce& guide_force : ui_state.active_guide_forces) {
-    if (guide_force.hidden || !guide_force.valid) continue;
-    mark_vertices_active(guide_force.vertices);
-  }
-
   for (uint32_t tri_index = 0; tri_index < mesh.triangles.size(); ++tri_index) {
-    if (selection.kind == SelectionKind::Triangle && selection.triangle == static_cast<int>(tri_index)) continue;
-    bool negative = tri_index < triangle_faces_viewer.size() && !triangle_faces_viewer[tri_index];
-    if (!negative) AppendHatchForTriangle(vertices, mesh, tri_index, 0.0f, 0.75f, 0.25f);
+    AppendHatchForTriangle(vertices, mesh, tri_index, 0.0f, 0.75f, 0.25f);
   }
   green_hatch_count = static_cast<uint32_t>(vertices.size());
-
-  for (uint32_t tri_index = 0; tri_index < mesh.triangles.size(); ++tri_index) {
-    if (selection.kind == SelectionKind::Triangle && selection.triangle == static_cast<int>(tri_index)) continue;
-    bool negative = tri_index < triangle_faces_viewer.size() && !triangle_faces_viewer[tri_index];
-    if (negative) AppendHatchForTriangle(vertices, mesh, tri_index, 1.0f, 0.85f, 0.0f);
-  }
-  yellow_hatch_count = static_cast<uint32_t>(vertices.size()) - green_hatch_count;
-
-  if (selection.kind == SelectionKind::Triangle && selection.triangle >= 0) {
-    AppendHatchForTriangle(vertices, mesh, static_cast<uint32_t>(selection.triangle), 1.0f, 0.0f, 0.0f);
-  }
-  red_hatch_count = static_cast<uint32_t>(vertices.size()) - green_hatch_count - yellow_hatch_count;
+  yellow_hatch_count = 0;
+  red_hatch_count = 0;
 
   auto is_active_edge = [&](const std::array<uint32_t, 2>& edge) {
     return edge[0] < active_vertices.size() && edge[1] < active_vertices.size() && (active_vertices[edge[0]] || active_vertices[edge[1]]);
@@ -809,12 +741,10 @@ void VulkanRenderer::UpdateVertexBuffer(const Mesh& mesh, const TriangleOrientat
   uint32_t line_start = static_cast<uint32_t>(vertices.size());
   for (uint32_t edge_index = 0; edge_index < mesh.edges.size(); ++edge_index) {
     const auto& edge = mesh.edges[edge_index];
-    bool negative = edge_index < negative_edges.size() && negative_edges[edge_index];
-    bool selected = SelectionContainsEdge(mesh, selection, edge);
     bool active = is_active_edge(edge);
-    float r = selected ? 1.0f : (active ? 0.25f : (negative ? 1.0f : 0.0f));
-    float g = selected ? 1.0f : (active ? 0.65f : (negative ? 0.85f : 0.9f));
-    float b = selected ? 1.0f : (active ? 1.0f : (negative ? 0.0f : 0.25f));
+    float r = active ? 0.25f : 0.0f;
+    float g = active ? 0.65f : 0.9f;
+    float b = active ? 1.0f : 0.25f;
     for (uint32_t index : edge) {
       const Vec3& p = mesh.positions[index];
       vertices.push_back({p.x, p.y, p.z, r, g, b});
@@ -822,59 +752,14 @@ void VulkanRenderer::UpdateVertexBuffer(const Mesh& mesh, const TriangleOrientat
   }
   line_count = static_cast<uint32_t>(vertices.size()) - line_start;
 
-  uint32_t directive_start = static_cast<uint32_t>(vertices.size());
-  if (ui_state.mode == InteractionMode::Phys && ui_state.phys_guide_enabled) {
-    for (uint32_t i = 0; i < ui_state.active_velocity_guidances.size(); ++i) {
-      const VelocityGuidance& guidance = ui_state.active_velocity_guidances[i];
-      if (guidance.vertex < 0) continue;
-      if (guidance.hidden) continue;
-      bool selected = static_cast<int>(i) == ui_state.selected_velocity_guidance;
-      float thickness = selected ? 0.0065f : 0.0f;
-      float allowed_r = selected ? 0.35f : 1.0f;
-      float allowed_g = selected ? 0.95f : 1.0f;
-      float allowed_b = selected ? 1.0f : 1.0f;
-      if (!guidance.valid) {
-        AppendDashedArrow(vertices, guidance.start, guidance.requested_target, 1.0f, 0.0f, 0.0f, ui_state.animation_time, thickness);
-      }
-      AppendDashedArrow(vertices, guidance.start, guidance.allowed_target, allowed_r, allowed_g, allowed_b, ui_state.animation_time, thickness);
-    }
-
-    for (const VelocityGuideVelocity& guide_velocity : ui_state.active_guide_velocities) {
-      if (guide_velocity.hidden || !guide_velocity.valid || guide_velocity.vertices.empty()) continue;
-      int primary_vertex = guide_velocity.vertices.front();
-      if (primary_vertex < 0 || static_cast<size_t>(primary_vertex) >= mesh.positions.size()) continue;
-      Vec3 start = mesh.positions[primary_vertex];
-      Vec3 end = VisualEndPoint(start, guide_velocity.display_delta, ExtractTranslation(guide_velocity.velocity));
-      AppendArrow(vertices, start, end, 0.25f, 0.65f, 1.0f);
-      AppendRingWithTicks(vertices, start, 0.04f, 0.25f, 0.65f, 1.0f, ui_state.animation_time);
-    }
-
-    for (const VelocityGuideForce& guide_force : ui_state.active_guide_forces) {
-      if (guide_force.hidden || !guide_force.valid || guide_force.vertices.empty()) continue;
-      int primary_vertex = guide_force.vertices.front();
-      if (primary_vertex < 0 || static_cast<size_t>(primary_vertex) >= mesh.positions.size()) continue;
-      Vec3 start = mesh.positions[primary_vertex];
-      Vec3 end = VisualEndPoint(start, guide_force.display_delta, guide_force.force);
-      AppendArrow(vertices, start, end, 1.0f, 0.7f, 0.15f);
-      AppendRingWithTicks(vertices, start, 0.04f, 1.0f, 0.7f, 0.15f, ui_state.animation_time);
-    }
-  }
-  directive_line_count = static_cast<uint32_t>(vertices.size()) - directive_start;
+  directive_line_count = 0u;
 
   for (uint32_t i = 0; i < mesh.positions.size(); ++i) {
     const Vec3& p = mesh.positions[i];
-    bool hot = static_cast<int>(i) == highlighted_vertex;
-    bool negative = i < negative_vertices.size() && negative_vertices[i];
-    bool selected = SelectionContainsVertex(mesh, selection, i);
     bool active = i < active_vertices.size() && active_vertices[i];
-    float r = selected ? 1.0f : (active ? 0.25f : (negative ? 1.0f : 0.0f));
-    float g = selected ? 1.0f : (active ? 0.65f : (negative ? 0.85f : 0.9f));
-    float b = selected ? 1.0f : (active ? 1.0f : (negative ? 0.0f : 0.25f));
-    if (hot && !active) {
-      r = 1.0f;
-      g = 0.1f;
-      b = 0.05f;
-    }
+    float r = active ? 0.25f : 0.0f;
+    float g = active ? 0.65f : 0.9f;
+    float b = active ? 1.0f : 0.25f;
     vertices.push_back({p.x, p.y, p.z, r, g, b});
   }
   point_count = static_cast<uint32_t>(mesh.positions.size());
@@ -885,6 +770,7 @@ void VulkanRenderer::UpdateVertexBuffer(const Mesh& mesh, const TriangleOrientat
   if (bytes > 0 && vertex_buffer_.allocation_info.pMappedData) {
     std::memcpy(vertex_buffer_.allocation_info.pMappedData, vertices.data(), bytes);
   }
+  (void)ui_state;
 }
 
 void VulkanRenderer::CreateSceneTarget(VkExtent2D extent) {
@@ -949,7 +835,7 @@ void VulkanRenderer::RequestSceneTargetResize(VkExtent2D extent) {
   scene_target_pending_extent_ = extent;
 }
 
-void VulkanRenderer::RenderScene(VkCommandBuffer cmd, const Mesh& mesh, const TriangleOrientationState& orientation_state, const SceneCamera& camera, const RenderUiState& ui_state, uint32_t green_hatch_count, uint32_t yellow_hatch_count, uint32_t red_hatch_count, uint32_t line_count, uint32_t directive_line_count, uint32_t point_count, VkExtent2D extent) {
+void VulkanRenderer::RenderScene(VkCommandBuffer cmd, const Mesh& mesh, const SceneCamera& camera, const RenderUiState& ui_state, uint32_t green_hatch_count, uint32_t yellow_hatch_count, uint32_t red_hatch_count, uint32_t line_count, uint32_t directive_line_count, uint32_t point_count, VkExtent2D extent) {
   if (scene_target_.image == VK_NULL_HANDLE || extent.width == 0 || extent.height == 0) return;
 
   TransitionImage(cmd, scene_target_.image, scene_target_layout_, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
@@ -1007,38 +893,21 @@ void VulkanRenderer::RenderScene(VkCommandBuffer cmd, const Mesh& mesh, const Tr
   TransitionImage(cmd, scene_target_.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
   scene_target_layout_ = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
   (void)mesh;
-  (void)orientation_state;
   (void)ui_state;
 }
 
-RenderFrameResult VulkanRenderer::Draw(const Mesh& mesh, const TriangleOrientationState& orientation_state, const SceneCamera& camera, int highlighted_vertex, const RenderUiState& ui_state) {
+RenderFrameResult VulkanRenderer::Draw(const Mesh& mesh, const SceneCamera& camera, const RenderUiState& ui_state) {
   uint32_t green_hatch_count = 0;
   uint32_t yellow_hatch_count = 0;
   uint32_t red_hatch_count = 0;
   uint32_t line_count = 0;
   uint32_t directive_line_count = 0;
   uint32_t point_count = 0;
-  UpdateVertexBuffer(mesh, orientation_state, highlighted_vertex, ui_state, green_hatch_count, yellow_hatch_count, red_hatch_count, line_count, directive_line_count, point_count);
+  UpdateVertexBuffer(mesh, ui_state, green_hatch_count, yellow_hatch_count, red_hatch_count, line_count, directive_line_count, point_count);
   FrameStats stats{};
   stats.draw_calls = 6;
-  bool save_requested = false;
-  bool phys_state_cache_requested = false;
   bool phys_reset_requested = false;
   bool phys_step_requested = false;
-  bool phys_state_restore_requested = false;
-  int phys_state_restore_index = -1;
-  bool recorded_frame_toggle_requested = false;
-  int recorded_frame_toggle_index = -1;
-  bool recorded_frame_toggle_expanded = false;
-  bool guide_keyframe_toggle_requested = false;
-  int guide_keyframe_toggle_index = -1;
-  bool guide_keyframe_toggle_enabled = false;
-  bool guide_keyframe_expand_requested = false;
-  int guide_keyframe_expand_index = -1;
-  bool guide_keyframe_expand_expanded = false;
-  bool triangle_material_change_requested = false;
-  int triangle_material_change_triangle = -1;
-  float triangle_material_change_gpa = 0.0f;
 
   VkResult fence_wait = vkWaitForFences(device_, 1, &in_flight_, VK_TRUE, kFrameTimeoutNs);
   if (fence_wait == VK_TIMEOUT) throw std::runtime_error("Timed out waiting for GPU fence");
@@ -1060,7 +929,7 @@ RenderFrameResult VulkanRenderer::Draw(const Mesh& mesh, const TriangleOrientati
   begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   vkBeginCommandBuffer(cmd, &begin);
 
-  RenderScene(cmd, mesh, orientation_state, camera, ui_state, green_hatch_count, yellow_hatch_count, red_hatch_count, line_count, directive_line_count, point_count, scene_target_.extent);
+  RenderScene(cmd, mesh, camera, ui_state, green_hatch_count, yellow_hatch_count, red_hatch_count, line_count, directive_line_count, point_count, scene_target_.extent);
 
   TransitionImage(cmd, swapchain_images_[image_index], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
@@ -1115,8 +984,6 @@ RenderFrameResult VulkanRenderer::Draw(const Mesh& mesh, const TriangleOrientati
       ImGui::OpenPopup("Page Visibility");
     }
     if (ImGui::BeginPopup("Page Visibility")) {
-      ImGui::MenuItem("Edit / Data", nullptr, &show_edit_data_window_);
-      ImGui::MenuItem("Frames", nullptr, &show_frames_window_);
       ImGui::MenuItem("Phys", nullptr, &show_phys_window_);
       ImGui::MenuItem("Animation", nullptr, &show_animation_window_);
       ImGui::EndPopup();
@@ -1149,246 +1016,15 @@ RenderFrameResult VulkanRenderer::Draw(const Mesh& mesh, const TriangleOrientati
   ImGui::DockSpace(static_cast<ImGuiID>(dockspace_id), ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_PassthruCentralNode);
   ImGui::End();
 
-  const int current_frame_index = ui_state.recorded_frames.empty() ? 0 : ui_state.recorded_frames.front().frame_index;
-  if (ui_state.selected_velocity_guidance >= 0) {
-    selected_velocity_guidance_ = ui_state.selected_velocity_guidance;
-  }
-  if (selected_velocity_guidance_ >= static_cast<int>(ui_state.active_velocity_guidances.size())) {
-    selected_velocity_guidance_ = -1;
-  }
-  if (ui_state.selection.kind == SelectionKind::Triangle && ui_state.selection.triangle >= 0) {
-    if (triangle_material_input_triangle_ != ui_state.selection.triangle) {
-      triangle_material_input_triangle_ = ui_state.selection.triangle;
-      triangle_material_input_gpa_ = ui_state.selected_triangle_material_gpa;
-    }
-  } else {
-    triangle_material_input_triangle_ = -1;
-  }
-
-  auto draw_recorded_frames = [&]() {
-    if (ImGui::BeginChild("RecordedFrames", ImVec2(0.0f, 220.0f), true)) {
-      ImGui::TextUnformatted("RecordedFrames");
-      for (uint32_t i = 0; i < ui_state.recorded_frames.size(); ++i) {
-        const PhysRecordedFrame& frame = ui_state.recorded_frames[i];
-        ImGui::PushID(static_cast<int>(i));
-        std::string label = frame.current ? ("current frame " + std::to_string(frame.frame_index)) : ("frame " + std::to_string(frame.frame_index));
-        ImGui::SetNextItemOpen(frame.expanded, ImGuiCond_Always);
-        ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnDoubleClick;
-        bool open = ImGui::TreeNodeEx(label.c_str(), flags);
-        if (ImGui::IsItemToggledOpen()) {
-          recorded_frame_toggle_requested = true;
-          recorded_frame_toggle_index = static_cast<int>(i);
-          recorded_frame_toggle_expanded = !frame.expanded;
-        }
-        if (ImGui::BeginDragDropSource()) {
-          int payload_index = static_cast<int>(i);
-          ImGui::SetDragDropPayload("RECORDED_FRAME_INDEX", &payload_index, sizeof(int));
-          ImGui::Text("frame %d", frame.frame_index);
-          ImGui::EndDragDropSource();
-        }
-        if (open) {
-          ImGui::Indent();
-          ImGui::Text("positions: %zu", frame.positions.size());
-          ImGui::Text("total velocities: %zu", frame.total_velocities.size());
-          ImGui::Text("linear velocities: %zu", frame.linear_velocities.size());
-          ImGui::Text("angular velocities: %zu", frame.angular_velocities.size());
-          ImGui::TextUnformatted("drag this header onto the scene pane to restore");
-          ImGui::Unindent();
-          ImGui::TreePop();
-        }
-        ImGui::PopID();
-      }
-    }
-    ImGui::EndChild();
-  };
-
-  auto draw_guide_keyframes = [&]() {
-    if (ImGui::BeginChild("GuideKeyframes", ImVec2(0.0f, 0.0f), true)) {
-      ImGui::TextUnformatted("GuideKeyframes");
-      for (uint32_t i = 0; i < ui_state.guide_keyframes.size(); ++i) {
-        const PhysGuideKeyframe& keyframe = ui_state.guide_keyframes[i];
-        ImGui::PushID(static_cast<int>(i));
-        bool enabled = keyframe.enabled;
-        if (ImGui::Checkbox("##enabled", &enabled)) {
-          guide_keyframe_toggle_requested = true;
-          guide_keyframe_toggle_index = static_cast<int>(i);
-          guide_keyframe_toggle_enabled = enabled;
-        }
-        ImGui::SameLine();
-        std::string label = "VelocityGuidance frame " + std::to_string(keyframe.frame_index);
-        if (keyframe.frame_index == current_frame_index) {
-          label += " [current]";
-        }
-        if (!keyframe.enabled) {
-          label += " [off]";
-        }
-        ImGui::SetNextItemOpen(keyframe.expanded, ImGuiCond_Always);
-        ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_OpenOnDoubleClick;
-        bool open = ImGui::TreeNodeEx(label.c_str(), flags);
-        if (ImGui::IsItemToggledOpen()) {
-          guide_keyframe_expand_requested = true;
-          guide_keyframe_expand_index = static_cast<int>(i);
-          guide_keyframe_expand_expanded = !keyframe.expanded;
-        }
-        if (open) {
-          ImGui::Indent();
-          ImGui::Text("displacement guides: %zu", keyframe.guidances.size());
-          for (uint32_t j = 0; j < keyframe.guidances.size(); ++j) {
-            const VelocityGuidance& guidance = keyframe.guidances[j];
-            ImGui::PushID(static_cast<int>(j));
-            if (!guidance.valid) {
-              ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "group blocked");
-            } else {
-              ImGui::Text("group");
-            }
-            if (!guidance.vertices.empty()) {
-              ImGui::Text("vertices: %zu", guidance.vertices.size());
-              ImGui::SameLine();
-              ImGui::TextDisabled("first v%d", guidance.vertices.front());
-            } else {
-              ImGui::Text("v%d", guidance.vertex);
-            }
-            ImGui::Text("requested (%.3f, %.3f)  allowed (%.3f, %.3f)",
-                        guidance.requested_target.x, guidance.requested_target.y,
-                        guidance.allowed_target.x, guidance.allowed_target.y);
-            Vec3 total_move = ExtractTranslation(guidance.total_velocity);
-            ImGui::Text("total velocity move (%.3f, %.3f, %.3f)", total_move.x, total_move.y, total_move.z);
-            ImGui::PopID();
-          }
-          ImGui::Spacing();
-          ImGui::Text("velocity guides: %zu", keyframe.guide_velocities.size());
-          for (uint32_t j = 0; j < keyframe.guide_velocities.size(); ++j) {
-            const VelocityGuideVelocity& guide_velocity = keyframe.guide_velocities[j];
-            ImGui::PushID(static_cast<int>(j) + 1000);
-            ImGui::Text("vertices: %zu", guide_velocity.vertices.size());
-            Vec3 move = ExtractTranslation(guide_velocity.velocity);
-            ImGui::Text("velocity (%.3f, %.3f, %.3f)", move.x, move.y, move.z);
-            ImGui::Text("starts after %u frame(s), lasts %u frame(s)", guide_velocity.start_frame_offset, guide_velocity.duration_frames);
-            ImGui::PopID();
-          }
-          ImGui::Spacing();
-          ImGui::Text("force guides: %zu", keyframe.guide_forces.size());
-          for (uint32_t j = 0; j < keyframe.guide_forces.size(); ++j) {
-            const VelocityGuideForce& guide_force = keyframe.guide_forces[j];
-            ImGui::PushID(static_cast<int>(j) + 2000);
-            ImGui::Text("vertices: %zu", guide_force.vertices.size());
-            ImGui::Text("force (%.3f, %.3f, %.3f)", guide_force.force.x, guide_force.force.y, guide_force.force.z);
-            ImGui::Text("starts after %u frame(s), lasts %u frame(s)", guide_force.start_frame_offset, guide_force.duration_frames);
-            ImGui::PopID();
-          }
-          ImGui::Unindent();
-          ImGui::TreePop();
-        }
-        ImGui::PopID();
-      }
-    }
-    ImGui::EndChild();
-  };
-
-  auto draw_edit_data_window = [&]() {
-    if (!show_edit_data_window_) return;
-    ImGui::Begin("Edit / Data");
-    ImGui::Text("mesh: %s", ui_state.mesh_file_name.c_str());
-    ImGui::Text("drawcall: %u", stats.draw_calls);
-    if (ImGui::Button(mode_ == InteractionMode::Edit ? "mode: edit" : "mode: phys")) {
-      mode_ = mode_ == InteractionMode::Edit ? InteractionMode::Phys : InteractionMode::Edit;
-    }
-    ImGui::Spacing();
-    if (ui_state.selection.kind == SelectionKind::Vertex && ui_state.selection.vertex >= 0) {
-      ImGui::Text("vertex %d", ui_state.selection.vertex);
-      ImGui::Text("x: %.4f", ui_state.selected_vertex_position.x);
-      ImGui::Text("y: %.4f", ui_state.selected_vertex_position.y);
-      ImGui::Text("z: %.4f", ui_state.selected_vertex_position.z);
-    } else if (ui_state.selection.kind == SelectionKind::Triangle && ui_state.selection.triangle >= 0) {
-      ImGui::Text("triangle %d", ui_state.selection.triangle);
-      ImGui::Text("material: %.3f GPa", ui_state.selected_triangle_material_gpa);
-      if (ImGui::InputFloat("triangle material GPa", &triangle_material_input_gpa_, 0.0f, 0.0f, "%.3f")) {
-        if (ImGui::IsItemDeactivatedAfterEdit()) {
-          triangle_material_change_requested = true;
-          triangle_material_change_triangle = ui_state.selection.triangle;
-          triangle_material_change_gpa = triangle_material_input_gpa_;
-        }
-      }
-      if (ImGui::Button("Apply Material")) {
-        triangle_material_change_requested = true;
-        triangle_material_change_triangle = ui_state.selection.triangle;
-        triangle_material_change_gpa = triangle_material_input_gpa_;
-      }
-      ImGui::SameLine();
-      if (ImGui::Button("Materials")) {
-        ImGui::OpenPopup("Material Presets");
-      }
-      if (ImGui::BeginDragDropTarget()) {
-        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("MAT_GPA")) {
-          triangle_material_change_requested = true;
-          triangle_material_change_triangle = ui_state.selection.triangle;
-          triangle_material_change_gpa = *static_cast<const float*>(payload->Data);
-        }
-        ImGui::EndDragDropTarget();
-      }
-      if (ImGui::BeginPopup("Material Presets")) {
-        ImGui::TextUnformatted("Drag a material onto the selected triangle");
-        if (ImGui::BeginTable("MaterialPresetTable", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_Borders | ImGuiTableFlags_SizingStretchSame)) {
-          ImGui::TableSetupColumn("Material");
-          ImGui::TableSetupColumn("GPa");
-          ImGui::TableHeadersRow();
-          for (const MaterialPreset& preset : kMaterialPresets) {
-            ImGui::TableNextRow();
-            ImGui::TableSetColumnIndex(0);
-            if (ImGui::Selectable(preset.name, false, ImGuiSelectableFlags_SpanAllColumns)) {
-              triangle_material_change_requested = true;
-              triangle_material_change_triangle = ui_state.selection.triangle;
-              triangle_material_change_gpa = preset.gpa;
-            }
-            if (ImGui::BeginDragDropSource()) {
-              ImGui::SetDragDropPayload("MAT_GPA", &preset.gpa, sizeof(float));
-              ImGui::Text("%s", preset.name);
-              ImGui::Text("%.3f GPa", preset.gpa);
-              ImGui::EndDragDropSource();
-            }
-            ImGui::TableSetColumnIndex(1);
-            ImGui::Text("%.3f", preset.gpa);
-          }
-          ImGui::EndTable();
-        }
-        if (ImGui::InputFloat("Custom GPa", &triangle_material_input_gpa_, 0.0f, 0.0f, "%.3f")) {
-          if (ImGui::IsItemDeactivatedAfterEdit()) {
-            triangle_material_change_requested = true;
-            triangle_material_change_triangle = ui_state.selection.triangle;
-            triangle_material_change_gpa = triangle_material_input_gpa_;
-          }
-        }
-        if (ImGui::Button("Apply Custom")) {
-          triangle_material_change_requested = true;
-          triangle_material_change_triangle = ui_state.selection.triangle;
-          triangle_material_change_gpa = triangle_material_input_gpa_;
-        }
-        ImGui::EndPopup();
-      }
-    }
-    if (ImGui::Button("Save")) {
-      save_requested = true;
-    }
-    ImGui::End();
-  };
-
-  auto draw_frames_window = [&]() {
-    if (!show_frames_window_) return;
-    ImGui::Begin("Frames");
-    draw_recorded_frames();
-    ImGui::Separator();
-    draw_guide_keyframes();
-    ImGui::End();
-  };
+  const int current_frame_index = ui_state.phys_current_frame_index;
 
   auto draw_phys_window = [&]() {
     if (!show_phys_window_) return;
     ImGui::Begin("Phys");
+    ImGui::Text("drawcall: %u", stats.draw_calls);
     ImGui::Text("current frame: %d", current_frame_index);
     ImGui::Text("solver: %s", ui_state.phys_solver_kind == PhysSolverKind::Gpu ? "gpu" : "cpu");
     ImGui::Text("algorithm: %s", ui_state.phys_algorithm_name.empty() ? "<none>" : ui_state.phys_algorithm_name.c_str());
-    ImGui::Text("selected velocity guidance: %d", selected_velocity_guidance_);
-    ImGui::Text("selected guide vertices: %zu", ui_state.selected_guide_vertices.size());
     if (ui_state.gpu_dispatch_debug.valid) {
       const GpuPhysicsDispatchDebugInfo& debug = ui_state.gpu_dispatch_debug;
       ImGui::Text("gpu shader: %s", debug.shader_name.c_str());
@@ -1398,86 +1034,35 @@ RenderFrameResult VulkanRenderer::Draw(const Mesh& mesh, const TriangleOrientati
       }
     }
     ImGui::Spacing();
-    ImGui::TextUnformatted("physRun");
-    if (ImGui::Button("PhysRun")) {
+    ImGui::TextUnformatted("simulation");
+    if (ImGui::Button("Start")) {
+      mode_ = InteractionMode::Phys;
       phys_run_state_ = PhysRunState::Run;
     }
     ImGui::SameLine();
-    if (ImGui::Button("PhysPause")) {
+    if (ImGui::Button("Pause")) {
+      mode_ = InteractionMode::Phys;
       phys_run_state_ = PhysRunState::Pause;
     }
     ImGui::SameLine();
     if (ImGui::Button("Reset")) {
+      mode_ = InteractionMode::Phys;
       phys_reset_requested = true;
       phys_run_state_ = PhysRunState::Pause;
     }
     ImGui::SameLine();
     if (phys_run_state_ == PhysRunState::Pause) {
-      if (ImGui::Button("PhysStep")) {
+      if (ImGui::Button("Single Frame")) {
+        mode_ = InteractionMode::Phys;
         phys_step_requested = true;
       }
     } else {
       ImGui::BeginDisabled();
-      ImGui::Button("PhysStep");
+      ImGui::Button("Single Frame");
       ImGui::EndDisabled();
     }
-    ImGui::Text("run state: %s", phys_run_state_ == PhysRunState::Run ? "Run" : "Pause");
-
-    ImGui::Spacing();
-    ImGui::TextUnformatted("physGuide");
-    if (ImGui::Button("enable")) {
-      phys_guide_enabled_ = true;
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("disable")) {
-      phys_guide_enabled_ = false;
-    }
-
-    ImGui::Spacing();
-    ImGui::TextUnformatted("guide mode");
-    if (ImGui::RadioButton("displacement", guide_edit_mode_ == GuideEditMode::Displacement)) {
-      guide_edit_mode_ = GuideEditMode::Displacement;
-    }
-    ImGui::SameLine();
-    if (ImGui::RadioButton("velocity", guide_edit_mode_ == GuideEditMode::Velocity)) {
-      guide_edit_mode_ = GuideEditMode::Velocity;
-    }
-    ImGui::SameLine();
-    if (ImGui::RadioButton("force", guide_edit_mode_ == GuideEditMode::Force)) {
-      guide_edit_mode_ = GuideEditMode::Force;
-    }
-
-    ImGui::Spacing();
-    ImGui::TextUnformatted("drag the selected vertex to set the arrow direction and UI length");
-    ImGui::TextDisabled("magnitude still controls physics, delay is the start offset in frames");
-    if (guide_edit_mode_ == GuideEditMode::Velocity) {
-      ImGui::TextUnformatted("velocity params");
-      ImGui::SliderFloat("velocity magnitude", &guide_velocity_magnitude_, 0.0f, 20.0f, "%.3f");
-      ImGui::InputFloat("velocity magnitude##input", &guide_velocity_magnitude_, 0.0f, 0.0f, "%.3f");
-      ImGui::SliderInt("velocity start delay", &guide_velocity_delay_frames_, 0, 240);
-      ImGui::InputInt("velocity start delay##input", &guide_velocity_delay_frames_);
-      ImGui::SliderInt("velocity duration", &guide_velocity_duration_frames_, 1, 240);
-      ImGui::InputInt("velocity duration##input", &guide_velocity_duration_frames_);
-      if (guide_velocity_magnitude_ < 0.0f) guide_velocity_magnitude_ = 0.0f;
-      if (guide_velocity_delay_frames_ < 0) guide_velocity_delay_frames_ = 0;
-      if (guide_velocity_duration_frames_ < 1) guide_velocity_duration_frames_ = 1;
-    } else if (guide_edit_mode_ == GuideEditMode::Force) {
-      ImGui::TextUnformatted("force params");
-      ImGui::SliderFloat("force magnitude", &guide_force_magnitude_, 0.0f, 100.0f, "%.3f");
-      ImGui::InputFloat("force magnitude##input", &guide_force_magnitude_, 0.0f, 0.0f, "%.3f");
-      ImGui::SliderInt("force start delay", &guide_force_delay_frames_, 0, 240);
-      ImGui::InputInt("force start delay##input", &guide_force_delay_frames_);
-      ImGui::SliderInt("force duration", &guide_force_duration_frames_, 1, 240);
-      ImGui::InputInt("force duration##input", &guide_force_duration_frames_);
-      if (guide_force_delay_frames_ < 0) guide_force_delay_frames_ = 0;
-      if (guide_force_duration_frames_ < 1) guide_force_duration_frames_ = 1;
-      if (guide_force_magnitude_ < 0.0f) guide_force_magnitude_ = 0.0f;
-    }
-
-    ImGui::Spacing();
-    if (phys_run_state_ == PhysRunState::Pause && ImGui::Button("Cache Current")) {
-      phys_state_cache_requested = true;
-    }
+    ImGui::Text("mode: %s", mode_ == InteractionMode::Phys ? "phys" : "edit");
+    ImGui::Text("run state: %s", phys_run_state_ == PhysRunState::Run ? "run" : "pause");
 
     ImGui::End();
   };
@@ -1503,18 +1088,9 @@ RenderFrameResult VulkanRenderer::Draw(const Mesh& mesh, const TriangleOrientati
     scene_view_bounds_.width = scene_max.x - scene_min.x;
     scene_view_bounds_.height = scene_max.y - scene_min.y;
     scene_view_bounds_.valid = scene_view_bounds_.width > 0.0f && scene_view_bounds_.height > 0.0f;
-    if (ImGui::BeginDragDropTarget()) {
-      if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("RECORDED_FRAME_INDEX")) {
-        phys_state_restore_requested = true;
-        phys_state_restore_index = *static_cast<const int*>(payload->Data);
-      }
-      ImGui::EndDragDropTarget();
-    }
     ImGui::End();
   };
 
-  draw_edit_data_window();
-  draw_frames_window();
   draw_phys_window();
   draw_animation_window();
 
@@ -1554,33 +1130,8 @@ RenderFrameResult VulkanRenderer::Draw(const Mesh& mesh, const TriangleOrientati
   result.draw_calls = stats.draw_calls;
   result.mode = mode_;
   result.phys_run_state = phys_run_state_;
-  result.phys_guide_enabled = phys_guide_enabled_;
-  result.guide_edit_mode = guide_edit_mode_;
-  result.guide_velocity_magnitude = guide_velocity_magnitude_;
-  result.guide_velocity_delay_frames = static_cast<uint32_t>(std::max(0, guide_velocity_delay_frames_));
-  result.guide_velocity_duration_frames = static_cast<uint32_t>(std::max(1, guide_velocity_duration_frames_));
-  result.guide_force_magnitude = guide_force_magnitude_;
-  result.guide_force_delay_frames = static_cast<uint32_t>(std::max(0, guide_force_delay_frames_));
-  result.guide_force_duration_frames = static_cast<uint32_t>(std::max(1, guide_force_duration_frames_));
-  result.selected_velocity_guidance = selected_velocity_guidance_;
-  result.phys_state_cache_requested = phys_state_cache_requested;
   result.phys_reset_requested = phys_reset_requested;
   result.phys_step_requested = phys_step_requested;
-  result.phys_state_restore_requested = phys_state_restore_requested;
-  result.phys_state_restore_index = phys_state_restore_index;
-  result.recorded_frame_toggle_requested = recorded_frame_toggle_requested;
-  result.recorded_frame_toggle_index = recorded_frame_toggle_index;
-  result.recorded_frame_toggle_expanded = recorded_frame_toggle_expanded;
-  result.guide_keyframe_toggle_requested = guide_keyframe_toggle_requested;
-  result.guide_keyframe_toggle_index = guide_keyframe_toggle_index;
-  result.guide_keyframe_toggle_enabled = guide_keyframe_toggle_enabled;
-  result.guide_keyframe_expand_requested = guide_keyframe_expand_requested;
-  result.guide_keyframe_expand_index = guide_keyframe_expand_index;
-  result.guide_keyframe_expand_expanded = guide_keyframe_expand_expanded;
-  result.triangle_material_change_requested = triangle_material_change_requested;
-  result.triangle_material_triangle = triangle_material_change_triangle;
-  result.triangle_material_gpa = triangle_material_change_gpa;
-  result.save_requested = save_requested;
   return result;
 }
 
@@ -1589,16 +1140,10 @@ void VulkanRenderer::SetupDockLayout(uint32_t dockspace_id, float width, float h
   ImGui::DockBuilderAddNode(static_cast<ImGuiID>(dockspace_id), ImGuiDockNodeFlags_DockSpace);
   ImGui::DockBuilderSetNodeSize(static_cast<ImGuiID>(dockspace_id), ImVec2(width, height));
 
-  ImGuiID dock_right = 0;
-  ImGuiID dock_left = ImGui::DockBuilderSplitNode(static_cast<ImGuiID>(dockspace_id), ImGuiDir_Left, 0.42f, nullptr, &dock_right);
-  ImGuiID dock_left_bottom = 0;
-  ImGuiID dock_left_top = ImGui::DockBuilderSplitNode(dock_left, ImGuiDir_Down, 0.52f, nullptr, &dock_left_bottom);
-  ImGuiID dock_right_bottom = 0;
-  ImGuiID dock_right_top = ImGui::DockBuilderSplitNode(dock_right, ImGuiDir_Down, 0.78f, nullptr, &dock_right_bottom);
-  ImGui::DockBuilderDockWindow("Edit / Data", dock_left_top);
-  ImGui::DockBuilderDockWindow("Frames", dock_left_bottom);
-  ImGui::DockBuilderDockWindow("Animation", dock_right_top);
-  ImGui::DockBuilderDockWindow("Phys", dock_right_bottom);
+  ImGuiID dock_bottom = 0;
+  ImGuiID dock_top = ImGui::DockBuilderSplitNode(static_cast<ImGuiID>(dockspace_id), ImGuiDir_Down, 0.80f, nullptr, &dock_bottom);
+  ImGui::DockBuilderDockWindow("Animation", dock_top);
+  ImGui::DockBuilderDockWindow("Phys", dock_bottom);
   ImGui::DockBuilderFinish(static_cast<ImGuiID>(dockspace_id));
   dock_layout_initialized_ = true;
 }

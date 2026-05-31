@@ -1,6 +1,6 @@
 #include "scene_camera.h"
 
-#include "foundation/render_algorithm/camera_math.h"
+#include "common_data/render_algorithm/camera_math.h"
 
 #include <algorithm>
 #include <cmath>
