@@ -11,6 +11,7 @@ namespace {
 
 struct _PackedAlgorithmInterventionEntry {
   int32_t mode{};
+  float radius{};
   float velocity_magnitude{};
   uint32_t velocity_delay_frames{};
   uint32_t velocity_duration_frames{};
@@ -78,6 +79,7 @@ bool _DecodeInterventionMode(int32_t raw_mode, AlgorithmInterventionMode* mode) 
 AlgorithmInterventionDescriptor _ToAlgorithmInterventionDescriptor(const InteractionInterventionRequest& request) {
   AlgorithmInterventionDescriptor descriptor{};
   descriptor.mode = static_cast<AlgorithmInterventionMode>(request.mode);
+  descriptor.radius = request.radius;
   descriptor.velocity_magnitude = request.velocity_magnitude;
   descriptor.velocity_delay_frames = request.velocity_delay_frames;
   descriptor.velocity_duration_frames = request.velocity_duration_frames;
@@ -96,6 +98,7 @@ InteractionInterventionRequest _ToInteractionInterventionRequest(const Algorithm
   InteractionInterventionRequest request{};
   request.enabled = true;
   request.mode = static_cast<InteractionInterventionMode>(descriptor.mode);
+  request.radius = descriptor.radius;
   request.velocity_magnitude = descriptor.velocity_magnitude;
   request.velocity_delay_frames = descriptor.velocity_delay_frames;
   request.velocity_duration_frames = descriptor.velocity_duration_frames;
@@ -115,6 +118,7 @@ IoDataBufferEntry _CreateAlgorithmInterventionDataBufferEntry(const AlgorithmInt
   entry.name = "algorithm_intervention_data";
   _AppendPod(&entry.bytes, _PackedAlgorithmInterventionEntry{
     static_cast<int32_t>(descriptor.mode),
+    descriptor.radius,
     std::max(0.0f, descriptor.velocity_magnitude),
     descriptor.velocity_delay_frames,
     std::max(1u, descriptor.velocity_duration_frames),
@@ -138,6 +142,7 @@ bool _DecodeAlgorithmInterventionData(
   AlgorithmInterventionMode mode = AlgorithmInterventionMode::Displacement;
   if (!_DecodeInterventionMode(packed.mode, &mode)) return false;
   decoded->mode = mode;
+  decoded->radius = std::max(0.0f, packed.radius);
   decoded->velocity_magnitude = std::max(0.0f, packed.velocity_magnitude);
   decoded->velocity_delay_frames = packed.velocity_delay_frames;
   decoded->velocity_duration_frames = std::max(1u, packed.velocity_duration_frames);

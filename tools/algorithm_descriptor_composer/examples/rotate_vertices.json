@@ -1,0 +1,49 @@
+{
+  "package_name": "rotate_vertices",
+  "algorithm_name": "rotate_vertices",
+  "cpu_available": true,
+  "gpu_available": false,
+  "data_contract": {
+    "arrays_to_allocate": [
+      {
+        "name": "vertexs",
+        "element_count": 1,
+        "element_stride": 12
+      },
+      {
+        "name": "edges",
+        "element_count": 1,
+        "element_stride": 8
+      }
+    ],
+    "temporary_registers_to_allocate": [
+      {
+        "name": "rotationQuaternion",
+        "element_count": 1,
+        "element_stride": 16
+      }
+    ],
+    "temporary_caches_to_allocate": [
+      {
+        "name": "rotationCache",
+        "element_count": 1,
+        "element_stride": 12
+      }
+    ],
+    "filled_data_formats": [
+      {
+        "name": "rotated_vertices",
+        "element_count": 1,
+        "element_stride": 12
+      }
+    ],
+    "algorithm_required_formats": [
+      {
+        "name": "mesh",
+        "element_count": 1,
+        "element_stride": 12
+      }
+    ],
+    "container_aliases": []
+  }
+}

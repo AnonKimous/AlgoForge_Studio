@@ -87,6 +87,7 @@ void PhysicsAgent::EnsureInitialized(const Mesh& mesh) {
   rest_mesh_ = mesh;
   rest_triangles_ = BuildRestTriangles(mesh);
   initial_positions_ = mesh.positions;
+  vertex_positions_ = mesh.positions;
   total_velocities_.assign(mesh.positions.size(), MakeIdentityVelocity());
   linear_velocities_.assign(mesh.positions.size(), MakeIdentityVelocity());
   angular_velocities_.assign(mesh.positions.size(), MakeIdentityVelocity());
@@ -112,6 +113,7 @@ PhysicsAlgorithmRequest PhysicsAgent::BuildRequest(const Mesh& mesh) const {
   request.input.force_interventions = active_force_interventions_;
   request.agent_to_algorithm_signal = algorithm_runtime_.agent_to_algorithm_signal();
   request.intervention_request = algorithm_runtime_.intervention_request();
+  request.compliance_descriptor = algorithm_runtime_.compliance_descriptor();
   if (request.input.total_velocities.size() < request.input.positions.size()) {
     request.input.total_velocities.resize(request.input.positions.size(), MakeIdentityVelocity());
   }
@@ -150,6 +152,7 @@ void PhysicsAgent::AdvancePhysicsStep(Mesh& mesh) {
     return;
   }
   mesh.positions = std::move(result.step_output.positions);
+  vertex_positions_ = mesh.positions;
   total_velocities_ = std::move(result.step_output.total_velocities);
   linear_velocities_ = std::move(result.step_output.linear_velocities);
   angular_velocities_ = std::move(result.step_output.angular_velocities);
@@ -236,6 +239,7 @@ void PhysicsAgent::Reset(Mesh& mesh) {
   if (initial_positions_.size() == mesh.positions.size()) {
     mesh.positions = initial_positions_;
   }
+  vertex_positions_ = mesh.positions;
   total_velocities_.assign(mesh.positions.size(), MakeIdentityVelocity());
   linear_velocities_.assign(mesh.positions.size(), MakeIdentityVelocity());
   angular_velocities_.assign(mesh.positions.size(), MakeIdentityVelocity());
@@ -245,6 +249,7 @@ void PhysicsAgent::Reset(Mesh& mesh) {
   frame_index_ = 0;
   physics_accumulator_ = 0.0f;
   run_state_ = PhysRunState::Pause;
+  vertex_positions_.clear();
 }
 
 }  // namespace agents

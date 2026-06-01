@@ -13,6 +13,11 @@
 
 namespace agents {
 
+void DrawVertexArrayOverlay(
+  const std::vector<Vec3>& vertex_positions,
+  const std::vector<std::array<uint32_t, 2>>& triangle_edges,
+  const std::vector<std::array<uint32_t, 3>>& triangles);
+
 class AgentAlgorithmRuntime {
  public:
   void Init(
@@ -43,9 +48,12 @@ class AgentAlgorithmRuntime {
 
 class WindowAgent {
  public:
+  using DrawCallback = runtime_systems::ImGuiVulkanRuntime::DrawCallback;
+
   bool Init(const char* title, int width, int height);
   bool Tick();
   void Destroy();
+  void SetDrawCallback(DrawCallback callback);
 
   WindowHandle native_handle() const;
   int width() const;

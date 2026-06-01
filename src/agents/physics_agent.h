@@ -30,6 +30,7 @@ class PhysicsAgent {
   void SetAgentToAlgorithmSignal(const AgentToAlgorithmSignal& signal) { algorithm_runtime_.SetAgentToAlgorithmSignal(signal); }
 
   PhysRunState run_state() const { return run_state_; }
+  const std::vector<Vec3>& vertex_positions() const { return vertex_positions_; }
   const std::vector<VelocityMatrix>& total_velocities() const { return total_velocities_; }
   const std::vector<VelocityMatrix>& linear_velocities() const { return linear_velocities_; }
   const std::vector<VelocityMatrix>& angular_velocities() const { return angular_velocities_; }
@@ -56,6 +57,7 @@ class PhysicsAgent {
   float physics_accumulator_{0.0f};
   uint64_t frame_index_{0};
   Mesh rest_mesh_{};
+  std::vector<Vec3> vertex_positions_{};
   std::vector<PhysicsRestTriangle> rest_triangles_;
   std::vector<Vec3> initial_positions_;
   std::vector<VelocityMatrix> total_velocities_;

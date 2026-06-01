@@ -64,6 +64,7 @@ enum class AlgorithmInterventionMode {
 
 struct AlgorithmInterventionDescriptor {
   AlgorithmInterventionMode mode{AlgorithmInterventionMode::Displacement};
+  float radius{0.0f};
   float velocity_magnitude{1.0f};
   uint32_t velocity_delay_frames{0};
   uint32_t velocity_duration_frames{1};

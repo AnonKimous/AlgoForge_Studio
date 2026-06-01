@@ -14,11 +14,33 @@ using OrchestrationEntityInterventionPackageHandle = algorithm::AlgorithmInterve
 using OrchestrationEntityDecomposerCodec = algorithm::IAlgorithmPackageCodec;
 using OrchestrationEntityReflectorCodec = algorithm::IAlgorithmPackageCodec;
 
+struct OrchestrationEntityPackageBinding {
+  std::string package_name;
+  std::vector<std::string> input_containers;
+  std::vector<std::string> output_containers;
+  std::vector<algorithm::AlgorithmContainerAlias> container_aliases;
+};
+
+struct OrchestrationEntityContainerRoute {
+  std::string source_package_name;
+  std::string source_container_name;
+  std::string target_package_name;
+  std::string target_container_name;
+};
+
+struct OrchestrationEntityPipelineDescriptor {
+  std::vector<OrchestrationEntityPackageBinding> ordered_bindings;
+  std::vector<OrchestrationEntityContainerRoute> container_routes;
+  std::vector<AlgorithmComplianceDescriptor> component_descriptors;
+};
+
 struct OrchestrationEntityInitConfig {
+  std::string instance_name;
   std::string algorithm_name;
   std::string mounted_agent_name;
   std::vector<std::string> bound_resources;
   std::vector<OrchestrationEntityAlgorithmPackageHandle> compliance_packages;
+  OrchestrationEntityPipelineDescriptor pipeline_descriptor;
   std::shared_ptr<OrchestrationEntityInterventionPackageHandle> intervention_package;
   std::shared_ptr<OrchestrationEntityDecomposerCodec> decomposer;
   std::shared_ptr<OrchestrationEntityReflectorCodec> reflector;
@@ -30,7 +52,9 @@ class OrchestrationEntity {
  public:
   bool Init(OrchestrationEntityInitConfig config) {
     initialized_ = true;
+    instance_name_ = std::move(config.instance_name);
     compliance_packages_ = std::move(config.compliance_packages);
+    pipeline_descriptor_ = std::move(config.pipeline_descriptor);
     intervention_package_ = std::move(config.intervention_package);
     decomposer_ = std::move(config.decomposer);
     reflector_ = std::move(config.reflector);
@@ -44,10 +68,12 @@ class OrchestrationEntity {
 
   void Destroy() {
     initialized_ = false;
+    instance_name_.clear();
     algorithm_name_.clear();
     mounted_agent_name_.clear();
     bound_resources_.clear();
     compliance_packages_.clear();
+    pipeline_descriptor_ = {};
     intervention_package_.reset();
     decomposer_.reset();
     reflector_.reset();
@@ -56,22 +82,31 @@ class OrchestrationEntity {
   }
 
   bool initialized() const { return initialized_; }
+  const std::string& instance_name() const { return instance_name_; }
   const std::string& algorithm_name() const { return algorithm_name_; }
   const std::string& mounted_agent_name() const { return mounted_agent_name_; }
   const std::vector<std::string>& bound_resources() const { return bound_resources_; }
   const std::vector<OrchestrationEntityAlgorithmPackageHandle>& compliance_packages() const { return compliance_packages_; }
+  const std::vector<OrchestrationEntityAlgorithmPackageHandle>& algorithm_packages() const { return compliance_packages_; }
+  const OrchestrationEntityAlgorithmPackageHandle* FindAlgorithmPackage(const std::string& package_name) const;
+  bool HasAlgorithmPackage(const std::string& package_name) const;
+  const OrchestrationEntityPipelineDescriptor& pipeline_descriptor() const { return pipeline_descriptor_; }
+  const OrchestrationEntityPackageBinding* FindPackageBinding(const std::string& package_name) const;
   const std::shared_ptr<OrchestrationEntityInterventionPackageHandle>& intervention_package() const { return intervention_package_; }
   const std::shared_ptr<OrchestrationEntityDecomposerCodec>& decomposer() const { return decomposer_; }
   const std::shared_ptr<OrchestrationEntityReflectorCodec>& reflector() const { return reflector_; }
   const PhysSolverConfig& solver_config() const { return solver_config_; }
   const AlgorithmComplianceDescriptor& compliance_descriptor() const { return compliance_descriptor_; }
+  const AlgorithmComplianceDescriptor& composite_compliance_descriptor() const { return compliance_descriptor_; }
 
  private:
   bool initialized_{false};
   std::string algorithm_name_{};
+  std::string instance_name_{};
   std::string mounted_agent_name_{};
   std::vector<std::string> bound_resources_{};
   std::vector<OrchestrationEntityAlgorithmPackageHandle> compliance_packages_{};
+  OrchestrationEntityPipelineDescriptor pipeline_descriptor_{};
   std::shared_ptr<OrchestrationEntityInterventionPackageHandle> intervention_package_{};
   std::shared_ptr<OrchestrationEntityDecomposerCodec> decomposer_{};
   std::shared_ptr<OrchestrationEntityReflectorCodec> reflector_{};
@@ -95,10 +130,13 @@ inline void orchestration_entity_destroy(OrchestrationEntity* entity) {
 }  // namespace orchestration_entity
 
 using orchestration_entity::OrchestrationEntity;
+using orchestration_entity::OrchestrationEntityContainerRoute;
 using orchestration_entity::OrchestrationEntityAlgorithmPackageHandle;
 using orchestration_entity::OrchestrationEntityDecomposerCodec;
 using orchestration_entity::OrchestrationEntityInitConfig;
 using orchestration_entity::OrchestrationEntityInterventionPackageHandle;
+using orchestration_entity::OrchestrationEntityPackageBinding;
+using orchestration_entity::OrchestrationEntityPipelineDescriptor;
 using orchestration_entity::OrchestrationEntityReflectorCodec;
 using orchestration_entity::OrchestrationEntityRuntime;
 using orchestration_entity::orchestration_entity_destroy;

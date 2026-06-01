@@ -99,6 +99,8 @@ add_library(algorithm STATIC
   src/algorithm_library/algorithm_mng.cpp
   src/algorithm_library/corotated_cpu_algorithm_contract.cpp
   src/algorithm_library/physics_convolution_gpu_algorithm_contract.cpp
+  src/algorithm_library/random_vertex_motion_algorithm.cpp
+  src/algorithm_library/random_vertex_motion_algorithm_contract.cpp
   ${SPIRV_REFLECT_SOURCE_DIR}/spirv_reflect.c
 )
 target_include_directories(algorithm PUBLIC ${PROJECT_INCLUDE_DIRS})

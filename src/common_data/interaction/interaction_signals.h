@@ -14,6 +14,7 @@ enum class InteractionInterventionMode {
 struct InteractionInterventionRequest {
   bool enabled{false};
   InteractionInterventionMode mode{InteractionInterventionMode::Displacement};
+  float radius{0.0f};
   float velocity_magnitude{1.0f};
   uint32_t velocity_delay_frames{0};
   uint32_t velocity_duration_frames{1};
