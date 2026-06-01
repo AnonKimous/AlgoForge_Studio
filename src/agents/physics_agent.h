@@ -1,37 +1,45 @@
 #pragma once
 
-#include "algorithm/algorithm_types.h"
-#include "codec/codec_manager.h"
+#include "agents.h"
+#include "algorithm_library/algorithm_types.h"
 #include "common_data/interaction/interaction_state.h"
 #include "common_data/mesh.h"
 #include "common_data/input_state.h"
-#include "common_data/viewport_transform.h"
-#include "service_domains/render/scene_camera.h"
-
 #include <string>
 #include <vector>
 
-namespace interaction_analysis {
+namespace agents {
 
-class PhysAgent {
+class PhysicsAgent {
  public:
   void Init(
     const PhysSolverConfig& config,
     const VulkanComputeContextView& compute_context,
     const AlgorithmComplianceDescriptor& compliance_descriptor = {});
-  void Tick(Mesh& mesh, const ViewportTransform& viewport, const SceneCamera& camera, const InputState& input, Vec2 mouse_pixel, float dt_seconds);
+  void Tick(
+    Mesh& mesh,
+    const InputState& input,
+    Vec2 mouse_pixel,
+    float dt_seconds);
   void Destroy();
 
   void SetRunState(PhysRunState run_state) { run_state_ = run_state; }
-  void ApplyAlgorithmIntervention(const AlgorithmInterventionDescriptor& intervention, Mesh& mesh);
+  void SetInterventionPackage(std::shared_ptr<algorithm::AlgorithmInterventionPackageHandle> package) { algorithm_runtime_.SetInterventionPackage(std::move(package)); }
+  void ApplyUiAction(const InteractionUiAction& action, Mesh& mesh);
+  void ApplyInterventionRequest(const InteractionInterventionRequest& request);
+  void SetAgentToAlgorithmSignal(const AgentToAlgorithmSignal& signal) { algorithm_runtime_.SetAgentToAlgorithmSignal(signal); }
+
   PhysRunState run_state() const { return run_state_; }
   const std::vector<VelocityMatrix>& total_velocities() const { return total_velocities_; }
   const std::vector<VelocityMatrix>& linear_velocities() const { return linear_velocities_; }
   const std::vector<VelocityMatrix>& angular_velocities() const { return angular_velocities_; }
   int current_frame_index() const { return static_cast<int>(frame_index_); }
-  PhysSolverKind solver_kind() const { return config_.solver_kind; }
-  const std::string& algorithm_name() const { return config_.algorithm_name; }
+  PhysSolverKind solver_kind() const { return algorithm_runtime_.config().solver_kind; }
+  const std::string& algorithm_name() const { return algorithm_runtime_.config().algorithm_name; }
   const GpuPhysicsDispatchDebugInfo& gpu_dispatch_debug_info() const { return gpu_dispatch_debug_info_; }
+  const AgentToAlgorithmSignal& agent_to_algorithm_signal() const { return algorithm_runtime_.agent_to_algorithm_signal(); }
+  const AlgorithmToAgentSignal& algorithm_to_agent_signal() const { return algorithm_runtime_.algorithm_to_agent_signal(); }
+  const InteractionInterventionRequest& intervention_request() const { return algorithm_runtime_.intervention_request(); }
 
   void StepOnce(Mesh& mesh);
   void Reset(Mesh& mesh);
@@ -40,11 +48,10 @@ class PhysAgent {
   void EnsureInitialized(const Mesh& mesh);
   void AdvancePhysicsStep(Mesh& mesh);
   PhysicsAlgorithmRequest BuildRequest(const Mesh& mesh) const;
+  void CaptureResultFeedback(const PhysicsAlgorithmResult& result);
 
   bool initialized_{false};
-  PhysSolverConfig config_{};
-  VulkanComputeContextView compute_context_{};
-  AlgorithmComplianceDescriptor compliance_descriptor_{};
+  AgentAlgorithmRuntime algorithm_runtime_{};
   PhysRunState run_state_{PhysRunState::Pause};
   float physics_accumulator_{0.0f};
   uint64_t frame_index_{0};
@@ -57,8 +64,12 @@ class PhysAgent {
   std::vector<InterventionDisplacement> active_displacement_interventions_;
   std::vector<InterventionVelocity> active_velocity_interventions_;
   std::vector<InterventionForce> active_force_interventions_;
-  AlgorithmInterventionDescriptor algorithm_intervention_{};
   GpuPhysicsDispatchDebugInfo gpu_dispatch_debug_info_{};
 };
 
-}  // namespace interaction_analysis
+using PhysAgent = PhysicsAgent;
+
+}  // namespace agents
+
+using agents::PhysAgent;
+using agents::PhysicsAgent;

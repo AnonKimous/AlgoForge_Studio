@@ -1,19 +1,44 @@
 #pragma once
 
+#include "agents/algorithm_pool.h"
+#include "algorithm/algorithm_package.h"
+#include "common_data/interaction/interaction_state.h"
+#include "common_data/interaction/interaction_signals.h"
 #include "common_data/mesh.h"
-#include "service_domains/render/renderer.h"
-#include "service_domains/render/scene_camera.h"
-#include "common_data/viewport_transform.h"
+#include "runtime_systems/render/imgui_vulkan_runtime.h"
 #include "runtime_systems/window/window.h"
 
-#include <filesystem>
 #include <memory>
-#include <vector>
+#include <utility>
 
 namespace agents {
 
-struct SceneViewFrameState {
-  Vec2 mouse_pixel{};
+class AgentAlgorithmRuntime {
+ public:
+  void Init(
+    const PhysSolverConfig& config,
+    const VulkanComputeContextView& compute_context,
+    const AlgorithmComplianceDescriptor& compliance_descriptor);
+  bool Run(const PhysicsAlgorithmRequest& request, PhysicsAlgorithmResult* result) const;
+  void SetInterventionPackage(std::shared_ptr<algorithm::AlgorithmInterventionPackageHandle> package);
+
+  void SetAgentToAlgorithmSignal(const AgentToAlgorithmSignal& signal) { agent_to_algorithm_signal_ = signal; }
+  void ApplyInterventionRequest(const InteractionInterventionRequest& request);
+  void SetAlgorithmToAgentSignal(const AlgorithmToAgentSignal& signal) { algorithm_to_agent_signal_ = signal; }
+
+  const PhysSolverConfig& config() const { return pool_.config(); }
+  const VulkanComputeContextView& compute_context() const { return pool_.compute_context(); }
+  const AlgorithmComplianceDescriptor& compliance_descriptor() const { return pool_.compliance_descriptor(); }
+  const std::shared_ptr<algorithm::AlgorithmInterventionPackageHandle>& intervention_package() const { return pool_.intervention_package(); }
+  const AgentToAlgorithmSignal& agent_to_algorithm_signal() const { return agent_to_algorithm_signal_; }
+  const AlgorithmToAgentSignal& algorithm_to_agent_signal() const { return algorithm_to_agent_signal_; }
+  const InteractionInterventionRequest& intervention_request() const { return intervention_request_; }
+
+ private:
+  AlgorithmPool pool_{};
+  InteractionInterventionRequest intervention_request_{};
+  AgentToAlgorithmSignal agent_to_algorithm_signal_{};
+  AlgorithmToAgentSignal algorithm_to_agent_signal_{};
 };
 
 class WindowAgent {
@@ -30,36 +55,24 @@ class WindowAgent {
 
  private:
   std::unique_ptr<SdlWindow> window_;
-};
-
-class SceneViewAgent {
- public:
-  void Init(const Mesh& mesh);
-  SceneViewFrameState Tick(const SceneViewBounds& scene_bounds, const WindowAgent& window_agent);
-  void Destroy();
-
-  const SceneCamera& camera() const { return camera_; }
-  const ViewportTransform& viewport() const { return viewport_; }
-
- private:
-  SceneCamera camera_{};
-  ViewportTransform viewport_{};
+  std::unique_ptr<runtime_systems::ImGuiVulkanRuntime> imgui_runtime_;
 };
 
 class RenderAgent {
  public:
   bool Init(const WindowHandle& window_handle);
-  RenderFrameResult Tick(const Mesh& mesh, const SceneCamera& camera, const RenderUiState& ui_state);
+  InteractionUiAction Tick(const Mesh& mesh, const InteractionUiState& ui_state);
   void Destroy();
 
   InteractionMode mode() const;
   PhysRunState phys_run_state() const;
   void SetPhysRunState(PhysRunState state);
-  SceneViewBounds scene_view_bounds() const;
-  VulkanComputeContextView compute_context() const;
 
  private:
-  std::unique_ptr<VulkanRenderer> renderer_;
+  InteractionMode mode_{InteractionMode::Edit};
+  PhysRunState phys_run_state_{PhysRunState::Pause};
 };
 
 }  // namespace agents
+
+using agents::AgentAlgorithmRuntime;

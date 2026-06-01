@@ -94,11 +94,11 @@ target_include_directories(codec PUBLIC ${PROJECT_INCLUDE_DIRS})
 target_link_libraries(codec PUBLIC common_data messaging)
 
 add_library(algorithm STATIC
-  src/algorithm/cpu_physics_algorithm.cpp
-  src/algorithm/gpu_physics_algorithm.cpp
-  src/algorithm/physics_algorithm_pipeline.cpp
-  src/algorithm/corotated_cpu_algorithm_contract.cpp
-  src/algorithm/physics_convolution_gpu_algorithm_contract.cpp
+  src/algorithm_library/cpu_physics_algorithm.cpp
+  src/algorithm_library/gpu_physics_algorithm.cpp
+  src/algorithm_library/algorithm_mng.cpp
+  src/algorithm_library/corotated_cpu_algorithm_contract.cpp
+  src/algorithm_library/physics_convolution_gpu_algorithm_contract.cpp
   ${SPIRV_REFLECT_SOURCE_DIR}/spirv_reflect.c
 )
 target_include_directories(algorithm PUBLIC ${PROJECT_INCLUDE_DIRS})
@@ -107,13 +107,7 @@ target_link_libraries(algorithm PUBLIC common_data Vulkan::Vulkan)
 add_library(runtime_systems STATIC
   src/runtime_systems/window/sdl_window.cpp
   src/runtime_systems/render/vma_impl.cpp
-)
-target_include_directories(runtime_systems PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(runtime_systems PUBLIC common_data Vulkan::Vulkan ${SDL3_LINK_LIBS})
-
-add_library(service_domains STATIC
-  src/service_domains/render/scene_camera.cpp
-  src/service_domains/render/vulkan_renderer.cpp
+  src/runtime_systems/render/imgui_vulkan_runtime.cpp
   ${VKB_SOURCE_DIR}/src/VkBootstrap.cpp
   ${IMGUI_SOURCE_DIR}/imgui.cpp
   ${IMGUI_SOURCE_DIR}/imgui_draw.cpp
@@ -122,56 +116,35 @@ add_library(service_domains STATIC
   ${IMGUI_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp
   ${IMGUI_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp
 )
-target_include_directories(service_domains PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(service_domains PUBLIC
-  common_data
-  algorithm
-  runtime_systems
-  Vulkan::Vulkan
-  ${SDL3_LINK_LIBS}
-)
+target_include_directories(runtime_systems PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_link_libraries(runtime_systems PUBLIC common_data Vulkan::Vulkan ${SDL3_LINK_LIBS})
 
-add_library(interaction_analysis STATIC
-  src/interaction_analysis/interaction_agents.cpp
+add_library(orchestration_entity STATIC
+  src/orchestration_entity/entity.cpp
 )
-target_include_directories(interaction_analysis PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(interaction_analysis PUBLIC common_data codec algorithm)
+target_include_directories(orchestration_entity PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_link_libraries(orchestration_entity PUBLIC common_data algorithm codec)
+
+add_library(entity_interaction STATIC
+  src/entity_interaction/entity_interaction_agents.cpp
+)
+target_include_directories(entity_interaction PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_link_libraries(entity_interaction PUBLIC common_data agents)
 
 add_library(agents STATIC
   src/agents/agents.cpp
+  src/agents/algorithm_pool.cpp
+  src/agents/physics_agent.cpp
 )
 target_include_directories(agents PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(agents PUBLIC common_data runtime_systems service_domains)
-
-add_library(app_orchestration STATIC
-  src/app_orchestration/app_frame_sync_glue.cpp
-)
-target_include_directories(app_orchestration PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(app_orchestration PUBLIC common_data agents interaction_analysis)
+target_link_libraries(agents PUBLIC common_data runtime_systems codec algorithm)
+target_link_libraries(agents PUBLIC orchestration_entity)
 
 set(SHADER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
 set(SHADER_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/shaders)
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/data)
-file(TO_CMAKE_PATH "${SHADER_OUTPUT_DIR}/mesh.vert.spv" SHADER_VERT_PATH)
-file(TO_CMAKE_PATH "${SHADER_OUTPUT_DIR}/mesh.frag.spv" SHADER_FRAG_PATH)
 file(TO_CMAKE_PATH "${SHADER_OUTPUT_DIR}/physics_convolution.comp.spv" SHADER_PHYSICS_CONV_PATH)
 file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/data/subdivided_triangle.mesh" MESH_PATH)
-
-add_custom_command(
-  OUTPUT ${SHADER_OUTPUT_DIR}/mesh.vert.spv
-  COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADER_OUTPUT_DIR}
-  COMMAND ${GLSLC} -o ${SHADER_OUTPUT_DIR}/mesh.vert.spv ${SHADER_DIR}/mesh.vert
-  DEPENDS ${SHADER_DIR}/mesh.vert
-  VERBATIM
-)
-
-add_custom_command(
-  OUTPUT ${SHADER_OUTPUT_DIR}/mesh.frag.spv
-  COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADER_OUTPUT_DIR}
-  COMMAND ${GLSLC} -o ${SHADER_OUTPUT_DIR}/mesh.frag.spv ${SHADER_DIR}/mesh.frag
-  DEPENDS ${SHADER_DIR}/mesh.frag
-  VERBATIM
-)
 
 add_custom_command(
   OUTPUT ${SHADER_OUTPUT_DIR}/physics_convolution.comp.spv
@@ -182,16 +155,7 @@ add_custom_command(
 )
 
 add_custom_target(shaders DEPENDS
-  ${SHADER_OUTPUT_DIR}/mesh.vert.spv
-  ${SHADER_OUTPUT_DIR}/mesh.frag.spv
   ${SHADER_OUTPUT_DIR}/physics_convolution.comp.spv
-)
-
-target_compile_definitions(service_domains PRIVATE
-  WIN32_LEAN_AND_MEAN
-  NOMINMAX
-  SHADER_VERT_PATH="${SHADER_VERT_PATH}"
-  SHADER_FRAG_PATH="${SHADER_FRAG_PATH}"
 )
 
 add_executable(min_vulkan_win32 WIN32
@@ -202,10 +166,8 @@ add_dependencies(min_vulkan_win32 shaders)
 
 target_include_directories(min_vulkan_win32 PRIVATE ${PROJECT_INCLUDE_DIRS})
 target_link_libraries(min_vulkan_win32 PRIVATE
-  app_orchestration
   agents
-  interaction_analysis
-  service_domains
+  entity_interaction
   runtime_systems
   codec
   algorithm

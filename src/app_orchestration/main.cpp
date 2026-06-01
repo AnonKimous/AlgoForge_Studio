@@ -1,9 +1,6 @@
-#include "algorithm/corotated_cpu_algorithm_contract.h"
-#include "algorithm/physics_convolution_gpu_algorithm_contract.h"
-#include "agents/agents.h"
-#include "app_orchestration/app_frame_sync_glue.h"
-#include "interaction_analysis/interaction_agents.h"
-#include "common_data/mesh.h"
+#include "entity_interaction/entity_interaction_agents.h"
+#include "algorithm_library/corotated_cpu_algorithm_contract.h"
+#include "algorithm_library/physics_convolution_gpu_algorithm_contract.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
@@ -11,16 +8,15 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 int main(int argc, char** argv) {
   try {
-    using agents::RenderAgent;
-    using agents::SceneViewAgent;
-    using agents::SceneViewFrameState;
-    using agents::WindowAgent;
-    using interaction_analysis::PhysAgent;
+    (void)argc;
+    (void)argv;
 
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
       throw std::runtime_error(std::string("SDL_Init failed: ") + SDL_GetError());
@@ -32,12 +28,16 @@ int main(int argc, char** argv) {
     std::filesystem::path mesh_path = MESH_PATH;
     Mesh mesh = LoadMeshFile(mesh_path.string());
 
-    WindowAgent window_agent;
-    window_agent.Init("Vulkan Mesh Vertex Editor", 1280, 720);
-    SceneViewAgent scene_view_agent;
-    RenderAgent render_agent;
-    render_agent.Init(window_agent.native_handle());
-    scene_view_agent.Init(mesh);
+    EntityInteractionRuntime runtime;
+    if (!runtime.Init(mesh, "Vulkan Mesh Vertex Editor", 1280, 720)) {
+      throw std::runtime_error("EntityInteractionRuntime init failed");
+    }
+
+    auto camera_entity_handle = runtime.LoadEntity(entity_interaction::CreateCameraEntityInfo(mesh));
+    if (camera_entity_handle == EntityInteractionRuntime::kInvalidEntityHandle) {
+      throw std::runtime_error("camera entity load failed");
+    }
+
     CreatePhysSolverInfo phys_solver_info{};
     phys_solver_info.solver_kind = PhysSolverKind::Cpu;
     phys_solver_info.algorithm_name = kCorotatedCpuAlgorithmName;
@@ -48,6 +48,7 @@ int main(int argc, char** argv) {
     if (phys_solver_info.solver_kind != PhysSolverKind::Cpu) {
       phys_solver_info.algorithm_name = kPhysicsConvolutionGpuAlgorithmName;
     }
+
     AlgorithmComplianceDescriptor algorithm_compliance_descriptor{};
     if (phys_solver_info.algorithm_name == kCorotatedCpuAlgorithmName) {
       algorithm_compliance_descriptor = CreateCorotatedCpuAlgorithmComplianceDescriptor(
@@ -57,36 +58,27 @@ int main(int argc, char** argv) {
       algorithm_compliance_descriptor = CreatePhysicsConvolutionGpuAlgorithmComplianceDescriptor(
         static_cast<uint32_t>(mesh.positions.size()));
     }
-    PhysAgent phys_agent;
-    phys_agent.Init(
-      phys_solver_info,
-      render_agent.compute_context(),
-      algorithm_compliance_descriptor);
 
-    auto start_time = std::chrono::steady_clock::now();
-    auto last_frame_time = start_time;
-    while (window_agent.Tick()) {
-      auto now = std::chrono::steady_clock::now();
-      float frame_dt = std::chrono::duration<float>(now - last_frame_time).count();
-      if (frame_dt < 0.0f) frame_dt = 0.0f;
-      if (frame_dt > 0.05f) frame_dt = 0.05f;
-      last_frame_time = now;
-      SceneViewFrameState scene_view_frame = scene_view_agent.Tick(render_agent.scene_view_bounds(), window_agent);
-      phys_agent.SetRunState(render_agent.phys_run_state());
-
-      phys_agent.Tick(mesh, scene_view_agent.viewport(), scene_view_agent.camera(), window_agent.input(), scene_view_frame.mouse_pixel, frame_dt);
-      RenderUiState ui = app_orchestration::AppFrameSyncGlue::BuildRenderUiStateFromRenderAgentAndPhysAgent(
-        render_agent,
-        phys_agent,
-        std::chrono::duration<float>(std::chrono::steady_clock::now() - start_time).count());
-
-      RenderFrameResult frame = render_agent.Tick(mesh, scene_view_agent.camera(), ui);
-      app_orchestration::AppFrameSyncGlue::ApplyRenderFrameResultOnPhysAgentAndMesh(frame, &phys_agent, &mesh);
+    CreateEntityInfo physics_entity_info{};
+    physics_entity_info.algorithm_name = phys_solver_info.algorithm_name;
+    physics_entity_info.mounted_agent_name = "physics_agent";
+    physics_entity_info.bound_resources = {"mesh", "physics_state", "compute_context"};
+    physics_entity_info.compliance_packages.push_back(OrchestrationEntityAlgorithmPackageHandle{
+      phys_solver_info.algorithm_name,
+      nullptr});
+    physics_entity_info.solver_config = phys_solver_info;
+    physics_entity_info.compliance_descriptor = algorithm_compliance_descriptor;
+    physics_entity_info.intervention_package = std::make_shared<OrchestrationEntityInterventionPackageHandle>();
+    physics_entity_info.intervention_package->package_name = "physics_intervention";
+    auto physics_entity_handle = runtime.LoadEntity(std::move(physics_entity_info));
+    if (physics_entity_handle == EntityInteractionRuntime::kInvalidEntityHandle) {
+      throw std::runtime_error("physics entity load failed");
     }
-    phys_agent.Destroy();
-    scene_view_agent.Destroy();
-    render_agent.Destroy();
-    window_agent.Destroy();
+
+    while (runtime.Tick()) {
+    }
+
+    runtime.Destroy();
     SDL_Quit();
     return 0;
   } catch (const std::exception& e) {

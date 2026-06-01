@@ -2,12 +2,18 @@
 
 ## Rule
 
-Each algorithm package must provide:
+This layer now only hosts the algorithm manager.
+
+Concrete algorithm packages live in `algorithm_library`.
+
+## Rule
+
+Each ordinary algorithm package must provide:
 
 1. Execution implementation.
 2. Algorithm compliance descriptor contract.
 
-## Current Algorithms
+## Current Ordinary Algorithms
 
 ### CPU
 
@@ -25,7 +31,7 @@ Each algorithm package must provide:
 
 1. Upper layer selects backend and algorithm name.
 2. Upper layer builds algorithm compliance descriptor from contract.
-3. PhysAgent builds request and dispatches pipeline.
+3. `AlgorithmMng` dispatches the pool.
 4. Algorithm consumes only data that matches its own contract.
 
 ## Package Abstraction
@@ -34,3 +40,5 @@ Each algorithm package must provide:
 
 - Complex packages may provide custom conversion/reflection and debug signal collection.
 - Simple packages can reuse default/common conversion behavior.
+- Intervention packages can also provide codec, agent, and algorithm-side hooks for higher-level algorithms.
+- Render-side packages now live under `orchestration_entity` and still present themselves as algorithm packages through the shared handle interface.

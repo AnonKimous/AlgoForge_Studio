@@ -2,6 +2,7 @@
 
 #include "algorithm_types.h"
 #include "codec/codec_manager.h"
+#include "common_data/interaction/interaction_signals.h"
 
 #include <memory>
 #include <string>
@@ -13,6 +14,11 @@ struct AlgorithmPackageDebugState {
   std::vector<codec::AdvancedAlgorithmDebugSignal> signals;
 };
 
+struct AlgorithmInterventionPackageDebugState {
+  std::vector<codec::AdvancedAlgorithmDebugSignal> signals;
+  AlgorithmToAgentSignal algorithm_to_agent_signal{};
+};
+
 class IAlgorithmPackageCodec {
  public:
   virtual ~IAlgorithmPackageCodec() = default;
@@ -21,6 +27,30 @@ class IAlgorithmPackageCodec {
   virtual bool BuildComplianceDescriptor(
     const codec::VolumeDescriptor& volume,
     AlgorithmComplianceDescriptor* out_descriptor) const = 0;
+
+  virtual bool BuildMeshCoderOutput(const Mesh& mesh, MeshCoderOutput* out_output) const {
+    (void)mesh;
+    (void)out_output;
+    return false;
+  }
+
+  virtual bool ReflectMeshCommon(const Mesh& mesh, MeshCommonReflection* out_reflection) const {
+    (void)mesh;
+    (void)out_reflection;
+    return false;
+  }
+
+  virtual bool BuildVolumeDescriptor(
+    const Mesh& mesh,
+    float mass,
+    Vec3 driving_dir,
+    VolumeDescriptor* out_volume) const {
+    (void)mesh;
+    (void)mass;
+    (void)driving_dir;
+    (void)out_volume;
+    return false;
+  }
 };
 
 class ISimpleAlgorithmPackageCodec : public IAlgorithmPackageCodec {
@@ -34,15 +64,54 @@ class IComplexAlgorithmPackageCodec : public IAlgorithmPackageCodec {
   virtual void CollectDebugState(AlgorithmPackageDebugState* debug_state) const = 0;
 };
 
+class IAlgorithmInterventionPackageCodec {
+ public:
+  virtual ~IAlgorithmInterventionPackageCodec() = default;
+
+  virtual bool BuildInterventionPacket(
+    const InteractionInterventionRequest& request,
+    IoBufferPacket* packet) const = 0;
+  virtual bool DecodeInterventionPacket(
+    const IoBufferPacket& packet,
+    InteractionInterventionRequest* request) const = 0;
+};
+
+class IAlgorithmInterventionPackageAgent {
+ public:
+  virtual ~IAlgorithmInterventionPackageAgent() = default;
+
+  virtual bool NeedsIntervention(const AgentToAlgorithmSignal& signal) const = 0;
+  virtual bool ShouldPause(const AgentToAlgorithmSignal& signal) const = 0;
+};
+
+class IAlgorithmInterventionPackageAlgorithm {
+ public:
+  virtual ~IAlgorithmInterventionPackageAlgorithm() = default;
+
+  virtual bool SupportsIntervention() const = 0;
+};
+
 struct AlgorithmPackageHandle {
   std::string package_name;
   std::shared_ptr<IAlgorithmPackageCodec> codec_hook;
+};
+
+struct AlgorithmInterventionPackageHandle {
+  std::string package_name;
+  std::shared_ptr<IAlgorithmInterventionPackageCodec> codec_hook;
+  std::shared_ptr<IAlgorithmInterventionPackageAgent> agent_hook;
+  std::shared_ptr<IAlgorithmInterventionPackageAlgorithm> algorithm_hook;
 };
 
 }  // namespace algorithm
 
 using algorithm::AlgorithmPackageDebugState;
 using algorithm::AlgorithmPackageHandle;
+using algorithm::AlgorithmInterventionPackageDebugState;
+using algorithm::AlgorithmInterventionPackageHandle;
+using algorithm::IAlgorithmInterventionPackageAgent;
+using algorithm::IAlgorithmInterventionPackageAlgorithm;
+using algorithm::IAlgorithmInterventionPackageCodec;
 using algorithm::IAlgorithmPackageCodec;
 using algorithm::IComplexAlgorithmPackageCodec;
 using algorithm::ISimpleAlgorithmPackageCodec;

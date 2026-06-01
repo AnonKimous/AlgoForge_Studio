@@ -15,9 +15,13 @@ The UI keeps only these simulation controls:
 ## Current High-Level Flow
 
 - `agents` own lifecycle and host-facing API wrappers.
-- `codec` converts resource + descriptor data into algorithm-compliance payloads and keeps the algorithm intervention channel.
-- `algorithm` executes CPU/GPU physics and exposes compliance contracts.
+- `agents` can also own shared algorithm pools, intervention requests, and agent<->algorithm signals.
+- `codec` converts resource + descriptor data into algorithm-compliance payloads and keeps the intervention packet codec.
+- `algorithm` is now the manager layer only.
+- `algorithm_library` hosts ordinary algorithm packages and ordinary execution contracts, including the camera package.
+- `orchestration_entity` hosts the organization entity that ties multi-layer work together.
 - `common_data` is the unified shared data layer.
+- `instance_interaction` is the instance interaction layer and depends on `agents` for simulation control.
 
 ## Build
 

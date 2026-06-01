@@ -75,6 +75,41 @@ bool _DecodeInterventionMode(int32_t raw_mode, AlgorithmInterventionMode* mode) 
   }
 }
 
+AlgorithmInterventionDescriptor _ToAlgorithmInterventionDescriptor(const InteractionInterventionRequest& request) {
+  AlgorithmInterventionDescriptor descriptor{};
+  descriptor.mode = static_cast<AlgorithmInterventionMode>(request.mode);
+  descriptor.velocity_magnitude = request.velocity_magnitude;
+  descriptor.velocity_delay_frames = request.velocity_delay_frames;
+  descriptor.velocity_duration_frames = request.velocity_duration_frames;
+  descriptor.force_magnitude = request.force_magnitude;
+  descriptor.force_delay_frames = request.force_delay_frames;
+  descriptor.force_duration_frames = request.force_duration_frames;
+  descriptor.source_module_name = request.source_module_name;
+  descriptor.source_buffer_id = request.source_buffer_id;
+  descriptor.target_module_name = request.target_module_name;
+  descriptor.target_buffer_id = request.target_buffer_id;
+  descriptor.lock_required = request.lock_required;
+  return descriptor;
+}
+
+InteractionInterventionRequest _ToInteractionInterventionRequest(const AlgorithmInterventionDescriptor& descriptor) {
+  InteractionInterventionRequest request{};
+  request.enabled = true;
+  request.mode = static_cast<InteractionInterventionMode>(descriptor.mode);
+  request.velocity_magnitude = descriptor.velocity_magnitude;
+  request.velocity_delay_frames = descriptor.velocity_delay_frames;
+  request.velocity_duration_frames = descriptor.velocity_duration_frames;
+  request.force_magnitude = descriptor.force_magnitude;
+  request.force_delay_frames = descriptor.force_delay_frames;
+  request.force_duration_frames = descriptor.force_duration_frames;
+  request.source_module_name = descriptor.source_module_name;
+  request.source_buffer_id = descriptor.source_buffer_id;
+  request.target_module_name = descriptor.target_module_name;
+  request.target_buffer_id = descriptor.target_buffer_id;
+  request.lock_required = descriptor.lock_required;
+  return request;
+}
+
 IoDataBufferEntry _CreateAlgorithmInterventionDataBufferEntry(const AlgorithmInterventionDescriptor& descriptor) {
   IoDataBufferEntry entry{};
   entry.name = "algorithm_intervention_data";
@@ -198,6 +233,20 @@ bool CodecManager::DecodeAlgorithmInterventionPacket(const IoBufferPacket& packe
     }
   }
   return false;
+}
+
+IoBufferPacket CodecManager::BuildAlgorithmInterventionPacket(const InteractionInterventionRequest& request) const {
+  return BuildAlgorithmInterventionPacket(_ToAlgorithmInterventionDescriptor(request));
+}
+
+bool CodecManager::DecodeAlgorithmInterventionPacket(const IoBufferPacket& packet, InteractionInterventionRequest* request) const {
+  if (!request) return false;
+  DecodedAlgorithmIntervention decoded{};
+  if (!DecodeAlgorithmInterventionPacket(packet, &decoded)) {
+    return false;
+  }
+  *request = _ToInteractionInterventionRequest(decoded);
+  return true;
 }
 
 }  // namespace codec

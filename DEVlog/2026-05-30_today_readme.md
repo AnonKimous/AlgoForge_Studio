@@ -87,3 +87,32 @@
 3. 继续理顺 `decomposition` 和 `algorithm` 的边界
 4. 再统一检查各层 namespace 和目录是否完全对应
 
+## 2026-06-01 追加记录
+
+今天继续做了两条主线的整理：
+
+### 1. 术语统一成 `entity`
+
+- 原来的 `instance_interaction` 统一改成了 `entity_interaction`
+- `InstanceInteractionRuntime` / `InstanceInteractionUiBridge` 改成了 `EntityInteractionRuntime` / `EntityInteractionUiBridge`
+- `main` 不再直接构造摄像机算法包，只通过 `entity_interaction::CreateCameraEntityInfo(mesh)` 创建实体
+- CMake 里的库目标也跟着改成了 `entity_interaction`
+
+### 2. 把 ImGui 接回运行时系统
+
+- 新增了 `runtime_systems/render/imgui_vulkan_runtime.h/.cpp`
+- 这一层负责 ImGui 的 context、SDL3 backend、Vulkan backend、每帧绘制和提交
+- `WindowAgent` 现在会自动初始化并驱动这个 runtime
+- `SdlWindow::ProcessEvents()` 恢复把 SDL 事件喂给 ImGui
+
+### 3. 当前对 ImGui 的定位
+
+- `runtime_systems` 只负责把 ImGui 跑起来
+- `entity_interaction` 负责决定“画什么”
+- 不同 `entity` 以后可以挂不同的 `debugUI`
+- `ImGui` 不直接认识 `algorithm` 或 `agent`
+
+### 4. 验证结果
+
+- `cmake --build build` 已通过
+- `min_vulkan_win32.exe` 已成功生成

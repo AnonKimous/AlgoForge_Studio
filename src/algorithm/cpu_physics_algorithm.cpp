@@ -490,6 +490,10 @@ bool CpuPhysicsAlgorithm_Run(const PhysicsAlgorithmRequest& request, PhysicsAlgo
   result->step_output = _BuildInitialOutput(request.input);
   _RunCorotated(request.input, &result->step_output);
   result->executed = true;
+  result->algorithm_to_agent_signal.intervention_needed =
+    request.agent_to_algorithm_signal.needs_intervention || request.intervention_request.enabled;
+  result->algorithm_to_agent_signal.pause_requested = request.agent_to_algorithm_signal.pause_requested;
+  result->algorithm_to_agent_signal.stop_requested = request.agent_to_algorithm_signal.stop_requested;
   return true;
 }
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common_data/mesh.h"
+#include "common_data/interaction/interaction_signals.h"
 #include "messaging/io_buffers.h"
 
 #include <array>
@@ -71,7 +72,7 @@ struct AlgorithmInterventionDescriptor {
   uint32_t force_duration_frames{1};
   std::string source_module_name{"agent"};
   uint32_t source_buffer_id{0u};
-  std::string target_module_name{"phys_agent"};
+  std::string target_module_name{"physics_agent"};
   uint32_t target_buffer_id{0u};
   bool lock_required{false};
 };
@@ -88,6 +89,8 @@ class CodecManager {
 
   IoBufferPacket BuildAlgorithmInterventionPacket(const AlgorithmInterventionDescriptor& descriptor) const;
   bool DecodeAlgorithmInterventionPacket(const IoBufferPacket& packet, DecodedAlgorithmIntervention* decoded) const;
+  IoBufferPacket BuildAlgorithmInterventionPacket(const InteractionInterventionRequest& request) const;
+  bool DecodeAlgorithmInterventionPacket(const IoBufferPacket& packet, InteractionInterventionRequest* request) const;
 };
 
 }  // namespace codec

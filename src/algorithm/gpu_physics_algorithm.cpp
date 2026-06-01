@@ -512,6 +512,10 @@ bool _RunConvolutionDemo(const PhysicsAlgorithmRequest& request, PhysicsAlgorith
     result->gpu_dispatch_debug.height = height;
     result->gpu_dispatch_debug.values = std::move(result_values);
     result->gpu_dispatch_debug.valid = true;
+    result->algorithm_to_agent_signal.intervention_needed =
+      request.agent_to_algorithm_signal.needs_intervention || request.intervention_request.enabled;
+    result->algorithm_to_agent_signal.pause_requested = request.agent_to_algorithm_signal.pause_requested;
+    result->algorithm_to_agent_signal.stop_requested = request.agent_to_algorithm_signal.stop_requested;
 
     vkFreeCommandBuffers(context.device, command_pool, 1, &command_buffer);
   } catch (...) {

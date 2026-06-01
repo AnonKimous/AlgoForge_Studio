@@ -1,5 +1,6 @@
 #pragma once
 
+#include "common_data/interaction/interaction_signals.h"
 #include "common_data/physics/physics_types.h"
 
 #include <vulkan/vulkan.h>
@@ -78,12 +79,15 @@ struct PhysicsAlgorithmRequest {
   PhysSolverConfig config{};
   PhysicsStepInput input{};
   VulkanComputeContextView compute_context{};
+  AgentToAlgorithmSignal agent_to_algorithm_signal{};
+  InteractionInterventionRequest intervention_request{};
 };
 
 struct PhysicsAlgorithmResult {
   bool executed{false};
   PhysicsStepOutput step_output{};
   GpuPhysicsDispatchDebugInfo gpu_dispatch_debug{};
+  AlgorithmToAgentSignal algorithm_to_agent_signal{};
 };
 
 }  // namespace algorithm

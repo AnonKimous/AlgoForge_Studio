@@ -1,17 +1,62 @@
 #include "agents.h"
 
+#include "codec/codec_manager.h"
+
 namespace agents {
+
+void AgentAlgorithmRuntime::Init(
+  const PhysSolverConfig& config,
+  const VulkanComputeContextView& compute_context,
+  const AlgorithmComplianceDescriptor& compliance_descriptor) {
+  pool_.Init(config, compute_context, compliance_descriptor);
+}
+
+bool AgentAlgorithmRuntime::Run(const PhysicsAlgorithmRequest& request, PhysicsAlgorithmResult* result) const {
+  return pool_.Run(request, result);
+}
+
+void AgentAlgorithmRuntime::SetInterventionPackage(std::shared_ptr<algorithm::AlgorithmInterventionPackageHandle> package) {
+  pool_.SetInterventionPackage(std::move(package));
+}
+
+void AgentAlgorithmRuntime::ApplyInterventionRequest(const InteractionInterventionRequest& request) {
+  intervention_request_ = request;
+  algorithm_to_agent_signal_.intervention_applied = false;
+  algorithm_to_agent_signal_.intervention_needed = request.enabled;
+
+  CodecManager codec{};
+  IoBufferPacket packet = codec.BuildAlgorithmInterventionPacket(request);
+  InteractionInterventionRequest decoded{};
+  if (codec.DecodeAlgorithmInterventionPacket(packet, &decoded)) {
+    decoded.enabled = request.enabled;
+    intervention_request_ = decoded;
+    algorithm_to_agent_signal_.intervention_applied = request.enabled;
+  }
+}
 
 bool WindowAgent::Init(const char* title, int width, int height) {
   window_ = std::make_unique<SdlWindow>(title, width, height);
+  imgui_runtime_ = std::make_unique<runtime_systems::ImGuiVulkanRuntime>();
+  if (!imgui_runtime_->Init(window_->native_handle().window, title ? title : "Entity Debug UI")) {
+    imgui_runtime_.reset();
+    window_.reset();
+    return false;
+  }
   return true;
 }
 
 bool WindowAgent::Tick() {
-  return window_ && window_->ProcessEvents();
+  if (!window_ || !window_->ProcessEvents()) {
+    return false;
+  }
+  return !imgui_runtime_ || imgui_runtime_->Tick(window_->native_handle().window);
 }
 
 void WindowAgent::Destroy() {
+  if (imgui_runtime_) {
+    imgui_runtime_->Destroy();
+    imgui_runtime_.reset();
+  }
   window_.reset();
 }
 
@@ -36,61 +81,36 @@ Vec2 WindowAgent::MousePosition() const {
   return window_ ? window_->MousePosition() : Vec2{};
 }
 
-void SceneViewAgent::Init(const Mesh& mesh) {
-  camera_.FitToMesh(mesh);
-  viewport_ = ViewportTransform{};
-}
-
-SceneViewFrameState SceneViewAgent::Tick(const SceneViewBounds& scene_bounds, const WindowAgent& window_agent) {
-  SceneViewFrameState frame{};
-  frame.mouse_pixel = window_agent.MousePosition();
-  if (scene_bounds.valid) {
-    frame.mouse_pixel.x -= scene_bounds.x;
-    frame.mouse_pixel.y -= scene_bounds.y;
-    viewport_.SetSize(static_cast<int>(scene_bounds.width), static_cast<int>(scene_bounds.height));
-    camera_.SetViewportSize(static_cast<int>(scene_bounds.width), static_cast<int>(scene_bounds.height));
-  } else {
-    viewport_.SetSize(window_agent.width(), window_agent.height());
-  }
-  return frame;
-}
-
-void SceneViewAgent::Destroy() {
-  camera_ = SceneCamera{};
-  viewport_ = ViewportTransform{};
-}
-
 bool RenderAgent::Init(const WindowHandle& window_handle) {
-  renderer_ = std::make_unique<VulkanRenderer>(window_handle);
+  (void)window_handle;
   return true;
 }
 
-RenderFrameResult RenderAgent::Tick(const Mesh& mesh, const SceneCamera& camera, const RenderUiState& ui_state) {
-  return renderer_->Draw(mesh, camera, ui_state);
+InteractionUiAction RenderAgent::Tick(const Mesh& mesh, const InteractionUiState& ui_state) {
+  (void)mesh;
+  InteractionUiAction action{};
+  action.mode = mode_;
+  action.phys_run_state = phys_run_state_;
+  action.agent_to_algorithm_signal = ui_state.agent_to_algorithm_signal;
+  action.intervention_request = ui_state.intervention_request;
+  return action;
 }
 
 void RenderAgent::Destroy() {
-  renderer_.reset();
+  mode_ = InteractionMode::Edit;
+  phys_run_state_ = PhysRunState::Pause;
 }
 
 InteractionMode RenderAgent::mode() const {
-  return renderer_ ? renderer_->mode() : InteractionMode::Edit;
+  return mode_;
 }
 
 PhysRunState RenderAgent::phys_run_state() const {
-  return renderer_ ? renderer_->phys_run_state() : PhysRunState::Pause;
+  return phys_run_state_;
 }
 
 void RenderAgent::SetPhysRunState(PhysRunState state) {
-  if (renderer_) renderer_->SetPhysRunState(state);
-}
-
-SceneViewBounds RenderAgent::scene_view_bounds() const {
-  return renderer_ ? renderer_->scene_view_bounds() : SceneViewBounds{};
-}
-
-VulkanComputeContextView RenderAgent::compute_context() const {
-  return renderer_ ? renderer_->compute_context() : VulkanComputeContextView{};
+  phys_run_state_ = state;
 }
 
 }  // namespace agents
