@@ -3,16 +3,9 @@
 #include "algorithm_library/camera_algorithm_package.h"
 #include "algorithm_library/corotated_cpu_algorithm_contract.h"
 #include "algorithm_library/physics_convolution_gpu_algorithm_contract.h"
-#include "algorithm_library/random_vertex_motion_algorithm_contract.h"
 
 #include <algorithm>
 #include <chrono>
-#include <cfloat>
-#include <array>
-#include <filesystem>
-#include <imgui.h>
-#include <cstdio>
-#include <iterator>
 #include <utility>
 
 namespace entity_interaction {
@@ -42,8 +35,6 @@ const char* ResolveMountedAgentNameForPreset(int preset_index) {
     case 1:
     case 2:
       return "physics_agent";
-    case 3:
-      return "render_physics_agent";
     default:
       return "physics_agent";
   }
@@ -64,7 +55,7 @@ CreateEntityInfo BuildCameraEntityInfoFromMesh(const Mesh& mesh, const std::stri
   volume.driving_dir = Vec3{0.0f, 0.0f, 1.0f};
 
   AlgorithmComplianceDescriptor compliance_descriptor{};
-  codec->BuildComplianceDescriptor(volume, &compliance_descriptor);
+  codec->BuildContainerDescriptor(volume, &compliance_descriptor);
   info.compliance_packages.push_back(OrchestrationEntityAlgorithmPackageHandle{
     kCameraAlgorithmName,
     codec});
@@ -99,10 +90,10 @@ CreateEntityInfo BuildPhysicsEntityInfoFromMesh(
   info.solver_config = solver_config;
 
   if (solver_kind == PhysSolverKind::Gpu) {
-    info.compliance_descriptor = CreatePhysicsConvolutionGpuAlgorithmComplianceDescriptor(
+    info.compliance_descriptor = CreatePhysicsConvolutionGpuAlgorithmContainerDescriptor(
       static_cast<uint32_t>(mesh.positions.size()));
   } else {
-    info.compliance_descriptor = CreateCorotatedCpuAlgorithmComplianceDescriptor(
+    info.compliance_descriptor = CreateCorotatedCpuAlgorithmContainerDescriptor(
       static_cast<uint32_t>(mesh.positions.size()),
       static_cast<uint32_t>(mesh.triangles.size()));
   }
@@ -111,31 +102,6 @@ CreateEntityInfo BuildPhysicsEntityInfoFromMesh(
     nullptr});
   info.intervention_package = std::make_shared<OrchestrationEntityInterventionPackageHandle>();
   info.intervention_package->package_name = "physics_intervention";
-  return info;
-}
-
-CreateEntityInfo BuildRandomVertexMotionEntityInfoFromMesh(
-  const Mesh& mesh,
-  float motion_radius,
-  const std::string& mounted_agent_name,
-  const std::string& instance_name) {
-  CreateEntityInfo info{};
-  info.instance_name = instance_name.empty() ? "random_vertex_motion_instance" : instance_name;
-  info.algorithm_name = kRandomVertexMotionAlgorithmName;
-  info.mounted_agent_name = mounted_agent_name.empty() ? "render_physics_agent" : mounted_agent_name;
-  info.bound_resources = {"mesh", "vertex_positions", "triangle_edges", "motion_radius"};
-  info.solver_config.solver_kind = PhysSolverKind::Cpu;
-  info.solver_config.algorithm_name = kRandomVertexMotionAlgorithmName;
-  info.solver_config.run_algorithm_on_init = true;
-  info.compliance_descriptor = CreateRandomVertexMotionAlgorithmComplianceDescriptor(mesh, motion_radius);
-  info.compliance_packages.push_back(OrchestrationEntityAlgorithmPackageHandle{
-    kRandomVertexMotionAlgorithmName,
-    nullptr});
-  info.intervention_package = std::make_shared<OrchestrationEntityInterventionPackageHandle>();
-  info.intervention_package->package_name = "random_vertex_motion_intervention";
-  info.intervention_package->codec_hook = nullptr;
-  info.intervention_package->agent_hook = nullptr;
-  info.intervention_package->algorithm_hook = nullptr;
   return info;
 }
 
@@ -184,31 +150,19 @@ CreateEntityInfo CreatePhysicsEntityInfo(
   const Mesh& mesh,
   PhysSolverKind solver_kind,
   const std::string& algorithm_name,
-  const std::string& mounted_agent_name) {
-  return BuildPhysicsEntityInfoFromMesh(mesh, solver_kind, algorithm_name, std::string{}, mounted_agent_name, "");
-}
-
-CreateEntityInfo CreateRandomVertexMotionEntityInfo(
-  const Mesh& mesh,
-  float motion_radius,
-  const std::string& mounted_agent_name) {
-  return BuildRandomVertexMotionEntityInfoFromMesh(mesh, motion_radius, mounted_agent_name, "");
+  const std::string& mounted_agent_name,
+  const std::string& gpu_shader_path) {
+  return BuildPhysicsEntityInfoFromMesh(mesh, solver_kind, algorithm_name, gpu_shader_path, mounted_agent_name, "");
 }
 
 InteractionUiState EntityInteractionUiBridge::BuildInteractionUiStateFromRenderAgentAndPhysicsAgent(
   const agents::RenderAgent& render_agent,
   const agents::PhysicsAgent& physics_agent,
   float animation_time) {
+  (void)physics_agent;
   InteractionUiState ui{};
   ui.mode = render_agent.mode();
   ui.phys_run_state = render_agent.phys_run_state();
-  ui.phys_solver_kind = physics_agent.solver_kind();
-  ui.phys_algorithm_name = physics_agent.algorithm_name();
-  ui.phys_current_frame_index = physics_agent.current_frame_index();
-  ui.total_velocities = physics_agent.total_velocities();
-  ui.linear_velocities = physics_agent.linear_velocities();
-  ui.angular_velocities = physics_agent.angular_velocities();
-  ui.gpu_dispatch_debug = physics_agent.gpu_dispatch_debug_info();
   ui.agent_to_algorithm_signal = physics_agent.agent_to_algorithm_signal();
   ui.algorithm_to_agent_signal = physics_agent.algorithm_to_agent_signal();
   ui.intervention_request = physics_agent.intervention_request();
@@ -223,7 +177,17 @@ void EntityInteractionUiBridge::ApplyInteractionUiActionOnPhysicsAgentAndMesh(
   if (!physics_agent || !mesh) {
     return;
   }
-  physics_agent->ApplyUiAction(action, *mesh);
+  physics_agent->SetRunState(action.phys_run_state);
+  physics_agent->SetAgentToAlgorithmSignal(action.agent_to_algorithm_signal);
+  if (action.intervention_request.enabled) {
+    physics_agent->ApplyInterventionRequest(action.intervention_request);
+  }
+  if (action.phys_reset_requested) {
+    physics_agent->Reset(*mesh);
+  }
+  if (action.phys_step_requested) {
+    physics_agent->StepOnce(*mesh);
+  }
 }
 
 bool EntityInteractionRuntime::Init(const Mesh& mesh, const char* window_title, int width, int height) {
@@ -232,9 +196,7 @@ bool EntityInteractionRuntime::Init(const Mesh& mesh, const char* window_title, 
   if (!initialized_) {
     return false;
   }
-  window_agent_.SetDrawCallback([this]() { DrawInstanceComposerUi(); });
   mesh_source_path_.clear();
-  ResetInstanceDraftState();
   ui_status_message_ = "Mesh is prefilled. Create the shared entity to start work.";
   start_time_ = std::chrono::steady_clock::now();
   last_frame_time_ = start_time_;
@@ -251,10 +213,8 @@ bool EntityInteractionRuntime::LoadMeshFromFile(const std::string& path, std::st
     render_entity_ready_ = false;
     physics_entity_ready_ = false;
     entity_slots_dirty_ = false;
-    selected_entity_slot_ = static_cast<std::size_t>(-1);
     render_agent_.Destroy();
     physics_agent_.Destroy();
-    ResetInstanceDraftState();
     ui_status_message_ = "Loaded mesh: " + path;
     return true;
   } catch (const std::exception& error) {
@@ -266,15 +226,9 @@ bool EntityInteractionRuntime::LoadMeshFromFile(const std::string& path, std::st
   }
 }
 
-void EntityInteractionRuntime::ResetInstanceDraftState() {
-  std::snprintf(instance_draft_.instance_name, sizeof(instance_draft_.instance_name), "%s", "entity_0");
-  std::snprintf(instance_draft_.algorithm_name, sizeof(instance_draft_.algorithm_name), "%s", kCorotatedCpuAlgorithmName);
-  std::snprintf(instance_draft_.mesh_path, sizeof(instance_draft_.mesh_path), "%s", mesh_source_path_.c_str());
-  instance_draft_.gpu_shader_path[0] = '\0';
-  instance_draft_.motion_radius = 0.15f;
-  instance_draft_.preset_index = 3;
-  instance_draft_.solver_kind_index = 0;
-  instance_draft_.load_mesh_before_create = true;
+void EntityInteractionRuntime::SetDrawCallback(std::function<void()> draw_callback) {
+  draw_callback_ = std::move(draw_callback);
+  window_agent_.SetDrawCallback(draw_callback_);
 }
 
 bool EntityInteractionRuntime::LoadMeshAndResetBindings(const std::string& path, std::string* status_message) {
@@ -289,235 +243,6 @@ bool EntityInteractionRuntime::LoadMeshAndResetBindings(const std::string& path,
     *status_message = "Loaded mesh and cleared existing entities.";
   }
   return true;
-}
-
-bool EntityInteractionRuntime::CreateEntityFromDraft(std::string* status_message) {
-  std::string mesh_path = instance_draft_.mesh_path;
-  const bool should_load_mesh = instance_draft_.load_mesh_before_create && !mesh_path.empty() && mesh_path != mesh_source_path_;
-  if (should_load_mesh) {
-    if (!LoadMeshAndResetBindings(mesh_path, status_message)) {
-      return false;
-    }
-  }
-
-  CreateEntityInfo info{};
-  const std::string instance_name = instance_draft_.instance_name;
-  const std::string algorithm_name = instance_draft_.algorithm_name;
-  const int preset_index = std::clamp(instance_draft_.preset_index, 0, 3);
-  PhysSolverConfig draft_solver{};
-  draft_solver.solver_kind = instance_draft_.solver_kind_index == 1 ? PhysSolverKind::Gpu : PhysSolverKind::Cpu;
-  draft_solver.algorithm_name = algorithm_name;
-  const PhysSolverKind solver_kind = InferSolverKind(draft_solver, algorithm_name);
-  if (solver_kind == PhysSolverKind::Gpu && std::string(instance_draft_.gpu_shader_path).empty()) {
-    if (status_message) {
-      *status_message = "GPU preset needs a shader path.";
-    }
-    return false;
-  }
-
-  if (preset_index == 0) {
-    info = BuildCameraEntityInfoFromMesh(mesh_, ResolveMountedAgentNameForPreset(preset_index), instance_name);
-    const EntityHandle handle = LoadEntity(std::move(info));
-    if (handle == kInvalidEntityHandle) {
-      if (status_message) {
-      *status_message = "Failed to create camera entity.";
-      }
-      return false;
-    }
-    if (status_message) {
-      *status_message = "Created camera entity slot " + std::to_string(handle);
-    }
-    return true;
-  }
-
-  if (preset_index == 3) {
-    info = BuildRandomVertexMotionEntityInfoFromMesh(
-      mesh_,
-      instance_draft_.motion_radius,
-      ResolveMountedAgentNameForPreset(preset_index),
-      instance_name);
-    const EntityHandle handle = LoadEntity(std::move(info));
-    if (handle == kInvalidEntityHandle) {
-      if (status_message) {
-        *status_message = "Failed to create shared random-motion entity.";
-      }
-      return false;
-    }
-    if (status_message) {
-      *status_message = "Created shared random-motion entity slot " + std::to_string(handle) + " and started it.";
-    }
-    return true;
-  }
-
-  {
-    info = BuildPhysicsEntityInfoFromMesh(
-      mesh_,
-      solver_kind,
-      algorithm_name,
-      instance_draft_.gpu_shader_path,
-      ResolveMountedAgentNameForPreset(preset_index),
-      instance_name);
-    const EntityHandle handle = LoadEntity(std::move(info));
-    if (handle == kInvalidEntityHandle) {
-      if (status_message) {
-        *status_message = "Failed to create entity.";
-      }
-      return false;
-    }
-    if (status_message) {
-      *status_message = "Created entity slot " + std::to_string(handle);
-    }
-    return true;
-  }
-}
-
-void EntityInteractionRuntime::DrawLoadedEntityListUi() {
-  ImGui::Text("Loaded entities: %zu", entity_slots_.size());
-  ImGui::Separator();
-
-  if (ImGui::BeginListBox("##entity_list", ImVec2(-FLT_MIN, 220.0f))) {
-    for (std::size_t index = 0; index < entity_slots_.size(); ++index) {
-      const auto& entity = entity_slots_[index];
-      if (!entity) {
-        continue;
-      }
-
-      std::string label = "[" + std::to_string(index) + "] ";
-      label += entity->instance_name().empty() ? entity->algorithm_name() : entity->instance_name();
-      label += " | ";
-      label += entity->mounted_agent_name();
-      if (IsSharedMountedAgentName(entity->mounted_agent_name())) {
-        label += " [shared]";
-      }
-      label += " | ";
-      label += entity->algorithm_name();
-
-      const bool selected = (selected_entity_slot_ == index);
-      if (ImGui::Selectable(label.c_str(), selected)) {
-        selected_entity_slot_ = index;
-      }
-    }
-    ImGui::EndListBox();
-  }
-
-  const bool has_selected = selected_entity_slot_ < entity_slots_.size() && entity_slots_[selected_entity_slot_];
-  if (has_selected) {
-    const auto& entity = entity_slots_[selected_entity_slot_];
-    ImGui::Text("Selected: %s", entity->instance_name().empty() ? entity->algorithm_name().c_str() : entity->instance_name().c_str());
-    ImGui::Text("Agent: %s", entity->mounted_agent_name().c_str());
-    if (IsSharedMountedAgentName(entity->mounted_agent_name())) {
-      ImGui::TextUnformatted("Role: shared render + physics");
-    }
-    ImGui::Text("Algorithm: %s", entity->algorithm_name().c_str());
-    if (ImGui::Button("Unload Selected")) {
-      UnloadEntity(selected_entity_slot_);
-      selected_entity_slot_ = static_cast<std::size_t>(-1);
-    }
-  } else {
-    ImGui::TextUnformatted("No entity selected.");
-  }
-}
-
-void EntityInteractionRuntime::DrawInstanceDraftUi() {
-  static constexpr const char* kSolverLabels[] = {
-    "CPU",
-    "GPU",
-  };
-  static constexpr float kRandomMotionRadiusMax = 100.0f;
-
-  ImGui::InputText("Entity Name", instance_draft_.instance_name, sizeof(instance_draft_.instance_name));
-  ImGui::InputText("Mesh File", instance_draft_.mesh_path, sizeof(instance_draft_.mesh_path));
-  if (instance_draft_.motion_radius <= 0.0f) {
-    instance_draft_.motion_radius = 0.15f;
-  }
-  ImGui::SliderFloat("Motion Radius", &instance_draft_.motion_radius, 0.01f, kRandomMotionRadiusMax, "%.3f");
-  ImGui::Text("Random drift radius range: 0.01 .. %.0f", kRandomMotionRadiusMax);
-
-  if (ImGui::Button("Create and Run Shared Entity")) {
-    instance_draft_.preset_index = 3;
-    std::snprintf(instance_draft_.algorithm_name, sizeof(instance_draft_.algorithm_name), "%s", kRandomVertexMotionAlgorithmName);
-    std::string message;
-    if (CreateEntityFromDraft(&message)) {
-      ui_status_message_ = message;
-    } else {
-      ui_status_message_ = message.empty() ? "Failed to create shared entity." : message;
-    }
-  }
-
-  ImGui::TextUnformatted("This preset creates one entity that mounts both render and physics roles, then starts it on the next tick.");
-
-  if (ImGui::CollapsingHeader("Advanced Presets")) {
-    ImGui::Combo("Solver", &instance_draft_.solver_kind_index, kSolverLabels, static_cast<int>(std::size(kSolverLabels)));
-    if (instance_draft_.solver_kind_index == 1) {
-      ImGui::InputText("GPU Shader", instance_draft_.gpu_shader_path, sizeof(instance_draft_.gpu_shader_path));
-    }
-
-    if (ImGui::Button("Create Camera Entity")) {
-      instance_draft_.preset_index = 0;
-      std::snprintf(instance_draft_.algorithm_name, sizeof(instance_draft_.algorithm_name), "%s", kCameraAlgorithmName);
-      std::string message;
-      if (CreateEntityFromDraft(&message)) {
-        ui_status_message_ = message;
-      } else {
-        ui_status_message_ = message.empty() ? "Failed to create camera entity." : message;
-      }
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Create Physics Entity")) {
-      instance_draft_.preset_index = instance_draft_.solver_kind_index == 1 ? 2 : 1;
-      std::snprintf(
-        instance_draft_.algorithm_name,
-        sizeof(instance_draft_.algorithm_name),
-        "%s",
-        instance_draft_.solver_kind_index == 1 ? kPhysicsConvolutionGpuAlgorithmName : kCorotatedCpuAlgorithmName);
-      std::string message;
-      if (CreateEntityFromDraft(&message)) {
-        ui_status_message_ = message;
-      } else {
-        ui_status_message_ = message.empty() ? "Failed to create physics entity." : message;
-      }
-    }
-  }
-
-  if (ImGui::Button("Load Mesh")) {
-    std::string message;
-    if (LoadMeshAndResetBindings(instance_draft_.mesh_path, &message)) {
-      ui_status_message_ = message;
-    } else {
-      ui_status_message_ = message.empty() ? "Failed to load mesh." : message;
-    }
-  }
-  ImGui::SameLine();
-  if (ImGui::Button("Reset Entity Form")) {
-    ResetInstanceDraftState();
-      ui_status_message_ = "Entity form reset.";
-  }
-}
-
-void EntityInteractionRuntime::DrawInstanceComposerUi() {
-  const auto& vertex_positions = physics_entity_ready_ ? physics_agent_.vertex_positions() : mesh_.positions;
-  agents::DrawVertexArrayOverlay(vertex_positions, mesh_.edges, mesh_.triangles);
-  ImGui::Begin("Entity Interaction");
-  ImGui::Text("Mesh source: %s", mesh_source_path_.empty() ? "<in-memory>" : mesh_source_path_.c_str());
-  ImGui::TextUnformatted("Rendering the algorithm vertex array, not the source mesh object.");
-  ImGui::Text("Status: %s", ui_status_message_.empty() ? "ready" : ui_status_message_.c_str());
-  ImGui::Separator();
-
-  if (ImGui::CollapsingHeader("Create Entity", ImGuiTreeNodeFlags_DefaultOpen)) {
-    DrawInstanceDraftUi();
-  }
-
-  if (ImGui::CollapsingHeader("Loaded Entities", ImGuiTreeNodeFlags_DefaultOpen)) {
-    DrawLoadedEntityListUi();
-  }
-
-  ImGui::Separator();
-  ImGui::Text("Active render entity: %s", render_entity_ready_ ? render_entity_->instance_name().c_str() : "<none>");
-  ImGui::Text("Active physics entity: %s", physics_entity_ready_ ? physics_entity_->instance_name().c_str() : "<none>");
-  if (render_entity_ready_ && physics_entity_ready_ && render_entity_ == physics_entity_) {
-    ImGui::Text("Active shared entity: %s", render_entity_->instance_name().c_str());
-  }
-  ImGui::End();
 }
 
 MountedAgentKind EntityInteractionRuntime::ClassifyMountedAgent(
@@ -589,6 +314,21 @@ bool EntityInteractionRuntime::MountPhysicsEntity(const std::shared_ptr<orchestr
   return true;
 }
 
+const std::vector<Vec3>& EntityInteractionRuntime::active_vertex_positions() const {
+  return mesh_.positions;
+}
+
+void EntityInteractionRuntime::SetUiStatusMessage(std::string message) {
+  ui_status_message_ = std::move(message);
+}
+
+InteractionUiState EntityInteractionRuntime::BuildInteractionUiState(float animation_time) const {
+  return EntityInteractionUiBridge::BuildInteractionUiStateFromRenderAgentAndPhysicsAgent(
+    render_agent_,
+    physics_agent_,
+    animation_time);
+}
+
 EntityInteractionRuntime::EntityHandle EntityInteractionRuntime::LoadEntity(CreateEntityInfo info) {
   auto entity = std::make_shared<orchestration_entity::OrchestrationEntity>();
   if (!orchestration_entity_init(entity.get(), std::move(info))) {
@@ -598,7 +338,6 @@ EntityInteractionRuntime::EntityHandle EntityInteractionRuntime::LoadEntity(Crea
   const EntityHandle handle = entity_slots_.size();
   entity_slots_.push_back(entity);
   entity_slots_dirty_ = true;
-  selected_entity_slot_ = handle;
   return handle;
 }
 
@@ -617,13 +356,6 @@ void EntityInteractionRuntime::RefreshBindingsFromEntitySlots() {
 
   MountRenderEntity(desired_render);
   MountPhysicsEntity(desired_physics);
-}
-
-InteractionUiState EntityInteractionRuntime::BuildInteractionUiState(float animation_time) const {
-  return EntityInteractionUiBridge::BuildInteractionUiStateFromRenderAgentAndPhysicsAgent(
-    render_agent_,
-    physics_agent_,
-    animation_time);
 }
 
 bool EntityInteractionRuntime::Tick() {
@@ -680,9 +412,8 @@ void EntityInteractionRuntime::Destroy() {
   render_entity_ready_ = false;
   physics_entity_ready_ = false;
   entity_slots_dirty_ = false;
-  selected_entity_slot_ = static_cast<std::size_t>(-1);
   ui_status_message_.clear();
-  ResetInstanceDraftState();
+  draw_callback_ = {};
   start_time_ = {};
   last_frame_time_ = {};
 }

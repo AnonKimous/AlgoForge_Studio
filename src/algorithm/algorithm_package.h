@@ -6,9 +6,23 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace algorithm {
+
+struct AlgorithmReadableReflection {
+  std::string algorithm_name;
+  std::vector<std::pair<std::string, std::string>> fields;
+  bool valid{false};
+};
+
+struct AlgorithmDescriptorShapeReflection {
+  std::string algorithm_name;
+  std::vector<std::string> required_resources;
+  AlgorithmContainerDescriptor descriptor_shape{};
+  bool valid{false};
+};
 
 struct AlgorithmPackageDebugState {
   std::vector<codec::AdvancedAlgorithmDebugSignal> signals;
@@ -24,9 +38,15 @@ class IAlgorithmPackageCodec {
   virtual ~IAlgorithmPackageCodec() = default;
 
   // Complex algorithms can override conversion/reflection with custom logic.
-  virtual bool BuildComplianceDescriptor(
+  virtual bool BuildContainerDescriptor(
     const codec::VolumeDescriptor& volume,
-    AlgorithmComplianceDescriptor* out_descriptor) const = 0;
+    AlgorithmContainerDescriptor* out_descriptor) const = 0;
+
+  // Describe the runtime resources the algorithm expects the upper layer to bind.
+  virtual bool BuildBoundResources(std::vector<std::string>* out_resources) const {
+    (void)out_resources;
+    return false;
+  }
 
   virtual bool BuildMeshCoderOutput(const Mesh& mesh, MeshCoderOutput* out_output) const {
     (void)mesh;
@@ -36,6 +56,26 @@ class IAlgorithmPackageCodec {
 
   virtual bool ReflectMeshCommon(const Mesh& mesh, MeshCommonReflection* out_reflection) const {
     (void)mesh;
+    (void)out_reflection;
+    return false;
+  }
+
+  // Reflect the container into a human-friendly summary for upper layers.
+  virtual bool ReflectReadableParameters(
+    const AlgorithmContainerDescriptor& container_descriptor,
+    AlgorithmReadableReflection* out_reflection) const {
+    (void)container_descriptor;
+    (void)out_reflection;
+    return false;
+  }
+
+  // Reflect the runtime resource list and the descriptor shape in one payload.
+  virtual bool ReflectDescriptorShape(
+    const AlgorithmContainerDescriptor& container_descriptor,
+    const std::vector<std::string>& bound_resources,
+    AlgorithmDescriptorShapeReflection* out_reflection) const {
+    (void)container_descriptor;
+    (void)bound_resources;
     (void)out_reflection;
     return false;
   }
@@ -107,8 +147,10 @@ struct AlgorithmInterventionPackageHandle {
 
 using algorithm::AlgorithmPackageDebugState;
 using algorithm::AlgorithmPackageHandle;
+using algorithm::AlgorithmDescriptorShapeReflection;
 using algorithm::AlgorithmInterventionPackageDebugState;
 using algorithm::AlgorithmInterventionPackageHandle;
+using algorithm::AlgorithmReadableReflection;
 using algorithm::IAlgorithmInterventionPackageAgent;
 using algorithm::IAlgorithmInterventionPackageAlgorithm;
 using algorithm::IAlgorithmInterventionPackageCodec;

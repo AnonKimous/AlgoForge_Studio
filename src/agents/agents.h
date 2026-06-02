@@ -23,7 +23,7 @@ class AgentAlgorithmRuntime {
   void Init(
     const PhysSolverConfig& config,
     const VulkanComputeContextView& compute_context,
-    const AlgorithmComplianceDescriptor& compliance_descriptor);
+    const AlgorithmContainerDescriptor& container_descriptor);
   bool Run(const PhysicsAlgorithmRequest& request, PhysicsAlgorithmResult* result) const;
   void SetInterventionPackage(std::shared_ptr<algorithm::AlgorithmInterventionPackageHandle> package);
 
@@ -33,7 +33,7 @@ class AgentAlgorithmRuntime {
 
   const PhysSolverConfig& config() const { return pool_.config(); }
   const VulkanComputeContextView& compute_context() const { return pool_.compute_context(); }
-  const AlgorithmComplianceDescriptor& compliance_descriptor() const { return pool_.compliance_descriptor(); }
+  const AlgorithmContainerDescriptor& container_descriptor() const { return pool_.container_descriptor(); }
   const std::shared_ptr<algorithm::AlgorithmInterventionPackageHandle>& intervention_package() const { return pool_.intervention_package(); }
   const AgentToAlgorithmSignal& agent_to_algorithm_signal() const { return agent_to_algorithm_signal_; }
   const AlgorithmToAgentSignal& algorithm_to_agent_signal() const { return algorithm_to_agent_signal_; }

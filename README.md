@@ -4,7 +4,7 @@ This project is a layered Vulkan + SDL3 sandbox for entity-driven physics and re
 
 ## Runtime Model
 
-- `entity_interaction` is the main runtime UI.
+- `editor_ui` is the main runtime UI.
 - An `entity` is the unit that carries algorithm packages, agent bindings, solver metadata, and intervention state.
 - A shared entity can mount both render and physics roles.
 - The current default workflow is: load mesh -> keep the draft prefilled -> create the shared entity -> run immediately.
@@ -25,13 +25,13 @@ This project is a layered Vulkan + SDL3 sandbox for entity-driven physics and re
 - `codec` encodes and decodes compliance / intervention payloads.
 - `orchestration_entity` describes the instance-level composition of ordered packages, aliases, and container routing.
 - `agents` owns the runtime wrappers for render and physics.
-- `entity_interaction` provides the manual entity composer and live debug UI.
+- `entity_interaction` provides the manual entity composer backend.
+- `editor_ui` provides the manual entity composer and live debug UI.
 - `app_orchestration` is the executable entry point.
 
 ## Entity Workflow
 
-- The UI creates entities from the active mesh.
-- The shared random-motion preset binds one entity to both render and physics.
+- The editor UI creates entities from the active mesh.
 - Physics owns the evolving vertex array.
 - Rendering reads the current vertex array and the mesh topology arrays to draw points and edges.
 - The default preset is prefilled so the user only needs to create the entity to start work.

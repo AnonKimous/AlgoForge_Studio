@@ -113,7 +113,7 @@ def _serialize_container(container: ContainerEntry, alias_name: str | None = Non
 class DescriptorComposerApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title("Algorithm Descriptor Composer")
+        self.root.title("Algorithm Container Descriptor Composer")
         self.root.geometry("1280x840")
 
         self.available_records: list[DescriptorRecord] = []
@@ -124,7 +124,7 @@ class DescriptorComposerApp:
         self.composite_cpu_var = tk.BooleanVar(value=False)
         self.composite_gpu_var = tk.BooleanVar(value=False)
         self.alias_var = tk.StringVar()
-        self.status_var = tk.StringVar(value="Load one or more descriptor JSON files to begin.")
+        self.status_var = tk.StringVar(value="Load one or more container descriptor JSON files to begin.")
 
         self._build_layout()
         self._refresh_all_views()
@@ -249,7 +249,7 @@ class DescriptorComposerApp:
 
     def _load_descriptors(self) -> None:
         paths = filedialog.askopenfilenames(
-            title="Select descriptor JSON files",
+            title="Select container descriptor JSON files",
             filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
         )
         if not paths:
@@ -267,7 +267,7 @@ class DescriptorComposerApp:
             loaded += 1
 
         if loaded:
-            self.status_var.set(f"Loaded {loaded} descriptor file(s).")
+            self.status_var.set(f"Loaded {loaded} container descriptor file(s).")
             self._refresh_all_views()
 
     def _remove_loaded_descriptor(self) -> None:
@@ -521,7 +521,7 @@ class DescriptorComposerApp:
             "pipeline_name": pipeline_name,
             "ordered_bindings": ordered_bindings,
             "component_descriptors": component_descriptors,
-            "composite_compliance_descriptor": composite_descriptor,
+            "composite_container_descriptor": composite_descriptor,
         }
         return payload, warnings
 
@@ -536,9 +536,9 @@ class DescriptorComposerApp:
         elif self.pipeline_steps:
             self.status_var.set(f"Prepared {len(self.pipeline_steps)} pipeline step(s).")
         elif self.available_records:
-            self.status_var.set("Loaded descriptors. Add one or more steps to compose a pipeline.")
+            self.status_var.set("Loaded container descriptors. Add one or more steps to compose a pipeline.")
         else:
-            self.status_var.set("Load one or more descriptor JSON files to begin.")
+            self.status_var.set("Load one or more container descriptor JSON files to begin.")
 
     def _export_composite(self) -> None:
         payload, warnings = self._build_composite_payload()
@@ -553,7 +553,7 @@ class DescriptorComposerApp:
             )
 
         path = filedialog.asksaveasfilename(
-            title="Save composite descriptor",
+            title="Save composite container descriptor",
             defaultextension=".json",
             filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
         )

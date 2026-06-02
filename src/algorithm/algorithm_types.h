@@ -66,6 +66,8 @@ struct AlgorithmComplianceDescriptor {
   AlgorithmDataContract data_contract{};
 };
 
+using AlgorithmContainerDescriptor = AlgorithmComplianceDescriptor;
+
 inline const AlgorithmContainerAlias* FindAlgorithmContainerAlias(
   const AlgorithmDataContract& data_contract,
   const std::string& package_name,
@@ -130,6 +132,7 @@ struct PhysicsAlgorithmResult {
 
 using algorithm::AlgorithmBufferRequirement;
 using algorithm::AlgorithmComplianceDescriptor;
+using algorithm::AlgorithmContainerDescriptor;
 using algorithm::AlgorithmDataContract;
 using algorithm::AlgorithmDataFormat;
 using algorithm::AlgorithmContainerAlias;

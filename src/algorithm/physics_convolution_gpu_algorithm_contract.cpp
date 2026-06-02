@@ -2,8 +2,8 @@
 
 namespace algorithm {
 
-AlgorithmComplianceDescriptor CreatePhysicsConvolutionGpuAlgorithmComplianceDescriptor(uint32_t element_count) {
-  AlgorithmComplianceDescriptor descriptor{};
+AlgorithmContainerDescriptor CreatePhysicsConvolutionGpuAlgorithmContainerDescriptor(uint32_t element_count) {
+  AlgorithmContainerDescriptor descriptor{};
   descriptor.algorithm_name = kPhysicsConvolutionGpuAlgorithmName;
   descriptor.cpu_available = false;
   descriptor.gpu_available = true;
@@ -23,6 +23,14 @@ AlgorithmComplianceDescriptor CreatePhysicsConvolutionGpuAlgorithmComplianceDesc
     AlgorithmDataFormat{"physics_convolution_demo_input", element_count, static_cast<uint32_t>(sizeof(float))}
   };
   return descriptor;
+}
+
+std::vector<std::string> DescribePhysicsConvolutionGpuAlgorithmBoundResources() {
+  return {
+    "mesh",
+    "physics_state",
+    "compute_context",
+  };
 }
 
 }  // namespace algorithm

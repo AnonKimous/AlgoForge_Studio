@@ -109,8 +109,8 @@ void DrawVertexArrayOverlay(
 void AgentAlgorithmRuntime::Init(
   const PhysSolverConfig& config,
   const VulkanComputeContextView& compute_context,
-  const AlgorithmComplianceDescriptor& compliance_descriptor) {
-  pool_.Init(config, compute_context, compliance_descriptor);
+  const AlgorithmContainerDescriptor& container_descriptor) {
+  pool_.Init(config, compute_context, container_descriptor);
 }
 
 bool AgentAlgorithmRuntime::Run(const PhysicsAlgorithmRequest& request, PhysicsAlgorithmResult* result) const {

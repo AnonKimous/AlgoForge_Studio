@@ -9,6 +9,7 @@
 
 #include <chrono>
 #include <cstddef>
+#include <functional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -30,11 +31,8 @@ CreateEntityInfo CreatePhysicsEntityInfo(
   const Mesh& mesh,
   PhysSolverKind solver_kind,
   const std::string& algorithm_name,
-  const std::string& mounted_agent_name = "physics_agent");
-CreateEntityInfo CreateRandomVertexMotionEntityInfo(
-  const Mesh& mesh,
-  float motion_radius,
-  const std::string& mounted_agent_name = "render_physics_agent");
+  const std::string& mounted_agent_name = "physics_agent",
+  const std::string& gpu_shader_path = "");
 
 class EntityInteractionUiBridge {
  public:
@@ -58,6 +56,7 @@ class EntityInteractionRuntime {
   bool LoadMeshFromFile(const std::string& path, std::string* error_message = nullptr);
   EntityHandle LoadEntity(CreateEntityInfo info);
   bool UnloadEntity(EntityHandle handle);
+  void SetDrawCallback(std::function<void()> draw_callback);
   bool createentity(CreateEntityInfo info) { return LoadEntity(std::move(info)) != kInvalidEntityHandle; }
   bool destroyentity(EntityHandle handle) { return UnloadEntity(handle); }
   bool Tick();
@@ -66,6 +65,15 @@ class EntityInteractionRuntime {
   const Mesh& mesh() const { return mesh_; }
   Mesh& mutable_mesh() { return mesh_; }
   const std::string& mesh_source_path() const { return mesh_source_path_; }
+  const std::vector<std::shared_ptr<orchestration_entity::OrchestrationEntity>>& entity_slots() const { return entity_slots_; }
+  const std::shared_ptr<orchestration_entity::OrchestrationEntity>& render_entity() const { return render_entity_; }
+  const std::shared_ptr<orchestration_entity::OrchestrationEntity>& physics_entity() const { return physics_entity_; }
+  bool render_entity_ready() const { return render_entity_ready_; }
+  bool physics_entity_ready() const { return physics_entity_ready_; }
+  const std::vector<Vec3>& active_vertex_positions() const;
+  const std::string& ui_status_message() const { return ui_status_message_; }
+  void SetUiStatusMessage(std::string message);
+  InteractionUiState BuildInteractionUiState(float animation_time) const;
 
  private:
   enum class InstancePresetKind {
@@ -74,28 +82,11 @@ class EntityInteractionRuntime {
     PhysicsGpu,
   };
 
-  struct InstanceDraftState {
-    char instance_name[128]{};
-    char algorithm_name[128]{};
-    char mesh_path[512]{};
-    char gpu_shader_path[512]{};
-    int preset_index{0};
-    int solver_kind_index{0};
-    float motion_radius{0.15f};
-    bool load_mesh_before_create{true};
-  };
-
-  void ResetInstanceDraftState();
-  void DrawInstanceComposerUi();
-  void DrawLoadedEntityListUi();
-  void DrawInstanceDraftUi();
-  bool CreateEntityFromDraft(std::string* status_message);
   bool LoadMeshAndResetBindings(const std::string& path, std::string* status_message);
   static MountedAgentKind ClassifyMountedAgent(const std::string& mounted_agent_name);
   bool MountRenderEntity(const std::shared_ptr<orchestration_entity::OrchestrationEntity>& entity);
   bool MountPhysicsEntity(const std::shared_ptr<orchestration_entity::OrchestrationEntity>& entity);
   void RefreshBindingsFromEntitySlots();
-  InteractionUiState BuildInteractionUiState(float animation_time) const;
 
   Mesh mesh_{};
   std::string mesh_source_path_{};
@@ -109,8 +100,7 @@ class EntityInteractionRuntime {
   bool render_entity_ready_{false};
   bool physics_entity_ready_{false};
   bool entity_slots_dirty_{false};
-  InstanceDraftState instance_draft_{};
-  std::size_t selected_entity_slot_{static_cast<std::size_t>(-1)};
+  std::function<void()> draw_callback_{};
   std::string ui_status_message_{};
   std::chrono::steady_clock::time_point start_time_{};
   std::chrono::steady_clock::time_point last_frame_time_{};

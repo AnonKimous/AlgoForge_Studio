@@ -8,7 +8,6 @@ This folder is the home of concrete algorithm packages and ordinary algorithm co
 - Compliance descriptor contracts.
 - Package-level type aliases for ordinary algorithm management.
 - Ordinary packages such as the camera package.
-- Instance-level algorithms such as `random_vertex_motion`, which compose render and physics roles through one instance preset.
 
 ## Notes
 

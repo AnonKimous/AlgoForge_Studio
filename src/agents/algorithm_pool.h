@@ -12,7 +12,7 @@ class AlgorithmPool {
   void Init(
     const PhysSolverConfig& config,
     const VulkanComputeContextView& compute_context,
-    const AlgorithmComplianceDescriptor& compliance_descriptor);
+    const AlgorithmContainerDescriptor& container_descriptor);
 
   bool Run(const PhysicsAlgorithmRequest& request, PhysicsAlgorithmResult* result) const;
 
@@ -20,13 +20,13 @@ class AlgorithmPool {
 
   const PhysSolverConfig& config() const { return config_; }
   const VulkanComputeContextView& compute_context() const { return compute_context_; }
-  const AlgorithmComplianceDescriptor& compliance_descriptor() const { return compliance_descriptor_; }
+  const AlgorithmContainerDescriptor& container_descriptor() const { return container_descriptor_; }
   const std::shared_ptr<algorithm::AlgorithmInterventionPackageHandle>& intervention_package() const { return intervention_package_; }
 
  private:
   PhysSolverConfig config_{};
   VulkanComputeContextView compute_context_{};
-  AlgorithmComplianceDescriptor compliance_descriptor_{};
+  AlgorithmContainerDescriptor container_descriptor_{};
   std::shared_ptr<algorithm::AlgorithmInterventionPackageHandle> intervention_package_{};
 };
 

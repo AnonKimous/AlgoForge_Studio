@@ -12,9 +12,9 @@ inline constexpr const char* kCameraAlgorithmName = "camera";
 
 class CameraAlgorithmPackageCodec : public algorithm::ISimpleAlgorithmPackageCodec {
  public:
-  bool BuildComplianceDescriptor(
+  bool BuildContainerDescriptor(
     const codec::VolumeDescriptor& volume,
-    AlgorithmComplianceDescriptor* out_descriptor) const override {
+    AlgorithmContainerDescriptor* out_descriptor) const override {
     if (!out_descriptor) return false;
 
     const uint32_t point_count = static_cast<uint32_t>(std::max<size_t>(1u, volume.point_position.size()));
@@ -39,6 +39,50 @@ class CameraAlgorithmPackageCodec : public algorithm::ISimpleAlgorithmPackageCod
     out_descriptor->data_contract.algorithm_required_formats = {
       {"camera_input_mesh", point_count, static_cast<uint32_t>(sizeof(Vec3))},
     };
+    return true;
+  }
+
+  bool BuildBoundResources(std::vector<std::string>* out_resources) const override {
+    if (!out_resources) return false;
+    out_resources->assign({"mesh", "camera"});
+    return true;
+  }
+
+  bool ReflectReadableParameters(
+    const AlgorithmContainerDescriptor& container_descriptor,
+    AlgorithmReadableReflection* out_reflection) const override {
+    if (!out_reflection) return false;
+
+    out_reflection->algorithm_name = container_descriptor.algorithm_name.empty()
+      ? kCameraAlgorithmName
+      : container_descriptor.algorithm_name;
+    out_reflection->fields = {
+      {"algorithm_name", out_reflection->algorithm_name},
+      {"cpu_available", container_descriptor.cpu_available ? "true" : "false"},
+      {"gpu_available", container_descriptor.gpu_available ? "true" : "false"},
+      {"motion_radius", std::to_string(container_descriptor.motion_radius)},
+      {"arrays_to_allocate", std::to_string(container_descriptor.data_contract.arrays_to_allocate.size())},
+      {"required_formats", std::to_string(container_descriptor.data_contract.algorithm_required_formats.size())},
+    };
+    out_reflection->valid = true;
+    return true;
+  }
+
+  bool ReflectDescriptorShape(
+    const AlgorithmContainerDescriptor& container_descriptor,
+    const std::vector<std::string>& bound_resources,
+    AlgorithmDescriptorShapeReflection* out_reflection) const override {
+    if (!out_reflection) return false;
+
+    out_reflection->algorithm_name = container_descriptor.algorithm_name.empty()
+      ? kCameraAlgorithmName
+      : container_descriptor.algorithm_name;
+    out_reflection->required_resources = bound_resources;
+    if (out_reflection->required_resources.empty()) {
+      out_reflection->required_resources = {"mesh", "camera"};
+    }
+    out_reflection->descriptor_shape = container_descriptor;
+    out_reflection->valid = true;
     return true;
   }
 };

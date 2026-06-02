@@ -61,6 +61,7 @@ file(WRITE "${VKB_COMPAT_INCLUDE_DIR}/vkb/VkBootstrap.h" "#pragma once\n#include
 
 set(PROJECT_INCLUDE_DIRS
   ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cjson
   ${SDL3_INCLUDE_DIR}
   ${EIGEN_INCLUDE_DIR}
   ${VMA_INCLUDE_DIR}
@@ -87,6 +88,11 @@ add_library(messaging STATIC
 )
 target_include_directories(messaging PUBLIC ${PROJECT_INCLUDE_DIRS})
 
+add_library(cjson STATIC
+  third_party/cjson/cJSON.c
+)
+target_include_directories(cjson PUBLIC ${PROJECT_INCLUDE_DIRS})
+
 add_library(codec STATIC
   src/codec/codec_manager.cpp
 )
@@ -99,12 +105,11 @@ add_library(algorithm STATIC
   src/algorithm_library/algorithm_mng.cpp
   src/algorithm_library/corotated_cpu_algorithm_contract.cpp
   src/algorithm_library/physics_convolution_gpu_algorithm_contract.cpp
-  src/algorithm_library/random_vertex_motion_algorithm.cpp
-  src/algorithm_library/random_vertex_motion_algorithm_contract.cpp
+  src/algorithm/algorithm_container_manifest.cpp
   ${SPIRV_REFLECT_SOURCE_DIR}/spirv_reflect.c
 )
 target_include_directories(algorithm PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(algorithm PUBLIC common_data Vulkan::Vulkan)
+target_link_libraries(algorithm PUBLIC common_data Vulkan::Vulkan cjson)
 
 add_library(runtime_systems STATIC
   src/runtime_systems/window/sdl_window.cpp
@@ -132,6 +137,12 @@ add_library(entity_interaction STATIC
 )
 target_include_directories(entity_interaction PUBLIC ${PROJECT_INCLUDE_DIRS})
 target_link_libraries(entity_interaction PUBLIC common_data agents)
+
+add_library(editor_ui STATIC
+  src/editor_ui/editor_ui_runtime.cpp
+)
+target_include_directories(editor_ui PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_link_libraries(editor_ui PUBLIC entity_interaction)
 
 add_library(agents STATIC
   src/agents/agents.cpp
@@ -169,7 +180,7 @@ add_dependencies(min_vulkan_win32 shaders)
 target_include_directories(min_vulkan_win32 PRIVATE ${PROJECT_INCLUDE_DIRS})
 target_link_libraries(min_vulkan_win32 PRIVATE
   agents
-  entity_interaction
+  editor_ui
   runtime_systems
   codec
   algorithm

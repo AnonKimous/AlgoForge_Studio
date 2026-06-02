@@ -7,6 +7,7 @@
 - Cross-cutting coordination is lifted to upper orchestration layers.
 - `orchestration_entity` is a cross-layer carrier, not a pure leaf layer.
 - `agents` stay below `entity_interaction`; the dependency is one-way.
+- `editor_ui` stays above `entity_interaction`; the dependency is one-way.
 
 ## Active Layer Map
 
@@ -19,7 +20,8 @@
 7. `orchestration_entity`
 8. `agents`
 9. `entity_interaction`
-10. `app_orchestration`
+10. `editor_ui`
+11. `app_orchestration`
 
 ## Important Notes
 
@@ -30,9 +32,8 @@
 - Ordinary algorithm packages live under `algorithm_library`.
 - Orchestration entities live under `orchestration_entity` and may carry ordered cross-layer package/descriptor data plus pipeline routing metadata.
 - `algorithm_library/camera` is the ordinary camera package that can be held by orchestration entities.
-- `entity_interaction` composes `agents` and owns the app-level runtime loop.
-- `entity_interaction` also exposes the editor UI for loading meshes and creating instances by hand.
-- That UI can also create paired render/physics instances for the random vertex motion preset.
+- `entity_interaction` composes `agents` and owns the app-level runtime backend.
+- `editor_ui` sits above `entity_interaction` and exposes the editor UI for loading meshes and creating entities by hand.
 - `agents` do not depend on `entity_interaction`.
 - A single orchestration entity can bundle multiple algorithm packages to represent one render or simulation pipeline, and the entity owns the package order plus container routing.
 - The final composite compliance descriptor is where package-scoped container aliases live.
@@ -41,4 +42,4 @@
 
 Recommended direction:
 
-`common_data -> runtime_systems -> messaging -> algorithm_library -> algorithm -> codec -> orchestration_entity -> agents -> entity_interaction -> app_orchestration`
+`common_data -> runtime_systems -> messaging -> algorithm_library -> algorithm -> codec -> orchestration_entity -> agents -> entity_interaction -> editor_ui -> app_orchestration`

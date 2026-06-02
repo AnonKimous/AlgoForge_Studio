@@ -1,5 +1,4 @@
 #include "cpu_physics_algorithm.h"
-#include "algorithm_library/random_vertex_motion_algorithm_contract.h"
 
 #include <algorithm>
 #include <cmath>
@@ -29,7 +28,7 @@ struct _Mat2 {
 };
 
 bool _SupportsCpuAlgorithm(const std::string& algorithm_name) {
-  return algorithm_name == "corotated_cpu" || algorithm_name == kRandomVertexMotionAlgorithmName;
+  return algorithm_name == "corotated_cpu";
 }
 
 Vec3 _Add(Vec3 a, Vec3 b) {
@@ -481,9 +480,6 @@ void _RunCorotated(const PhysicsStepInput& input, PhysicsStepOutput* output) {
 
 bool CpuPhysicsAlgorithm_Run(const PhysicsAlgorithmRequest& request, PhysicsAlgorithmResult* result) {
   if (!result) return false;
-  if (request.config.algorithm_name == kRandomVertexMotionAlgorithmName) {
-    return RandomVertexMotionAlgorithm_Run(request, result);
-  }
   if (!_SupportsCpuAlgorithm(request.config.algorithm_name)) {
     return false;
   }

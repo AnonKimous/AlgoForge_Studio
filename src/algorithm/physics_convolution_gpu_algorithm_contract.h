@@ -6,9 +6,12 @@ namespace algorithm {
 
 inline constexpr const char* kPhysicsConvolutionGpuAlgorithmName = "physics_convolution_demo";
 
-AlgorithmComplianceDescriptor CreatePhysicsConvolutionGpuAlgorithmComplianceDescriptor(uint32_t element_count);
+AlgorithmContainerDescriptor CreatePhysicsConvolutionGpuAlgorithmContainerDescriptor(uint32_t element_count);
+
+std::vector<std::string> DescribePhysicsConvolutionGpuAlgorithmBoundResources();
 
 }  // namespace algorithm
 
-using algorithm::CreatePhysicsConvolutionGpuAlgorithmComplianceDescriptor;
+using algorithm::CreatePhysicsConvolutionGpuAlgorithmContainerDescriptor;
+using algorithm::DescribePhysicsConvolutionGpuAlgorithmBoundResources;
 using algorithm::kPhysicsConvolutionGpuAlgorithmName;

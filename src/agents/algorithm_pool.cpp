@@ -9,10 +9,10 @@ namespace agents {
 void AlgorithmPool::Init(
   const PhysSolverConfig& config,
   const VulkanComputeContextView& compute_context,
-  const AlgorithmComplianceDescriptor& compliance_descriptor) {
+  const AlgorithmContainerDescriptor& container_descriptor) {
   config_ = config;
   compute_context_ = compute_context;
-  compliance_descriptor_ = compliance_descriptor;
+  container_descriptor_ = container_descriptor;
 }
 
 bool AlgorithmPool::Run(const PhysicsAlgorithmRequest& request, PhysicsAlgorithmResult* result) const {

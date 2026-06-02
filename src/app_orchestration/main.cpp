@@ -1,4 +1,4 @@
-#include "entity_interaction/entity_interaction_agents.h"
+#include "editor_ui/editor_ui_runtime.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
@@ -22,9 +22,9 @@ int main(int argc, char** argv) {
     std::filesystem::path mesh_path = MESH_PATH;
     Mesh mesh = LoadMeshFile(mesh_path.string());
 
-    EntityInteractionRuntime runtime;
-    if (!runtime.Init(mesh, "Entity Interaction Editor", 1280, 720)) {
-      throw std::runtime_error("EntityInteractionRuntime init failed");
+    EditorUiRuntime runtime;
+    if (!runtime.Init(mesh, "Editor UI", 1280, 720)) {
+      throw std::runtime_error("EditorUiRuntime init failed");
     }
 
     std::string mesh_error;

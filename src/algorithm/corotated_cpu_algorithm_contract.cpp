@@ -2,10 +2,10 @@
 
 namespace algorithm {
 
-AlgorithmComplianceDescriptor CreateCorotatedCpuAlgorithmComplianceDescriptor(
+AlgorithmContainerDescriptor CreateCorotatedCpuAlgorithmContainerDescriptor(
   uint32_t vertex_count,
   uint32_t triangle_count) {
-  AlgorithmComplianceDescriptor descriptor{};
+  AlgorithmContainerDescriptor descriptor{};
   descriptor.algorithm_name = kCorotatedCpuAlgorithmName;
   descriptor.cpu_available = true;
   descriptor.gpu_available = false;
@@ -27,6 +27,14 @@ AlgorithmComplianceDescriptor CreateCorotatedCpuAlgorithmComplianceDescriptor(
     AlgorithmDataFormat{"corotated_cpu_input", vertex_count, static_cast<uint32_t>(sizeof(Vec3))}
   };
   return descriptor;
+}
+
+std::vector<std::string> DescribeCorotatedCpuAlgorithmBoundResources() {
+  return {
+    "mesh",
+    "physics_state",
+    "compute_context",
+  };
 }
 
 }  // namespace algorithm
