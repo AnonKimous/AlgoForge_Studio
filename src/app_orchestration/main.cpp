@@ -1,4 +1,4 @@
-#include "editor_ui/editor_ui_runtime.h"
+#include "interact_ui/interact_ui_runtime.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
@@ -22,9 +22,9 @@ int main(int argc, char** argv) {
     std::filesystem::path mesh_path = MESH_PATH;
     Mesh mesh = LoadMeshFile(mesh_path.string());
 
-    EditorUiRuntime runtime;
-    if (!runtime.Init(mesh, "Editor UI", 1280, 720)) {
-      throw std::runtime_error("EditorUiRuntime init failed");
+    InteractUiRuntime runtime;
+    if (!runtime.Init(mesh, "Interact & UI", 1280, 720)) {
+      throw std::runtime_error("InteractUiRuntime init failed");
     }
 
     std::string mesh_error;

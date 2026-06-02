@@ -4,7 +4,7 @@
 
 #include <utility>
 
-namespace agents {
+namespace agent_execute {
 
 void AlgorithmPool::Init(
   const PhysSolverConfig& config,
@@ -23,4 +23,4 @@ void AlgorithmPool::SetInterventionPackage(std::shared_ptr<algorithm::AlgorithmI
   intervention_package_ = std::move(package);
 }
 
-}  // namespace agents
+}  // namespace agent_execute

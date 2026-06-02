@@ -18,7 +18,7 @@ class ImGuiVulkanRuntime {
  public:
   using DrawCallback = std::function<void()>;
 
-  bool Init(SDL_Window* window, const char* app_name = "Entity Debug UI");
+  bool Init(SDL_Window* window, const char* app_name = "Agent Debug UI");
   bool Tick(SDL_Window* window);
   void SetDrawCallback(DrawCallback callback);
   void Destroy();

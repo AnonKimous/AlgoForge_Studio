@@ -44,7 +44,7 @@ void ImGuiVulkanRuntime::SetupVulkan(const char* app_name, SDL_Window* window) {
 
   VkApplicationInfo app_info{};
   app_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-  app_info.pApplicationName = app_name ? app_name : "Entity Debug UI";
+  app_info.pApplicationName = app_name ? app_name : "Agent Debug UI";
   app_info.apiVersion = VK_API_VERSION_1_3;
 
   VkInstanceCreateInfo create_info{};

@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace agents {
+namespace agent_execute {
 
 class PhysicsAgent {
  public:
@@ -58,7 +58,7 @@ class PhysicsAgent {
 
 using PhysAgent = PhysicsAgent;
 
-}  // namespace agents
+}  // namespace agent_execute
 
-using agents::PhysAgent;
-using agents::PhysicsAgent;
+using agent_execute::PhysAgent;
+using agent_execute::PhysicsAgent;

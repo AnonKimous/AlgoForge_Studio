@@ -11,7 +11,7 @@
 #include <memory>
 #include <utility>
 
-namespace agents {
+namespace agent_execute {
 
 void DrawVertexArrayOverlay(
   const std::vector<Vec3>& vertex_positions,
@@ -81,6 +81,6 @@ class RenderAgent {
   PhysRunState phys_run_state_{PhysRunState::Pause};
 };
 
-}  // namespace agents
+}  // namespace agent_execute
 
-using agents::AgentAlgorithmRuntime;
+using agent_execute::AgentAlgorithmRuntime;

@@ -5,7 +5,7 @@
 
 #include <memory>
 
-namespace agents {
+namespace agent_execute {
 
 class AlgorithmPool {
  public:
@@ -30,6 +30,6 @@ class AlgorithmPool {
   std::shared_ptr<algorithm::AlgorithmInterventionPackageHandle> intervention_package_{};
 };
 
-}  // namespace agents
+}  // namespace agent_execute
 
-using agents::AlgorithmPool;
+using agent_execute::AlgorithmPool;

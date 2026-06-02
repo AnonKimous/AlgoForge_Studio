@@ -7,7 +7,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace agents {
+namespace agent_execute {
 
 namespace {
 
@@ -139,7 +139,7 @@ void AgentAlgorithmRuntime::ApplyInterventionRequest(const InteractionInterventi
 bool WindowAgent::Init(const char* title, int width, int height) {
   window_ = std::make_unique<SdlWindow>(title, width, height);
   imgui_runtime_ = std::make_unique<runtime_systems::ImGuiVulkanRuntime>();
-  if (!imgui_runtime_->Init(window_->native_handle().window, title ? title : "Entity Debug UI")) {
+  if (!imgui_runtime_->Init(window_->native_handle().window, title ? title : "Agent Debug UI")) {
     imgui_runtime_.reset();
     window_.reset();
     return false;
@@ -221,4 +221,4 @@ void RenderAgent::SetPhysRunState(PhysRunState state) {
   phys_run_state_ = state;
 }
 
-}  // namespace agents
+}  // namespace agent_execute

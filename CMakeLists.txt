@@ -126,32 +126,26 @@ add_library(runtime_systems STATIC
 target_include_directories(runtime_systems PUBLIC ${PROJECT_INCLUDE_DIRS})
 target_link_libraries(runtime_systems PUBLIC common_data Vulkan::Vulkan ${SDL3_LINK_LIBS})
 
-add_library(orchestration_entity STATIC
-  src/orchestration_entity/entity.cpp
+add_library(agent STATIC
+  src/agent/agent.cpp
 )
-target_include_directories(orchestration_entity PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(orchestration_entity PUBLIC common_data algorithm codec)
+target_include_directories(agent PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_link_libraries(agent PUBLIC common_data algorithm codec)
 
-add_library(entity_interaction STATIC
-  src/entity_interaction/entity_interaction_agents.cpp
-)
-target_include_directories(entity_interaction PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(entity_interaction PUBLIC common_data agents)
-
-add_library(editor_ui STATIC
-  src/editor_ui/editor_ui_runtime.cpp
-)
-target_include_directories(editor_ui PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(editor_ui PUBLIC entity_interaction)
-
-add_library(agents STATIC
+add_library(agent_execute STATIC
   src/agents/agents.cpp
   src/agents/algorithm_pool.cpp
   src/agents/physics_agent.cpp
+  src/agent_execute/agent_execute_runtime.cpp
 )
-target_include_directories(agents PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(agents PUBLIC common_data runtime_systems codec algorithm)
-target_link_libraries(agents PUBLIC orchestration_entity)
+target_include_directories(agent_execute PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_link_libraries(agent_execute PUBLIC common_data runtime_systems codec algorithm agent)
+
+add_library(interact_ui STATIC
+  src/interact_ui/interact_ui_runtime.cpp
+)
+target_include_directories(interact_ui PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_link_libraries(interact_ui PUBLIC agent_execute)
 
 set(SHADER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
 set(SHADER_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/shaders)
@@ -179,8 +173,8 @@ add_dependencies(min_vulkan_win32 shaders)
 
 target_include_directories(min_vulkan_win32 PRIVATE ${PROJECT_INCLUDE_DIRS})
 target_link_libraries(min_vulkan_win32 PRIVATE
-  agents
-  editor_ui
+  agent_execute
+  interact_ui
   runtime_systems
   codec
   algorithm

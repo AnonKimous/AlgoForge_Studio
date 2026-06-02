@@ -4,7 +4,7 @@
 #include <cmath>
 #include <utility>
 
-namespace agents {
+namespace agent_execute {
 
 namespace {
 
@@ -227,4 +227,4 @@ void PhysicsAgent::Reset(Mesh& mesh) {
   run_state_ = PhysRunState::Pause;
 }
 
-}  // namespace agents
+}  // namespace agent_execute

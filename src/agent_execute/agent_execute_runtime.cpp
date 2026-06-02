@@ -1,4 +1,4 @@
-#include "entity_interaction_agents.h"
+#include "agent_execute_runtime.h"
 
 #include "algorithm_library/camera_algorithm_package.h"
 #include "algorithm_library/corotated_cpu_algorithm_contract.h"
@@ -8,7 +8,7 @@
 #include <chrono>
 #include <utility>
 
-namespace entity_interaction {
+namespace agent_execute {
 
 namespace {
 
@@ -40,9 +40,9 @@ const char* ResolveMountedAgentNameForPreset(int preset_index) {
   }
 }
 
-CreateEntityInfo BuildCameraEntityInfoFromMesh(const Mesh& mesh, const std::string& mounted_agent_name, const std::string& instance_name) {
-  CreateEntityInfo info{};
-  info.instance_name = instance_name.empty() ? "camera_instance" : instance_name;
+CreateAgentInfo BuildCameraAgentInfoFromMesh(const Mesh& mesh, const std::string& mounted_agent_name, const std::string& agent_name) {
+  CreateAgentInfo info{};
+  info.agent_name = agent_name.empty() ? "camera_agent" : agent_name;
   info.algorithm_name = kCameraAlgorithmName;
   info.mounted_agent_name = mounted_agent_name.empty() ? "render_agent" : mounted_agent_name;
   info.bound_resources = {"mesh", "camera"};
@@ -56,22 +56,22 @@ CreateEntityInfo BuildCameraEntityInfoFromMesh(const Mesh& mesh, const std::stri
 
   AlgorithmComplianceDescriptor compliance_descriptor{};
   codec->BuildContainerDescriptor(volume, &compliance_descriptor);
-  info.compliance_packages.push_back(OrchestrationEntityAlgorithmPackageHandle{
+  info.compliance_packages.push_back(agent::AgentAlgorithmPackageHandle{
     kCameraAlgorithmName,
     codec});
   info.compliance_descriptor = compliance_descriptor;
   return info;
 }
 
-CreateEntityInfo BuildPhysicsEntityInfoFromMesh(
+CreateAgentInfo BuildPhysicsAgentInfoFromMesh(
   const Mesh& mesh,
   PhysSolverKind solver_kind,
   const std::string& algorithm_name,
   const std::string& gpu_shader_path,
   const std::string& mounted_agent_name,
-  const std::string& instance_name) {
-  CreateEntityInfo info{};
-  info.instance_name = instance_name.empty() ? (algorithm_name.empty() ? "physics_instance" : algorithm_name + "_instance") : instance_name;
+  const std::string& agent_name) {
+  CreateAgentInfo info{};
+  info.agent_name = agent_name.empty() ? (algorithm_name.empty() ? "physics_agent" : algorithm_name + "_agent") : agent_name;
   info.algorithm_name = algorithm_name.empty()
     ? (solver_kind == PhysSolverKind::Gpu ? kPhysicsConvolutionGpuAlgorithmName : kCorotatedCpuAlgorithmName)
     : algorithm_name;
@@ -97,10 +97,10 @@ CreateEntityInfo BuildPhysicsEntityInfoFromMesh(
       static_cast<uint32_t>(mesh.positions.size()),
       static_cast<uint32_t>(mesh.triangles.size()));
   }
-  info.compliance_packages.push_back(OrchestrationEntityAlgorithmPackageHandle{
+  info.compliance_packages.push_back(agent::AgentAlgorithmPackageHandle{
     info.algorithm_name,
     nullptr});
-  info.intervention_package = std::make_shared<OrchestrationEntityInterventionPackageHandle>();
+  info.intervention_package = std::make_shared<agent::AgentInterventionPackageHandle>();
   info.intervention_package->package_name = "physics_intervention";
   return info;
 }
@@ -118,21 +118,21 @@ PhysSolverKind InferSolverKind(const PhysSolverConfig& config, const std::string
   return PhysSolverKind::Cpu;
 }
 
-std::shared_ptr<orchestration_entity::OrchestrationEntity> FindFirstMountedEntity(
-  const std::vector<std::shared_ptr<orchestration_entity::OrchestrationEntity>>& slots,
-  MountedAgentKind kind) {
+std::shared_ptr<agent::Agent> FindFirstMountedAgent(
+  const std::vector<std::shared_ptr<agent::Agent>>& slots,
+  MountedRuntimeKind kind) {
   for (auto it = slots.rbegin(); it != slots.rend(); ++it) {
     const auto& slot = *it;
     if (!slot) continue;
     const std::string& mounted_agent_name = slot->mounted_agent_name();
     switch (kind) {
-      case MountedAgentKind::Render:
+      case MountedRuntimeKind::Render:
         if (IsRenderMountedAgentName(mounted_agent_name)) return slot;
         break;
-      case MountedAgentKind::Physics:
+      case MountedRuntimeKind::Physics:
         if (IsPhysicsMountedAgentName(mounted_agent_name)) return slot;
         break;
-      case MountedAgentKind::None:
+      case MountedRuntimeKind::None:
       default:
         break;
     }
@@ -142,22 +142,22 @@ std::shared_ptr<orchestration_entity::OrchestrationEntity> FindFirstMountedEntit
 
 }  // namespace
 
-CreateEntityInfo CreateCameraEntityInfo(const Mesh& mesh) {
-  return BuildCameraEntityInfoFromMesh(mesh, "render_agent", "camera_instance");
+CreateAgentInfo CreateCameraAgentInfo(const Mesh& mesh) {
+  return BuildCameraAgentInfoFromMesh(mesh, "render_agent", "camera_agent");
 }
 
-CreateEntityInfo CreatePhysicsEntityInfo(
+CreateAgentInfo CreatePhysicsAgentInfo(
   const Mesh& mesh,
   PhysSolverKind solver_kind,
   const std::string& algorithm_name,
   const std::string& mounted_agent_name,
   const std::string& gpu_shader_path) {
-  return BuildPhysicsEntityInfoFromMesh(mesh, solver_kind, algorithm_name, gpu_shader_path, mounted_agent_name, "");
+  return BuildPhysicsAgentInfoFromMesh(mesh, solver_kind, algorithm_name, gpu_shader_path, mounted_agent_name, "");
 }
 
-InteractionUiState EntityInteractionUiBridge::BuildInteractionUiStateFromRenderAgentAndPhysicsAgent(
-  const agents::RenderAgent& render_agent,
-  const agents::PhysicsAgent& physics_agent,
+InteractionUiState AgentUiBridge::BuildInteractionUiStateFromRenderAgentAndPhysicsAgent(
+  const agent_execute::RenderAgent& render_agent,
+  const agent_execute::PhysicsAgent& physics_agent,
   float animation_time) {
   (void)physics_agent;
   InteractionUiState ui{};
@@ -170,9 +170,9 @@ InteractionUiState EntityInteractionUiBridge::BuildInteractionUiStateFromRenderA
   return ui;
 }
 
-void EntityInteractionUiBridge::ApplyInteractionUiActionOnPhysicsAgentAndMesh(
+void AgentUiBridge::ApplyInteractionUiActionOnPhysicsAgentAndMesh(
   const InteractionUiAction& action,
-  agents::PhysicsAgent* physics_agent,
+  agent_execute::PhysicsAgent* physics_agent,
   Mesh* mesh) {
   if (!physics_agent || !mesh) {
     return;
@@ -190,29 +190,29 @@ void EntityInteractionUiBridge::ApplyInteractionUiActionOnPhysicsAgentAndMesh(
   }
 }
 
-bool EntityInteractionRuntime::Init(const Mesh& mesh, const char* window_title, int width, int height) {
+bool AgentExecuteRuntime::Init(const Mesh& mesh, const char* window_title, int width, int height) {
   mesh_ = mesh;
-  initialized_ = window_agent_.Init(window_title ? window_title : "Entity Interaction", width, height);
+  initialized_ = window_agent_.Init(window_title ? window_title : "Agent Execute", width, height);
   if (!initialized_) {
     return false;
   }
   mesh_source_path_.clear();
-  ui_status_message_ = "Mesh is prefilled. Create the shared entity to start work.";
+  ui_status_message_ = "Mesh is prefilled. Create the shared agent to start work.";
   start_time_ = std::chrono::steady_clock::now();
   last_frame_time_ = start_time_;
   return true;
 }
 
-bool EntityInteractionRuntime::LoadMeshFromFile(const std::string& path, std::string* error_message) {
+bool AgentExecuteRuntime::LoadMeshFromFile(const std::string& path, std::string* error_message) {
   try {
     mesh_ = LoadMeshFile(path);
     mesh_source_path_ = path;
-    entity_slots_.clear();
-    render_entity_.reset();
-    physics_entity_.reset();
-    render_entity_ready_ = false;
-    physics_entity_ready_ = false;
-    entity_slots_dirty_ = false;
+    agent_slots_.clear();
+    render_agent_binding_.reset();
+    physics_agent_binding_.reset();
+    render_agent_binding_ready_ = false;
+    physics_agent_binding_ready_ = false;
+    agent_slots_dirty_ = false;
     render_agent_.Destroy();
     physics_agent_.Destroy();
     ui_status_message_ = "Loaded mesh: " + path;
@@ -226,12 +226,12 @@ bool EntityInteractionRuntime::LoadMeshFromFile(const std::string& path, std::st
   }
 }
 
-void EntityInteractionRuntime::SetDrawCallback(std::function<void()> draw_callback) {
+void AgentExecuteRuntime::SetDrawCallback(std::function<void()> draw_callback) {
   draw_callback_ = std::move(draw_callback);
   window_agent_.SetDrawCallback(draw_callback_);
 }
 
-bool EntityInteractionRuntime::LoadMeshAndResetBindings(const std::string& path, std::string* status_message) {
+bool AgentExecuteRuntime::LoadMeshAndResetBindings(const std::string& path, std::string* status_message) {
   std::string error_message;
   if (!LoadMeshFromFile(path, &error_message)) {
     if (status_message) {
@@ -240,125 +240,125 @@ bool EntityInteractionRuntime::LoadMeshAndResetBindings(const std::string& path,
     return false;
   }
   if (status_message) {
-    *status_message = "Loaded mesh and cleared existing entities.";
+    *status_message = "Loaded mesh and cleared existing agents.";
   }
   return true;
 }
 
-MountedAgentKind EntityInteractionRuntime::ClassifyMountedAgent(
+MountedRuntimeKind AgentExecuteRuntime::ClassifyMountedAgent(
   const std::string& mounted_agent_name) {
   if (IsRenderMountedAgentName(mounted_agent_name)) {
-    return MountedAgentKind::Render;
+    return MountedRuntimeKind::Render;
   }
   if (IsPhysicsMountedAgentName(mounted_agent_name)) {
-    return MountedAgentKind::Physics;
+    return MountedRuntimeKind::Physics;
   }
-  return MountedAgentKind::None;
+  return MountedRuntimeKind::None;
 }
 
-bool EntityInteractionRuntime::MountRenderEntity(const std::shared_ptr<orchestration_entity::OrchestrationEntity>& entity) {
-  if (render_entity_ == entity && render_entity_ready_) {
+bool AgentExecuteRuntime::MountRenderAgent(const std::shared_ptr<agent::Agent>& agent) {
+  if (render_agent_binding_ == agent && render_agent_binding_ready_) {
     return true;
   }
-  if (!entity) {
-    if (render_entity_ready_) {
+  if (!agent) {
+    if (render_agent_binding_ready_) {
       render_agent_.Destroy();
     }
-    render_entity_.reset();
-    render_entity_ready_ = false;
+    render_agent_binding_.reset();
+    render_agent_binding_ready_ = false;
     return true;
   }
 
-  if (render_entity_ready_) {
+  if (render_agent_binding_ready_) {
     render_agent_.Destroy();
-    render_entity_ready_ = false;
+    render_agent_binding_ready_ = false;
   }
 
-  render_entity_ = entity;
+  render_agent_binding_ = agent;
   render_agent_.Init(window_agent_.native_handle());
-  render_agent_.SetPhysRunState(IsSharedMountedAgentName(entity->mounted_agent_name()) ? PhysRunState::Run : PhysRunState::Pause);
-  render_entity_ready_ = true;
+  render_agent_.SetPhysRunState(IsSharedMountedAgentName(agent->mounted_agent_name()) ? PhysRunState::Run : PhysRunState::Pause);
+  render_agent_binding_ready_ = true;
   return true;
 }
 
-bool EntityInteractionRuntime::MountPhysicsEntity(const std::shared_ptr<orchestration_entity::OrchestrationEntity>& entity) {
-  if (physics_entity_ == entity && physics_entity_ready_) {
+bool AgentExecuteRuntime::MountPhysicsAgent(const std::shared_ptr<agent::Agent>& agent) {
+  if (physics_agent_binding_ == agent && physics_agent_binding_ready_) {
     return true;
   }
-  if (!entity) {
-    if (physics_entity_ready_) {
+  if (!agent) {
+    if (physics_agent_binding_ready_) {
       physics_agent_.Destroy();
     }
-    physics_entity_.reset();
-    physics_entity_ready_ = false;
+    physics_agent_binding_.reset();
+    physics_agent_binding_ready_ = false;
     return true;
   }
 
-  physics_entity_ = entity;
-  if (physics_entity_ready_) {
+  physics_agent_binding_ = agent;
+  if (physics_agent_binding_ready_) {
     physics_agent_.Destroy();
-    physics_entity_ready_ = false;
+    physics_agent_binding_ready_ = false;
   }
 
-  PhysSolverConfig solver_config = entity->solver_config();
+  PhysSolverConfig solver_config = agent->solver_config();
   if (solver_config.algorithm_name.empty()) {
-    solver_config.algorithm_name = entity->algorithm_name();
+    solver_config.algorithm_name = agent->algorithm_name();
   }
-  solver_config.solver_kind = InferSolverKind(solver_config, entity->algorithm_name());
-  physics_agent_.Init(solver_config, VulkanComputeContextView{}, entity->compliance_descriptor());
-  if (entity->intervention_package()) {
-    physics_agent_.SetInterventionPackage(entity->intervention_package());
+  solver_config.solver_kind = InferSolverKind(solver_config, agent->algorithm_name());
+  physics_agent_.Init(solver_config, VulkanComputeContextView{}, agent->compliance_descriptor());
+  if (agent->intervention_package()) {
+    physics_agent_.SetInterventionPackage(agent->intervention_package());
   }
-  physics_agent_.SetRunState(IsSharedMountedAgentName(entity->mounted_agent_name()) ? PhysRunState::Run : PhysRunState::Pause);
-  physics_entity_ready_ = true;
+  physics_agent_.SetRunState(IsSharedMountedAgentName(agent->mounted_agent_name()) ? PhysRunState::Run : PhysRunState::Pause);
+  physics_agent_binding_ready_ = true;
   return true;
 }
 
-const std::vector<Vec3>& EntityInteractionRuntime::active_vertex_positions() const {
+const std::vector<Vec3>& AgentExecuteRuntime::active_vertex_positions() const {
   return mesh_.positions;
 }
 
-void EntityInteractionRuntime::SetUiStatusMessage(std::string message) {
+void AgentExecuteRuntime::SetUiStatusMessage(std::string message) {
   ui_status_message_ = std::move(message);
 }
 
-InteractionUiState EntityInteractionRuntime::BuildInteractionUiState(float animation_time) const {
-  return EntityInteractionUiBridge::BuildInteractionUiStateFromRenderAgentAndPhysicsAgent(
+InteractionUiState AgentExecuteRuntime::BuildInteractionUiState(float animation_time) const {
+  return AgentUiBridge::BuildInteractionUiStateFromRenderAgentAndPhysicsAgent(
     render_agent_,
     physics_agent_,
     animation_time);
 }
 
-EntityInteractionRuntime::EntityHandle EntityInteractionRuntime::LoadEntity(CreateEntityInfo info) {
-  auto entity = std::make_shared<orchestration_entity::OrchestrationEntity>();
-  if (!orchestration_entity_init(entity.get(), std::move(info))) {
-    return kInvalidEntityHandle;
+AgentExecuteRuntime::AgentHandle AgentExecuteRuntime::LoadAgent(CreateAgentInfo info) {
+  auto agent_instance = std::make_shared<agent::Agent>();
+  if (!agent::agent_init(agent_instance.get(), std::move(info))) {
+    return kInvalidAgentHandle;
   }
 
-  const EntityHandle handle = entity_slots_.size();
-  entity_slots_.push_back(entity);
-  entity_slots_dirty_ = true;
+  const AgentHandle handle = agent_slots_.size();
+  agent_slots_.push_back(agent_instance);
+  agent_slots_dirty_ = true;
   return handle;
 }
 
-bool EntityInteractionRuntime::UnloadEntity(EntityHandle handle) {
-  if (handle >= entity_slots_.size() || !entity_slots_[handle]) {
+bool AgentExecuteRuntime::UnloadAgent(AgentHandle handle) {
+  if (handle >= agent_slots_.size() || !agent_slots_[handle]) {
     return false;
   }
-  entity_slots_[handle].reset();
-  entity_slots_dirty_ = true;
+  agent_slots_[handle].reset();
+  agent_slots_dirty_ = true;
   return true;
 }
 
-void EntityInteractionRuntime::RefreshBindingsFromEntitySlots() {
-  auto desired_render = FindFirstMountedEntity(entity_slots_, MountedAgentKind::Render);
-  auto desired_physics = FindFirstMountedEntity(entity_slots_, MountedAgentKind::Physics);
+void AgentExecuteRuntime::RefreshBindingsFromAgentSlots() {
+  auto desired_render = FindFirstMountedAgent(agent_slots_, MountedRuntimeKind::Render);
+  auto desired_physics = FindFirstMountedAgent(agent_slots_, MountedRuntimeKind::Physics);
 
-  MountRenderEntity(desired_render);
-  MountPhysicsEntity(desired_physics);
+  MountRenderAgent(desired_render);
+  MountPhysicsAgent(desired_physics);
 }
 
-bool EntityInteractionRuntime::Tick() {
+bool AgentExecuteRuntime::Tick() {
   if (!initialized_) {
     return false;
   }
@@ -366,9 +366,9 @@ bool EntityInteractionRuntime::Tick() {
     return false;
   }
 
-  if (entity_slots_dirty_) {
-    RefreshBindingsFromEntitySlots();
-    entity_slots_dirty_ = false;
+  if (agent_slots_dirty_) {
+    RefreshBindingsFromAgentSlots();
+    agent_slots_dirty_ = false;
   }
 
   const auto now = std::chrono::steady_clock::now();
@@ -376,7 +376,7 @@ bool EntityInteractionRuntime::Tick() {
   frame_dt = std::clamp(frame_dt, 0.0f, 0.05f);
   last_frame_time_ = now;
 
-  if (physics_entity_ready_) {
+  if (physics_agent_binding_ready_) {
     physics_agent_.SetRunState(render_agent_.phys_run_state());
     physics_agent_.Tick(
       mesh_,
@@ -385,37 +385,37 @@ bool EntityInteractionRuntime::Tick() {
       frame_dt);
   }
 
-  if (render_entity_ready_ && physics_entity_ready_ && render_entity_ == physics_entity_) {
+  if (render_agent_binding_ready_ && physics_agent_binding_ready_ && render_agent_binding_ == physics_agent_binding_) {
     render_agent_.SetPhysRunState(PhysRunState::Run);
     physics_agent_.SetRunState(PhysRunState::Run);
   }
 
-  if (render_entity_ready_ && physics_entity_ready_) {
+  if (render_agent_binding_ready_ && physics_agent_binding_ready_) {
     InteractionUiState ui = BuildInteractionUiState(std::chrono::duration<float>(now - start_time_).count());
     InteractionUiAction frame = render_agent_.Tick(mesh_, ui);
-    EntityInteractionUiBridge::ApplyInteractionUiActionOnPhysicsAgentAndMesh(frame, &physics_agent_, &mesh_);
+    AgentUiBridge::ApplyInteractionUiActionOnPhysicsAgentAndMesh(frame, &physics_agent_, &mesh_);
   }
 
   return true;
 }
 
-void EntityInteractionRuntime::Destroy() {
+void AgentExecuteRuntime::Destroy() {
   physics_agent_.Destroy();
   render_agent_.Destroy();
-  physics_entity_.reset();
-  render_entity_.reset();
-  entity_slots_.clear();
+  physics_agent_binding_.reset();
+  render_agent_binding_.reset();
+  agent_slots_.clear();
   window_agent_.Destroy();
   mesh_ = Mesh{};
   mesh_source_path_.clear();
   initialized_ = false;
-  render_entity_ready_ = false;
-  physics_entity_ready_ = false;
-  entity_slots_dirty_ = false;
+  render_agent_binding_ready_ = false;
+  physics_agent_binding_ready_ = false;
+  agent_slots_dirty_ = false;
   ui_status_message_.clear();
   draw_callback_ = {};
   start_time_ = {};
   last_frame_time_ = {};
 }
 
-}  // namespace entity_interaction
+}  // namespace agent_execute
