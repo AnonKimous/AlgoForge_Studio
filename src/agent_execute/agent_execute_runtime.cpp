@@ -24,6 +24,10 @@ AgentLaunchSpec BuildCameraAgentInfoFromMesh(const Mesh& mesh, const std::string
   volume.driving_dir = Vec3{0.0f, 0.0f, 1.0f};
 
   codec->BuildContainerDescriptor(volume, &spec.compliance_descriptor);
+  spec.agent_config.compliance_packages.push_back(AgentAlgorithmPackageHandle{
+    kCameraAlgorithmName,
+    std::static_pointer_cast<algorithm::IAlgorithmPackageCodec>(codec),
+    std::static_pointer_cast<algorithm::IAlgorithmPackageDecomposer>(codec)});
   return spec;
 }
 
@@ -56,6 +60,12 @@ AgentLaunchSpec BuildPhysicsAgentInfoFromMesh(
       static_cast<uint32_t>(mesh.positions.size()),
       static_cast<uint32_t>(mesh.triangles.size()));
   }
+  spec.agent_config.compliance_packages.push_back(AgentAlgorithmPackageHandle{
+    spec.agent_config.algorithm_name,
+    nullptr,
+    nullptr});
+  spec.agent_config.intervention_package = std::make_shared<AgentInterventionPackageHandle>();
+  spec.agent_config.intervention_package->package_name = "physics_intervention";
   return spec;
 }
 

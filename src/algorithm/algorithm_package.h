@@ -135,6 +135,7 @@ class IAlgorithmInterventionPackageAlgorithm {
 struct AlgorithmPackageHandle {
   std::string package_name;
   std::shared_ptr<IAlgorithmPackageCodec> codec_hook;
+  std::shared_ptr<IAlgorithmPackageDecomposer> decomposer_hook;
 };
 
 struct AlgorithmInterventionPackageHandle {
