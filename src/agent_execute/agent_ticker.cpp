@@ -1,4 +1,8 @@
-#include "physics_agent.h"
+#include "agent_ticker.h"
+
+#include "agent/agent.h"
+#include "codec/codec_manager.h"
+#include "algorithm_library/algorithm_mng.h"
 
 #include <algorithm>
 #include <cmath>
@@ -69,19 +73,17 @@ std::vector<PhysicsRestTriangle> BuildRestTriangles(const Mesh& mesh) {
 
 }  // namespace
 
-void PhysicsAgent::Init(
-  const PhysSolverConfig& config,
-  const VulkanComputeContextView& compute_context,
-  const AlgorithmContainerDescriptor& container_descriptor) {
-  algorithm_runtime_.Init(config, compute_context, container_descriptor);
-  algorithm_runtime_.SetAgentToAlgorithmSignal(AgentToAlgorithmSignal{});
-  algorithm_runtime_.SetAlgorithmToAgentSignal(AlgorithmToAgentSignal{});
-  algorithm_runtime_.ApplyInterventionRequest(InteractionInterventionRequest{});
+void AgentTicker::Init(std::shared_ptr<agent::Agent> agent, const VulkanComputeContextView& compute_context) {
+  compute_context_ = compute_context;
+  agent_binding_ = std::move(agent);
+  agent_to_algorithm_signal_ = {};
+  algorithm_to_agent_signal_ = {};
+  intervention_request_ = {};
   run_state_ = PhysRunState::Pause;
   initialized_ = false;
 }
 
-void PhysicsAgent::EnsureInitialized(const Mesh& mesh) {
+void AgentTicker::EnsureInitialized(const Mesh& mesh) {
   if (initialized_) return;
 
   rest_mesh_ = mesh;
@@ -93,14 +95,26 @@ void PhysicsAgent::EnsureInitialized(const Mesh& mesh) {
   initialized_ = true;
 }
 
-void PhysicsAgent::ApplyInterventionRequest(const InteractionInterventionRequest& request) {
-  algorithm_runtime_.ApplyInterventionRequest(request);
+void AgentTicker::ApplyInterventionRequest(const InteractionInterventionRequest& request) {
+  intervention_request_ = request;
+  algorithm_to_agent_signal_.intervention_applied = false;
+  algorithm_to_agent_signal_.intervention_needed = request.enabled;
+
+  CodecManager codec{};
+  IoBufferPacket packet = codec.BuildAlgorithmInterventionPacket(request);
+  InteractionInterventionRequest decoded{};
+  if (codec.DecodeAlgorithmInterventionPacket(packet, &decoded)) {
+    decoded.enabled = request.enabled;
+    intervention_request_ = decoded;
+    algorithm_to_agent_signal_.intervention_applied = request.enabled;
+  }
 }
 
-PhysicsAlgorithmRequest PhysicsAgent::BuildRequest(const Mesh& mesh) const {
+PhysicsAlgorithmRequest AgentTicker::BuildRequest(const Mesh& mesh) const {
   PhysicsAlgorithmRequest request{};
-  request.config = algorithm_runtime_.config();
-  request.compute_context = algorithm_runtime_.compute_context();
+  const auto& agent_binding = agent_binding_;
+  request.config = agent_binding ? agent_binding->solver_config() : PhysSolverConfig{};
+  request.compute_context = compute_context_;
   request.input.positions = mesh.positions;
   request.input.rest_positions = rest_mesh_.positions;
   request.input.total_velocities = total_velocities_;
@@ -110,9 +124,9 @@ PhysicsAlgorithmRequest PhysicsAgent::BuildRequest(const Mesh& mesh) const {
   request.input.displacement_interventions = active_displacement_interventions_;
   request.input.velocity_interventions = active_velocity_interventions_;
   request.input.force_interventions = active_force_interventions_;
-  request.agent_to_algorithm_signal = algorithm_runtime_.agent_to_algorithm_signal();
-  request.intervention_request = algorithm_runtime_.intervention_request();
-  request.compliance_descriptor = algorithm_runtime_.container_descriptor();
+  request.agent_to_algorithm_signal = agent_to_algorithm_signal_;
+  request.intervention_request = intervention_request_;
+  request.compliance_descriptor = agent_binding ? agent_binding->compliance_descriptor() : AlgorithmComplianceDescriptor{};
   if (request.input.total_velocities.size() < request.input.positions.size()) {
     request.input.total_velocities.resize(request.input.positions.size(), MakeIdentityVelocity());
   }
@@ -130,21 +144,21 @@ PhysicsAlgorithmRequest PhysicsAgent::BuildRequest(const Mesh& mesh) const {
   return request;
 }
 
-void PhysicsAgent::CaptureResultFeedback(const PhysicsAlgorithmResult& result) {
-  algorithm_runtime_.SetAlgorithmToAgentSignal(result.algorithm_to_agent_signal);
+void AgentTicker::CaptureResultFeedback(const PhysicsAlgorithmResult& result) {
+  algorithm_to_agent_signal_ = result.algorithm_to_agent_signal;
   if (result.algorithm_to_agent_signal.pause_requested) {
     run_state_ = PhysRunState::Pause;
   }
 }
 
-void PhysicsAgent::AdvancePhysicsStep(Mesh& mesh) {
+void AgentTicker::AdvancePhysicsStep(Mesh& mesh) {
   EnsureInitialized(mesh);
   PhysicsAlgorithmResult result{};
   PhysicsAlgorithmRequest request = BuildRequest(mesh);
-  if (algorithm_runtime_.agent_to_algorithm_signal().needs_intervention && algorithm_runtime_.intervention_request().enabled) {
-    ApplyInterventionRequest(algorithm_runtime_.intervention_request());
+  if (agent_to_algorithm_signal_.needs_intervention && intervention_request_.enabled) {
+    ApplyInterventionRequest(intervention_request_);
   }
-  if (!algorithm_runtime_.Run(request, &result) || !result.executed) {
+  if (!agent_binding_ || !AlgorithmMng_Run(request, &result) || !result.executed) {
     return;
   }
   mesh.positions = std::move(result.step_output.positions);
@@ -157,7 +171,7 @@ void PhysicsAgent::AdvancePhysicsStep(Mesh& mesh) {
   CaptureResultFeedback(result);
 }
 
-void PhysicsAgent::Tick(
+void AgentTicker::Tick(
   Mesh& mesh,
   const InputState& input,
   Vec2 mouse_pixel,
@@ -165,13 +179,13 @@ void PhysicsAgent::Tick(
   (void)input;
   (void)mouse_pixel;
   EnsureInitialized(mesh);
-  if (algorithm_runtime_.agent_to_algorithm_signal().stop_requested) {
+  if (agent_to_algorithm_signal_.stop_requested) {
     run_state_ = PhysRunState::Pause;
     physics_accumulator_ = 0.0f;
-    algorithm_runtime_.SetAgentToAlgorithmSignal(AgentToAlgorithmSignal{});
+    agent_to_algorithm_signal_ = {};
     return;
   }
-  if (algorithm_runtime_.agent_to_algorithm_signal().pause_requested) {
+  if (agent_to_algorithm_signal_.pause_requested) {
     run_state_ = PhysRunState::Pause;
   }
   if (run_state_ == PhysRunState::Run) {
@@ -184,10 +198,10 @@ void PhysicsAgent::Tick(
   } else {
     physics_accumulator_ = 0.0f;
   }
-  algorithm_runtime_.SetAgentToAlgorithmSignal(AgentToAlgorithmSignal{});
+  agent_to_algorithm_signal_ = {};
 }
 
-void PhysicsAgent::Destroy() {
+void AgentTicker::Destroy() {
   initialized_ = false;
   run_state_ = PhysRunState::Pause;
   physics_accumulator_ = 0.0f;
@@ -200,19 +214,21 @@ void PhysicsAgent::Destroy() {
   active_displacement_interventions_.clear();
   active_velocity_interventions_.clear();
   active_force_interventions_.clear();
-  algorithm_runtime_.SetAgentToAlgorithmSignal(AgentToAlgorithmSignal{});
-  algorithm_runtime_.SetAlgorithmToAgentSignal(AlgorithmToAgentSignal{});
-  algorithm_runtime_.ApplyInterventionRequest(InteractionInterventionRequest{});
+  agent_binding_.reset();
+  agent_to_algorithm_signal_ = {};
+  algorithm_to_agent_signal_ = {};
+  intervention_request_ = {};
+  compute_context_ = {};
 }
 
-void PhysicsAgent::StepOnce(Mesh& mesh) {
+void AgentTicker::StepOnce(Mesh& mesh) {
   EnsureInitialized(mesh);
   if (run_state_ != PhysRunState::Pause) return;
   physics_accumulator_ = 0.0f;
   AdvancePhysicsStep(mesh);
 }
 
-void PhysicsAgent::Reset(Mesh& mesh) {
+void AgentTicker::Reset(Mesh& mesh) {
   EnsureInitialized(mesh);
   if (initial_positions_.size() == mesh.positions.size()) {
     mesh.positions = initial_positions_;

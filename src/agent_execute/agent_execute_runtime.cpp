@@ -12,40 +12,10 @@ namespace agent_execute {
 
 namespace {
 
-bool IsRenderMountedAgentName(const std::string& mounted_agent_name) {
-  return mounted_agent_name == "render" || mounted_agent_name == "render_agent" ||
-         mounted_agent_name == "instance_render" || mounted_agent_name == "render_physics_agent" ||
-         mounted_agent_name == "dual_agent";
-}
-
-bool IsPhysicsMountedAgentName(const std::string& mounted_agent_name) {
-  return mounted_agent_name == "physics" || mounted_agent_name == "physics_agent" ||
-         mounted_agent_name == "instance_physics" || mounted_agent_name == "render_physics_agent" ||
-         mounted_agent_name == "dual_agent";
-}
-
-bool IsSharedMountedAgentName(const std::string& mounted_agent_name) {
-  return mounted_agent_name == "render_physics_agent" || mounted_agent_name == "dual_agent";
-}
-
-const char* ResolveMountedAgentNameForPreset(int preset_index) {
-  switch (preset_index) {
-    case 0:
-      return "render_agent";
-    case 1:
-    case 2:
-      return "physics_agent";
-    default:
-      return "physics_agent";
-  }
-}
-
-CreateAgentInfo BuildCameraAgentInfoFromMesh(const Mesh& mesh, const std::string& mounted_agent_name, const std::string& agent_name) {
-  CreateAgentInfo info{};
+agent::AgentInitConfig BuildCameraAgentInfoFromMesh(const Mesh& mesh, const std::string& agent_name) {
+  agent::AgentInitConfig info{};
   info.agent_name = agent_name.empty() ? "camera_agent" : agent_name;
   info.algorithm_name = kCameraAlgorithmName;
-  info.mounted_agent_name = mounted_agent_name.empty() ? "render_agent" : mounted_agent_name;
-  info.bound_resources = {"mesh", "camera"};
 
   auto codec = std::make_shared<CameraAlgorithmPackageCodec>();
   codec::VolumeDescriptor volume{};
@@ -63,20 +33,17 @@ CreateAgentInfo BuildCameraAgentInfoFromMesh(const Mesh& mesh, const std::string
   return info;
 }
 
-CreateAgentInfo BuildPhysicsAgentInfoFromMesh(
+agent::AgentInitConfig BuildPhysicsAgentInfoFromMesh(
   const Mesh& mesh,
   PhysSolverKind solver_kind,
   const std::string& algorithm_name,
   const std::string& gpu_shader_path,
-  const std::string& mounted_agent_name,
   const std::string& agent_name) {
-  CreateAgentInfo info{};
-  info.agent_name = agent_name.empty() ? (algorithm_name.empty() ? "physics_agent" : algorithm_name + "_agent") : agent_name;
+  agent::AgentInitConfig info{};
+  info.agent_name = agent_name.empty() ? (algorithm_name.empty() ? "agent" : algorithm_name + "_agent") : agent_name;
   info.algorithm_name = algorithm_name.empty()
     ? (solver_kind == PhysSolverKind::Gpu ? kPhysicsConvolutionGpuAlgorithmName : kCorotatedCpuAlgorithmName)
     : algorithm_name;
-  info.mounted_agent_name = mounted_agent_name.empty() ? "physics_agent" : mounted_agent_name;
-  info.bound_resources = {"mesh", "physics_state", "compute_context"};
 
   PhysSolverConfig solver_config{};
   solver_config.solver_kind = solver_kind;
@@ -105,89 +72,30 @@ CreateAgentInfo BuildPhysicsAgentInfoFromMesh(
   return info;
 }
 
-PhysSolverKind InferSolverKind(const PhysSolverConfig& config, const std::string& algorithm_name) {
-  if (algorithm_name == kPhysicsConvolutionGpuAlgorithmName || config.algorithm_name == kPhysicsConvolutionGpuAlgorithmName) {
-    return PhysSolverKind::Gpu;
-  }
-  if (config.solver_kind == PhysSolverKind::Gpu) {
-    return PhysSolverKind::Gpu;
-  }
-  if (config.solver_kind == PhysSolverKind::Cpu) {
-    return PhysSolverKind::Cpu;
-  }
-  return PhysSolverKind::Cpu;
-}
-
-std::shared_ptr<agent::Agent> FindFirstMountedAgent(
-  const std::vector<std::shared_ptr<agent::Agent>>& slots,
-  MountedRuntimeKind kind) {
-  for (auto it = slots.rbegin(); it != slots.rend(); ++it) {
-    const auto& slot = *it;
-    if (!slot) continue;
-    const std::string& mounted_agent_name = slot->mounted_agent_name();
-    switch (kind) {
-      case MountedRuntimeKind::Render:
-        if (IsRenderMountedAgentName(mounted_agent_name)) return slot;
-        break;
-      case MountedRuntimeKind::Physics:
-        if (IsPhysicsMountedAgentName(mounted_agent_name)) return slot;
-        break;
-      case MountedRuntimeKind::None:
-      default:
-        break;
+std::shared_ptr<agent::Agent> FindLastActiveAgent(
+  const std::vector<std::shared_ptr<agent::Agent>>& slots) {
+  for (std::size_t index = slots.size(); index-- > 0;) {
+    const auto& slot = slots[index];
+    if (!slot) {
+      continue;
     }
+    return slot;
   }
   return {};
 }
 
 }  // namespace
 
-CreateAgentInfo CreateCameraAgentInfo(const Mesh& mesh) {
-  return BuildCameraAgentInfoFromMesh(mesh, "render_agent", "camera_agent");
+agent::AgentInitConfig CreateCameraAgentInfo(const Mesh& mesh) {
+  return BuildCameraAgentInfoFromMesh(mesh, "camera_agent");
 }
 
-CreateAgentInfo CreatePhysicsAgentInfo(
+agent::AgentInitConfig CreatePhysicsAgentInfo(
   const Mesh& mesh,
   PhysSolverKind solver_kind,
   const std::string& algorithm_name,
-  const std::string& mounted_agent_name,
   const std::string& gpu_shader_path) {
-  return BuildPhysicsAgentInfoFromMesh(mesh, solver_kind, algorithm_name, gpu_shader_path, mounted_agent_name, "");
-}
-
-InteractionUiState AgentUiBridge::BuildInteractionUiStateFromRenderAgentAndPhysicsAgent(
-  const agent_execute::RenderAgent& render_agent,
-  const agent_execute::PhysicsAgent& physics_agent,
-  float animation_time) {
-  (void)physics_agent;
-  InteractionUiState ui{};
-  ui.mode = render_agent.mode();
-  ui.phys_run_state = render_agent.phys_run_state();
-  ui.agent_to_algorithm_signal = physics_agent.agent_to_algorithm_signal();
-  ui.algorithm_to_agent_signal = physics_agent.algorithm_to_agent_signal();
-  ui.intervention_request = physics_agent.intervention_request();
-  ui.animation_time = animation_time;
-  return ui;
-}
-
-void AgentUiBridge::ApplyInteractionUiActionOnPhysicsAgentAndMesh(
-  const InteractionUiAction& action,
-  agent_execute::PhysicsAgent* physics_agent,
-  Mesh* mesh) {
-  if (!physics_agent || !mesh) {
-    return;
-  }
-  physics_agent->SetRunState(action.phys_run_state);
-  physics_agent->SetAgentToAlgorithmSignal(action.agent_to_algorithm_signal);
-  if (action.intervention_request.enabled) {
-    physics_agent->ApplyInterventionRequest(action.intervention_request);
-  }
-  if (action.phys_reset_requested) {
-    physics_agent->Reset(*mesh);
-  }
-  if (action.phys_step_requested) {
-    physics_agent->StepOnce(*mesh);
-  }
+  return BuildPhysicsAgentInfoFromMesh(mesh, solver_kind, algorithm_name, gpu_shader_path, "");
 }
 
 bool AgentExecuteRuntime::Init(const Mesh& mesh, const char* window_title, int width, int height) {
@@ -197,9 +105,8 @@ bool AgentExecuteRuntime::Init(const Mesh& mesh, const char* window_title, int w
     return false;
   }
   mesh_source_path_.clear();
-  ui_status_message_ = "Mesh is prefilled. Create the shared agent to start work.";
-  start_time_ = std::chrono::steady_clock::now();
-  last_frame_time_ = start_time_;
+  ui_status_message_ = "Mesh is prefilled. Create an agent to start work.";
+  last_frame_time_ = std::chrono::steady_clock::now();
   return true;
 }
 
@@ -208,13 +115,10 @@ bool AgentExecuteRuntime::LoadMeshFromFile(const std::string& path, std::string*
     mesh_ = LoadMeshFile(path);
     mesh_source_path_ = path;
     agent_slots_.clear();
-    render_agent_binding_.reset();
-    physics_agent_binding_.reset();
-    render_agent_binding_ready_ = false;
-    physics_agent_binding_ready_ = false;
+    active_agent_binding_.reset();
+    active_agent_binding_ready_ = false;
     agent_slots_dirty_ = false;
-    render_agent_.Destroy();
-    physics_agent_.Destroy();
+    agent_ticker_.Destroy();
     ui_status_message_ = "Loaded mesh: " + path;
     return true;
   } catch (const std::exception& error) {
@@ -245,72 +149,28 @@ bool AgentExecuteRuntime::LoadMeshAndResetBindings(const std::string& path, std:
   return true;
 }
 
-MountedRuntimeKind AgentExecuteRuntime::ClassifyMountedAgent(
-  const std::string& mounted_agent_name) {
-  if (IsRenderMountedAgentName(mounted_agent_name)) {
-    return MountedRuntimeKind::Render;
-  }
-  if (IsPhysicsMountedAgentName(mounted_agent_name)) {
-    return MountedRuntimeKind::Physics;
-  }
-  return MountedRuntimeKind::None;
-}
-
-bool AgentExecuteRuntime::MountRenderAgent(const std::shared_ptr<agent::Agent>& agent) {
-  if (render_agent_binding_ == agent && render_agent_binding_ready_) {
+bool AgentExecuteRuntime::MountActiveAgent(const std::shared_ptr<agent::Agent>& agent) {
+  if (active_agent_binding_ == agent && active_agent_binding_ready_) {
     return true;
   }
   if (!agent) {
-    if (render_agent_binding_ready_) {
-      render_agent_.Destroy();
+    if (active_agent_binding_ready_) {
+      agent_ticker_.Destroy();
     }
-    render_agent_binding_.reset();
-    render_agent_binding_ready_ = false;
+    active_agent_binding_.reset();
+    active_agent_binding_ready_ = false;
     return true;
   }
 
-  if (render_agent_binding_ready_) {
-    render_agent_.Destroy();
-    render_agent_binding_ready_ = false;
+  if (active_agent_binding_ready_) {
+    agent_ticker_.Destroy();
+    active_agent_binding_ready_ = false;
   }
 
-  render_agent_binding_ = agent;
-  render_agent_.Init(window_agent_.native_handle());
-  render_agent_.SetPhysRunState(IsSharedMountedAgentName(agent->mounted_agent_name()) ? PhysRunState::Run : PhysRunState::Pause);
-  render_agent_binding_ready_ = true;
-  return true;
-}
-
-bool AgentExecuteRuntime::MountPhysicsAgent(const std::shared_ptr<agent::Agent>& agent) {
-  if (physics_agent_binding_ == agent && physics_agent_binding_ready_) {
-    return true;
-  }
-  if (!agent) {
-    if (physics_agent_binding_ready_) {
-      physics_agent_.Destroy();
-    }
-    physics_agent_binding_.reset();
-    physics_agent_binding_ready_ = false;
-    return true;
-  }
-
-  physics_agent_binding_ = agent;
-  if (physics_agent_binding_ready_) {
-    physics_agent_.Destroy();
-    physics_agent_binding_ready_ = false;
-  }
-
-  PhysSolverConfig solver_config = agent->solver_config();
-  if (solver_config.algorithm_name.empty()) {
-    solver_config.algorithm_name = agent->algorithm_name();
-  }
-  solver_config.solver_kind = InferSolverKind(solver_config, agent->algorithm_name());
-  physics_agent_.Init(solver_config, VulkanComputeContextView{}, agent->compliance_descriptor());
-  if (agent->intervention_package()) {
-    physics_agent_.SetInterventionPackage(agent->intervention_package());
-  }
-  physics_agent_.SetRunState(IsSharedMountedAgentName(agent->mounted_agent_name()) ? PhysRunState::Run : PhysRunState::Pause);
-  physics_agent_binding_ready_ = true;
+  active_agent_binding_ = agent;
+  agent_ticker_.Init(agent, VulkanComputeContextView{});
+  agent_ticker_.SetRunState(PhysRunState::Run);
+  active_agent_binding_ready_ = true;
   return true;
 }
 
@@ -322,14 +182,7 @@ void AgentExecuteRuntime::SetUiStatusMessage(std::string message) {
   ui_status_message_ = std::move(message);
 }
 
-InteractionUiState AgentExecuteRuntime::BuildInteractionUiState(float animation_time) const {
-  return AgentUiBridge::BuildInteractionUiStateFromRenderAgentAndPhysicsAgent(
-    render_agent_,
-    physics_agent_,
-    animation_time);
-}
-
-AgentExecuteRuntime::AgentHandle AgentExecuteRuntime::LoadAgent(CreateAgentInfo info) {
+AgentExecuteRuntime::AgentHandle AgentExecuteRuntime::LoadAgent(agent::AgentInitConfig info) {
   auto agent_instance = std::make_shared<agent::Agent>();
   if (!agent::agent_init(agent_instance.get(), std::move(info))) {
     return kInvalidAgentHandle;
@@ -351,11 +204,7 @@ bool AgentExecuteRuntime::UnloadAgent(AgentHandle handle) {
 }
 
 void AgentExecuteRuntime::RefreshBindingsFromAgentSlots() {
-  auto desired_render = FindFirstMountedAgent(agent_slots_, MountedRuntimeKind::Render);
-  auto desired_physics = FindFirstMountedAgent(agent_slots_, MountedRuntimeKind::Physics);
-
-  MountRenderAgent(desired_render);
-  MountPhysicsAgent(desired_physics);
+  MountActiveAgent(FindLastActiveAgent(agent_slots_));
 }
 
 bool AgentExecuteRuntime::Tick() {
@@ -376,45 +225,29 @@ bool AgentExecuteRuntime::Tick() {
   frame_dt = std::clamp(frame_dt, 0.0f, 0.05f);
   last_frame_time_ = now;
 
-  if (physics_agent_binding_ready_) {
-    physics_agent_.SetRunState(render_agent_.phys_run_state());
-    physics_agent_.Tick(
+  if (active_agent_binding_ready_) {
+    agent_ticker_.Tick(
       mesh_,
       window_agent_.input(),
       window_agent_.MousePosition(),
       frame_dt);
   }
 
-  if (render_agent_binding_ready_ && physics_agent_binding_ready_ && render_agent_binding_ == physics_agent_binding_) {
-    render_agent_.SetPhysRunState(PhysRunState::Run);
-    physics_agent_.SetRunState(PhysRunState::Run);
-  }
-
-  if (render_agent_binding_ready_ && physics_agent_binding_ready_) {
-    InteractionUiState ui = BuildInteractionUiState(std::chrono::duration<float>(now - start_time_).count());
-    InteractionUiAction frame = render_agent_.Tick(mesh_, ui);
-    AgentUiBridge::ApplyInteractionUiActionOnPhysicsAgentAndMesh(frame, &physics_agent_, &mesh_);
-  }
-
   return true;
 }
 
 void AgentExecuteRuntime::Destroy() {
-  physics_agent_.Destroy();
-  render_agent_.Destroy();
-  physics_agent_binding_.reset();
-  render_agent_binding_.reset();
+  agent_ticker_.Destroy();
+  active_agent_binding_.reset();
   agent_slots_.clear();
   window_agent_.Destroy();
   mesh_ = Mesh{};
   mesh_source_path_.clear();
   initialized_ = false;
-  render_agent_binding_ready_ = false;
-  physics_agent_binding_ready_ = false;
+  active_agent_binding_ready_ = false;
   agent_slots_dirty_ = false;
   ui_status_message_.clear();
   draw_callback_ = {};
-  start_time_ = {};
   last_frame_time_ = {};
 }
 

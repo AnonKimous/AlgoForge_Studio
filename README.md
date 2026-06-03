@@ -6,8 +6,7 @@ This project is a layered Vulkan + SDL3 sandbox for agent-driven physics and ren
 
 - `interact_ui` is the main runtime UI.
 - An `agent` is the unit that carries algorithm packages, solver metadata, and intervention state.
-- A shared agent can mount both render and physics roles.
-- The current default workflow is: load mesh -> keep the draft prefilled -> create the shared agent -> run immediately.
+- The current default workflow is: load mesh -> keep the draft prefilled -> create an agent -> run immediately.
 
 ## Terminology Rule
 
@@ -22,8 +21,8 @@ This project is a layered Vulkan + SDL3 sandbox for agent-driven physics and ren
 - `algorithm` manages execution and compliance descriptors.
 - `algorithm_library` hosts concrete algorithm packages and their contracts.
 - `codec` encodes and decodes compliance / intervention payloads.
-- The agent module describes ordered packages, aliases, and container routing.
-- `agent_execute` owns the runtime wrappers for render, physics, and agent submission.
+- The agent module holds the lightweight agent object and its attached algorithm metadata.
+- `agent_execute` owns the runtime path for creating agents, selecting the active one, and ticking it.
 - `interact_ui` provides the manual agent composer and live debug UI.
 - `app_orchestration` is the executable entry point.
 
@@ -37,12 +36,9 @@ This project is a layered Vulkan + SDL3 sandbox for agent-driven physics and ren
 ## Agent Composition
 
 - Write each small algorithm in `algorithm_library` as a normal algorithm package with its own compliance descriptor.
-- Define the low-level contract first: which containers it reads, which arrays it allocates, and which names it exposes.
-- Build the agent-level composite in the agent module by ordering packages and defining container aliases and routes.
-- Use the agent-level compliance descriptor as the final descriptor handed to `algorithm` / `algorithm_mng` for container allocation.
-- Let the agent remap a package container name to a final composite name through aliases; the runtime does not try to validate the whole graph.
-- If the structure is complex, compose it with the helper script under `tools/algorithm_descriptor_composer/` and export the merged descriptor for the agent.
-- The intended pattern is: small algorithms stay small, the agent stitches them together into one composite pipeline.
+- Build the final agent by attaching the algorithm package handles, solver config, and compliance descriptor to one agent object.
+- Let `agent_execute` create and manage the active agent instance, then hand it to `AgentTicker` for runtime stepping.
+- The runtime does not try to validate the full graph; missing or incompatible bindings should fail at the point of use.
 
 ## Logs
 

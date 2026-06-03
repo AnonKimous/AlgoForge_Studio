@@ -15,13 +15,4 @@ bool Agent::HasAlgorithmPackage(const std::string& package_name) const {
   return FindAlgorithmPackage(package_name) != nullptr;
 }
 
-const AgentPackageBinding* Agent::FindPackageBinding(const std::string& package_name) const {
-  for (const auto& binding : pipeline_descriptor_.ordered_bindings) {
-    if (binding.package_name == package_name) {
-      return &binding;
-    }
-  }
-  return nullptr;
-}
-
 }  // namespace agent

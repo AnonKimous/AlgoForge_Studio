@@ -134,8 +134,7 @@ target_link_libraries(agent PUBLIC common_data algorithm codec)
 
 add_library(agent_execute STATIC
   src/agents/agents.cpp
-  src/agents/algorithm_pool.cpp
-  src/agents/physics_agent.cpp
+  src/agent_execute/agent_ticker.cpp
   src/agent_execute/agent_execute_runtime.cpp
 )
 target_include_directories(agent_execute PUBLIC ${PROJECT_INCLUDE_DIRS})

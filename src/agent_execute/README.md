@@ -1,21 +1,16 @@
-# Agent Execute Backend
+# Agent Execute
 
-This layer owns the runtime backend for assembling agents.
+This layer owns the active-agent runtime path.
 
-## What the UI Does
+## Responsibilities
 
-- Load a mesh file into the active runtime mesh.
-- Create a new agent manually from the active mesh.
-- Bind the agent to a render role, a physics role, or a shared render+physics role.
-- Bind the agent to a known algorithm preset.
-- Set the mounted agent name and load-mesh name for agent-level presets before creating them.
-- Reset and reload agent bindings when the mesh source changes.
-- Loading a new mesh clears existing agent bindings so the draft stays aligned with the new vertex layout.
+- Own the window/UI shell for the runtime.
+- Keep the loaded agent slots and the current active agent binding.
+- Drive `AgentTicker` every frame.
+- Hold the current `agent` directly inside `AgentTicker` and forward execution to the algorithm manager.
 
 ## Notes
 
-- The backend is intentionally direct and agent-centric.
-- The editor UI sits above this layer and owns the rendering of agent controls.
-- When an intervention package is mounted, it owns the UI semantics, signal protocol, and intervention delegation for that agent.
-- Algorithm names still need to match the implementation contract.
-- GPU physics presets require a compiled shader path in the editor UI create panel.
+- The UI can create camera or physics agents from the current mesh.
+- Loading a new mesh clears the current agent binding state.
+- `AgentTicker` now lives here, not in `src/agents`.

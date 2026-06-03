@@ -13,21 +13,6 @@
 
 namespace interact_ui {
 
-namespace {
-
-const char* ResolveMountedAgentNameForPreset(int preset_index) {
-  switch (preset_index) {
-    case 0:
-      return "render_agent";
-    case 1:
-    case 2:
-    default:
-      return "physics_agent";
-  }
-}
-
-}  // namespace
-
 void InteractUiRuntime::ResetAgentDraftState() {
   std::snprintf(agent_draft_.agent_name, sizeof(agent_draft_.agent_name), "%s", "agent_0");
   std::snprintf(agent_draft_.algorithm_name, sizeof(agent_draft_.algorithm_name), "%s", kCorotatedCpuAlgorithmName);
@@ -73,7 +58,7 @@ bool InteractUiRuntime::CreateAgentFromDraft(std::string* status_message) {
   const std::string agent_name = agent_draft_.agent_name;
 
   if (preset_index == 0) {
-    CreateAgentInfo info = CreateCameraAgentInfo(execute_runtime_.mesh());
+    auto info = CreateCameraAgentInfo(execute_runtime_.mesh());
     info.agent_name = agent_name.empty() ? "camera_agent" : agent_name;
     const auto handle = execute_runtime_.LoadAgent(std::move(info));
     if (handle == agent_execute::AgentExecuteRuntime::kInvalidAgentHandle) {
@@ -107,13 +92,12 @@ bool InteractUiRuntime::CreateAgentFromDraft(std::string* status_message) {
       ? (solver_kind == PhysSolverKind::Gpu ? kPhysicsConvolutionGpuAlgorithmName : kCorotatedCpuAlgorithmName)
       : agent_draft_.algorithm_name;
 
-  CreateAgentInfo info = CreatePhysicsAgentInfo(
+  auto info = CreatePhysicsAgentInfo(
     execute_runtime_.mesh(),
     solver_kind,
     algorithm_name,
-    ResolveMountedAgentNameForPreset(preset_index),
     agent_draft_.gpu_shader_path);
-  info.agent_name = agent_name.empty() ? (algorithm_name.empty() ? "physics_agent" : algorithm_name + "_agent") : agent_name;
+  info.agent_name = agent_name.empty() ? (algorithm_name.empty() ? "agent" : algorithm_name + "_agent") : agent_name;
 
   const auto handle = execute_runtime_.LoadAgent(std::move(info));
   if (handle == agent_execute::AgentExecuteRuntime::kInvalidAgentHandle) {
@@ -148,11 +132,6 @@ void InteractUiRuntime::DrawLoadedAgentListUi() {
       std::string label = "[" + std::to_string(index) + "] ";
       label += agent->agent_name().empty() ? agent->algorithm_name() : agent->agent_name();
       label += " | ";
-      label += agent->mounted_agent_name();
-      if (agent->mounted_agent_name() == "render_physics_agent" || agent->mounted_agent_name() == "dual_agent") {
-        label += " [shared]";
-      }
-      label += " | ";
       label += agent->algorithm_name();
 
       const bool selected = (selected_agent_slot_ == index);
@@ -167,10 +146,6 @@ void InteractUiRuntime::DrawLoadedAgentListUi() {
   if (has_selected) {
     const auto& agent = agent_slots[selected_agent_slot_];
     ImGui::Text("Selected: %s", agent->agent_name().empty() ? agent->algorithm_name().c_str() : agent->agent_name().c_str());
-    ImGui::Text("Mounted role: %s", agent->mounted_agent_name().c_str());
-    if (agent->mounted_agent_name() == "render_physics_agent" || agent->mounted_agent_name() == "dual_agent") {
-      ImGui::TextUnformatted("Role: shared render + physics");
-    }
     ImGui::Text("Algorithm: %s", agent->algorithm_name().c_str());
     if (ImGui::Button("Unload Selected")) {
       execute_runtime_.UnloadAgent(selected_agent_slot_);
@@ -207,7 +182,7 @@ void InteractUiRuntime::DrawAgentDraftUi() {
       }
     }
     ImGui::SameLine();
-    if (ImGui::Button("Create Physics Agent")) {
+    if (ImGui::Button("Create Agent")) {
       agent_draft_.preset_index = agent_draft_.solver_kind_index == 1 ? 2 : 1;
       std::snprintf(
         agent_draft_.algorithm_name,
@@ -216,7 +191,7 @@ void InteractUiRuntime::DrawAgentDraftUi() {
         agent_draft_.solver_kind_index == 1 ? kPhysicsConvolutionGpuAlgorithmName : kCorotatedCpuAlgorithmName);
       std::string message;
       if (!CreateAgentFromDraft(&message)) {
-        execute_runtime_.SetUiStatusMessage(message.empty() ? "Failed to create physics agent." : message);
+        execute_runtime_.SetUiStatusMessage(message.empty() ? "Failed to create agent." : message);
       }
     }
   }
@@ -256,16 +231,9 @@ void InteractUiRuntime::DrawInteractUi() {
   }
 
   ImGui::Separator();
-  ImGui::Text("Active render agent: %s", execute_runtime_.render_agent_binding_ready() && execute_runtime_.render_agent_binding()
-    ? execute_runtime_.render_agent_binding()->agent_name().c_str()
+  ImGui::Text("Active agent: %s", execute_runtime_.active_agent_binding_ready() && execute_runtime_.active_agent_binding()
+    ? execute_runtime_.active_agent_binding()->agent_name().c_str()
     : "<none>");
-  ImGui::Text("Active physics agent: %s", execute_runtime_.physics_agent_binding_ready() && execute_runtime_.physics_agent_binding()
-    ? execute_runtime_.physics_agent_binding()->agent_name().c_str()
-    : "<none>");
-  if (execute_runtime_.render_agent_binding_ready() && execute_runtime_.physics_agent_binding_ready() &&
-      execute_runtime_.render_agent_binding() == execute_runtime_.physics_agent_binding()) {
-    ImGui::Text("Active shared agent: %s", execute_runtime_.render_agent_binding()->agent_name().c_str());
-  }
   ImGui::End();
 }
 

@@ -1,7 +1,5 @@
 #include "agents.h"
 
-#include "codec/codec_manager.h"
-
 #include <imgui.h>
 
 #include <algorithm>
@@ -106,36 +104,6 @@ void DrawVertexArrayOverlay(
   DrawVertexArrayOverlayImpl(vertex_positions, triangle_edges, triangles);
 }
 
-void AgentAlgorithmRuntime::Init(
-  const PhysSolverConfig& config,
-  const VulkanComputeContextView& compute_context,
-  const AlgorithmContainerDescriptor& container_descriptor) {
-  pool_.Init(config, compute_context, container_descriptor);
-}
-
-bool AgentAlgorithmRuntime::Run(const PhysicsAlgorithmRequest& request, PhysicsAlgorithmResult* result) const {
-  return pool_.Run(request, result);
-}
-
-void AgentAlgorithmRuntime::SetInterventionPackage(std::shared_ptr<algorithm::AlgorithmInterventionPackageHandle> package) {
-  pool_.SetInterventionPackage(std::move(package));
-}
-
-void AgentAlgorithmRuntime::ApplyInterventionRequest(const InteractionInterventionRequest& request) {
-  intervention_request_ = request;
-  algorithm_to_agent_signal_.intervention_applied = false;
-  algorithm_to_agent_signal_.intervention_needed = request.enabled;
-
-  CodecManager codec{};
-  IoBufferPacket packet = codec.BuildAlgorithmInterventionPacket(request);
-  InteractionInterventionRequest decoded{};
-  if (codec.DecodeAlgorithmInterventionPacket(packet, &decoded)) {
-    decoded.enabled = request.enabled;
-    intervention_request_ = decoded;
-    algorithm_to_agent_signal_.intervention_applied = request.enabled;
-  }
-}
-
 bool WindowAgent::Init(const char* title, int width, int height) {
   window_ = std::make_unique<SdlWindow>(title, width, height);
   imgui_runtime_ = std::make_unique<runtime_systems::ImGuiVulkanRuntime>();
@@ -187,38 +155,6 @@ const InputState& WindowAgent::input() const {
 
 Vec2 WindowAgent::MousePosition() const {
   return window_ ? window_->MousePosition() : Vec2{};
-}
-
-bool RenderAgent::Init(const WindowHandle& window_handle) {
-  (void)window_handle;
-  return true;
-}
-
-InteractionUiAction RenderAgent::Tick(const Mesh& mesh, const InteractionUiState& ui_state) {
-  InteractionUiAction action{};
-  action.draw_calls = static_cast<uint32_t>(mesh.positions.size() + mesh.edges.size() + mesh.triangles.size());
-  action.mode = mode_;
-  action.phys_run_state = phys_run_state_;
-  action.agent_to_algorithm_signal = ui_state.agent_to_algorithm_signal;
-  action.intervention_request = ui_state.intervention_request;
-  return action;
-}
-
-void RenderAgent::Destroy() {
-  mode_ = InteractionMode::Edit;
-  phys_run_state_ = PhysRunState::Pause;
-}
-
-InteractionMode RenderAgent::mode() const {
-  return mode_;
-}
-
-PhysRunState RenderAgent::phys_run_state() const {
-  return phys_run_state_;
-}
-
-void RenderAgent::SetPhysRunState(PhysRunState state) {
-  phys_run_state_ = state;
 }
 
 }  // namespace agent_execute
