@@ -73,8 +73,14 @@ std::vector<PhysicsRestTriangle> BuildRestTriangles(const Mesh& mesh) {
 
 }  // namespace
 
-void AgentTicker::Init(std::shared_ptr<agent::Agent> agent, const VulkanComputeContextView& compute_context) {
+void AgentTicker::Init(
+  std::shared_ptr<agent::Agent> agent,
+  const VulkanComputeContextView& compute_context,
+  PhysSolverConfig solver_config,
+  AlgorithmComplianceDescriptor compliance_descriptor) {
   compute_context_ = compute_context;
+  solver_config_ = std::move(solver_config);
+  compliance_descriptor_ = std::move(compliance_descriptor);
   agent_binding_ = std::move(agent);
   agent_to_algorithm_signal_ = {};
   algorithm_to_agent_signal_ = {};
@@ -112,8 +118,7 @@ void AgentTicker::ApplyInterventionRequest(const InteractionInterventionRequest&
 
 PhysicsAlgorithmRequest AgentTicker::BuildRequest(const Mesh& mesh) const {
   PhysicsAlgorithmRequest request{};
-  const auto& agent_binding = agent_binding_;
-  request.config = agent_binding ? agent_binding->solver_config() : PhysSolverConfig{};
+  request.config = solver_config_;
   request.compute_context = compute_context_;
   request.input.positions = mesh.positions;
   request.input.rest_positions = rest_mesh_.positions;
@@ -126,7 +131,7 @@ PhysicsAlgorithmRequest AgentTicker::BuildRequest(const Mesh& mesh) const {
   request.input.force_interventions = active_force_interventions_;
   request.agent_to_algorithm_signal = agent_to_algorithm_signal_;
   request.intervention_request = intervention_request_;
-  request.compliance_descriptor = agent_binding ? agent_binding->compliance_descriptor() : AlgorithmComplianceDescriptor{};
+  request.compliance_descriptor = compliance_descriptor_;
   if (request.input.total_velocities.size() < request.input.positions.size()) {
     request.input.total_velocities.resize(request.input.positions.size(), MakeIdentityVelocity());
   }
@@ -219,6 +224,8 @@ void AgentTicker::Destroy() {
   algorithm_to_agent_signal_ = {};
   intervention_request_ = {};
   compute_context_ = {};
+  solver_config_ = {};
+  compliance_descriptor_ = {};
 }
 
 void AgentTicker::StepOnce(Mesh& mesh) {

@@ -17,7 +17,11 @@ namespace agent_execute {
 
 class AgentTicker {
  public:
-  void Init(std::shared_ptr<agent::Agent> agent, const VulkanComputeContextView& compute_context);
+  void Init(
+    std::shared_ptr<agent::Agent> agent,
+    const VulkanComputeContextView& compute_context,
+    PhysSolverConfig solver_config,
+    AlgorithmComplianceDescriptor compliance_descriptor);
   void Tick(Mesh& mesh, const InputState& input, Vec2 mouse_pixel, float dt_seconds);
   void Destroy();
 
@@ -42,6 +46,8 @@ class AgentTicker {
   bool initialized_{false};
   std::shared_ptr<agent::Agent> agent_binding_{};
   VulkanComputeContextView compute_context_{}; 
+  PhysSolverConfig solver_config_{};
+  AlgorithmComplianceDescriptor compliance_descriptor_{};
   AgentToAlgorithmSignal agent_to_algorithm_signal_{};
   AlgorithmToAgentSignal algorithm_to_agent_signal_{};
   InteractionInterventionRequest intervention_request_{};

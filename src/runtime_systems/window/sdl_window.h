@@ -1,9 +1,8 @@
 #pragma once
 
 #include "common_data/input_state.h"
-#include "common_data/window_handle.h"
-
 #include "common_data/vector_types.h"
+#include "runtime_systems/window/window_handle.h"
 
 #include <SDL3/SDL.h>
 

@@ -19,8 +19,13 @@ struct AlgorithmReadableReflection {
 
 struct AlgorithmDescriptorShapeReflection {
   std::string algorithm_name;
-  std::vector<std::string> required_resources;
   AlgorithmContainerDescriptor descriptor_shape{};
+  bool valid{false};
+};
+
+struct AlgorithmDecompositionReflection {
+  std::string algorithm_name;
+  std::vector<std::string> required_resources;
   bool valid{false};
 };
 
@@ -41,12 +46,6 @@ class IAlgorithmPackageCodec {
   virtual bool BuildContainerDescriptor(
     const codec::VolumeDescriptor& volume,
     AlgorithmContainerDescriptor* out_descriptor) const = 0;
-
-  // Describe the runtime resources the algorithm expects the upper layer to bind.
-  virtual bool BuildBoundResources(std::vector<std::string>* out_resources) const {
-    (void)out_resources;
-    return false;
-  }
 
   virtual bool BuildMeshCoderOutput(const Mesh& mesh, MeshCoderOutput* out_output) const {
     (void)mesh;
@@ -69,17 +68,6 @@ class IAlgorithmPackageCodec {
     return false;
   }
 
-  // Reflect the runtime resource list and the descriptor shape in one payload.
-  virtual bool ReflectDescriptorShape(
-    const AlgorithmContainerDescriptor& container_descriptor,
-    const std::vector<std::string>& bound_resources,
-    AlgorithmDescriptorShapeReflection* out_reflection) const {
-    (void)container_descriptor;
-    (void)bound_resources;
-    (void)out_reflection;
-    return false;
-  }
-
   virtual bool BuildVolumeDescriptor(
     const Mesh& mesh,
     float mass,
@@ -89,6 +77,19 @@ class IAlgorithmPackageCodec {
     (void)mass;
     (void)driving_dir;
     (void)out_volume;
+    return false;
+  }
+};
+
+class IAlgorithmPackageDecomposer {
+ public:
+  virtual ~IAlgorithmPackageDecomposer() = default;
+
+  virtual bool ReflectDecomposition(
+    const AlgorithmContainerDescriptor& container_descriptor,
+    AlgorithmDecompositionReflection* out_reflection) const {
+    (void)container_descriptor;
+    (void)out_reflection;
     return false;
   }
 };
@@ -148,6 +149,7 @@ struct AlgorithmInterventionPackageHandle {
 using algorithm::AlgorithmPackageDebugState;
 using algorithm::AlgorithmPackageHandle;
 using algorithm::AlgorithmDescriptorShapeReflection;
+using algorithm::AlgorithmDecompositionReflection;
 using algorithm::AlgorithmInterventionPackageDebugState;
 using algorithm::AlgorithmInterventionPackageHandle;
 using algorithm::AlgorithmReadableReflection;
@@ -155,5 +157,6 @@ using algorithm::IAlgorithmInterventionPackageAgent;
 using algorithm::IAlgorithmInterventionPackageAlgorithm;
 using algorithm::IAlgorithmInterventionPackageCodec;
 using algorithm::IAlgorithmPackageCodec;
+using algorithm::IAlgorithmPackageDecomposer;
 using algorithm::IComplexAlgorithmPackageCodec;
 using algorithm::ISimpleAlgorithmPackageCodec;

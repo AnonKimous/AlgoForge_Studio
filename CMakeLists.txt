@@ -2,8 +2,11 @@ cmake_minimum_required(VERSION 3.20)
 
 project(min_vulkan_win32 LANGUAGES C CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+set(CMAKE_C_STANDARD 17)
+set(CMAKE_C_STANDARD_REQUIRED ON)
 
 if(WIN32)
   if(MSVC)
@@ -48,10 +51,11 @@ require_file("${SPIRV_REFLECT_SOURCE_DIR}/spirv_reflect.c" "Set SPIRV_REFLECT_SO
 
 set(SDL3_EFFECTIVE_LIBRARY_RELEASE "${SDL3_LIBRARY_RELEASE}")
 set(SDL3_EFFECTIVE_DLL_RELEASE "${SDL3_DLL_RELEASE}")
-if(NOT EXISTS "${SDL3_EFFECTIVE_LIBRARY_RELEASE}")
+# Fallback to debug libs if release ones are not present.
+if(NOT EXISTS "${SDL3_EFFECTIVE_LIBRARY_RELEASE}" AND EXISTS "${SDL3_LIBRARY_DEBUG}")
   set(SDL3_EFFECTIVE_LIBRARY_RELEASE "${SDL3_LIBRARY_DEBUG}")
 endif()
-if(NOT EXISTS "${SDL3_EFFECTIVE_DLL_RELEASE}")
+if(NOT EXISTS "${SDL3_EFFECTIVE_DLL_RELEASE}" AND EXISTS "${SDL3_DLL_DEBUG}")
   set(SDL3_EFFECTIVE_DLL_RELEASE "${SDL3_DLL_DEBUG}")
 endif()
 
@@ -61,6 +65,7 @@ file(WRITE "${VKB_COMPAT_INCLUDE_DIR}/vkb/VkBootstrap.h" "#pragma once\n#include
 
 set(PROJECT_INCLUDE_DIRS
   ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cjson
   ${SDL3_INCLUDE_DIR}
   ${EIGEN_INCLUDE_DIR}
@@ -82,6 +87,13 @@ add_library(common_data STATIC
   src/common_data/viewport_transform.cpp
 )
 target_include_directories(common_data PUBLIC ${PROJECT_INCLUDE_DIRS})
+
+add_library(mesh_resource STATIC
+  src/resource/mesh_resource.cpp
+  third_party/tinyobjloader/tiny_obj_loader.cc
+)
+target_include_directories(mesh_resource PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_link_libraries(mesh_resource PUBLIC common_data)
 
 add_library(messaging STATIC
   src/messaging/io_bus.cpp
@@ -138,7 +150,7 @@ add_library(agent_execute STATIC
   src/agent_execute/agent_execute_runtime.cpp
 )
 target_include_directories(agent_execute PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(agent_execute PUBLIC common_data runtime_systems codec algorithm agent)
+target_link_libraries(agent_execute PUBLIC common_data runtime_systems codec algorithm agent mesh_resource)
 
 add_library(interact_ui STATIC
   src/interact_ui/interact_ui_runtime.cpp
@@ -150,7 +162,7 @@ set(SHADER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
 set(SHADER_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/shaders)
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/data)
 file(TO_CMAKE_PATH "${SHADER_OUTPUT_DIR}/physics_convolution.comp.spv" SHADER_PHYSICS_CONV_PATH)
-file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/data/subdivided_triangle.mesh" MESH_PATH)
+file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/data/subdivided_triangle.obj" OBJ_PATH)
 
 add_custom_command(
   OUTPUT ${SHADER_OUTPUT_DIR}/physics_convolution.comp.spv
@@ -175,6 +187,7 @@ target_link_libraries(min_vulkan_win32 PRIVATE
   agent_execute
   interact_ui
   runtime_systems
+  mesh_resource
   codec
   algorithm
   messaging
@@ -187,7 +200,7 @@ target_compile_definitions(min_vulkan_win32 PRIVATE
   WIN32_LEAN_AND_MEAN
   NOMINMAX
   SHADER_PHYSICS_CONV_PATH="${SHADER_PHYSICS_CONV_PATH}"
-  MESH_PATH="${MESH_PATH}"
+  OBJ_PATH="${OBJ_PATH}"
 )
 
 if(WIN32)

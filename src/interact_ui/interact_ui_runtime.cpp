@@ -3,10 +3,13 @@
 #include "algorithm_library/camera_algorithm_package.h"
 #include "algorithm_library/corotated_cpu_algorithm_contract.h"
 #include "algorithm_library/physics_convolution_gpu_algorithm_contract.h"
+#include "resource/mesh_resource.h"
 
 #include <algorithm>
 #include <cfloat>
 #include <cstdio>
+#include <chrono>
+#include <exception>
 #include <imgui.h>
 #include <iterator>
 #include <utility>
@@ -16,40 +19,42 @@ namespace interact_ui {
 void InteractUiRuntime::ResetAgentDraftState() {
   std::snprintf(agent_draft_.agent_name, sizeof(agent_draft_.agent_name), "%s", "agent_0");
   std::snprintf(agent_draft_.algorithm_name, sizeof(agent_draft_.algorithm_name), "%s", kCorotatedCpuAlgorithmName);
-  std::snprintf(agent_draft_.mesh_path, sizeof(agent_draft_.mesh_path), "%s", execute_runtime_.mesh_source_path().c_str());
+  std::snprintf(agent_draft_.mesh_path, sizeof(agent_draft_.mesh_path), "%s", mesh_source_path_.c_str());
   agent_draft_.gpu_shader_path[0] = '\0';
   agent_draft_.preset_index = 1;
   agent_draft_.solver_kind_index = 0;
   agent_draft_.load_mesh_before_create = true;
 }
 
-bool InteractUiRuntime::LoadMeshAndResetBindings(const std::string& path, std::string* status_message) {
-  std::string error_message;
-  if (!execute_runtime_.LoadMeshFromFile(path, &error_message)) {
-    const std::string message = error_message.empty() ? "Failed to load mesh." : error_message;
-    execute_runtime_.SetUiStatusMessage(message);
+bool InteractUiRuntime::LoadMeshAndResetState(const std::string& path, std::string* status_message) {
+  try {
+    mesh_ = LoadMeshObjFile(path);
+    mesh_source_path_ = path;
+    execute_runtime_.UnloadAgent();
+    ResetAgentDraftState();
+    current_agent_id_ = 0;
+    const std::string message = "Loaded mesh: " + path;
+    ui_status_message_ = message;
+    if (status_message) {
+      *status_message = message;
+    }
+    return true;
+  } catch (const std::exception& error) {
+    const std::string message = std::string("Mesh load failed: ") + error.what();
+    ui_status_message_ = message;
     if (status_message) {
       *status_message = message;
     }
     return false;
   }
-
-  ResetAgentDraftState();
-  selected_agent_slot_ = static_cast<std::size_t>(-1);
-  const std::string message = "Loaded mesh and cleared existing agents.";
-  execute_runtime_.SetUiStatusMessage(message);
-  if (status_message) {
-    *status_message = message;
-  }
-  return true;
 }
 
 bool InteractUiRuntime::CreateAgentFromDraft(std::string* status_message) {
   std::string mesh_path = agent_draft_.mesh_path;
   const bool should_load_mesh =
-    agent_draft_.load_mesh_before_create && !mesh_path.empty() && mesh_path != execute_runtime_.mesh_source_path();
+    agent_draft_.load_mesh_before_create && !mesh_path.empty() && mesh_path != mesh_source_path_;
   if (should_load_mesh) {
-    if (!LoadMeshAndResetBindings(mesh_path, status_message)) {
+    if (!LoadMeshAndResetState(mesh_path, status_message)) {
       return false;
     }
   }
@@ -57,103 +62,66 @@ bool InteractUiRuntime::CreateAgentFromDraft(std::string* status_message) {
   const int preset_index = std::clamp(agent_draft_.preset_index, 0, 2);
   const std::string agent_name = agent_draft_.agent_name;
 
+  agent_execute::AgentLaunchSpec spec{};
   if (preset_index == 0) {
-    auto info = CreateCameraAgentInfo(execute_runtime_.mesh());
-    info.agent_name = agent_name.empty() ? "camera_agent" : agent_name;
-    const auto handle = execute_runtime_.LoadAgent(std::move(info));
-    if (handle == agent_execute::AgentExecuteRuntime::kInvalidAgentHandle) {
-      const std::string message = "Failed to create camera agent.";
-      execute_runtime_.SetUiStatusMessage(message);
+    spec = CreateCameraAgentInfo(mesh_);
+    spec.agent_config.agent_name = agent_name.empty() ? "camera_agent" : agent_name;
+  } else {
+    const PhysSolverKind solver_kind = agent_draft_.solver_kind_index == 1 ? PhysSolverKind::Gpu : PhysSolverKind::Cpu;
+    if (solver_kind == PhysSolverKind::Gpu && std::string(agent_draft_.gpu_shader_path).empty()) {
+      const std::string message = "GPU preset needs a shader path.";
+      ui_status_message_ = message;
       if (status_message) {
         *status_message = message;
       }
       return false;
     }
-    const std::string message = "Created camera agent slot " + std::to_string(handle);
-    execute_runtime_.SetUiStatusMessage(message);
-    if (status_message) {
-      *status_message = message;
-    }
-    return true;
+
+    const std::string algorithm_name =
+      std::string(agent_draft_.algorithm_name).empty()
+        ? (solver_kind == PhysSolverKind::Gpu ? kPhysicsConvolutionGpuAlgorithmName : kCorotatedCpuAlgorithmName)
+        : agent_draft_.algorithm_name;
+
+    spec = CreatePhysicsAgentInfo(
+      mesh_,
+      solver_kind,
+      algorithm_name,
+      agent_draft_.gpu_shader_path);
+    spec.agent_config.agent_name = agent_name.empty() ? (algorithm_name.empty() ? "agent" : algorithm_name + "_agent") : agent_name;
   }
 
-  const PhysSolverKind solver_kind = agent_draft_.solver_kind_index == 1 ? PhysSolverKind::Gpu : PhysSolverKind::Cpu;
-  if (solver_kind == PhysSolverKind::Gpu && std::string(agent_draft_.gpu_shader_path).empty()) {
-    const std::string message = "GPU preset needs a shader path.";
-    execute_runtime_.SetUiStatusMessage(message);
-    if (status_message) {
-      *status_message = message;
-    }
-    return false;
-  }
-
-  const std::string algorithm_name =
-    std::string(agent_draft_.algorithm_name).empty()
-      ? (solver_kind == PhysSolverKind::Gpu ? kPhysicsConvolutionGpuAlgorithmName : kCorotatedCpuAlgorithmName)
-      : agent_draft_.algorithm_name;
-
-  auto info = CreatePhysicsAgentInfo(
-    execute_runtime_.mesh(),
-    solver_kind,
-    algorithm_name,
-    agent_draft_.gpu_shader_path);
-  info.agent_name = agent_name.empty() ? (algorithm_name.empty() ? "agent" : algorithm_name + "_agent") : agent_name;
-
-  const auto handle = execute_runtime_.LoadAgent(std::move(info));
-  if (handle == agent_execute::AgentExecuteRuntime::kInvalidAgentHandle) {
+  if (!execute_runtime_.LoadAgent(std::move(spec))) {
     const std::string message = "Failed to create agent.";
-    execute_runtime_.SetUiStatusMessage(message);
+    ui_status_message_ = message;
     if (status_message) {
       *status_message = message;
     }
     return false;
   }
 
-  const std::string message = "Created agent slot " + std::to_string(handle);
-  execute_runtime_.SetUiStatusMessage(message);
+  current_agent_id_ += 1;
+  const std::string message = "Created agent #" + std::to_string(current_agent_id_);
+  ui_status_message_ = message;
   if (status_message) {
     *status_message = message;
   }
   return true;
 }
 
-void InteractUiRuntime::DrawLoadedAgentListUi() {
-  const auto& agent_slots = execute_runtime_.agent_slots();
-  ImGui::Text("Loaded agents: %zu", agent_slots.size());
-  ImGui::Separator();
-
-  if (ImGui::BeginListBox("##agent_list", ImVec2(-FLT_MIN, 220.0f))) {
-    for (std::size_t index = 0; index < agent_slots.size(); ++index) {
-      const auto& agent = agent_slots[index];
-      if (!agent) {
-        continue;
-      }
-
-      std::string label = "[" + std::to_string(index) + "] ";
-      label += agent->agent_name().empty() ? agent->algorithm_name() : agent->agent_name();
-      label += " | ";
-      label += agent->algorithm_name();
-
-      const bool selected = (selected_agent_slot_ == index);
-      if (ImGui::Selectable(label.c_str(), selected)) {
-        selected_agent_slot_ = index;
-      }
-    }
-    ImGui::EndListBox();
-  }
-
-  const bool has_selected = selected_agent_slot_ < agent_slots.size() && agent_slots[selected_agent_slot_];
-  if (has_selected) {
-    const auto& agent = agent_slots[selected_agent_slot_];
-    ImGui::Text("Selected: %s", agent->agent_name().empty() ? agent->algorithm_name().c_str() : agent->agent_name().c_str());
-    ImGui::Text("Algorithm: %s", agent->algorithm_name().c_str());
-    if (ImGui::Button("Unload Selected")) {
-      execute_runtime_.UnloadAgent(selected_agent_slot_);
-      selected_agent_slot_ = static_cast<std::size_t>(-1);
-      execute_runtime_.SetUiStatusMessage("Unloaded selected agent.");
+void InteractUiRuntime::DrawLoadedAgentUi() {
+  ImGui::Text("Current agent: %s", execute_runtime_.has_agent() && execute_runtime_.current_agent()
+    ? (execute_runtime_.current_agent()->agent_name().empty() ? execute_runtime_.current_agent()->algorithm_name().c_str() : execute_runtime_.current_agent()->agent_name().c_str())
+    : "<none>");
+  ImGui::Text("Algorithm: %s", execute_runtime_.has_agent() && execute_runtime_.current_agent()
+    ? execute_runtime_.current_agent()->algorithm_name().c_str()
+    : "<none>");
+  if (execute_runtime_.has_agent()) {
+    if (ImGui::Button("Unload Agent")) {
+      execute_runtime_.UnloadAgent();
+      ui_status_message_ = "Unloaded current agent.";
     }
   } else {
-    ImGui::TextUnformatted("No agent selected.");
+    ImGui::TextUnformatted("No agent loaded.");
   }
 }
 
@@ -178,7 +146,7 @@ void InteractUiRuntime::DrawAgentDraftUi() {
       std::snprintf(agent_draft_.algorithm_name, sizeof(agent_draft_.algorithm_name), "%s", kCameraAlgorithmName);
       std::string message;
       if (!CreateAgentFromDraft(&message)) {
-        execute_runtime_.SetUiStatusMessage(message.empty() ? "Failed to create camera agent." : message);
+        ui_status_message_ = message.empty() ? "Failed to create camera agent." : message;
       }
     }
     ImGui::SameLine();
@@ -191,81 +159,85 @@ void InteractUiRuntime::DrawAgentDraftUi() {
         agent_draft_.solver_kind_index == 1 ? kPhysicsConvolutionGpuAlgorithmName : kCorotatedCpuAlgorithmName);
       std::string message;
       if (!CreateAgentFromDraft(&message)) {
-        execute_runtime_.SetUiStatusMessage(message.empty() ? "Failed to create agent." : message);
+        ui_status_message_ = message.empty() ? "Failed to create agent." : message;
       }
     }
   }
 
   if (ImGui::Button("Load Mesh")) {
     std::string message;
-    if (!LoadMeshAndResetBindings(agent_draft_.mesh_path, &message)) {
-      execute_runtime_.SetUiStatusMessage(message.empty() ? "Failed to load mesh." : message);
+    if (!LoadMeshAndResetState(agent_draft_.mesh_path, &message)) {
+      ui_status_message_ = message.empty() ? "Failed to load mesh." : message;
     } else {
-      execute_runtime_.SetUiStatusMessage(message);
+      ui_status_message_ = message;
     }
   }
   ImGui::SameLine();
   if (ImGui::Button("Reset Agent Form")) {
     ResetAgentDraftState();
-    execute_runtime_.SetUiStatusMessage("Agent form reset.");
+    ui_status_message_ = "Agent form reset.";
   }
 }
 
 void InteractUiRuntime::DrawInteractUi() {
-  const auto& mesh = execute_runtime_.mesh();
-  const auto& vertex_positions = execute_runtime_.active_vertex_positions();
-  agent_execute::DrawVertexArrayOverlay(vertex_positions, mesh.edges, mesh.triangles);
+  execute_runtime_.Tick(mesh_, window_agent_.input(), window_agent_.MousePosition(), frame_dt_);
+  agent_execute::DrawVertexArrayOverlay(mesh_.positions, mesh_.edges, mesh_.triangles);
 
   ImGui::Begin("Interact & UI");
-  ImGui::Text("Mesh source: %s", execute_runtime_.mesh_source_path().empty() ? "<in-memory>" : execute_runtime_.mesh_source_path().c_str());
-  ImGui::TextUnformatted("Rendering the agent-execute vertex array, not the source mesh object.");
-  ImGui::Text("Status: %s", execute_runtime_.ui_status_message().empty() ? "ready" : execute_runtime_.ui_status_message().c_str());
+  ImGui::Text("Mesh source: %s", mesh_source_path_.empty() ? "<in-memory>" : mesh_source_path_.c_str());
+  ImGui::Text("Status: %s", ui_status_message_.empty() ? "ready" : ui_status_message_.c_str());
   ImGui::Separator();
 
   if (ImGui::CollapsingHeader("Create Agent", ImGuiTreeNodeFlags_DefaultOpen)) {
     DrawAgentDraftUi();
   }
 
-  if (ImGui::CollapsingHeader("Loaded Agents", ImGuiTreeNodeFlags_DefaultOpen)) {
-    DrawLoadedAgentListUi();
+  if (ImGui::CollapsingHeader("Loaded Agent", ImGuiTreeNodeFlags_DefaultOpen)) {
+    DrawLoadedAgentUi();
   }
 
   ImGui::Separator();
-  ImGui::Text("Active agent: %s", execute_runtime_.active_agent_binding_ready() && execute_runtime_.active_agent_binding()
-    ? execute_runtime_.active_agent_binding()->agent_name().c_str()
-    : "<none>");
+  ImGui::Text("Algorithm signal: %s", execute_runtime_.algorithm_to_agent_signal().pause_requested ? "pause requested" : "idle");
   ImGui::End();
 }
 
 bool InteractUiRuntime::Init(const Mesh& mesh, const char* window_title, int width, int height) {
-  if (!execute_runtime_.Init(mesh, window_title ? window_title : "Interact & UI", width, height)) {
+  mesh_ = mesh;
+  mesh_source_path_.clear();
+  if (!window_agent_.Init(window_title ? window_title : "Interact & UI", width, height)) {
     return false;
   }
-  execute_runtime_.SetDrawCallback([this]() { DrawInteractUi(); });
+  window_agent_.SetDrawCallback([this]() {
+    DrawInteractUi();
+  });
   ResetAgentDraftState();
-  execute_runtime_.SetUiStatusMessage("Mesh is prefilled. Create the agent to start work.");
+  ui_status_message_ = "Mesh is prefilled. Create the agent to start work.";
+  last_frame_time_ = std::chrono::steady_clock::now();
   return true;
 }
 
 bool InteractUiRuntime::LoadMeshFromFile(const std::string& path, std::string* error_message) {
-  if (!execute_runtime_.LoadMeshFromFile(path, error_message)) {
-    selected_agent_slot_ = static_cast<std::size_t>(-1);
-    ResetAgentDraftState();
+  if (!LoadMeshAndResetState(path, error_message)) {
     return false;
   }
-  selected_agent_slot_ = static_cast<std::size_t>(-1);
-  ResetAgentDraftState();
-  execute_runtime_.SetUiStatusMessage("Loaded mesh: " + path);
+  ui_status_message_ = "Loaded mesh: " + path;
   return true;
 }
 
 bool InteractUiRuntime::Tick() {
-  return execute_runtime_.Tick();
+  const auto now = std::chrono::steady_clock::now();
+  frame_dt_ = std::chrono::duration<float>(now - last_frame_time_).count();
+  last_frame_time_ = now;
+  return window_agent_.Tick();
 }
 
 void InteractUiRuntime::Destroy() {
   execute_runtime_.Destroy();
-  selected_agent_slot_ = static_cast<std::size_t>(-1);
+  window_agent_.Destroy();
+  mesh_ = Mesh{};
+  mesh_source_path_.clear();
+  ui_status_message_.clear();
+  current_agent_id_ = 0;
   ResetAgentDraftState();
 }
 

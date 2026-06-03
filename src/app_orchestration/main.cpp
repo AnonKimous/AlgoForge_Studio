@@ -1,4 +1,5 @@
 #include "interact_ui/interact_ui_runtime.h"
+#include "resource/mesh_resource.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
@@ -16,11 +17,11 @@ int main(int argc, char** argv) {
       throw std::runtime_error(std::string("SDL_Init failed: ") + SDL_GetError());
     }
 
-    if (!std::filesystem::exists(MESH_PATH)) {
-      GenerateSubdividedTriangleMeshFile(MESH_PATH);
+    if (!std::filesystem::exists(OBJ_PATH)) {
+      GenerateDefaultTriangleObjFile(OBJ_PATH);
     }
-    std::filesystem::path mesh_path = MESH_PATH;
-    Mesh mesh = LoadMeshFile(mesh_path.string());
+    std::filesystem::path mesh_path = OBJ_PATH;
+    Mesh mesh = LoadMeshObjFile(mesh_path.string());
 
     InteractUiRuntime runtime;
     if (!runtime.Init(mesh, "Interact & UI", 1280, 720)) {

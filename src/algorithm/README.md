@@ -40,13 +40,12 @@ Each ordinary algorithm package must provide:
 
 `algorithm_package.h` defines simple/complex package codec hooks.
 
-- Package codecs may provide custom conversion, decomposition, reflection, and debug signal collection.
+- Package codecs may provide custom conversion, reflection, and debug signal collection.
 - Simple packages can reuse default/common conversion behavior.
 - Intervention packages can also provide codec, agent, and algorithm-side hooks for higher-level algorithms.
 - Render-side packages now live under the agent-composition layer and still present themselves as algorithm packages through the shared handle interface.
 - `AlgorithmDataContract::container_aliases` is the package-scoped alias map used by agent-level composition.
-- `IAlgorithmPackageCodec::BuildBoundResources` lets a package describe which runtime resources the upper layer should bind for it.
 - `IAlgorithmPackageCodec::ReflectReadableParameters` exposes a human-friendly summary of the container descriptor.
-- `IAlgorithmPackageCodec::ReflectDescriptorShape` exposes the required resources together with the descriptor shape for orchestration or UI inspection.
+- `IAlgorithmPackageDecomposer::ReflectDecomposition` exposes which runtime resources the decomposition needs.
 - `AlgorithmMng_LoadContainerDescriptorFromJsonFile` and `AlgorithmMng_LoadContainerDescriptorFromJsonText` load container descriptors from official cJSON manifests.
 - Agent-level pipelines may order multiple algorithm packages and redirect containers between them; the agent owns that composition, not the algorithm manager.

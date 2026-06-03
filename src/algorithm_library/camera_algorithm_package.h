@@ -10,7 +10,9 @@ namespace algorithm_library {
 
 inline constexpr const char* kCameraAlgorithmName = "camera";
 
-class CameraAlgorithmPackageCodec : public algorithm::ISimpleAlgorithmPackageCodec {
+class CameraAlgorithmPackageCodec
+  : public algorithm::ISimpleAlgorithmPackageCodec
+  , public algorithm::IAlgorithmPackageDecomposer {
  public:
   bool BuildContainerDescriptor(
     const codec::VolumeDescriptor& volume,
@@ -42,12 +44,6 @@ class CameraAlgorithmPackageCodec : public algorithm::ISimpleAlgorithmPackageCod
     return true;
   }
 
-  bool BuildBoundResources(std::vector<std::string>* out_resources) const override {
-    if (!out_resources) return false;
-    out_resources->assign({"mesh", "camera"});
-    return true;
-  }
-
   bool ReflectReadableParameters(
     const AlgorithmContainerDescriptor& container_descriptor,
     AlgorithmReadableReflection* out_reflection) const override {
@@ -68,20 +64,18 @@ class CameraAlgorithmPackageCodec : public algorithm::ISimpleAlgorithmPackageCod
     return true;
   }
 
-  bool ReflectDescriptorShape(
+  bool ReflectDecomposition(
     const AlgorithmContainerDescriptor& container_descriptor,
-    const std::vector<std::string>& bound_resources,
-    AlgorithmDescriptorShapeReflection* out_reflection) const override {
+    AlgorithmDecompositionReflection* out_reflection) const override {
     if (!out_reflection) return false;
 
     out_reflection->algorithm_name = container_descriptor.algorithm_name.empty()
       ? kCameraAlgorithmName
       : container_descriptor.algorithm_name;
-    out_reflection->required_resources = bound_resources;
+    out_reflection->required_resources = {"mesh", "camera"};
     if (out_reflection->required_resources.empty()) {
       out_reflection->required_resources = {"mesh", "camera"};
     }
-    out_reflection->descriptor_shape = container_descriptor;
     out_reflection->valid = true;
     return true;
   }

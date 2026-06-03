@@ -1,7 +1,10 @@
 #pragma once
 
 #include "agent_execute/agent_execute_runtime.h"
+#include "agents/agents.h"
+#include "common_data/mesh.h"
 
+#include <chrono>
 #include <cstddef>
 
 namespace interact_ui {
@@ -25,15 +28,21 @@ class InteractUiRuntime {
   };
 
   void ResetAgentDraftState();
-  void DrawLoadedAgentListUi();
+  void DrawLoadedAgentUi();
   void DrawAgentDraftUi();
   void DrawInteractUi();
-  bool LoadMeshAndResetBindings(const std::string& path, std::string* status_message);
+  bool LoadMeshAndResetState(const std::string& path, std::string* status_message);
   bool CreateAgentFromDraft(std::string* status_message);
 
+  Mesh mesh_{};
+  std::string mesh_source_path_{};
   agent_execute::AgentExecuteRuntime execute_runtime_{};
+  agent_execute::WindowAgent window_agent_{};
   AgentDraftState agent_draft_{};
-  std::size_t selected_agent_slot_{static_cast<std::size_t>(-1)};
+  std::string ui_status_message_{};
+  std::size_t current_agent_id_{0};
+  std::chrono::steady_clock::time_point last_frame_time_{};
+  float frame_dt_{0.0f};
 };
 
 }  // namespace interact_ui
