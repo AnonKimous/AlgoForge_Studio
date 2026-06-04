@@ -1,6 +1,6 @@
 #pragma once
 
-#include "algorithm_library/algorithm_package.h"
+#include "algorithm/algorithm_package.h"
 
 #include <memory>
 #include <string>
@@ -17,7 +17,6 @@ struct AgentInitConfig {
   std::string algorithm_name;
   std::vector<AgentAlgorithmPackageHandle> compliance_packages;
   std::shared_ptr<AgentInterventionPackageHandle> intervention_package;
-  PhysSolverConfig solver_config{};
   AlgorithmComplianceDescriptor compliance_descriptor{};
 };
 
@@ -29,7 +28,6 @@ class Agent {
     compliance_packages_ = std::move(config.compliance_packages);
     intervention_package_ = std::move(config.intervention_package);
     algorithm_name_ = std::move(config.algorithm_name);
-    solver_config_ = std::move(config.solver_config);
     compliance_descriptor_ = std::move(config.compliance_descriptor);
     return true;
   }
@@ -40,7 +38,6 @@ class Agent {
     algorithm_name_.clear();
     compliance_packages_.clear();
     intervention_package_.reset();
-    solver_config_ = {};
     compliance_descriptor_ = {};
   }
 
@@ -52,7 +49,6 @@ class Agent {
   const AgentAlgorithmPackageHandle* FindAlgorithmPackage(const std::string& package_name) const;
   bool HasAlgorithmPackage(const std::string& package_name) const;
   const std::shared_ptr<AgentInterventionPackageHandle>& intervention_package() const { return intervention_package_; }
-  const PhysSolverConfig& solver_config() const { return solver_config_; }
   const AlgorithmComplianceDescriptor& compliance_descriptor() const { return compliance_descriptor_; }
 
  private:
@@ -61,7 +57,6 @@ class Agent {
   std::string agent_name_{};
   std::vector<AgentAlgorithmPackageHandle> compliance_packages_{};
   std::shared_ptr<AgentInterventionPackageHandle> intervention_package_{};
-  PhysSolverConfig solver_config_{};
   AlgorithmComplianceDescriptor compliance_descriptor_{};
 };
 

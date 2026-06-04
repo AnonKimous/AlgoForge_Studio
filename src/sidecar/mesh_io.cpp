@@ -7,7 +7,7 @@
 #define FASTFLOAT_IS_CONSTEXPR 0
 #define FASTFLOAT_DETAIL_MUST_DEFINE_CONSTEXPR_VARIABLE 0
 
-#include "resource/mesh_resource.h"
+#include "sidecar/mesh_io.h"
 
 #include "common_data/mesh.h"
 
@@ -21,7 +21,7 @@
 #include <stdexcept>
 #include <string>
 
-namespace mesh_resource {
+namespace mesh_io {
 
 namespace {
 
@@ -295,4 +295,4 @@ void GenerateDefaultTriangleObjFile(const std::string& path) {
   SaveMeshObjFile(BuildDefaultTriangleMesh(), path);
 }
 
-}  // namespace mesh_resource
+}  // namespace mesh_io

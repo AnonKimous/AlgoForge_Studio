@@ -37,7 +37,7 @@ This project is a layered Vulkan + SDL3 sandbox for agent-driven physics and ren
 
 - Write each small algorithm in `algorithm_library` as a normal algorithm package with its own compliance descriptor.
 - Build the final agent by attaching the algorithm package handles, solver config, and compliance descriptor to one agent object.
-- Let `agent_execute` create and manage the active agent instance, then hand it to `AgentTicker` for runtime stepping.
+- Let upper layers assemble the agent launch spec, then let `agent_execute` bind one agent instance for runtime stepping.
 - The runtime does not try to validate the full graph; missing or incompatible bindings should fail at the point of use.
 
 ## Logs

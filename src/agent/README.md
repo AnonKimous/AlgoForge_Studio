@@ -7,7 +7,7 @@ This module owns the lightweight `Agent` data object.
 - Agent name and algorithm name.
 - The current algorithm package handles attached to this agent.
 - An optional intervention package.
-- The solver config and compliance descriptor used by the runtime.
+- The compliance descriptor attached to this agent.
 
 ## What It Does Not Do
 
@@ -15,4 +15,3 @@ This module owns the lightweight `Agent` data object.
 - It does not own render/physics variants.
 - It does not model a pipeline graph or route metadata.
 - It does not carry extra mounted-agent or resource-binding layers.
-

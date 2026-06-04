@@ -1,16 +1,16 @@
 # Agent Execute
 
-This layer owns the active-agent runtime path.
+This layer owns the agent runtime binding path.
 
 ## Responsibilities
 
-- Own the window/UI shell for the runtime.
-- Keep the loaded agent slots and the current active agent binding.
+- Keep the bound agent for runtime stepping.
 - Drive `AgentTicker` every frame.
-- Hold the current `agent` directly inside `AgentTicker` and forward execution to the algorithm manager.
+- Hold the bound `agent` directly inside `AgentTicker`.
+- Let `AgentTicker` gate execution by agent signals.
 
 ## Notes
 
-- The UI can create camera or physics agents from the current mesh.
-- Loading a new mesh clears the current agent binding state.
-- `AgentTicker` now lives here, not in `src/agents`.
+- Upper layers build launch specs and hand the finished binding request down here.
+- Loading a new mesh clears the bound agent state.
+- `AgentTicker` no longer owns physics session caches, fixed-step simulation state, or legacy algorithm request assembly.

@@ -4,37 +4,13 @@
 
 This layer now only hosts the algorithm manager.
 
-Concrete algorithm packages live in `algorithm_library`.
-
-## Rule
-
-Each ordinary algorithm package must provide:
-
-1. Execution implementation.
-2. Algorithm container descriptor contract.
-
-## Current Ordinary Algorithms
-
-### CPU
-
-- `corotated_cpu`
-- Implementation: `cpu_physics_algorithm.*`
-- Contract: `corotated_cpu_algorithm_contract.*`
-
-### GPU
-
-- `physics_convolution_demo`
-- Implementation: `gpu_physics_algorithm.*`
-- Contract: `physics_convolution_gpu_algorithm_contract.*`
+- `AlgorithmMng` lives here under `src/algorithm/algorithm_mng.*`.
 
 ## Integration Flow
 
-1. Upper layer selects backend and algorithm name.
-2. Upper layer builds algorithm container descriptor from contract.
-3. `AlgorithmMng` dispatches the pool.
-4. The runtime request carries the final composite container descriptor for the agent.
-5. Algorithm consumes only data that matches its own contract.
-6. When an agent-level composite descriptor remaps container names, `AlgorithmMng_ResolveContainerName` resolves the final name that should be used for container lookup.
+1. Upper layers build or load an algorithm container descriptor.
+2. `AlgorithmMng_LoadContainerDescriptorFromJson*` loads official descriptor manifests.
+3. When an agent-level composite descriptor remaps container names, `AlgorithmMng_ResolveContainerName` resolves the final name that should be used for container lookup.
 
 ## Package Abstraction
 
@@ -42,10 +18,9 @@ Each ordinary algorithm package must provide:
 
 - Package codecs may provide custom conversion, reflection, and debug signal collection.
 - Simple packages can reuse default/common conversion behavior.
-- Intervention packages can also provide codec, agent, and algorithm-side hooks for higher-level algorithms.
-- Render-side packages now live under the agent-composition layer and still present themselves as algorithm packages through the shared handle interface.
+- Intervention packages can also provide codec, agent, and algorithm-side hooks for higher-level orchestration.
 - `AlgorithmDataContract::container_aliases` is the package-scoped alias map used by agent-level composition.
 - `IAlgorithmPackageCodec::ReflectReadableParameters` exposes a human-friendly summary of the container descriptor.
 - `IAlgorithmPackageDecomposer::ReflectDecomposition` exposes which runtime resources the decomposition needs.
 - `AlgorithmMng_LoadContainerDescriptorFromJsonFile` and `AlgorithmMng_LoadContainerDescriptorFromJsonText` load container descriptors from official cJSON manifests.
-- Agent-level pipelines may order multiple algorithm packages and redirect containers between them; the agent owns that composition, not the algorithm manager.
+- Agent-level composition may redirect containers between packages; the agent owns that composition, not the algorithm manager.

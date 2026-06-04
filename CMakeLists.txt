@@ -88,12 +88,12 @@ add_library(common_data STATIC
 )
 target_include_directories(common_data PUBLIC ${PROJECT_INCLUDE_DIRS})
 
-add_library(mesh_resource STATIC
-  src/resource/mesh_resource.cpp
+add_library(mesh_io STATIC
+  src/sidecar/mesh_io.cpp
   third_party/tinyobjloader/tiny_obj_loader.cc
 )
-target_include_directories(mesh_resource PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(mesh_resource PUBLIC common_data)
+target_include_directories(mesh_io PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_link_libraries(mesh_io PUBLIC common_data)
 
 add_library(messaging STATIC
   src/messaging/io_bus.cpp
@@ -112,11 +112,6 @@ target_include_directories(codec PUBLIC ${PROJECT_INCLUDE_DIRS})
 target_link_libraries(codec PUBLIC common_data messaging)
 
 add_library(algorithm STATIC
-  src/algorithm_library/cpu_physics_algorithm.cpp
-  src/algorithm_library/gpu_physics_algorithm.cpp
-  src/algorithm_library/algorithm_mng.cpp
-  src/algorithm_library/corotated_cpu_algorithm_contract.cpp
-  src/algorithm_library/physics_convolution_gpu_algorithm_contract.cpp
   src/algorithm/algorithm_container_manifest.cpp
   ${SPIRV_REFLECT_SOURCE_DIR}/spirv_reflect.c
 )
@@ -145,18 +140,17 @@ target_include_directories(agent PUBLIC ${PROJECT_INCLUDE_DIRS})
 target_link_libraries(agent PUBLIC common_data algorithm codec)
 
 add_library(agent_execute STATIC
-  src/agents/agents.cpp
   src/agent_execute/agent_ticker.cpp
   src/agent_execute/agent_execute_runtime.cpp
 )
 target_include_directories(agent_execute PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(agent_execute PUBLIC common_data runtime_systems codec algorithm agent mesh_resource)
+target_link_libraries(agent_execute PUBLIC common_data runtime_systems agent)
 
 add_library(interact_ui STATIC
   src/interact_ui/interact_ui_runtime.cpp
 )
 target_include_directories(interact_ui PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(interact_ui PUBLIC agent_execute)
+target_link_libraries(interact_ui PUBLIC agent_execute mesh_io)
 
 set(SHADER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
 set(SHADER_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/shaders)
@@ -187,7 +181,7 @@ target_link_libraries(min_vulkan_win32 PRIVATE
   agent_execute
   interact_ui
   runtime_systems
-  mesh_resource
+  mesh_io
   codec
   algorithm
   messaging

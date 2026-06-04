@@ -1,5 +1,5 @@
 #include "interact_ui/interact_ui_runtime.h"
-#include "resource/mesh_resource.h"
+#include "sidecar/mesh_io.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>

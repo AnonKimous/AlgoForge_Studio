@@ -1,26 +1,12 @@
 #pragma once
 
 #include "common_data/interaction/interaction_signals.h"
-#include "common_data/physics/physics_types.h"
-
-#include <vulkan/vulkan.h>
 
 #include <cstdint>
 #include <string>
 #include <vector>
 
 namespace algorithm {
-
-enum class PhysSolverKind {
-  Cpu,
-  Gpu,
-};
-
-struct GpuPhysicsShaderSpec {
-  std::string shader_name;
-  std::vector<uint32_t> shader_mask;
-  std::vector<float> shader_data;
-};
 
 struct AlgorithmBufferRequirement {
   std::string name;
@@ -48,15 +34,6 @@ struct AlgorithmDataContract {
   std::vector<AlgorithmDataFormat> algorithm_required_formats;
   std::vector<AlgorithmContainerAlias> container_aliases;
 };
-
-struct CreatePhysSolverInfo {
-  PhysSolverKind solver_kind{PhysSolverKind::Cpu};
-  std::string algorithm_name;
-  GpuPhysicsShaderSpec gpu_shader{};
-  bool run_algorithm_on_init{false};
-};
-
-using PhysSolverConfig = CreatePhysSolverInfo;
 
 struct AlgorithmComplianceDescriptor {
   std::string algorithm_name;
@@ -95,39 +72,6 @@ inline std::string ResolveAlgorithmContainerName(
   return ResolveAlgorithmContainerName(compliance_descriptor.data_contract, package_name, source_name);
 }
 
-struct VulkanComputeContextView {
-  VkInstance instance{};
-  VkPhysicalDevice physical_device{};
-  VkDevice device{};
-  VkQueue queue{};
-  uint32_t queue_family_index{};
-  bool valid{false};
-};
-
-struct GpuPhysicsDispatchDebugInfo {
-  std::string shader_name;
-  uint32_t width{};
-  uint32_t height{};
-  std::vector<float> values;
-  bool valid{false};
-};
-
-struct PhysicsAlgorithmRequest {
-  PhysSolverConfig config{};
-  PhysicsStepInput input{};
-  VulkanComputeContextView compute_context{};
-  AlgorithmComplianceDescriptor compliance_descriptor{};
-  AgentToAlgorithmSignal agent_to_algorithm_signal{};
-  InteractionInterventionRequest intervention_request{};
-};
-
-struct PhysicsAlgorithmResult {
-  bool executed{false};
-  PhysicsStepOutput step_output{};
-  GpuPhysicsDispatchDebugInfo gpu_dispatch_debug{};
-  AlgorithmToAgentSignal algorithm_to_agent_signal{};
-};
-
 }  // namespace algorithm
 
 using algorithm::AlgorithmBufferRequirement;
@@ -136,11 +80,3 @@ using algorithm::AlgorithmContainerDescriptor;
 using algorithm::AlgorithmDataContract;
 using algorithm::AlgorithmDataFormat;
 using algorithm::AlgorithmContainerAlias;
-using algorithm::CreatePhysSolverInfo;
-using algorithm::GpuPhysicsDispatchDebugInfo;
-using algorithm::GpuPhysicsShaderSpec;
-using algorithm::PhysSolverConfig;
-using algorithm::PhysicsAlgorithmRequest;
-using algorithm::PhysicsAlgorithmResult;
-using algorithm::PhysSolverKind;
-using algorithm::VulkanComputeContextView;

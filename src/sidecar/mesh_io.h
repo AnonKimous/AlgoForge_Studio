@@ -4,14 +4,14 @@
 
 #include <string>
 
-namespace mesh_resource {
+namespace mesh_io {
 
 Mesh LoadMeshObjFile(const std::string& path);
 void SaveMeshObjFile(const Mesh& mesh, const std::string& path);
 void GenerateDefaultTriangleObjFile(const std::string& path);
 
-}  // namespace mesh_resource
+}  // namespace mesh_io
 
-using mesh_resource::GenerateDefaultTriangleObjFile;
-using mesh_resource::LoadMeshObjFile;
-using mesh_resource::SaveMeshObjFile;
+using mesh_io::GenerateDefaultTriangleObjFile;
+using mesh_io::LoadMeshObjFile;
+using mesh_io::SaveMeshObjFile;
