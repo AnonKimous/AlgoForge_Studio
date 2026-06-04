@@ -18,11 +18,44 @@ void AddEdge(Mesh& mesh, uint32_t a, uint32_t b) {
   mesh.edges.push_back({a, b});
 }
 
+Vec3 Midpoint(const Vec3& a, const Vec3& b) {
+  return Vec3{
+    (a.x + b.x) * 0.5f,
+    (a.y + b.y) * 0.5f,
+    (a.z + b.z) * 0.5f,
+  };
+}
+
 float DefaultMaterialValue() {
   return std::numeric_limits<float>::quiet_NaN();
 }
 
 }  // namespace
+
+Mesh BuildDefaultTriangleMesh() {
+  const std::vector<Vec3> base = {
+    {-0.110f, -0.090f, 0.0f},
+    {0.110f, -0.090f, 0.0f},
+    {0.000f, 0.100f, 0.0f},
+  };
+
+  Mesh mesh{};
+  mesh.positions = base;
+  mesh.positions.push_back(Midpoint(base[0], base[1]));
+  mesh.positions.push_back(Midpoint(base[1], base[2]));
+  mesh.positions.push_back(Midpoint(base[2], base[0]));
+  mesh.normals.assign(mesh.positions.size(), Vec3{0.0f, 0.0f, 1.0f});
+  mesh.triangles = {
+    {0, 3, 5},
+    {3, 1, 4},
+    {5, 4, 2},
+    {3, 4, 5},
+  };
+  mesh.triangle_material_gpa.assign(mesh.triangles.size(), std::numeric_limits<float>::quiet_NaN());
+  RebuildEdges(mesh);
+  NormalizeTriangleMaterials(mesh);
+  return mesh;
+}
 
 void NormalizeTriangleMaterials(Mesh& mesh) {
   if (mesh.triangle_material_gpa.size() != mesh.triangles.size()) {

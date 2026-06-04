@@ -33,5 +33,3 @@ class SdlWindow {
 };
 
 }  // namespace runtime_systems
-
-using runtime_systems::SdlWindow;

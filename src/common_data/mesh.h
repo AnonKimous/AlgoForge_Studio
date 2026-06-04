@@ -17,6 +17,7 @@ struct Mesh {
   std::vector<float> triangle_material_gpa;
 };
 
+Mesh BuildDefaultTriangleMesh();
 void NormalizeTriangleMaterials(Mesh& mesh);
 void RebuildEdges(Mesh& mesh);
 int FindNearestVertex(const Mesh& mesh, Vec2 xy, float max_distance);

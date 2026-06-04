@@ -187,31 +187,6 @@ Mesh BuildMeshFromObjReader(const tinyobj::ObjReader& reader) {
   return mesh;
 }
 
-Mesh BuildDefaultTriangleMesh() {
-  const std::vector<Vec3> base = {
-    {-0.110f, -0.090f, 0.0f},
-    {0.110f, -0.090f, 0.0f},
-    {0.000f, 0.100f, 0.0f},
-  };
-
-  Mesh mesh{};
-  mesh.positions = base;
-  mesh.positions.push_back(Midpoint(base[0], base[1]));
-  mesh.positions.push_back(Midpoint(base[1], base[2]));
-  mesh.positions.push_back(Midpoint(base[2], base[0]));
-  mesh.normals.assign(mesh.positions.size(), Vec3{0.0f, 0.0f, 1.0f});
-  mesh.triangles = {
-    {0, 3, 5},
-    {3, 1, 4},
-    {5, 4, 2},
-    {3, 4, 5},
-  };
-  mesh.triangle_material_gpa.assign(mesh.triangles.size(), std::numeric_limits<float>::quiet_NaN());
-  RebuildEdges(mesh);
-  NormalizeTriangleMaterials(mesh);
-  return mesh;
-}
-
 Mesh PrepareMeshForObjExport(const Mesh& input_mesh) {
   Mesh mesh = input_mesh;
   if (mesh.positions.empty()) {
@@ -292,7 +267,7 @@ void SaveMeshObjFile(const Mesh& input_mesh, const std::string& path) {
 }
 
 void GenerateDefaultTriangleObjFile(const std::string& path) {
-  SaveMeshObjFile(BuildDefaultTriangleMesh(), path);
+  SaveMeshObjFile(common_data::BuildDefaultTriangleMesh(), path);
 }
 
 }  // namespace mesh_io

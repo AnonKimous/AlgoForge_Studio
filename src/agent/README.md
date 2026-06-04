@@ -7,7 +7,8 @@ This module owns the lightweight `Agent` data object.
 - Agent name and algorithm name.
 - The current algorithm package handles attached to this agent.
 - An optional intervention package.
-- The compliance descriptor attached to this agent.
+- The resource descriptor and compliance descriptor attached to this agent.
+- The optional custom intervention UI hook owned by the intervention package.
 
 ## What It Does Not Do
 

@@ -84,7 +84,6 @@ set(SDL3_LINK_LIBS
 
 add_library(common_data STATIC
   src/common_data/mesh.cpp
-  src/common_data/viewport_transform.cpp
 )
 target_include_directories(common_data PUBLIC ${PROJECT_INCLUDE_DIRS})
 
@@ -122,6 +121,7 @@ add_library(runtime_systems STATIC
   src/runtime_systems/window/sdl_window.cpp
   src/runtime_systems/render/vma_impl.cpp
   src/runtime_systems/render/imgui_vulkan_runtime.cpp
+  src/runtime_systems/runtime_environment.cpp
   ${VKB_SOURCE_DIR}/src/VkBootstrap.cpp
   ${IMGUI_SOURCE_DIR}/imgui.cpp
   ${IMGUI_SOURCE_DIR}/imgui_draw.cpp
@@ -144,19 +144,18 @@ add_library(agent_execute STATIC
   src/agent_execute/agent_execute_runtime.cpp
 )
 target_include_directories(agent_execute PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(agent_execute PUBLIC common_data runtime_systems agent)
+target_link_libraries(agent_execute PUBLIC common_data agent)
 
 add_library(interact_ui STATIC
   src/interact_ui/interact_ui_runtime.cpp
 )
 target_include_directories(interact_ui PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(interact_ui PUBLIC agent_execute mesh_io)
+target_link_libraries(interact_ui PUBLIC agent_execute runtime_systems)
 
 set(SHADER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
 set(SHADER_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/shaders)
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/data)
 file(TO_CMAKE_PATH "${SHADER_OUTPUT_DIR}/physics_convolution.comp.spv" SHADER_PHYSICS_CONV_PATH)
-file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/data/subdivided_triangle.obj" OBJ_PATH)
 
 add_custom_command(
   OUTPUT ${SHADER_OUTPUT_DIR}/physics_convolution.comp.spv
@@ -176,25 +175,15 @@ add_executable(min_vulkan_win32 WIN32
 
 add_dependencies(min_vulkan_win32 shaders)
 
-target_include_directories(min_vulkan_win32 PRIVATE ${PROJECT_INCLUDE_DIRS})
 target_link_libraries(min_vulkan_win32 PRIVATE
-  agent_execute
   interact_ui
-  runtime_systems
-  mesh_io
-  codec
-  algorithm
-  messaging
   common_data
-  Vulkan::Vulkan
-  ${SDL3_LINK_LIBS}
 )
 
 target_compile_definitions(min_vulkan_win32 PRIVATE
   WIN32_LEAN_AND_MEAN
   NOMINMAX
   SHADER_PHYSICS_CONV_PATH="${SHADER_PHYSICS_CONV_PATH}"
-  OBJ_PATH="${OBJ_PATH}"
 )
 
 if(WIN32)
