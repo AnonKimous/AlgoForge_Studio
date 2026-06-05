@@ -1,5 +1,9 @@
 #pragma once
 
+#if !defined(MESSAGING_LAYER_INTERNAL_BUILD) && !defined(MESSAGING_LAYER_PUBLIC_FACADE_INCLUDE)
+#error "Do not include messaging/io_buffers.h directly. Use messaging/messaging.h."
+#endif
+
 #include <cstddef>
 #include <cstdint>
 #include <string>

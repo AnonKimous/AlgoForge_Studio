@@ -1,5 +1,9 @@
 #pragma once
 
+#if !defined(RUNTIME_SYSTEMS_LAYER_INTERNAL_BUILD)
+#error "Do not include runtime_systems/render/imgui_vulkan_runtime.h directly. Use runtime_systems/runtime_environment.h."
+#endif
+
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 

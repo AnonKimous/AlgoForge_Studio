@@ -1,7 +1,6 @@
 #pragma once
 
-#include "common_data/input_state.h"
-#include "common_data/vector_types.h"
+#include "common_data/common_data.h"
 
 #include <functional>
 #include <memory>
@@ -10,6 +9,12 @@ namespace runtime_systems {
 
 class ImGuiVulkanRuntime;
 class SdlWindow;
+struct SdlWindowDeleter {
+  void operator()(SdlWindow* window) const;
+};
+struct ImGuiVulkanRuntimeDeleter {
+  void operator()(ImGuiVulkanRuntime* runtime) const;
+};
 
 class RuntimeEnvironment {
  public:
@@ -29,8 +34,8 @@ class RuntimeEnvironment {
 
  private:
   bool sdl_initialized_{false};
-  std::unique_ptr<SdlWindow> window_{};
-  std::unique_ptr<ImGuiVulkanRuntime> imgui_runtime_{};
+  std::unique_ptr<SdlWindow, SdlWindowDeleter> window_{};
+  std::unique_ptr<ImGuiVulkanRuntime, ImGuiVulkanRuntimeDeleter> imgui_runtime_{};
 };
 
 }  // namespace runtime_systems

@@ -7,9 +7,9 @@
 #define FASTFLOAT_IS_CONSTEXPR 0
 #define FASTFLOAT_DETAIL_MUST_DEFINE_CONSTEXPR_VARIABLE 0
 
-#include "sidecar/mesh_io.h"
+#include "capabilities/sidecar/mesh_io.h"
 
-#include "common_data/mesh.h"
+#include "common_data/common_data.h"
 
 #include <tinyobjloader/tiny_obj_loader.h>
 

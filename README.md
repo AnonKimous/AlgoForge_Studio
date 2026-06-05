@@ -18,26 +18,29 @@ This project is a layered Vulkan + SDL3 sandbox for agent-driven physics and ren
 - `common_data` holds shared mesh, math, input, and interaction types.
 - `runtime_systems` owns windowing, ImGui, and Vulkan runtime support.
 - `messaging` stays a transport layer.
-- `algorithm` manages execution and compliance descriptors.
-- `algorithm_library` hosts concrete algorithm packages and their contracts.
+- `algorithm_management` owns container-manifest loading and real runtime container creation.
 - `codec` encodes and decodes compliance / intervention payloads.
-- The agent module holds the lightweight agent object and its attached algorithm metadata.
-- `agent_execute` owns the runtime path for creating agents, selecting the active one, and ticking it.
+- `capabilities/agent` holds the lightweight agent object and its attached algorithm metadata.
+- `capabilities/algorithm_library` is reserved for concrete algorithm package capability bundles.
+- `capabilities/sidecar` hosts optional sidecar capabilities such as mesh import/export.
+- `agent_management` owns the runtime path for creating agents, keeping all created agents, and ticking them.
 - `interact_ui` provides the manual agent composer and live debug UI.
 - `app_orchestration` is the executable entry point.
 
 ## Execution Workflow
 
 - The interact UI creates agents from the active mesh.
+- The project does not yet have a formal algorithm execution engine.
+- Current algorithm execution is still a temporary bring-up path: the main thread temporarily executes algorithm work through explicitly marked `temporaryTest` hooks.
 - Physics owns the evolving vertex array.
 - Rendering reads the current vertex array and the mesh topology arrays to draw points and edges.
 - The default preset is prefilled so the user only needs to create the agent to start work.
 
 ## Agent Composition
 
-- Write each small algorithm in `algorithm_library` as a normal algorithm package with its own compliance descriptor.
-- Build the final agent by attaching the algorithm package handles, solver config, and compliance descriptor to one agent object.
-- Let upper layers assemble the agent launch spec, then let `agent_execute` bind one agent instance for runtime stepping.
+- Write each small algorithm capability in `capabilities/algorithm_library` with its own container manifest and package hooks.
+- Build the final agent by attaching one or more algorithm codec groups, solver config, and lightweight algorithm profiles to one agent object.
+- Let upper layers assemble the agent creation spec, then let `agent_management` create and retain agents for runtime stepping while each `Agent` internally ticks its attached algorithm groups.
 - The runtime does not try to validate the full graph; missing or incompatible bindings should fail at the point of use.
 
 ## Logs

@@ -1,14 +1,24 @@
 #pragma once
 
-#include "common_data/mesh.h"
-#include "common_data/interaction/interaction_signals.h"
-#include "messaging/io_buffers.h"
+#include "common_data/common_data.h"
+#include "messaging/messaging.h"
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
+
+namespace agent {
+struct AgentAlgorithmCodecGroup;
+class IAlgorithmInterventionPackageAgent;
+class IAlgorithmInterventionPackageAlgorithm;
+class IAlgorithmInterventionPackageCodec;
+class IAlgorithmPackageCodec;
+class IAlgorithmPackageDecomposer;
+class IAlgorithmtemporaryTestMainThreadExecutor;
+}  // namespace agent
 
 namespace codec {
 
@@ -93,6 +103,41 @@ class CodecManager {
   IoBufferPacket BuildAlgorithmInterventionPacket(const InteractionInterventionRequest& request) const;
   bool DecodeAlgorithmInterventionPacket(const IoBufferPacket& packet, InteractionInterventionRequest* request) const;
 };
+
+bool CreateAlgorithmPackageReflectorByName(
+  const std::string& algorithm_name,
+  std::shared_ptr<agent::IAlgorithmPackageCodec>* out_reflector,
+  std::string* out_error_message = nullptr);
+
+bool CreateAlgorithmPackageDecomposerByName(
+  const std::string& algorithm_name,
+  std::shared_ptr<agent::IAlgorithmPackageDecomposer>* out_decomposer,
+  std::string* out_error_message = nullptr);
+
+bool CreateAlgorithmtemporaryTestMainThreadExecutorByName(
+  const std::string& algorithm_name,
+  std::shared_ptr<agent::IAlgorithmtemporaryTestMainThreadExecutor>* out_executor,
+  std::string* out_error_message = nullptr);
+
+bool CreateAlgorithmInterventionPackageCodecByName(
+  const std::string& algorithm_name,
+  std::shared_ptr<agent::IAlgorithmInterventionPackageCodec>* out_codec,
+  std::string* out_error_message = nullptr);
+
+bool CreateAlgorithmInterventionPackageAgentByName(
+  const std::string& algorithm_name,
+  std::shared_ptr<agent::IAlgorithmInterventionPackageAgent>* out_agent,
+  std::string* out_error_message = nullptr);
+
+bool CreateAlgorithmInterventionPackageAlgorithmByName(
+  const std::string& algorithm_name,
+  std::shared_ptr<agent::IAlgorithmInterventionPackageAlgorithm>* out_algorithm,
+  std::string* out_error_message = nullptr);
+
+bool CreateAlgorithmCodecGroupByName(
+  const std::string& algorithm_name,
+  agent::AgentAlgorithmCodecGroup* out_group,
+  std::string* out_error_message = nullptr);
 
 }  // namespace codec
 

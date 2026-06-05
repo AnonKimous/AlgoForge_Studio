@@ -2,255 +2,221 @@
 
 ## Purpose
 
-This file describes the current framework shape after the recent cleanup passes.
-It is written for both human developers and AI agents.
+This file describes the repository structure that is actually present in the
+workspace today.
 
-Use it as the first architecture reference before adding new files, moving code, or restoring deleted legacy paths.
+Use it before:
+
+- adding a new module
+- moving code between folders
+- wiring new runtime behavior into the app
+- restoring older architecture ideas
+
+When code and docs disagree, follow the code and update the docs.
 
 ## Core Rules
 
 - Lower layers do not depend upward.
-- Same-layer modules do not directly depend on each other.
-- Cross-cutting coordination is lifted to upper orchestration layers.
-- `common_data` keeps shared in-memory data only.
-- `algorithm` keeps descriptor and manager concerns only.
-- `agent` is a lightweight carrier, not a runtime executor.
-- `agent_execute` is a runtime binding and signal-gating layer, not an algorithm assembly layer.
-- `interact_ui` is UI only. It should not own algorithm assembly logic.
-- Sidecar capability modules stay outside the primary layer chain and must be linked explicitly by users.
+- `common_data` is shared in-memory data only.
+- `common_data` is the one exception to the single-facade header rule.
+- `runtime_systems` owns the SDL, ImGui, and Vulkan runtime shell.
+- `messaging` moves packets and buffers only. It must not absorb business semantics.
+- `codec` owns encode/decode and reflection helpers. It is not a general file-IO layer.
+- `algorithm_management` is a strict main-trunk layer.
+- `algorithm_management` owns container-manifest loading, manifest-name resolution, and runtime container creation helpers only.
+- `agent_execute` owns runtime binding and per-frame ticking only.
+- `interact_ui` owns editor-facing UI and the app-facing facade.
+- `app_orchestration` owns startup wiring only.
+- Modules under `src/capabilities` are capability modules, not strict main-trunk hops.
+- Capability modules may aggregate lower-level contracts, but they must not introduce upward dependencies into strict trunk layers.
+- Optional capabilities must be linked explicitly by any consumer.
 
-## Primary Layer Chain
+## Current Module Graph
 
-Current intended direction:
+Strict main-trunk layering path:
 
-`common_data -> runtime_systems -> messaging -> algorithm -> codec -> agent -> agent_execute -> interact_ui -> app_orchestration`
+`common_data -> messaging -> codec -> algorithm_management -> agent_execute -> interact_ui -> app_orchestration`
 
-## Sidecar Rule
+Runtime shell support path:
 
-Sidecar capability modules do not belong to the primary layer chain.
+`common_data -> runtime_systems -> interact_ui -> app_orchestration`
 
-They are used for optional capabilities such as:
+Capability modules grouped under `src/capabilities`:
 
-- file formats
-- persistence
-- third-party adapters
+- `agent`
+- `algorithm_library`
+- `sidecar`
 
-Current sidecar module:
+Current project-library dependency graph from `CMakeLists.txt`:
 
-- `mesh_io`
+- `mesh_io -> common_data`
+- `messaging -> (no project-library dependency)`
+- `codec -> common_data + messaging`
+- `algorithm_management -> common_data`
+- `runtime_systems -> common_data`
+- `agent -> common_data + algorithm_management + codec`
+- `agent_execute -> common_data + agent`
+- `interact_ui -> agent_execute + runtime_systems`
+- `app_orchestration/main.cpp -> interact_ui + common_data`
 
-Rules:
+Important note:
 
-- A sidecar module may depend on stable lower-layer data structures.
-- Business layers must link sidecar modules directly.
-- Do not hide sidecar usage behind unrelated business layers.
-- One external capability should have one clear owner module.
+`messaging`, `codec`, and `algorithm_management` are real trunk layers, but in
+the current executable they still mostly provide contracts and helpers rather
+than a rich live execution pipeline.
+
+`capabilities/agent` is intentionally different: it is consumed by trunk code,
+but it is a capability carrier rather than one strict hop in the layering path.
 
 ## Current Tree
 
 ```text
 src/
-├─ common_data/
-│  ├─ mesh.h/.cpp
-│  ├─ vector_types.h
-│  ├─ input_state.h
-│  ├─ viewport_transform.h/.cpp
-│  ├─ interaction/
-│  │  └─ interaction_signals.h
-│  ├─ render_algorithm/
-│  │  ├─ camera_math.h
-│  │  └─ viewport_math.h
-│  ├─ phys_algorithm/
-│  │  └─ velocity_math.h
-│  └─ physics/
-│     └─ physics_types.h
-│
-├─ runtime_systems/
-│  ├─ window/
-│  │  ├─ window_handle.h
-│  │  ├─ window.h
-│  │  └─ sdl_window.h/.cpp
-│  └─ render/
-│     ├─ imgui_vulkan_runtime.h/.cpp
-│     └─ vma_impl.cpp
-│
-├─ messaging/
-│  ├─ io_buffers.h
-│  └─ io_bus.h/.cpp
-│
-├─ algorithm/
-│  ├─ algorithm_types.h
-│  ├─ algorithm_package.h
+├─ algorithm_management/
+│  ├─ algorithm_manager.h
 │  ├─ algorithm_container_manifest.h/.cpp
-│  ├─ algorithm_mng.h
+│  ├─ algorithm_types.h
 │  └─ README.md
-│
+├─ capabilities/
+│  ├─ README.md
+│  ├─ agent/
+│  │  ├─ agent.h/.cpp
+│  │  └─ README.md
+│  ├─ algorithm_library/
+│  │  └─ README.md
+│  └─ sidecar/
+│     ├─ mesh_io.h/.cpp
+│     └─ README.md
+├─ common_data/
+├─ messaging/
 ├─ codec/
-│  └─ codec_manager.h/.cpp
-│
-├─ agent/
-│  ├─ agent.h/.cpp
-│  └─ README.md
-│
+├─ runtime_systems/
 ├─ agent_execute/
-│  ├─ agent_ticker.h/.cpp
-│  ├─ agent_execute_runtime.h/.cpp
-│  └─ README.md
-│
 ├─ interact_ui/
-│  ├─ interact_ui_runtime.h/.cpp
-│  └─ README.md
-│
-├─ sidecar/
-│  ├─ mesh_io.h/.cpp
-│  └─ README.md
-│
 └─ app_orchestration/
-   └─ main.cpp
 ```
 
-## Layer Roles
+## Public Interfaces
 
-### `common_data`
+- `common_data`: specific headers or `common_data/common_data.h`
+- `messaging`: `messaging/messaging.h`
+- `codec`: `codec/codec_manager.h`
+- `algorithm_management`: `algorithm_management/algorithm_manager.h`
+- `runtime_systems`: `runtime_systems/runtime_environment.h`
+- `agent_execute`: `agent_execute/agent_execute_runtime.h`
+- `interact_ui`: `interact_ui/interact_ui_runtime.h`
 
-Shared in-memory structures and math helpers.
+## Module Roles
 
-Allowed here:
+### `algorithm_management`
 
-- mesh data
-- vector types
-- input state
-- generic interaction signals
-- low-level math helpers
+Strict trunk layer for manifest-driven runtime container creation.
 
-Not allowed here:
+It should:
 
-- algorithm manager logic
-- UI workflow state
-- runtime binding logic
-- file IO
+- load official JSON manifests
+- resolve manifest names from `capabilities/algorithm_library`
+- create real runtime containers from a manifest
+- cache per-manifest container templates for fast clone-and-clear reuse
 
-### `runtime_systems`
+It should not:
 
-Low-level runtime backends such as SDL windowing, ImGui runtime, and Vulkan support.
+- own runtime execution state
+- become a sidecar format layer
+- turn back into a full algorithm runtime
 
-### `messaging`
+Code outside `src/algorithm_management` should include only
+`algorithm_management/algorithm_manager.h`.
 
-Low-level packet and buffer transport only.
+### `capabilities/agent`
 
-It should move data, not interpret business meaning.
+Cross-layer capability module for the lightweight `Agent` object and its package
+hook contracts.
 
-### `algorithm`
+It may aggregate:
 
-Descriptor and manager layer.
+- algorithm-management container and manifest types
+- codec hook contracts
+- decomposer-provided resource reflection contracts
+- shared interaction and common-data types
 
-Current responsibilities:
+It should not:
 
-- algorithm container descriptor types
-- manifest loading from official JSON shape
-- container alias resolution
-- manager-facing helper entrypoints
-- package hook interfaces
+- own outer runtime scheduling
+- own the runtime shell
+- become a hidden execution graph manager
 
-Important rule:
+### `capabilities/algorithm_library`
 
-`algorithm` should only reason about containers and descriptor contracts.
-It should not grow back domain-specific execution semantics such as physics, render, acceleration, or solver workflows.
+Reserved home for concrete algorithm package capability bundles.
 
-### `codec`
+Keep:
 
-Encode/decode layer for protocol payloads and intervention packets.
+- package-local contracts
+- package-local container manifests
+- package-local hook bundles
 
-It is not a general file import/export layer.
+Do not move manager responsibilities out of `algorithm_management` into this
+directory.
 
-### `agent`
+### `capabilities/sidecar`
 
-Lightweight carrier object.
+Optional external-format and adapter capabilities.
 
-It may hold:
+Current sidecar:
 
-- agent name
-- algorithm name
-- attached package handles
-- intervention package handle
-- compliance descriptor
-
-It does not own ticking or UI.
+- `mesh_io`: OBJ mesh import/export on top of `common_data::Mesh`
 
 ### `agent_execute`
 
-Runtime binding and signal-gating layer.
+Strict trunk layer above `capabilities/agent`.
 
-Current responsibilities:
+It owns:
 
-- hold the bound agent
-- gate execution by agent signals
-- hold the current intervention request
+- loading and unloading one bound agent
+- driving `AgentTicker`
+- exposing runtime-facing signal state
+- macro-level per-frame delegation into `Agent`
 
 It should not:
 
-- assemble algorithms
-- own physics runtime state
-- own legacy solver request structs
+- own SDL/Vulkan runtime state
+- absorb package composition policy
+- turn into a UI module
 
 ### `interact_ui`
 
-Editor-facing UI layer.
+Editor-facing UI facade that bridges `RuntimeEnvironment` and
+`AgentExecuteRuntime`.
 
-Current responsibilities:
+It owns:
 
-- load mesh files through `mesh_io`
-- display current status
-- inspect bound-agent state
+- the live mesh shown by the UI
+- editor-facing panels
+- custom intervention UI integration
 
-It should not:
+It should stay above runtime binding and below top-level orchestration.
 
-- build algorithm launch specs
-- choose solver internals
-- encode algorithm intervention packets itself
+## Current Runtime Flow
 
-### `app_orchestration`
-
-Top-level executable entry.
-
-This is where startup wiring belongs.
-
-## Current Simplifications
-
-The following legacy areas have already been removed or sharply reduced:
-
-- `src/agents`
-- `algorithm_library`
-- physics/gpu algorithm implementation files under `src/algorithm`
-- old runtime-side algorithm assembly UI
-- `common_data/interaction/interaction_state.h`
-- `agent_execute` request/result assembly logic
-
-## Current Transitional Notes
-
-Some legacy-flavored names still exist and may be reduced later, for example:
-
-- `common_data/physics/physics_types.h`
-- `common_data/phys_algorithm/velocity_math.h`
-- some mesh-oriented and volume-oriented hooks in `algorithm_package.h`
-
-These files are no longer part of the main execution path, but they still carry old domain naming.
-
-When touching them:
-
-- prefer deletion over expansion
-- prefer neutral container language over domain language
-- do not reintroduce upward dependencies
+1. `main.cpp` builds a default triangle mesh.
+2. `InteractUiRuntime::Init` receives that mesh and initializes `RuntimeEnvironment`.
+3. `RuntimeEnvironment` drives the SDL and ImGui frame loop.
+4. `InteractUiRuntime::DrawInteractUi` calls `AgentExecuteRuntime::Tick`.
+5. `AgentExecuteRuntime` delegates to `AgentTicker` only when an agent is loaded.
+6. `AgentTicker` builds macro tick context and lets `Agent` tick its attached algorithm codec groups.
 
 ## Quick Guidance For AI Agents
 
-When adding or changing code:
+When changing code:
 
-1. Start from this file.
-2. Check whether the target belongs to the primary layer chain or a sidecar module.
-3. Prefer deleting legacy wrappers instead of renaming and keeping them.
-4. Do not reintroduce `algorithm_library`.
-5. Do not reintroduce `src/agents`.
-6. Do not put UI workflow state back into `common_data`.
-7. Do not put algorithm assembly back into `interact_ui`.
-8. Do not put execution-domain semantics back into `algorithm`.
+1. Start from this file and `src/README.md`.
+2. Decide whether the new behavior belongs in the strict trunk or under `src/capabilities`.
+3. Keep `runtime_systems` behind `RuntimeEnvironment`.
+4. Keep packet transport in `messaging`.
+5. Keep manifest loading and runtime container creation helpers in `algorithm_management`.
+6. Keep cross-layer package hooks in `capabilities/agent`.
+7. Keep optional adapters in `capabilities/sidecar`.
+8. Keep runtime binding in `agent_execute`.
+9. Keep editor behavior in `interact_ui`.
+10. Do not claim a full execution pipeline exists unless you also implement it.

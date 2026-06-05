@@ -1,5 +1,9 @@
 #pragma once
 
+#if !defined(MESSAGING_LAYER_INTERNAL_BUILD) && !defined(MESSAGING_LAYER_PUBLIC_FACADE_INCLUDE)
+#error "Do not include messaging/io_bus.h directly. Use messaging/messaging.h."
+#endif
+
 #include "io_buffers.h"
 
 #include <array>
@@ -43,3 +47,5 @@ class SharedIoBus {
 };
 
 }  // namespace messaging
+
+using messaging::SharedIoBus;

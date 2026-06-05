@@ -1,7 +1,10 @@
 #pragma once
 
-#include "common_data/input_state.h"
-#include "common_data/vector_types.h"
+#if !defined(RUNTIME_SYSTEMS_LAYER_INTERNAL_BUILD)
+#error "Do not include runtime_systems/window/sdl_window.h directly. Use runtime_systems/runtime_environment.h."
+#endif
+
+#include "common_data/common_data.h"
 #include "runtime_systems/window/window_handle.h"
 
 #include <SDL3/SDL.h>

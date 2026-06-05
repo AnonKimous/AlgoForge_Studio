@@ -39,8 +39,30 @@ function(require_file path hint)
   endif()
 endfunction()
 
+function(require_sdl3_artifacts)
+  if(CMAKE_CONFIGURATION_TYPES)
+    return()
+  endif()
+
+  if(NOT CMAKE_BUILD_TYPE)
+    message(FATAL_ERROR "CMAKE_BUILD_TYPE must be set for single-config generators.")
+  endif()
+
+  if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    require_file("${SDL3_LIBRARY_DEBUG}" "Provide the SDL3 Debug library for Debug builds.")
+    require_file("${SDL3_DLL_DEBUG}" "Provide the SDL3 Debug runtime DLL for Debug builds.")
+  elseif(CMAKE_BUILD_TYPE STREQUAL "Release" OR
+         CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo" OR
+         CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
+    require_file("${SDL3_LIBRARY_RELEASE}" "Provide the SDL3 Release library for non-Debug builds.")
+    require_file("${SDL3_DLL_RELEASE}" "Provide the SDL3 Release runtime DLL for non-Debug builds.")
+  else()
+    message(FATAL_ERROR "Unsupported CMAKE_BUILD_TYPE: ${CMAKE_BUILD_TYPE}")
+  endif()
+endfunction()
+
 require_file("${SDL3_INCLUDE_DIR}/SDL3/SDL.h" "Set SDL3_INCLUDE_DIR or prepare dependencies under ${DEPS_ROOT}.")
-require_file("${SDL3_LIBRARY_DEBUG}" "Set SDL3_LIBRARY_DEBUG to a valid SDL3 import/static library.")
+require_sdl3_artifacts()
 require_file("${EIGEN_INCLUDE_DIR}/Eigen/Dense" "Set EIGEN_INCLUDE_DIR to a valid Eigen root.")
 require_file("${IMGUI_SOURCE_DIR}/imgui.h" "Set IMGUI_SOURCE_DIR to a valid Dear ImGui source root.")
 require_file("${VKB_SOURCE_DIR}/src/VkBootstrap.h" "Set VKB_SOURCE_DIR to a valid VkBootstrap source root.")
@@ -48,16 +70,19 @@ require_file("${VKB_SOURCE_DIR}/src/VkBootstrap.cpp" "Set VKB_SOURCE_DIR to a va
 require_file("${VMA_INCLUDE_DIR}/vk_mem_alloc.h" "Set VMA_INCLUDE_DIR to a valid VMA include directory.")
 require_file("${SPIRV_REFLECT_SOURCE_DIR}/spirv_reflect.h" "Set SPIRV_REFLECT_SOURCE_DIR to a valid SPIRV-Reflect source root.")
 require_file("${SPIRV_REFLECT_SOURCE_DIR}/spirv_reflect.c" "Set SPIRV_REFLECT_SOURCE_DIR to a valid SPIRV-Reflect source root.")
+require_file("${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyobjloader/tiny_obj_loader.h" "Pull tinyobjloader into third_party/tinyobjloader.")
+require_file("${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyobjloader/tiny_obj_loader.cc" "Pull tinyobjloader into third_party/tinyobjloader.")
 
-set(SDL3_EFFECTIVE_LIBRARY_RELEASE "${SDL3_LIBRARY_RELEASE}")
-set(SDL3_EFFECTIVE_DLL_RELEASE "${SDL3_DLL_RELEASE}")
-# Fallback to debug libs if release ones are not present.
-if(NOT EXISTS "${SDL3_EFFECTIVE_LIBRARY_RELEASE}" AND EXISTS "${SDL3_LIBRARY_DEBUG}")
-  set(SDL3_EFFECTIVE_LIBRARY_RELEASE "${SDL3_LIBRARY_DEBUG}")
+set(CMAKE_HELPER_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated_cmake")
+file(MAKE_DIRECTORY "${CMAKE_HELPER_DIR}")
+file(WRITE "${CMAKE_HELPER_DIR}/require_generated_file.cmake"
+[[if(NOT DEFINED REQUIRED_FILE)
+  message(FATAL_ERROR "REQUIRED_FILE was not provided to require_generated_file.cmake")
 endif()
-if(NOT EXISTS "${SDL3_EFFECTIVE_DLL_RELEASE}" AND EXISTS "${SDL3_DLL_DEBUG}")
-  set(SDL3_EFFECTIVE_DLL_RELEASE "${SDL3_DLL_DEBUG}")
+if(NOT EXISTS "${REQUIRED_FILE}")
+  message(FATAL_ERROR "Missing required dependency file: ${REQUIRED_FILE}\nHint: ${HINT_TEXT}")
 endif()
+]])
 
 set(VKB_COMPAT_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated_vkb_include")
 file(MAKE_DIRECTORY "${VKB_COMPAT_INCLUDE_DIR}/vkb")
@@ -79,7 +104,7 @@ set(PROJECT_INCLUDE_DIRS
 
 set(SDL3_LINK_LIBS
   debug "${SDL3_LIBRARY_DEBUG}"
-  optimized "${SDL3_EFFECTIVE_LIBRARY_RELEASE}"
+  optimized "${SDL3_LIBRARY_RELEASE}"
 )
 
 add_library(common_data STATIC
@@ -88,7 +113,7 @@ add_library(common_data STATIC
 target_include_directories(common_data PUBLIC ${PROJECT_INCLUDE_DIRS})
 
 add_library(mesh_io STATIC
-  src/sidecar/mesh_io.cpp
+  src/capabilities/sidecar/mesh_io.cpp
   third_party/tinyobjloader/tiny_obj_loader.cc
 )
 target_include_directories(mesh_io PUBLIC ${PROJECT_INCLUDE_DIRS})
@@ -98,6 +123,7 @@ add_library(messaging STATIC
   src/messaging/io_bus.cpp
 )
 target_include_directories(messaging PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_compile_definitions(messaging PRIVATE MESSAGING_LAYER_INTERNAL_BUILD=1)
 
 add_library(cjson STATIC
   third_party/cjson/cJSON.c
@@ -106,16 +132,26 @@ target_include_directories(cjson PUBLIC ${PROJECT_INCLUDE_DIRS})
 
 add_library(codec STATIC
   src/codec/codec_manager.cpp
+  src/codec/codecset_loader.cpp
 )
 target_include_directories(codec PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(codec PUBLIC common_data messaging)
+target_compile_definitions(codec PRIVATE
+  ALGORITHM_LIBRARY_RESOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library"
+)
+target_link_libraries(codec PUBLIC common_data messaging PRIVATE algorithm_management cjson)
 
-add_library(algorithm STATIC
-  src/algorithm/algorithm_container_manifest.cpp
+file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library" ALGORITHM_MANAGEMENT_MANIFEST_SEARCH_ROOT)
+
+add_library(algorithm_management STATIC
+  src/algorithm_management/algorithm_container_manifest.cpp
   ${SPIRV_REFLECT_SOURCE_DIR}/spirv_reflect.c
 )
-target_include_directories(algorithm PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(algorithm PUBLIC common_data Vulkan::Vulkan cjson)
+target_include_directories(algorithm_management PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_compile_definitions(algorithm_management PRIVATE
+  ALGORITHM_MANAGEMENT_LAYER_INTERNAL_BUILD=1
+  ALGORITHM_MANAGEMENT_MANIFEST_SEARCH_ROOT="${ALGORITHM_MANAGEMENT_MANIFEST_SEARCH_ROOT}"
+)
+target_link_libraries(algorithm_management PUBLIC common_data Vulkan::Vulkan cjson)
 
 add_library(runtime_systems STATIC
   src/runtime_systems/window/sdl_window.cpp
@@ -131,26 +167,31 @@ add_library(runtime_systems STATIC
   ${IMGUI_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp
 )
 target_include_directories(runtime_systems PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_compile_definitions(runtime_systems PRIVATE RUNTIME_SYSTEMS_LAYER_INTERNAL_BUILD=1)
 target_link_libraries(runtime_systems PUBLIC common_data Vulkan::Vulkan ${SDL3_LINK_LIBS})
 
 add_library(agent STATIC
-  src/agent/agent.cpp
+  src/capabilities/agent/agent.cpp
 )
 target_include_directories(agent PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(agent PUBLIC common_data algorithm codec)
+target_link_libraries(agent PUBLIC common_data algorithm_management codec)
 
-add_library(agent_execute STATIC
-  src/agent_execute/agent_ticker.cpp
-  src/agent_execute/agent_execute_runtime.cpp
+add_library(agent_management STATIC
+  src/agent_management/agent_ticker.cpp
+  src/agent_management/agent_manager.cpp
 )
-target_include_directories(agent_execute PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(agent_execute PUBLIC common_data agent)
+target_include_directories(agent_management PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_compile_definitions(agent_management PRIVATE AGENT_MANAGEMENT_LAYER_INTERNAL_BUILD=1)
+target_link_libraries(agent_management PUBLIC common_data agent)
 
 add_library(interact_ui STATIC
   src/interact_ui/interact_ui_runtime.cpp
 )
 target_include_directories(interact_ui PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(interact_ui PUBLIC agent_execute runtime_systems)
+target_compile_definitions(interact_ui PRIVATE
+  PROJECT_DATA_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/data"
+)
+target_link_libraries(interact_ui PUBLIC agent_management runtime_systems codec)
 
 set(SHADER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
 set(SHADER_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/shaders)
@@ -189,9 +230,20 @@ target_compile_definitions(min_vulkan_win32 PRIVATE
 if(WIN32)
   target_link_libraries(min_vulkan_win32 PRIVATE advapi32 user32 gdi32 shell32)
 
+  add_custom_command(TARGET min_vulkan_win32 PRE_BUILD
+    COMMAND ${CMAKE_COMMAND}
+      "-DREQUIRED_FILE=$<IF:$<CONFIG:Debug>,${SDL3_LIBRARY_DEBUG},${SDL3_LIBRARY_RELEASE}>"
+      "-DHINT_TEXT=$<IF:$<CONFIG:Debug>,Provide the SDL3 Debug library for Debug builds.,Provide the SDL3 Release library for non-Debug builds.>"
+      -P "${CMAKE_HELPER_DIR}/require_generated_file.cmake"
+    COMMAND ${CMAKE_COMMAND}
+      "-DREQUIRED_FILE=$<IF:$<CONFIG:Debug>,${SDL3_DLL_DEBUG},${SDL3_DLL_RELEASE}>"
+      "-DHINT_TEXT=$<IF:$<CONFIG:Debug>,Provide the SDL3 Debug runtime DLL for Debug builds.,Provide the SDL3 Release runtime DLL for non-Debug builds.>"
+      -P "${CMAKE_HELPER_DIR}/require_generated_file.cmake"
+  )
+
   add_custom_command(TARGET min_vulkan_win32 POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-    "$<IF:$<CONFIG:Debug>,${SDL3_DLL_DEBUG},${SDL3_EFFECTIVE_DLL_RELEASE}>"
+    "$<IF:$<CONFIG:Debug>,${SDL3_DLL_DEBUG},${SDL3_DLL_RELEASE}>"
     "$<TARGET_FILE_DIR:min_vulkan_win32>"
   )
 endif()

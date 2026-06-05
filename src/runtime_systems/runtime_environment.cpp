@@ -10,6 +10,14 @@
 
 namespace runtime_systems {
 
+void SdlWindowDeleter::operator()(SdlWindow* window) const {
+  delete window;
+}
+
+void ImGuiVulkanRuntimeDeleter::operator()(ImGuiVulkanRuntime* runtime) const {
+  delete runtime;
+}
+
 RuntimeEnvironment::RuntimeEnvironment() = default;
 
 RuntimeEnvironment::~RuntimeEnvironment() {
@@ -27,8 +35,10 @@ bool RuntimeEnvironment::Init(const char* window_title, int width, int height) {
   sdl_initialized_ = true;
 
   try {
-    window_ = std::make_unique<SdlWindow>(window_title ? window_title : "Interact & UI", width, height);
-    imgui_runtime_ = std::make_unique<ImGuiVulkanRuntime>();
+    window_ = std::unique_ptr<SdlWindow, SdlWindowDeleter>(
+      new SdlWindow(window_title ? window_title : "Interact & UI", width, height));
+    imgui_runtime_ = std::unique_ptr<ImGuiVulkanRuntime, ImGuiVulkanRuntimeDeleter>(
+      new ImGuiVulkanRuntime());
     if (!imgui_runtime_->Init(window_->native_handle().window, window_title ? window_title : "Interact & UI")) {
       Destroy();
       return false;

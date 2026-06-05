@@ -1,6 +1,6 @@
-# Sidecar Capability Modules
+# Sidecar Capabilities
 
-This directory hosts governed sidecar capability modules.
+This capability group hosts governed sidecar modules.
 
 ## Rules
 
