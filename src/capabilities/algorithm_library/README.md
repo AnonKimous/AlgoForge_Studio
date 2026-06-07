@@ -1,35 +1,41 @@
 # Algorithm Library Capability Bundles
 
-This directory is reserved for concrete algorithm package capability bundles.
+This directory stores concrete algorithm bundle assets.
 
-## Notes
+## Layout
 
-- It lives under `src/capabilities` because package bundles are not strict
-  main-trunk layer hops.
-- Manager-facing container-manifest resolution starts here.
-- `algorithm_management` resolves manifest names under this directory and
-  creates real runtime containers from the matched manifest JSON.
-- The same manifest may optionally carry a `reflector` section so the manager
-  can build an algorithm reflector from manifest data instead of legacy
-  descriptor code.
-- Keep runtime agent management in `src/agent_management`.
+Each algorithm lives in its own subdirectory named after the algorithm:
 
-## Reflector Snippet
-
-```json
-{
-  "reflector": {
-    "average_position": {
-      "from": ["vertex_array"],
-      "filter": "average_position"
-    },
-    "vertex": {
-      "from": ["vertex"]
-    },
-    "triangle": {
-      "from": ["vertex_a", "vertex_b", "vertex_c"],
-      "filter": "triangle"
-    }
-  }
-}
+```text
+src/capabilities/algorithm_library/<algorithm_name>/
 ```
+
+Each algorithm directory may contain:
+
+- `<algorithm_name>.json`
+  - container manifest
+- `<algorithm_name>_decomposer.json`
+  - resource and descriptor requests used by the UI and decomposer
+- `<algorithm_name>_reflector.json`
+  - runtime reflector data
+- `<algorithm_name>_intervention.json`
+  - intervention hooks and metadata
+- `<algorithm_name>.dll`
+  - optional algorithm plugin module exporting the bundle entrypoints
+
+The reflector and intervention files are optional. Some algorithms only provide
+the container manifest and decomposer description.
+
+The plugin module is also optional. If it exists, the host tries to load it
+first; otherwise it falls back to the legacy JSON-driven compatibility path.
+
+## UI Catalog
+
+The UI reads `algorithm_catalog.json` in this directory to populate the
+algorithm selection dropdown. The catalog lists available algorithms and points
+to their bundle names.
+
+## Compatibility
+
+Legacy flat files are still accepted by the loaders for now, but new bundles
+should use the subdirectory layout above.

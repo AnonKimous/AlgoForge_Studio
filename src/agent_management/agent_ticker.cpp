@@ -33,7 +33,6 @@ void AgentTicker::ApplyInterventionRequest(const InteractionInterventionRequest&
 }
 
 void AgentTicker::Tick(
-  Mesh& mesh,
   const InputState& input,
   Vec2 mouse_pixel,
   float dt_seconds) {
@@ -43,7 +42,6 @@ void AgentTicker::Tick(
   }
 
   const agent::AgentTickContext context{
-    .mesh = &mesh,
     .input = &input,
     .mouse_pixel = mouse_pixel,
     .dt_seconds = dt_seconds,
@@ -67,6 +65,8 @@ void AgentTicker::Tick(
   agent::AgentTickResult result{};
   if (agent_binding_->Tick(context, allow_tick_mask, &result)) {
     algorithm_to_agent_signal_ = result.algorithm_to_agent_signal;
+  } else {
+    algorithm_to_agent_signal_ = {};
   }
 }
 

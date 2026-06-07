@@ -20,7 +20,6 @@ When code and docs disagree, follow the code and update the docs.
 - `common_data` is shared in-memory data only.
 - `common_data` is the one exception to the single-facade header rule.
 - `runtime_systems` owns the SDL, ImGui, and Vulkan runtime shell.
-- `messaging` moves packets and buffers only. It must not absorb business semantics.
 - `codec` owns encode/decode and reflection helpers. It is not a general file-IO layer.
 - `algorithm_management` is a strict main-trunk layer.
 - `algorithm_management` owns container-manifest loading, manifest-name resolution, and runtime container creation helpers only.
@@ -35,7 +34,7 @@ When code and docs disagree, follow the code and update the docs.
 
 Strict main-trunk layering path:
 
-`common_data -> messaging -> codec -> algorithm_management -> agent_execute -> interact_ui -> app_orchestration`
+`common_data -> codec -> algorithm_management -> agent_execute -> interact_ui -> app_orchestration`
 
 Runtime shell support path:
 
@@ -50,8 +49,7 @@ Capability modules grouped under `src/capabilities`:
 Current project-library dependency graph from `CMakeLists.txt`:
 
 - `mesh_io -> common_data`
-- `messaging -> (no project-library dependency)`
-- `codec -> common_data + messaging`
+- `codec -> common_data`
 - `algorithm_management -> common_data`
 - `runtime_systems -> common_data`
 - `agent -> common_data + algorithm_management + codec`
@@ -61,9 +59,9 @@ Current project-library dependency graph from `CMakeLists.txt`:
 
 Important note:
 
-`messaging`, `codec`, and `algorithm_management` are real trunk layers, but in
-the current executable they still mostly provide contracts and helpers rather
-than a rich live execution pipeline.
+`codec` and `algorithm_management` are real trunk layers, but in the current
+executable they still mostly provide contracts and helpers rather than a rich
+live execution pipeline.
 
 `capabilities/agent` is intentionally different: it is consumed by trunk code,
 but it is a capability carrier rather than one strict hop in the layering path.
@@ -88,7 +86,6 @@ src/
 │     ├─ mesh_io.h/.cpp
 │     └─ README.md
 ├─ common_data/
-├─ messaging/
 ├─ codec/
 ├─ runtime_systems/
 ├─ agent_execute/
@@ -99,7 +96,6 @@ src/
 ## Public Interfaces
 
 - `common_data`: specific headers or `common_data/common_data.h`
-- `messaging`: `messaging/messaging.h`
 - `codec`: `codec/codec_manager.h`
 - `algorithm_management`: `algorithm_management/algorithm_manager.h`
 - `runtime_systems`: `runtime_systems/runtime_environment.h`
@@ -213,7 +209,7 @@ When changing code:
 1. Start from this file and `src/README.md`.
 2. Decide whether the new behavior belongs in the strict trunk or under `src/capabilities`.
 3. Keep `runtime_systems` behind `RuntimeEnvironment`.
-4. Keep packet transport in `messaging`.
+4. Keep packet transport as shared packet structs in `common_data`.
 5. Keep manifest loading and runtime container creation helpers in `algorithm_management`.
 6. Keep cross-layer package hooks in `capabilities/agent`.
 7. Keep optional adapters in `capabilities/sidecar`.

@@ -1,5 +1,4 @@
 #include "interact_ui/interact_ui_runtime.h"
-#include "common_data/common_data.h"
 
 #include <SDL3/SDL_main.h>
 
@@ -11,10 +10,8 @@ int main(int argc, char** argv) {
     (void)argc;
     (void)argv;
 
-    Mesh mesh = common_data::BuildDefaultTriangleMesh();
-
     InteractUiRuntime runtime;
-    if (!runtime.Init(mesh, "Interact & UI", 1280, 720)) {
+    if (!runtime.Init("Interact & UI", 1280, 720)) {
       throw std::runtime_error("InteractUiRuntime init failed");
     }
 
@@ -24,7 +21,7 @@ int main(int argc, char** argv) {
     runtime.Destroy();
     return 0;
   } catch (const std::exception& e) {
-    std::cerr << "Mesh editor error: " << e.what() << '\n';
+    std::cerr << "Editor error: " << e.what() << '\n';
     return 1;
   }
 }

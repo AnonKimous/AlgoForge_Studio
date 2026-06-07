@@ -24,8 +24,13 @@ RuntimeEnvironment::~RuntimeEnvironment() {
   Destroy();
 }
 
-bool RuntimeEnvironment::Init(const char* window_title, int width, int height) {
+bool RuntimeEnvironment::Init(
+  const char* window_title,
+  int width,
+  int height,
+  RuntimeExecutionSymbols execution_symbols) {
   if (window_ || imgui_runtime_) {
+    execution_symbols_ = execution_symbols;
     return true;
   }
 
@@ -43,6 +48,7 @@ bool RuntimeEnvironment::Init(const char* window_title, int width, int height) {
       Destroy();
       return false;
     }
+    execution_symbols_ = execution_symbols;
     return true;
   } catch (...) {
     Destroy();
@@ -66,6 +72,10 @@ void RuntimeEnvironment::SetDrawCallback(DrawCallback callback) {
   }
 }
 
+void RuntimeEnvironment::SetExecutionSymbols(RuntimeExecutionSymbols execution_symbols) {
+  execution_symbols_ = execution_symbols;
+}
+
 const InputState& RuntimeEnvironment::input() const {
   static const InputState kEmptyInput{};
   return window_ ? window_->input() : kEmptyInput;
@@ -81,6 +91,7 @@ void RuntimeEnvironment::Destroy() {
     imgui_runtime_.reset();
   }
   window_.reset();
+  execution_symbols_ = {};
   if (sdl_initialized_) {
     SDL_Quit();
     sdl_initialized_ = false;

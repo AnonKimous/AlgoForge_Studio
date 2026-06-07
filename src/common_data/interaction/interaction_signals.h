@@ -32,6 +32,7 @@ struct AgentToAlgorithmSignal {
   bool needs_intervention{false};
   bool pause_requested{false};
   bool stop_requested{false};
+  bool reflection_collection_requested{false};
 };
 
 struct AlgorithmToAgentSignal {
@@ -39,6 +40,7 @@ struct AlgorithmToAgentSignal {
   bool pause_requested{false};
   bool stop_requested{false};
   bool intervention_needed{false};
+  bool reflection_collection_requested{false};
 };
 
 }  // namespace common_data

@@ -4,9 +4,9 @@ This project is a layered Vulkan + SDL3 sandbox for agent-driven physics and ren
 
 ## Runtime Model
 
-- `interact_ui` is the main runtime UI.
+- `interact_ui` is the interaction host plus the thin editor UI panel.
 - An `agent` is the unit that carries algorithm packages, solver metadata, and intervention state.
-- The current default workflow is: load mesh -> keep the draft prefilled -> create an agent -> run immediately.
+- The current default workflow is: choose resource descriptors -> keep the draft prefilled -> create an agent -> run immediately.
 
 ## Terminology Rule
 
@@ -17,23 +17,23 @@ This project is a layered Vulkan + SDL3 sandbox for agent-driven physics and ren
 
 - `common_data` holds shared mesh, math, input, and interaction types.
 - `runtime_systems` owns windowing, ImGui, and Vulkan runtime support.
-- `messaging` stays a transport layer.
+- `common_data` also carries the shared packet structs used for codec and intervention payloads.
 - `algorithm_management` owns container-manifest loading and real runtime container creation.
 - `codec` encodes and decodes compliance / intervention payloads.
 - `capabilities/agent` holds the lightweight agent object and its attached algorithm metadata.
 - `capabilities/algorithm_library` is reserved for concrete algorithm package capability bundles.
 - `capabilities/sidecar` hosts optional sidecar capabilities such as mesh import/export.
 - `agent_management` owns the runtime path for creating agents, keeping all created agents, and ticking them.
-- `interact_ui` provides the manual agent composer and live debug UI.
+- `interact_ui` provides the manual agent composer and live debug UI panel without keeping a mesh resident in app state.
 - `app_orchestration` is the executable entry point.
 
 ## Execution Workflow
 
-- The interact UI creates agents from the active mesh.
+- The interact UI creates agents from resource descriptors and algorithm bindings.
 - The project does not yet have a formal algorithm execution engine.
 - Current algorithm execution is still a temporary bring-up path: the main thread temporarily executes algorithm work through explicitly marked `temporaryTest` hooks.
-- Physics owns the evolving vertex array.
-- Rendering reads the current vertex array and the mesh topology arrays to draw points and edges.
+- Physics owns the evolving algorithm-side state.
+- Rendering reads the current algorithm-side data to draw points and edges.
 - The default preset is prefilled so the user only needs to create the agent to start work.
 
 ## Agent Composition

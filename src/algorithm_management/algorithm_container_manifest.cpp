@@ -674,6 +674,10 @@ ManifestLookupResult _ResolveManifestPathByName(
   if (_TryUseManifestPathCandidate(requested_path, out_manifest_path)) {
     return ManifestLookupResult::Found;
   }
+  const fs::path folder_candidate = search_root / trimmed_name / (trimmed_name + ".json");
+  if (_TryUseManifestPathCandidate(folder_candidate, out_manifest_path)) {
+    return ManifestLookupResult::Found;
+  }
   if (_TryUseManifestPathCandidate(search_root / requested_path, out_manifest_path)) {
     return ManifestLookupResult::Found;
   }

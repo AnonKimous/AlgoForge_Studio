@@ -119,12 +119,6 @@ add_library(mesh_io STATIC
 target_include_directories(mesh_io PUBLIC ${PROJECT_INCLUDE_DIRS})
 target_link_libraries(mesh_io PUBLIC common_data)
 
-add_library(messaging STATIC
-  src/messaging/io_bus.cpp
-)
-target_include_directories(messaging PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_compile_definitions(messaging PRIVATE MESSAGING_LAYER_INTERNAL_BUILD=1)
-
 add_library(cjson STATIC
   third_party/cjson/cJSON.c
 )
@@ -132,13 +126,30 @@ target_include_directories(cjson PUBLIC ${PROJECT_INCLUDE_DIRS})
 
 add_library(codec STATIC
   src/codec/codec_manager.cpp
+  src/codec/algorithm_plugin_loader.cpp
   src/codec/codecset_loader.cpp
 )
 target_include_directories(codec PUBLIC ${PROJECT_INCLUDE_DIRS})
 target_compile_definitions(codec PRIVATE
   ALGORITHM_LIBRARY_RESOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library"
 )
-target_link_libraries(codec PUBLIC common_data messaging PRIVATE algorithm_management cjson)
+target_link_libraries(codec PUBLIC common_data PRIVATE algorithm_management cjson)
+
+add_library(temporary_test_line_motion_plugin MODULE
+  src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_plugin.cpp
+)
+target_include_directories(temporary_test_line_motion_plugin PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_compile_definitions(temporary_test_line_motion_plugin PRIVATE
+  ALGORITHM_LIBRARY_PLUGIN_BUILD=1
+  ALGORITHM_LIBRARY_RESOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library"
+)
+target_link_libraries(temporary_test_line_motion_plugin PRIVATE algorithm_management cjson common_data)
+set_target_properties(temporary_test_line_motion_plugin PROPERTIES
+  PREFIX ""
+  OUTPUT_NAME "temporary_test_line_motion"
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion"
+  LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion"
+)
 
 file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library" ALGORITHM_MANAGEMENT_MANIFEST_SEARCH_ROOT)
 
@@ -185,6 +196,7 @@ target_compile_definitions(agent_management PRIVATE AGENT_MANAGEMENT_LAYER_INTER
 target_link_libraries(agent_management PUBLIC common_data agent)
 
 add_library(interact_ui STATIC
+  src/interact_ui/interact_ui_panel.cpp
   src/interact_ui/interact_ui_runtime.cpp
 )
 target_include_directories(interact_ui PUBLIC ${PROJECT_INCLUDE_DIRS})
@@ -215,6 +227,7 @@ add_executable(min_vulkan_win32 WIN32
 )
 
 add_dependencies(min_vulkan_win32 shaders)
+add_dependencies(min_vulkan_win32 temporary_test_line_motion_plugin)
 
 target_link_libraries(min_vulkan_win32 PRIVATE
   interact_ui

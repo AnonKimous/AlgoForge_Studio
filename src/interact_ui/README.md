@@ -1,18 +1,21 @@
 # Interact UI Layer
 
-This layer owns the editor-facing UI that sits above `agent_management`.
-It is the app-facing entry point for the editor surface and delegates agent work downward.
+This layer is split into two thin halves:
+
+- `InteractUiRuntime` owns the interaction host surface and the runtime shell.
+- `InteractUiPanel` owns the editor-facing UI and depends only on the interaction host interface.
 
 ## Responsibilities
 
-- Render editor-facing inspection panels.
-- Read agent runtime state from `agent_management`.
-- Present intervention and signal state to the user in an editor-friendly form.
-- Own the facade that binds UI actions to `agent_management` and `runtime_systems::RuntimeEnvironment`.
+- `InteractUiRuntime` owns window/runtime lifetime and the managed agent registry.
+- `InteractUiRuntime` does not own the mesh; resource paths are passed through as descriptors and validated during composition.
+- `InteractUiPanel` renders editor-facing inspection and creation panels.
+- `InteractUiPanel` reads agent runtime state through `IInteractUiHost`.
+- The panel only previews algorithm-side state and does not keep a mesh copy alive.
+- Intervention packages may contribute custom UI through the agent-owned intervention hook, but the panel stays here.
 
 ## Notes
 
-- The layer is UI-only and should not own algorithm execution.
+- The UI is intentionally thin and stays separate from interaction state.
 - `agent_management` stays responsible for the runtime agent registry and macro tick backend.
-- Intervention packages may contribute custom UI through the agent-owned intervention hook, but the facade stays here.
-- This layer should not reach into `SdlWindow` or `ImGuiVulkanRuntime` directly.
+- `InteractUiPanel` should not reach into `SdlWindow` or `ImGuiVulkanRuntime` directly.

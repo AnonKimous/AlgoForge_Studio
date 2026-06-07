@@ -1,0 +1,13 @@
+{
+  "algorithms": [
+    {
+      "name": "temporary_test_line_motion",
+      "display_name": "temporary_test_line_motion",
+      "folder": "temporary_test_line_motion",
+      "container_manifest": "temporary_test_line_motion.json",
+      "decomposer": "temporary_test_line_motion_decomposer.json",
+      "reflector": "",
+      "intervention": ""
+    }
+  ]
+}

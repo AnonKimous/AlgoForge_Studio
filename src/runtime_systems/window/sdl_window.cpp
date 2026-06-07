@@ -36,6 +36,7 @@ bool SdlWindow::ProcessEvents() {
   input_.left_pressed = false;
   input_.left_released = false;
   input_.left_double_clicked = false;
+  input_.dropped_files.clear();
 
   SDL_Event event;
   while (SDL_PollEvent(&event)) {
@@ -72,6 +73,15 @@ bool SdlWindow::ProcessEvents() {
         if (event.button.windowID == window_id_ && event.button.button == SDL_BUTTON_LEFT) {
           input_.left_down = false;
           input_.left_released = true;
+        }
+        break;
+      case SDL_EVENT_DROP_FILE:
+        if (event.drop.windowID == window_id_ && event.drop.data) {
+          input_.dropped_files.push_back(common_data::DroppedFile{
+            .path = event.drop.data,
+            .x = static_cast<int>(event.drop.x),
+            .y = static_cast<int>(event.drop.y),
+          });
         }
         break;
       default:

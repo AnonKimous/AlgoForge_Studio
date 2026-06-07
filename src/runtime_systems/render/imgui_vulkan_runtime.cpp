@@ -277,6 +277,7 @@ bool ImGuiVulkanRuntime::Init(SDL_Window* window, const char* app_name) {
   imgui_context_created_ = true;
   ImGuiIO& io = ImGui::GetIO();
   io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+  io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
   ImGui::StyleColorsDark();
 
   SetupVulkan(app_name, window);

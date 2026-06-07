@@ -1,15 +1,11 @@
 #pragma once
 
-#if !defined(MESSAGING_LAYER_INTERNAL_BUILD) && !defined(MESSAGING_LAYER_PUBLIC_FACADE_INCLUDE)
-#error "Do not include messaging/io_buffers.h directly. Use messaging/messaging.h."
-#endif
-
 #include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
 
-namespace messaging {
+namespace common_data {
 
 enum class IoProtocolCompressionKind {
   None,
@@ -45,21 +41,10 @@ struct IoBufferPacket {
   std::vector<IoDataBufferEntry> data_buffer;
 };
 
-struct IoBufferEndpoint {
-  IoProtocolDescriptor* protocol{};
-  std::vector<IoSignalBufferEntry>* signal_buffer{};
-  std::vector<IoDataBufferEntry>* data_buffer{};
+}  // namespace common_data
 
-  bool valid() const {
-    return protocol != nullptr && signal_buffer != nullptr && data_buffer != nullptr;
-  }
-};
-
-}  // namespace messaging
-
-using messaging::IoBufferEndpoint;
-using messaging::IoBufferPacket;
-using messaging::IoDataBufferEntry;
-using messaging::IoProtocolCompressionKind;
-using messaging::IoProtocolDescriptor;
-using messaging::IoSignalBufferEntry;
+using common_data::IoBufferPacket;
+using common_data::IoDataBufferEntry;
+using common_data::IoProtocolCompressionKind;
+using common_data::IoProtocolDescriptor;
+using common_data::IoSignalBufferEntry;

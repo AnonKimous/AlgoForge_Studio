@@ -1,11 +1,10 @@
 #include "codec_manager.h"
+#include "codec/algorithm_plugin_loader.h"
 
 #include "capabilities/agent/agent.h"
 #include "cJSON.h"
 
 #include <algorithm>
-#include <array>
-#include <cmath>
 #include <cstring>
 #include <fstream>
 #include <memory>
@@ -16,12 +15,6 @@
 namespace codec {
 
 namespace {
-
-constexpr char ktemporaryTestLineMotionAlgorithmName[] = "temporary_test_line_motion";
-constexpr char ktemporaryTestLineMotionContainerName[] = "pos";
-constexpr float ktemporaryTestMinX = -100.0f;
-constexpr float ktemporaryTestMaxX = 100.0f;
-constexpr float ktemporaryTestVelocityX = 120.0f;
 
 #ifndef ALGORITHM_LIBRARY_RESOURCE_ROOT
 #define ALGORITHM_LIBRARY_RESOURCE_ROOT "src/capabilities/algorithm_library"
@@ -46,23 +39,10 @@ struct temporaryTestDecomposerSchema {
   std::string error_message;
 };
 
-bool _IstemporaryTestLineMotion(std::string_view algorithm_name) {
-  return algorithm_name == ktemporaryTestLineMotionAlgorithmName;
-}
-
 void _SetErrorMessage(std::string* out_error_message, std::string message) {
   if (out_error_message) {
     *out_error_message = std::move(message);
   }
-}
-
-bool _RejectUnsupportedAlgorithm(
-  const std::string& algorithm_name,
-  std::string* out_error_message) {
-  _SetErrorMessage(
-    out_error_message,
-    "Codec layer does not have a creator registered for algorithm '" + algorithm_name + "'.");
-  return false;
 }
 
 std::string _ReadtemporaryTestTextFile(const std::string& path) {
@@ -105,16 +85,55 @@ bool _GettemporaryTestBoolField(const cJSON* object, const char* key, bool fallb
   if (!item) {
     return fallback;
   }
-  if (cJSON_IsBool(item)) {
-    return cJSON_IsTrue(item);
+  if (item->type & (cJSON_True | cJSON_False)) {
+    return (item->type & cJSON_True) != 0;
   }
   return fallback;
 }
 
-temporaryTestDecomposerSchema _LoadtemporaryTestDecomposerSchema() {
+std::string _BuildAlgorithmLibraryPath(
+  const std::string& algorithm_name,
+  const std::string& suffix) {
+  return std::string(ALGORITHM_LIBRARY_RESOURCE_ROOT) + "/" + algorithm_name + suffix;
+}
+
+std::string _BuildAlgorithmLibraryFolderPath(
+  const std::string& algorithm_name,
+  const std::string& filename) {
+  return std::string(ALGORITHM_LIBRARY_RESOURCE_ROOT) + "/" + algorithm_name + "/" + filename;
+}
+
+bool _ResolveAlgorithmLibraryFilePath(
+  const std::string& algorithm_name,
+  const std::string& filename,
+  std::string* out_path) {
+  if (!out_path) {
+    return false;
+  }
+
+  const std::string folder_path = _BuildAlgorithmLibraryFolderPath(algorithm_name, filename);
+  std::ifstream folder_file(folder_path, std::ios::binary);
+  if (folder_file) {
+    *out_path = folder_path;
+    return true;
+  }
+
+  const std::string legacy_path = _BuildAlgorithmLibraryPath(algorithm_name, filename);
+  std::ifstream legacy_file(legacy_path, std::ios::binary);
+  if (legacy_file) {
+    *out_path = legacy_path;
+    return true;
+  }
+
+  return false;
+}
+
+temporaryTestDecomposerSchema _LoadtemporaryTestDecomposerSchema(const std::string& algorithm_name) {
   temporaryTestDecomposerSchema schema{};
-  const std::string path =
-    std::string(ALGORITHM_LIBRARY_RESOURCE_ROOT) + "/temporary_test_line_motion_decomposer.json";
+  std::string path;
+  if (!_ResolveAlgorithmLibraryFilePath(algorithm_name, algorithm_name + "_decomposer.json", &path)) {
+    path = _BuildAlgorithmLibraryPath(algorithm_name, "_decomposer.json");
+  }
   const std::string json_text = _ReadtemporaryTestTextFile(path);
   if (json_text.empty()) {
     schema.error_message = "Failed to read decomposer JSON file: " + path;
@@ -142,7 +161,7 @@ temporaryTestDecomposerSchema _LoadtemporaryTestDecomposerSchema() {
       entry.resource_kind = _GettemporaryTestStringField(item, "kind");
       entry.required = _GettemporaryTestBoolField(item, "required", true);
       if (entry.resource_name.empty() || entry.resource_kind.empty()) {
-        schema.error_message = "Invalid required_resources entry in temporary_test_line_motion_decomposer.json.";
+        schema.error_message = "Invalid required_resources entry in " + path + ".";
         cJSON_Delete(root);
         return schema;
       }
@@ -165,7 +184,7 @@ temporaryTestDecomposerSchema _LoadtemporaryTestDecomposerSchema() {
       entry.container_name = _GettemporaryTestStringField(item, "container");
       entry.array_index = _GettemporaryTestUintField(item, "array_index");
       if (entry.descriptor_name.empty() || entry.container_name.empty()) {
-        schema.error_message = "Invalid descriptor_to_container entry in temporary_test_line_motion_decomposer.json.";
+        schema.error_message = "Invalid descriptor_to_container entry in " + path + ".";
         cJSON_Delete(root);
         return schema;
       }
@@ -176,14 +195,8 @@ temporaryTestDecomposerSchema _LoadtemporaryTestDecomposerSchema() {
   cJSON_Delete(root);
   schema.valid = !schema.descriptor_entries.empty();
   if (!schema.valid && schema.error_message.empty()) {
-    schema.error_message =
-      "temporary_test_line_motion_decomposer.json does not contain descriptor_to_container entries.";
+    schema.error_message = path + " does not contain descriptor_to_container entries.";
   }
-  return schema;
-}
-
-const temporaryTestDecomposerSchema& _GettemporaryTestDecomposerSchema() {
-  static const temporaryTestDecomposerSchema schema = _LoadtemporaryTestDecomposerSchema();
   return schema;
 }
 
@@ -209,138 +222,61 @@ const agent::AlgorithmResourceBinding* _FindtemporaryTestResourceBinding(
   return nullptr;
 }
 
-bool _ReadtemporaryTestPosition(
-  const AlgorithmContainerSet& container_set,
-  std::array<float, 3>* out_position) {
-  if (!out_position) {
-    return false;
-  }
-
-  const AlgorithmContainer* container =
-    FindAlgorithmContainer(container_set, ktemporaryTestLineMotionContainerName);
-  if (!container) {
-    return false;
-  }
-  if (container->storage_kind != AlgorithmContainerStorageKind::Array) {
-    return false;
-  }
-  if (container->element_count < 1u) {
-    return false;
-  }
-  if (container->element_stride != sizeof(float) * 3u) {
-    return false;
-  }
-  if (container->bytes.size() < sizeof(float) * 3u) {
-    return false;
-  }
-
-  std::memcpy(out_position->data(), container->bytes.data(), sizeof(float) * 3u);
-  return true;
-}
-
-bool _WritetemporaryTestPosition(
-  AlgorithmContainerSet* container_set,
-  const std::array<float, 3>& position) {
-  if (!container_set) {
-    return false;
-  }
-
-  AlgorithmContainer* container =
-    FindAlgorithmContainer(container_set, ktemporaryTestLineMotionContainerName);
-  if (!container) {
-    return false;
-  }
-  if (container->storage_kind != AlgorithmContainerStorageKind::Array) {
-    return false;
-  }
-  if (container->element_count < 1u) {
-    return false;
-  }
-  if (container->element_stride != sizeof(float) * 3u) {
-    return false;
-  }
-  if (container->bytes.size() < sizeof(float) * 3u) {
-    return false;
-  }
-
-  std::memcpy(container->bytes.data(), position.data(), sizeof(float) * 3u);
-  return true;
-}
-
-void _SynctemporaryTestMeshPosition(Mesh* mesh, const std::array<float, 3>& position) {
-  if (!mesh) {
-    return;
-  }
-
-  const Vec3 point{
-    position[0],
-    position[1],
-    position[2],
-  };
-  if (mesh->positions.empty()) {
-    mesh->positions.push_back(point);
-  } else {
-    mesh->positions[0] = point;
-    mesh->positions.resize(1u);
-  }
-  mesh->normals.assign(1u, Vec3{0.0f, 0.0f, 1.0f});
-  mesh->triangles.clear();
-  mesh->edges.clear();
-  mesh->triangle_material_gpa.clear();
-}
-
-class temporaryTestLineMotionDecomposer final
-  : public agent::IAlgorithmPackageDecomposer {
+class AlgorithmLibrarySchemaDecomposer final : public agent::IAlgorithmPackageDecomposer {
  public:
-  bool ReflectRequiredResources(
+  explicit AlgorithmLibrarySchemaDecomposer(std::string algorithm_name)
+    : schema_(_LoadtemporaryTestDecomposerSchema(algorithm_name)) {}
+
+  bool valid() const { return schema_.valid; }
+  const std::string& error_message() const { return schema_.error_message; }
+
+  bool GetRequestedResources(
     const AlgorithmProfile& algorithm_profile,
-    agent::AlgorithmResourceReflection* out_reflection) const override {
-    if (!out_reflection) {
+    agent::AlgorithmRequestedResources* out_requested_resources) const override {
+    if (!out_requested_resources) {
       return false;
     }
 
-    *out_reflection = {};
-    out_reflection->algorithm_name = algorithm_profile.algorithm_name;
-    const temporaryTestDecomposerSchema& schema = _GettemporaryTestDecomposerSchema();
-    if (!schema.valid) {
+    *out_requested_resources = {};
+    out_requested_resources->algorithm_name = algorithm_profile.algorithm_name;
+    if (!schema_.valid) {
       return false;
     }
 
-    out_reflection->required_resources.reserve(schema.required_resources.size());
-    for (const temporaryTestDecomposerResourceEntry& entry : schema.required_resources) {
-      out_reflection->required_resources.push_back(agent::AlgorithmResourceReflection::RequiredResource{
+    out_requested_resources->required_resources.reserve(schema_.required_resources.size());
+    for (const temporaryTestDecomposerResourceEntry& entry : schema_.required_resources) {
+      out_requested_resources->required_resources.push_back(agent::AlgorithmRequestedResources::RequiredResource{
         .resource_name = entry.resource_name,
         .resource_kind = entry.resource_kind,
         .required = entry.required,
       });
     }
-    out_reflection->valid = true;
+    out_requested_resources->valid = true;
     return true;
   }
 
-  bool ReflectDescriptorBindings(
+  bool GetRequestedDescriptorBindings(
     const AlgorithmProfile& algorithm_profile,
-    agent::AlgorithmDescriptorReflection* out_reflection) const override {
-    if (!out_reflection) {
+    agent::AlgorithmRequestedDescriptorBindings* out_requested_descriptor_bindings) const override {
+    if (!out_requested_descriptor_bindings) {
       return false;
     }
 
-    *out_reflection = {};
-    out_reflection->algorithm_name = algorithm_profile.algorithm_name;
-    const temporaryTestDecomposerSchema& schema = _GettemporaryTestDecomposerSchema();
-    if (!schema.valid) {
+    *out_requested_descriptor_bindings = {};
+    out_requested_descriptor_bindings->algorithm_name = algorithm_profile.algorithm_name;
+    if (!schema_.valid) {
       return false;
     }
 
-    out_reflection->descriptor_slots.reserve(schema.descriptor_entries.size());
-    for (const temporaryTestDecomposerDescriptorEntry& entry : schema.descriptor_entries) {
-      out_reflection->descriptor_slots.push_back(agent::AlgorithmDescriptorReflection::DescriptorSlot{
+    out_requested_descriptor_bindings->descriptor_slots.reserve(schema_.descriptor_entries.size());
+    for (const temporaryTestDecomposerDescriptorEntry& entry : schema_.descriptor_entries) {
+      out_requested_descriptor_bindings->descriptor_slots.push_back(agent::AlgorithmRequestedDescriptorBindings::DescriptorSlot{
         .descriptor_name = entry.descriptor_name,
         .container_name = entry.container_name,
         .array_index = entry.array_index,
       });
     }
-    out_reflection->valid = true;
+    out_requested_descriptor_bindings->valid = true;
     return true;
   }
 
@@ -355,13 +291,12 @@ class temporaryTestLineMotionDecomposer final
       return false;
     }
 
-    const temporaryTestDecomposerSchema& schema = _GettemporaryTestDecomposerSchema();
-    if (!schema.valid) {
-      _SetErrorMessage(out_error_message, schema.error_message);
+    if (!schema_.valid) {
+      _SetErrorMessage(out_error_message, schema_.error_message);
       return false;
     }
 
-    for (const temporaryTestDecomposerResourceEntry& entry : schema.required_resources) {
+    for (const temporaryTestDecomposerResourceEntry& entry : schema_.required_resources) {
       if (!entry.required) {
         continue;
       }
@@ -375,21 +310,38 @@ class temporaryTestLineMotionDecomposer final
             algorithm_profile.algorithm_name + "'.");
         return false;
       }
-      if (entry.resource_kind == "mesh" && !binding->has_mesh) {
-        _SetErrorMessage(
-          out_error_message,
-          "Required mesh resource '" + entry.resource_name + "' was not loaded for '" +
+      if (entry.resource_kind == "mesh") {
+        if (binding->source_path.empty()) {
+          _SetErrorMessage(
+            out_error_message,
+            "Required mesh resource '" + entry.resource_name + "' has no source path for '" +
             algorithm_profile.algorithm_name + "'.");
-        return false;
+          return false;
+        }
+        std::ifstream file(binding->source_path, std::ios::binary);
+        if (!file) {
+          _SetErrorMessage(
+            out_error_message,
+            "Required mesh resource file '" + binding->source_path + "' could not be opened for '" +
+              algorithm_profile.algorithm_name + "'.");
+          return false;
+        }
       }
     }
 
-    std::array<float, 3> position{
-      ktemporaryTestMinX,
-      0.0f,
-      0.0f,
-    };
-    for (const temporaryTestDecomposerDescriptorEntry& entry : schema.descriptor_entries) {
+    uint32_t tuple_width = 0u;
+    for (const temporaryTestDecomposerDescriptorEntry& entry : schema_.descriptor_entries) {
+      tuple_width = std::max(tuple_width, entry.array_index + 1u);
+    }
+    if (tuple_width == 0u) {
+      _SetErrorMessage(
+        out_error_message,
+        "No descriptor-to-container mapping available for '" + algorithm_profile.algorithm_name + "'.");
+      return false;
+    }
+
+    std::vector<float> tuple_values(tuple_width, 0.0f);
+    for (const temporaryTestDecomposerDescriptorEntry& entry : schema_.descriptor_entries) {
       const agent::AlgorithmDescriptorValue* value =
         _FindtemporaryTestDescriptorValue(descriptor_values, entry.descriptor_name);
       if (!value) {
@@ -399,87 +351,54 @@ class temporaryTestLineMotionDecomposer final
             algorithm_profile.algorithm_name + "'.");
         return false;
       }
-      if (entry.container_name != ktemporaryTestLineMotionContainerName || entry.array_index >= position.size()) {
+      if (entry.array_index >= tuple_values.size()) {
         _SetErrorMessage(
           out_error_message,
           "Unsupported descriptor mapping '" + entry.descriptor_name + "' for container '" +
             entry.container_name + "'.");
         return false;
       }
-      position[entry.array_index] = value->scalar_value;
+      tuple_values[entry.array_index] = value->scalar_value;
     }
 
-    if (!_WritetemporaryTestPosition(container_set, position)) {
-      _SetErrorMessage(
-        out_error_message,
-        "Failed to write decomposed data into container '" +
-          std::string(ktemporaryTestLineMotionContainerName) + "'.");
-      return false;
+    for (const temporaryTestDecomposerDescriptorEntry& entry : schema_.descriptor_entries) {
+      AlgorithmContainer* container = FindAlgorithmContainer(container_set, entry.container_name);
+      if (!container) {
+        _SetErrorMessage(
+          out_error_message,
+          "Missing target container '" + entry.container_name + "' for '" +
+            algorithm_profile.algorithm_name + "'.");
+        return false;
+      }
+      if (container->storage_kind != AlgorithmContainerStorageKind::Array) {
+        _SetErrorMessage(
+          out_error_message,
+          "Target container '" + entry.container_name + "' is not an array for '" +
+            algorithm_profile.algorithm_name + "'.");
+        return false;
+      }
+      if (container->element_stride < sizeof(float) * tuple_width) {
+        _SetErrorMessage(
+          out_error_message,
+          "Target container '" + entry.container_name + "' has insufficient element stride for '" +
+            algorithm_profile.algorithm_name + "'.");
+        return false;
+      }
+      if (container->bytes.size() < sizeof(float) * tuple_width) {
+        _SetErrorMessage(
+          out_error_message,
+          "Target container '" + entry.container_name + "' has insufficient storage for '" +
+            algorithm_profile.algorithm_name + "'.");
+        return false;
+      }
+      std::memcpy(container->bytes.data(), tuple_values.data(), sizeof(float) * tuple_width);
     }
 
-    return true;
-  }
-};
-
-class temporaryTestLineMotionMainThreadExecutor final
-  : public agent::IAlgorithmtemporaryTestMainThreadExecutor {
- public:
-  bool temporaryTestExecuteOnMainThread(
-    const agent::AgentTickContext& context,
-    const AlgorithmProfile& algorithm_profile,
-    const AgentToAlgorithmSignal& agent_to_algorithm_signal,
-    AlgorithmContainerSet* algorithm_container_set,
-    AlgorithmToAgentSignal* algorithm_to_agent_signal,
-    agent::AlgorithmPackageDebugState* debug_state) override {
-    (void)algorithm_profile;
-    (void)agent_to_algorithm_signal;
-
-    if (!context.mesh || !algorithm_container_set || !algorithm_to_agent_signal || !debug_state) {
-      return false;
-    }
-
-    std::array<float, 3> position{
-      ktemporaryTestMinX,
-      0.0f,
-      0.0f,
-    };
-    if (!initialized_) {
-      velocity_x_ = ktemporaryTestVelocityX;
-      initialized_ = true;
-    } else if (!_ReadtemporaryTestPosition(*algorithm_container_set, &position)) {
-      return false;
-    }
-
-    const float dt_seconds = std::max(0.0f, context.dt_seconds);
-    position[0] += velocity_x_ * dt_seconds;
-    if (position[0] >= ktemporaryTestMaxX) {
-      position[0] = ktemporaryTestMaxX;
-      velocity_x_ = -std::abs(velocity_x_);
-    } else if (position[0] <= ktemporaryTestMinX) {
-      position[0] = ktemporaryTestMinX;
-      velocity_x_ = std::abs(velocity_x_);
-    }
-
-    if (!_WritetemporaryTestPosition(algorithm_container_set, position)) {
-      return false;
-    }
-
-    _SynctemporaryTestMeshPosition(context.mesh, position);
-
-    std::ostringstream signal_stream;
-    signal_stream << "x=" << position[0] << ", vx=" << velocity_x_;
-    debug_state->signals.push_back(AdvancedAlgorithmDebugSignal{
-      .name = "temporaryTest_line_motion",
-      .payload = signal_stream.str(),
-    });
-
-    *algorithm_to_agent_signal = {};
     return true;
   }
 
  private:
-  bool initialized_{false};
-  float velocity_x_{ktemporaryTestVelocityX};
+  temporaryTestDecomposerSchema schema_{};
 };
 
 }  // namespace
@@ -492,13 +411,11 @@ bool CreateAlgorithmPackageReflectorByName(
     _SetErrorMessage(out_error_message, "Reflector output pointer is null.");
     return false;
   }
+  (void)algorithm_name;
 
   out_reflector->reset();
-  if (_IstemporaryTestLineMotion(algorithm_name)) {
-    _SetErrorMessage(out_error_message, {});
-    return true;
-  }
-  return _RejectUnsupportedAlgorithm(algorithm_name, out_error_message);
+  _SetErrorMessage(out_error_message, {});
+  return true;
 }
 
 bool CreateAlgorithmPackageDecomposerByName(
@@ -511,30 +428,20 @@ bool CreateAlgorithmPackageDecomposerByName(
   }
 
   out_decomposer->reset();
-  if (_IstemporaryTestLineMotion(algorithm_name)) {
-    *out_decomposer = std::make_shared<temporaryTestLineMotionDecomposer>();
-    _SetErrorMessage(out_error_message, {});
-    return true;
-  }
-  return _RejectUnsupportedAlgorithm(algorithm_name, out_error_message);
-}
-
-bool CreateAlgorithmtemporaryTestMainThreadExecutorByName(
-  const std::string& algorithm_name,
-  std::shared_ptr<agent::IAlgorithmtemporaryTestMainThreadExecutor>* out_executor,
-  std::string* out_error_message) {
-  if (!out_executor) {
-    _SetErrorMessage(out_error_message, "temporaryTest executor output pointer is null.");
+  // Codec-level fallback: resolve the same-name decomposer schema from the
+  // algorithm library, then use the generic schema-driven decomposer.
+  const auto decomposer = std::make_shared<AlgorithmLibrarySchemaDecomposer>(algorithm_name);
+  if (!decomposer) {
+    _SetErrorMessage(out_error_message, "Failed to create decomposer object.");
     return false;
   }
-
-  out_executor->reset();
-  if (_IstemporaryTestLineMotion(algorithm_name)) {
-    *out_executor = std::make_shared<temporaryTestLineMotionMainThreadExecutor>();
-    _SetErrorMessage(out_error_message, {});
-    return true;
+  if (!decomposer->valid()) {
+    _SetErrorMessage(out_error_message, decomposer->error_message());
+    return false;
   }
-  return _RejectUnsupportedAlgorithm(algorithm_name, out_error_message);
+  *out_decomposer = std::move(decomposer);
+  _SetErrorMessage(out_error_message, {});
+  return true;
 }
 
 bool CreateAlgorithmInterventionPackageCodecByName(
@@ -545,13 +452,11 @@ bool CreateAlgorithmInterventionPackageCodecByName(
     _SetErrorMessage(out_error_message, "Intervention codec output pointer is null.");
     return false;
   }
+  (void)algorithm_name;
 
   out_codec->reset();
-  if (_IstemporaryTestLineMotion(algorithm_name)) {
-    _SetErrorMessage(out_error_message, {});
-    return true;
-  }
-  return _RejectUnsupportedAlgorithm(algorithm_name, out_error_message);
+  _SetErrorMessage(out_error_message, {});
+  return true;
 }
 
 bool CreateAlgorithmInterventionPackageAgentByName(
@@ -562,13 +467,11 @@ bool CreateAlgorithmInterventionPackageAgentByName(
     _SetErrorMessage(out_error_message, "Intervention agent output pointer is null.");
     return false;
   }
+  (void)algorithm_name;
 
   out_agent->reset();
-  if (_IstemporaryTestLineMotion(algorithm_name)) {
-    _SetErrorMessage(out_error_message, {});
-    return true;
-  }
-  return _RejectUnsupportedAlgorithm(algorithm_name, out_error_message);
+  _SetErrorMessage(out_error_message, {});
+  return true;
 }
 
 bool CreateAlgorithmInterventionPackageAlgorithmByName(
@@ -579,13 +482,11 @@ bool CreateAlgorithmInterventionPackageAlgorithmByName(
     _SetErrorMessage(out_error_message, "Intervention algorithm output pointer is null.");
     return false;
   }
+  (void)algorithm_name;
 
   out_algorithm->reset();
-  if (_IstemporaryTestLineMotion(algorithm_name)) {
-    _SetErrorMessage(out_error_message, {});
-    return true;
-  }
-  return _RejectUnsupportedAlgorithm(algorithm_name, out_error_message);
+  _SetErrorMessage(out_error_message, {});
+  return true;
 }
 
 bool CreateAlgorithmCodecGroupByName(
@@ -596,14 +497,35 @@ bool CreateAlgorithmCodecGroupByName(
     _SetErrorMessage(out_error_message, "AgentAlgorithmCodecGroup output pointer is null.");
     return false;
   }
-  if (algorithm_name.empty()) {
-    _SetErrorMessage(out_error_message, "Algorithm name must not be empty.");
-    return false;
-  }
 
   agent::AgentAlgorithmCodecGroup group{};
   group.algorithm_profile.algorithm_name = algorithm_name;
   group.algorithm_profile.container_manifest_name = algorithm_name;
+  codec::AlgorithmPluginComponents plugin_components{};
+  std::string plugin_error_message;
+  if (codec::TryLoadAlgorithmPluginComponents(algorithm_name, &plugin_components, &plugin_error_message)) {
+    group.cpu_symbol = plugin_components.cpu_symbol;
+    group.gpu_symbol = plugin_components.gpu_symbol;
+    group.reflector = plugin_components.reflector;
+    group.decomposer = plugin_components.decomposer;
+    group.intervention_codec = plugin_components.intervention_codec;
+    group.intervention_agent = plugin_components.intervention_agent;
+    group.intervention_algorithm = plugin_components.intervention_algorithm;
+    group.temporaryTest_main_thread_executor = plugin_components.temporary_test_executor;
+    if (plugin_components.has_runtime_reflector) {
+      group.algorithm_reflector = std::make_shared<algorithm::AlgorithmReflector>(
+        std::move(plugin_components.runtime_reflector));
+    }
+    *out_group = std::move(group);
+    _SetErrorMessage(out_error_message, {});
+    return true;
+  } else if (!plugin_error_message.empty()) {
+    _SetErrorMessage(out_error_message, std::move(plugin_error_message));
+    return false;
+  }
+
+  group.cpu_symbol = true;
+  group.gpu_symbol = true;
 
   if (!CreateAlgorithmPackageReflectorByName(
         algorithm_name,
@@ -614,12 +536,6 @@ bool CreateAlgorithmCodecGroupByName(
   if (!CreateAlgorithmPackageDecomposerByName(
         algorithm_name,
         &group.decomposer,
-        out_error_message)) {
-    return false;
-  }
-  if (!CreateAlgorithmtemporaryTestMainThreadExecutorByName(
-        algorithm_name,
-        &group.temporaryTest_main_thread_executor,
         out_error_message)) {
     return false;
   }
@@ -640,6 +556,13 @@ bool CreateAlgorithmCodecGroupByName(
         &group.intervention_algorithm,
         out_error_message)) {
     return false;
+  }
+  algorithm::AlgorithmReflector runtime_reflector{};
+  if (algorithm_management::AlgorithmManager_TryCreateReflectorFromAlgorithmName(
+        algorithm_name,
+        &runtime_reflector,
+        nullptr)) {
+    group.algorithm_reflector = std::make_shared<algorithm::AlgorithmReflector>(std::move(runtime_reflector));
   }
 
   *out_group = std::move(group);

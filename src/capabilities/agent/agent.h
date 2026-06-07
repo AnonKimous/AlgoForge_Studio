@@ -26,7 +26,7 @@ struct AlgorithmProfileReflection {
   bool valid{false};
 };
 
-struct AlgorithmResourceReflection {
+struct AlgorithmRequestedResources {
   struct RequiredResource {
     std::string resource_name;
     std::string resource_kind;
@@ -38,7 +38,7 @@ struct AlgorithmResourceReflection {
   bool valid{false};
 };
 
-struct AlgorithmDescriptorReflection {
+struct AlgorithmRequestedDescriptorBindings {
   struct DescriptorSlot {
     std::string descriptor_name;
     std::string container_name;
@@ -54,13 +54,33 @@ struct AlgorithmResourceBinding {
   std::string resource_name;
   std::string resource_kind;
   std::string source_path;
-  Mesh mesh{};
-  bool has_mesh{false};
 };
 
 struct AlgorithmDescriptorValue {
   std::string descriptor_name;
   float scalar_value{0.0f};
+};
+
+struct AlgorithmReflectionValue {
+  std::string reflection_object_name;
+  std::string container_name;
+  std::string filter_name;
+  algorithm::AlgorithmContainerStorageKind storage_kind{algorithm::AlgorithmContainerStorageKind::Array};
+  std::vector<std::byte> bytes;
+};
+
+struct AlgorithmReflectionSnapshot {
+  std::string algorithm_name;
+  std::vector<AlgorithmReflectionValue> variables;
+  std::vector<AlgorithmReflectionValue> variable_arrays;
+  bool valid{false};
+
+  void Clear() {
+    algorithm_name.clear();
+    variables.clear();
+    variable_arrays.clear();
+    valid = false;
+  }
 };
 
 struct AlgorithmPackageDebugState {
@@ -77,10 +97,17 @@ struct AgentAlgorithmRuntimeState {
   AgentToAlgorithmSignal agent_to_algorithm_signal{};
   AlgorithmToAgentSignal algorithm_to_agent_signal{};
   AlgorithmPackageDebugState debug_state{};
+  AlgorithmReflectionSnapshot reflection_snapshot{};
+};
+
+enum class AlgorithmAssemblyState {
+  Pending,
+  Assembling,
+  Ready,
+  Failed,
 };
 
 struct AgentTickContext {
-  Mesh* mesh{nullptr};
   const InputState* input{nullptr};
   Vec2 mouse_pixel{};
   float dt_seconds{0.0f};
@@ -131,19 +158,19 @@ class IAlgorithmPackageDecomposer {
  public:
   virtual ~IAlgorithmPackageDecomposer() = default;
 
-  virtual bool ReflectRequiredResources(
+  virtual bool GetRequestedResources(
     const AlgorithmProfile& algorithm_profile,
-    AlgorithmResourceReflection* out_reflection) const {
+    AlgorithmRequestedResources* out_requested_resources) const {
     (void)algorithm_profile;
-    (void)out_reflection;
+    (void)out_requested_resources;
     return false;
   }
 
-  virtual bool ReflectDescriptorBindings(
+  virtual bool GetRequestedDescriptorBindings(
     const AlgorithmProfile& algorithm_profile,
-    AlgorithmDescriptorReflection* out_reflection) const {
+    AlgorithmRequestedDescriptorBindings* out_requested_descriptor_bindings) const {
     (void)algorithm_profile;
-    (void)out_reflection;
+    (void)out_requested_descriptor_bindings;
     return false;
   }
 
@@ -220,8 +247,11 @@ struct AgentAlgorithmCodecGroup {
   AlgorithmProfile algorithm_profile{};
   std::shared_ptr<IAlgorithmPackageCodec> reflector;
   std::shared_ptr<IAlgorithmPackageDecomposer> decomposer;
+  std::shared_ptr<algorithm::AlgorithmReflector> algorithm_reflector;
   std::vector<AlgorithmResourceBinding> resource_bindings;
   std::vector<AlgorithmDescriptorValue> descriptor_values;
+  bool cpu_symbol{true};
+  bool gpu_symbol{true};
   std::shared_ptr<IAlgorithmtemporaryTestMainThreadExecutor> temporaryTest_main_thread_executor;
   std::shared_ptr<IAlgorithmInterventionPackageCodec> intervention_codec;
   std::shared_ptr<IAlgorithmInterventionPackageAgent> intervention_agent;
@@ -233,9 +263,17 @@ struct AgentInitConfig {
   std::vector<AgentAlgorithmCodecGroup> algorithm_codec_groups;
 };
 
+struct AlgorithmAssemblySlot {
+  size_t index{0u};
+  AgentAlgorithmCodecGroup* algorithm_codec_group{nullptr};
+  AlgorithmContainerSet* algorithm_container_set{nullptr};
+  AlgorithmAssemblyState* assembly_state{nullptr};
+};
+
 class Agent {
  public:
   bool Init(AgentInitConfig config);
+  bool AppendAlgorithmCodecGroup(AgentAlgorithmCodecGroup group, size_t* out_index = nullptr);
   void RefreshInterventionSignals(const AgentTickContext& context);
   bool Tick(
     const AgentTickContext& context,
@@ -247,9 +285,26 @@ class Agent {
   const std::string& agent_name() const { return agent_name_; }
   size_t algorithm_count() const { return algorithm_codec_groups_.size(); }
   const std::vector<AgentAlgorithmCodecGroup>& algorithm_codec_groups() const { return algorithm_codec_groups_; }
+  AgentAlgorithmCodecGroup* algorithm_codec_group(size_t index) {
+    return index < algorithm_codec_groups_.size() ? &algorithm_codec_groups_[index] : nullptr;
+  }
   const AgentAlgorithmCodecGroup* algorithm_codec_group(size_t index) const {
     return index < algorithm_codec_groups_.size() ? &algorithm_codec_groups_[index] : nullptr;
   }
+  AlgorithmContainerSet* algorithm_container_set(size_t index) {
+    return index < algorithm_container_sets_.size() ? &algorithm_container_sets_[index] : nullptr;
+  }
+  const AlgorithmContainerSet* algorithm_container_set(size_t index) const {
+    return index < algorithm_container_sets_.size() ? &algorithm_container_sets_[index] : nullptr;
+  }
+  AlgorithmAssemblyState algorithm_assembly_state(size_t index) const {
+    return index < algorithm_assembly_states_.size() ? algorithm_assembly_states_[index] : AlgorithmAssemblyState::Failed;
+  }
+  bool BeginAlgorithmAssembly(size_t index);
+  void MarkAlgorithmAssemblyReady(size_t index);
+  void MarkAlgorithmAssemblyFailed(size_t index);
+  bool GetAlgorithmAssemblySlot(size_t index, AlgorithmAssemblySlot* out_slot);
+  bool CollectAlgorithmReflection(size_t index, AlgorithmReflectionSnapshot* out_snapshot) const;
   const AgentAlgorithmCodecGroup* FindAlgorithmCodecGroup(const std::string& algorithm_name) const {
     for (const AgentAlgorithmCodecGroup& group : algorithm_codec_groups_) {
       if (group.algorithm_profile.algorithm_name == algorithm_name) {
@@ -272,6 +327,7 @@ class Agent {
   std::vector<AgentAlgorithmCodecGroup> algorithm_codec_groups_{};
   std::vector<AgentAlgorithmRuntimeState> algorithm_runtime_states_{};
   std::vector<AlgorithmContainerSet> algorithm_container_sets_{};
+  std::vector<AlgorithmAssemblyState> algorithm_assembly_states_{};
 };
 
 inline bool agent_init(Agent* agent_instance, AgentInitConfig config) {

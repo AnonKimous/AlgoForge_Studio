@@ -1,0 +1,23 @@
+适用于 .NET Framework MSBuild 版本 17.14.23+b0019275e
+
+  cjson.vcxproj -> D:\aaamyprj\physBased-render\build\Debug\cjson.lib
+  common_data.vcxproj -> D:\aaamyprj\physBased-render\build\Debug\common_data.lib
+  messaging.vcxproj -> D:\aaamyprj\physBased-render\build\Debug\messaging.lib
+  runtime_systems.vcxproj -> D:\aaamyprj\physBased-render\build\Debug\runtime_systems.lib
+  algorithm_management.vcxproj -> D:\aaamyprj\physBased-render\build\Debug\algorithm_management.lib
+  codecset_loader.cpp
+  codec.vcxproj -> D:\aaamyprj\physBased-render\build\Debug\codec.lib
+  agent.cpp
+  agent.vcxproj -> D:\aaamyprj\physBased-render\build\Debug\agent.lib
+  agent_manager.cpp
+  agent_ticker.cpp
+  正在生成代码...
+  agent_management.vcxproj -> D:\aaamyprj\physBased-render\build\Debug\agent_management.lib
+  interact_ui_panel.cpp
+  interact_ui_runtime.cpp
+  正在生成代码...
+  interact_ui.vcxproj -> D:\aaamyprj\physBased-render\build\Debug\interact_ui.lib
+  main.cpp
+  min_vulkan_win32.vcxproj -> D:\aaamyprj\physBased-render\build\Debug\min_vulkan_win32.exe
+  'pwsh.exe' 不是内部或外部命令，也不是可运行的程序
+  或批处理文件。

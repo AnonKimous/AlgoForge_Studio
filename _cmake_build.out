@@ -1,0 +1,40 @@
+适用于 .NET Framework MSBuild 版本 17.14.23+b0019275e
+
+  cjson.vcxproj -> D:\aaamyprj\physBased-render\build\Debug\cjson.lib
+  common_data.vcxproj -> D:\aaamyprj\physBased-render\build\Debug\common_data.lib
+  algorithm_container_manifest.cpp
+  io_bus.cpp
+  imgui_impl_sdl3.cpp
+  imgui_impl_vulkan.cpp
+  imgui.cpp
+  messaging.vcxproj -> D:\aaamyprj\physBased-render\build\Debug\messaging.lib
+  imgui_draw.cpp
+  imgui_tables.cpp
+  imgui_widgets.cpp
+  spirv_reflect.c
+  VkBootstrap.cpp
+  algorithm_management.vcxproj -> D:\aaamyprj\physBased-render\build\Debug\algorithm_management.lib
+  codec_manager.cpp
+D:\aaamyprj\physBased-render\build\_deps\vk_bootstrap-src\src\VkBootstrap.cpp(1,1): warning C4819: 该文件包含不能在当前代码页(936)中表示的字符。请将该文件保存为 Unicode 格式以防止数据丢失 [D:\aaamyprj\physBased-render\build\runtime_systems.vcxproj]
+D:\aaamyprj\physBased-render\build\_deps\vk_bootstrap-src\src\VkBootstrap.h(1,1): warning C4819: 该文件包含不能在当前代码页(936)中表示的字符。请将该文件保存为 Unicode 格式以防止数据丢失 [D:\aaamyprj\physBased-render\build\runtime_systems.vcxproj]
+  (编译源文件“_deps/vk_bootstrap-src/src/VkBootstrap.cpp”)
+  
+D:\aaamyprj\physBased-render\build\_deps\vk_bootstrap-src\src\VkBootstrapDispatch.h(1,1): warning C4819: 该文件包含不能在当前代码页(936)中表示的字符。请将该文件保存为 Unicode 格式以防止数据丢失 [D:\aaamyprj\physBased-render\build\runtime_systems.vcxproj]
+  (编译源文件“_deps/vk_bootstrap-src/src/VkBootstrap.cpp”)
+  
+D:\aaamyprj\physBased-render\build\_deps\vk_bootstrap-src\src\VkBootstrapFeatureChain.h(1,1): warning C4819: 该文件包含不能在当前代码页(936)中表示的字符。请将该文件保存为 Unicode 格式以防止数据丢失 [D:\aaamyprj\physBased-render\build\runtime_systems.vcxproj]
+  (编译源文件“_deps/vk_bootstrap-src/src/VkBootstrap.cpp”)
+  
+  codecset_loader.cpp
+  正在生成代码...
+D:\aaamyprj\physBased-render\src\codec\codecset_loader.cpp(87,7): error C3861: “cJSON_IsBool”: 找不到标识符 [D:\aaamyprj\physBased-render\build\codec.vcxproj]
+D:\aaamyprj\physBased-render\src\codec\codecset_loader.cpp(88,12): error C3861: “cJSON_IsTrue”: 找不到标识符 [D:\aaamyprj\physBased-render\build\codec.vcxproj]
+D:\aaamyprj\physBased-render\build\_deps\vk_bootstrap-src\src\VkBootstrapFeatureChain.inl(1,1): warning C4819: 该文件包含不能在当前代码页(936)中表示的字符。请将该文件保存为 Unicode 格式以防止数据丢失 [D:\aaamyprj\physBased-render\build\runtime_systems.vcxproj]
+  (编译源文件“_deps/vk_bootstrap-src/src/VkBootstrap.cpp”)
+  
+  imgui_vulkan_runtime.cpp
+  vma_impl.cpp
+  runtime_environment.cpp
+  sdl_window.cpp
+  正在生成代码...
+  runtime_systems.vcxproj -> D:\aaamyprj\physBased-render\build\Debug\runtime_systems.lib

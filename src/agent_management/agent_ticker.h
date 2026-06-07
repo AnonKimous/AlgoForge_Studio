@@ -18,7 +18,7 @@ namespace agent_management {
 class AgentTicker {
  public:
   void Init(std::shared_ptr<agent::Agent> agent);
-  void Tick(Mesh& mesh, const InputState& input, Vec2 mouse_pixel, float dt_seconds);
+  void Tick(const InputState& input, Vec2 mouse_pixel, float dt_seconds);
   void Destroy();
 
   void ApplyInterventionRequest(const InteractionInterventionRequest& request);

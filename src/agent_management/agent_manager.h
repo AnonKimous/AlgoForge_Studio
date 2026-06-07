@@ -10,7 +10,41 @@
 namespace agent_management {
 
 struct AgentCreateSpec {
-  agent::AgentInitConfig agent_config;
+  std::string agent_name;
+  struct AlgorithmMountSpec {
+    std::string algorithm_name;
+    std::vector<agent::AlgorithmResourceBinding> resource_bindings;
+    std::vector<agent::AlgorithmDescriptorValue> descriptor_values;
+  };
+  std::vector<AlgorithmMountSpec> algorithm_mount_specs;
+};
+
+struct AlgorithmReflectionRecord {
+  std::string reflection_object_name;
+  std::string container_name;
+  std::string filter_name;
+  AlgorithmContainerStorageKind storage_kind{AlgorithmContainerStorageKind::Array};
+  std::vector<std::byte> bytes;
+};
+
+struct AlgorithmReflectionSnapshot {
+  size_t agent_index{0u};
+  size_t algorithm_index{0u};
+  std::string agent_name;
+  std::string algorithm_name;
+  std::vector<AlgorithmReflectionRecord> variables;
+  std::vector<AlgorithmReflectionRecord> variable_arrays;
+  bool valid{false};
+
+  void Clear() {
+    agent_index = 0u;
+    algorithm_index = 0u;
+    agent_name.clear();
+    algorithm_name.clear();
+    variables.clear();
+    variable_arrays.clear();
+    valid = false;
+  }
 };
 
 class AgentManager {
@@ -19,9 +53,20 @@ class AgentManager {
   ~AgentManager();
 
   bool CreateAgent(AgentCreateSpec spec, size_t* out_agent_index = nullptr);
+  bool AttachAlgorithmToAgent(
+    size_t agent_index,
+    const std::string& algorithm_name,
+    const std::vector<agent::AlgorithmResourceBinding>& resource_bindings,
+    const std::vector<agent::AlgorithmDescriptorValue>& descriptor_values,
+    size_t* out_algorithm_index = nullptr,
+    std::string* out_error_message = nullptr);
   bool DestroyAgent(size_t agent_index);
   void ClearAgents();
-  bool Tick(Mesh& mesh, const InputState& input, Vec2 mouse_pixel, float dt_seconds);
+  bool Tick(const InputState& input, Vec2 mouse_pixel, float dt_seconds);
+  bool CollectAlgorithmReflection(
+    size_t agent_index,
+    size_t algorithm_index,
+    AlgorithmReflectionSnapshot* out_snapshot) const;
   void Destroy();
 
   size_t agent_count() const;

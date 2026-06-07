@@ -1,7 +1,7 @@
 #pragma once
 
 #include "common_data/common_data.h"
-#include "messaging/messaging.h"
+#include "common_data/io_packet.h"
 
 #include <array>
 #include <cstddef>
@@ -17,7 +17,6 @@ class IAlgorithmInterventionPackageAlgorithm;
 class IAlgorithmInterventionPackageCodec;
 class IAlgorithmPackageCodec;
 class IAlgorithmPackageDecomposer;
-class IAlgorithmtemporaryTestMainThreadExecutor;
 }  // namespace agent
 
 namespace codec {
@@ -112,11 +111,6 @@ bool CreateAlgorithmPackageReflectorByName(
 bool CreateAlgorithmPackageDecomposerByName(
   const std::string& algorithm_name,
   std::shared_ptr<agent::IAlgorithmPackageDecomposer>* out_decomposer,
-  std::string* out_error_message = nullptr);
-
-bool CreateAlgorithmtemporaryTestMainThreadExecutorByName(
-  const std::string& algorithm_name,
-  std::shared_ptr<agent::IAlgorithmtemporaryTestMainThreadExecutor>* out_executor,
   std::string* out_error_message = nullptr);
 
 bool CreateAlgorithmInterventionPackageCodecByName(
