@@ -209,14 +209,14 @@ VolumeDescriptor CodecManager::BuildVolumeDescriptorFromMesh(const Mesh& mesh, f
 
 IoBufferPacket CodecManager::BuildAlgorithmInterventionPacket(const AlgorithmInterventionDescriptor& descriptor) const {
   IoBufferPacket packet{};
-  packet.protocol.name = kAlgorithmInterventionCodecIoProtocolName;
+  packet.protocol.name = kAlgorithmInterventionIoProtocolName;
 
   IoDataBufferEntry entry = _CreateAlgorithmInterventionDataBufferEntry(descriptor);
   entry.buffer_id = descriptor.target_buffer_id;
   entry.source_buffer_id = descriptor.source_buffer_id;
   packet.data_buffer.push_back(std::move(entry));
   packet.signal_buffer.push_back(_BuildSignalEntry(
-    "algorithm_intervention_codec",
+    "algorithm_intervention",
     1u,
     descriptor.source_module_name,
     descriptor.source_buffer_id,
@@ -229,7 +229,7 @@ IoBufferPacket CodecManager::BuildAlgorithmInterventionPacket(const AlgorithmInt
 
 bool CodecManager::DecodeAlgorithmInterventionPacket(const IoBufferPacket& packet, DecodedAlgorithmIntervention* decoded) const {
   if (!decoded) return false;
-  if (packet.protocol.name != kAlgorithmInterventionCodecIoProtocolName) return false;
+  if (packet.protocol.name != kAlgorithmInterventionIoProtocolName) return false;
   if (packet.data_buffer.empty()) return false;
 
   for (const IoDataBufferEntry& entry : packet.data_buffer) {

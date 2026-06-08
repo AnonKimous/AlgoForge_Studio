@@ -32,6 +32,12 @@ struct TemporaryTestSchema {
   std::string error_message;
 };
 
+struct TemporaryTestInterventionSchema {
+  std::vector<agent::AlgorithmInterventionStageSpec> stage_specs;
+  bool valid{false};
+  std::string error_message;
+};
+
 std::string _ReadTextFile(const std::string& path) {
   std::ifstream file(path, std::ios::binary);
   if (!file) {
@@ -64,6 +70,17 @@ uint32_t _GetUintField(const cJSON* object, const char* key, uint32_t fallback =
   return static_cast<uint32_t>(item->valuedouble);
 }
 
+float _GetFloatField(const cJSON* object, const char* key, float fallback = 0.0f) {
+  if (!object || !key) {
+    return fallback;
+  }
+  const cJSON* item = cJSON_GetObjectItemCaseSensitive(object, key);
+  if (!item || !cJSON_IsNumber(item)) {
+    return fallback;
+  }
+  return static_cast<float>(item->valuedouble);
+}
+
 bool _GetBoolField(const cJSON* object, const char* key, bool fallback = false) {
   if (!object || !key) {
     return fallback;
@@ -86,6 +103,149 @@ std::string _BuildPath(
     ? request.algorithm_folder
     : (request.algorithm_name ? request.algorithm_name : "");
   return root + "/" + folder + "/" + folder + suffix;
+}
+
+bool _ParseInterventionStageKind(
+  const std::string& stage_name,
+  const std::string& stage_kind_text,
+  agent::AlgorithmInterventionStageKind* out_stage_kind) {
+  if (!out_stage_kind) {
+    return false;
+  }
+
+  const std::string kind = !stage_kind_text.empty() ? stage_kind_text : stage_name;
+  if (kind == "result_render" || kind == "algorithm_result_render") {
+    *out_stage_kind = agent::AlgorithmInterventionStageKind::ResultRender;
+    return true;
+  }
+  if (kind == "fill_signal" || kind == "signal_fill") {
+    *out_stage_kind = agent::AlgorithmInterventionStageKind::FillSignal;
+    return true;
+  }
+  if (kind == "resource_refill" || kind == "resource_rebind") {
+    *out_stage_kind = agent::AlgorithmInterventionStageKind::ResourceRefill;
+    return true;
+  }
+
+  *out_stage_kind = agent::AlgorithmInterventionStageKind::Custom;
+  return true;
+}
+
+TemporaryTestInterventionSchema _LoadInterventionSchema(const algorithm_library_plugin::AlgorithmPluginRequest& request) {
+  TemporaryTestInterventionSchema schema{};
+  const std::string path = _BuildPath(request, "_intervention.json");
+  const std::string json_text = _ReadTextFile(path);
+  if (json_text.empty()) {
+    schema.error_message = "Failed to read intervention JSON file: " + path;
+    return schema;
+  }
+
+  cJSON* root = cJSON_Parse(json_text.c_str());
+  if (!root) {
+    schema.error_message = "Failed to parse intervention JSON file: " + path;
+    return schema;
+  }
+
+  const cJSON* stages = cJSON_GetObjectItemCaseSensitive(root, "stages");
+  if (!stages || !cJSON_IsObject(stages)) {
+    schema.error_message = "Intervention JSON file " + path + " is missing a 'stages' object.";
+    cJSON_Delete(root);
+    return schema;
+  }
+
+  const cJSON* stage_item = nullptr;
+  cJSON_ArrayForEach(stage_item, stages) {
+    if (!stage_item || !cJSON_IsObject(stage_item) || !stage_item->string) {
+      continue;
+    }
+
+    const std::string stage_key = stage_item->string;
+    agent::AlgorithmInterventionStageSpec stage_spec{};
+    stage_spec.stage_name = _GetStringField(stage_item, "stage_name");
+    if (stage_spec.stage_name.empty()) {
+      stage_spec.stage_name = stage_key;
+    }
+
+    const std::string stage_kind_text = _GetStringField(stage_item, "stage_kind");
+    if (!_ParseInterventionStageKind(stage_spec.stage_name, stage_kind_text, &stage_spec.stage_kind)) {
+      schema.error_message = "Invalid stage kind in intervention JSON file: " + path;
+      cJSON_Delete(root);
+      return schema;
+    }
+
+    const cJSON* used_containers = cJSON_GetObjectItemCaseSensitive(stage_item, "used_algorithm_containers");
+    if (used_containers && cJSON_IsObject(used_containers)) {
+      const cJSON* arrays = cJSON_GetObjectItemCaseSensitive(used_containers, "arrays");
+      if (arrays && cJSON_IsArray(arrays)) {
+        const int container_count = cJSON_GetArraySize(arrays);
+        stage_spec.used_algorithm_containers.reserve(container_count > 0 ? static_cast<size_t>(container_count) : 0u);
+        for (int i = 0; i < container_count; ++i) {
+          const cJSON* item = cJSON_GetArrayItem(arrays, i);
+          if (!item) {
+            continue;
+          }
+
+          agent::AlgorithmInterventionContainerBinding binding{};
+          if (cJSON_IsString(item) && item->valuestring) {
+            binding.container_name = item->valuestring;
+            binding.container_kind = "array";
+            binding.tuple_width = 3u;
+            binding.required = true;
+          } else if (cJSON_IsObject(item)) {
+            binding.container_name = _GetStringField(item, "name");
+            if (binding.container_name.empty()) {
+              binding.container_name = _GetStringField(item, "container");
+            }
+            binding.container_kind = _GetStringField(item, "kind");
+            if (binding.container_kind.empty()) {
+              binding.container_kind = "array";
+            }
+            binding.tuple_width = _GetUintField(item, "tuple_width", 3u);
+            if (binding.tuple_width == 0u) {
+              binding.tuple_width = 3u;
+            }
+            binding.required = _GetBoolField(item, "required", true);
+          }
+
+          if (binding.container_name.empty()) {
+            schema.error_message = "Invalid array container binding in intervention JSON file: " + path;
+            cJSON_Delete(root);
+            return schema;
+          }
+          stage_spec.used_algorithm_containers.push_back(std::move(binding));
+        }
+      }
+    }
+
+    const cJSON* shader = cJSON_GetObjectItemCaseSensitive(stage_item, "shader");
+    if (shader && cJSON_IsObject(shader)) {
+      stage_spec.shader.vertex_shader_path = _GetStringField(shader, "vertex");
+      stage_spec.shader.fragment_shader_path = _GetStringField(shader, "fragment");
+      stage_spec.shader.pipeline_kind = _GetStringField(shader, "pipeline");
+    }
+
+    if (stage_spec.stage_kind == agent::AlgorithmInterventionStageKind::ResultRender) {
+      if (stage_spec.used_algorithm_containers.empty()) {
+        schema.error_message = "Result-render stage in intervention JSON file must bind at least one array container: " + path;
+        cJSON_Delete(root);
+        return schema;
+      }
+      if (stage_spec.shader.vertex_shader_path.empty() || stage_spec.shader.fragment_shader_path.empty()) {
+        schema.error_message = "Result-render stage in intervention JSON file is missing shader paths: " + path;
+        cJSON_Delete(root);
+        return schema;
+      }
+    }
+
+    schema.stage_specs.push_back(std::move(stage_spec));
+  }
+
+  cJSON_Delete(root);
+  schema.valid = !schema.stage_specs.empty();
+  if (!schema.valid && schema.error_message.empty()) {
+    schema.error_message = path + " does not contain any intervention stages.";
+  }
+  return schema;
 }
 
 TemporaryTestSchema _LoadSchema(const algorithm_library_plugin::AlgorithmPluginRequest& request) {
@@ -351,8 +511,45 @@ class TemporaryTestLineMotionDecomposer final : public agent::IAlgorithmPackageD
   TemporaryTestSchema schema_{};
 };
 
+class TemporaryTestLineMotionIntervention final : public agent::IAlgorithmIntervention {
+ public:
+  explicit TemporaryTestLineMotionIntervention(TemporaryTestInterventionSchema schema)
+    : schema_(std::move(schema)) {}
+
+  bool SupportsIntervention() const override {
+    return schema_.valid && !schema_.stage_specs.empty();
+  }
+
+  void FillAgentToAlgorithmSignal(
+    const agent::AgentTickContext& context,
+    AgentToAlgorithmSignal* out_signal) const override {
+    if (!out_signal) {
+      return;
+    }
+
+    *out_signal = {};
+    out_signal->needs_intervention = context.intervention_request && context.intervention_request->enabled;
+  }
+
+  bool GetInterventionStageSpecs(
+    std::vector<agent::AlgorithmInterventionStageSpec>* out_stage_specs) const override {
+    if (!out_stage_specs) {
+      return false;
+    }
+    *out_stage_specs = schema_.stage_specs;
+    return schema_.valid && !schema_.stage_specs.empty();
+  }
+
+ private:
+  TemporaryTestInterventionSchema schema_{};
+};
+
 void _DestroyDecomposer(agent::IAlgorithmPackageDecomposer* decomposer) {
   delete decomposer;
+}
+
+void _DestroyIntervention(agent::IAlgorithmIntervention* intervention) {
+  delete intervention;
 }
 
 }  // namespace
@@ -373,8 +570,15 @@ extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateBundle(
     return false;
   }
 
+  const TemporaryTestInterventionSchema intervention_schema = _LoadInterventionSchema(*request);
+  if (!intervention_schema.valid) {
+    return false;
+  }
+
   out_bundle->decomposer = new TemporaryTestLineMotionDecomposer(schema);
   out_bundle->destroy_decomposer = &_DestroyDecomposer;
+  out_bundle->intervention = new TemporaryTestLineMotionIntervention(intervention_schema);
+  out_bundle->destroy_intervention = &_DestroyIntervention;
   return true;
 }
 

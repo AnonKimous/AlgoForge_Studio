@@ -1,9 +1,13 @@
 #include "imgui_vulkan_runtime.h"
 
 #include <algorithm>
+#include <cstring>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+#include <vk_mem_alloc.h>
 
 namespace runtime_systems {
 
@@ -110,9 +114,17 @@ void ImGuiVulkanRuntime::SetupVulkan(const char* app_name, SDL_Window* window) {
   CheckVkResult(vkCreateDevice(physical_device_, &device_create_info, allocator_, &device_));
   vkGetDeviceQueue(device_, queue_family_, 0, &queue_);
 
+  VmaAllocatorCreateInfo vma_create_info{};
+  vma_create_info.instance = instance_;
+  vma_create_info.physicalDevice = physical_device_;
+  vma_create_info.device = device_;
+  vma_create_info.vulkanApiVersion = VK_API_VERSION_1_3;
+  CheckVkResult(vmaCreateAllocator(&vma_create_info, &vma_allocator_));
+
   VkDescriptorPoolSize pool_sizes[] = {
     {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 8},
     {VK_DESCRIPTOR_TYPE_SAMPLER, 2},
+    {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 64},
   };
   VkDescriptorPoolCreateInfo pool_info{};
   pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -177,6 +189,10 @@ void ImGuiVulkanRuntime::CleanupVulkanWindow() {
 }
 
 void ImGuiVulkanRuntime::CleanupVulkan() {
+  if (vma_allocator_ != VK_NULL_HANDLE) {
+    vmaDestroyAllocator(vma_allocator_);
+    vma_allocator_ = VK_NULL_HANDLE;
+  }
   if (descriptor_pool_ != VK_NULL_HANDLE) {
     vkDestroyDescriptorPool(device_, descriptor_pool_, allocator_);
     descriptor_pool_ = VK_NULL_HANDLE;
@@ -228,6 +244,9 @@ bool ImGuiVulkanRuntime::FrameRender(ImDrawData* draw_data) {
   render_pass_begin_info.pClearValues = &main_window_.ClearValue;
   vkCmdBeginRenderPass(fd->CommandBuffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
 
+  if (preview_renderer_) {
+    preview_renderer_->Record(fd->CommandBuffer, main_window_.Width, main_window_.Height);
+  }
   ImGui_ImplVulkan_RenderDrawData(draw_data, fd->CommandBuffer);
 
   vkCmdEndRenderPass(fd->CommandBuffer);
@@ -314,12 +333,26 @@ bool ImGuiVulkanRuntime::Init(SDL_Window* window, const char* app_name) {
   }
   vulkan_backend_initialized_ = true;
 
+  if (!preview_renderer_) {
+    preview_renderer_ = std::make_unique<PreviewRenderer>();
+  }
+  if (!preview_renderer_->Init(instance_, physical_device_, device_, descriptor_pool_, main_window_.RenderPass, vma_allocator_)) {
+    Destroy();
+    return false;
+  }
+
   initialized_ = true;
   return true;
 }
 
 void ImGuiVulkanRuntime::SetDrawCallback(DrawCallback callback) {
   draw_callback_ = std::move(callback);
+}
+
+void ImGuiVulkanRuntime::SetRenderPreviewRequest(RenderPreviewRequest request) {
+  if (preview_renderer_) {
+    preview_renderer_->SetRequest(std::move(request));
+  }
 }
 
 bool ImGuiVulkanRuntime::Tick(SDL_Window* window) {
@@ -408,6 +441,11 @@ void ImGuiVulkanRuntime::Destroy() {
   if (imgui_context_created_) {
     ImGui::DestroyContext();
     imgui_context_created_ = false;
+  }
+
+  if (preview_renderer_) {
+    preview_renderer_->Destroy();
+    preview_renderer_.reset();
   }
 
   CleanupVulkanWindow();

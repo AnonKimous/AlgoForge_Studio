@@ -12,9 +12,13 @@
 #include <imgui_impl_vulkan.h>
 
 #include <functional>
+#include <memory>
 #include <string>
 
 #include <vulkan/vulkan.h>
+
+#include "runtime_systems/render/render_preview_request.h"
+#include "runtime_systems/render/preview_renderer.h"
 
 namespace runtime_systems {
 
@@ -25,6 +29,7 @@ class ImGuiVulkanRuntime {
   bool Init(SDL_Window* window, const char* app_name = "Agent Debug UI");
   bool Tick(SDL_Window* window);
   void SetDrawCallback(DrawCallback callback);
+  void SetRenderPreviewRequest(RenderPreviewRequest request);
   void Destroy();
 
  private:
@@ -37,6 +42,7 @@ class ImGuiVulkanRuntime {
   static void CheckVkResult(VkResult err);
 
   VkAllocationCallbacks* allocator_{nullptr};
+  VmaAllocator vma_allocator_{VK_NULL_HANDLE};
   VkInstance instance_{VK_NULL_HANDLE};
   VkPhysicalDevice physical_device_{VK_NULL_HANDLE};
   VkDevice device_{VK_NULL_HANDLE};
@@ -53,6 +59,7 @@ class ImGuiVulkanRuntime {
   bool sdl_backend_initialized_{false};
   bool vulkan_backend_initialized_{false};
   DrawCallback draw_callback_{};
+  std::unique_ptr<PreviewRenderer> preview_renderer_{};
 };
 
 }  // namespace runtime_systems

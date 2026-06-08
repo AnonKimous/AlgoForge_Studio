@@ -14,12 +14,6 @@ namespace interact_ui {
 
 namespace {
 
-constexpr float kPreviewWorldMinX = -120.0f;
-constexpr float kPreviewWorldMaxX = 120.0f;
-constexpr float kPreviewWorldMinY = -30.0f;
-constexpr float kPreviewWorldMaxY = 30.0f;
-constexpr float kPreviewPadding = 24.0f;
-
 std::string _AlgorithmCatalogPath() {
   const std::filesystem::path candidates[] = {
     "src/capabilities/algorithm_library/algorithm_catalog.json",
@@ -52,6 +46,21 @@ std::string _AlgorithmLibraryRootPath() {
     }
   }
   return candidates[0].string();
+}
+
+std::string _ResolveAlgorithmShaderPath(
+  const std::string& algorithm_name,
+  const std::string& shader_path) {
+  if (shader_path.empty()) {
+    return {};
+  }
+
+  const std::filesystem::path path(shader_path);
+  if (path.is_absolute()) {
+    return path.string();
+  }
+
+  return (std::filesystem::path(_AlgorithmLibraryRootPath()) / algorithm_name / shader_path).string();
 }
 
 template <size_t N>
@@ -294,19 +303,6 @@ std::vector<AlgorithmCatalogEntry> _LoadAlgorithmCatalog(std::string* out_error_
   return entries;
 }
 
-ImVec2 _ProjectPreviewPoint(
-  const ImVec2& canvas_origin,
-  const ImVec2& canvas_size,
-  const Vec3& position) {
-  const float usable_width = std::max(1.0f, canvas_size.x - kPreviewPadding * 2.0f);
-  const float usable_height = std::max(1.0f, canvas_size.y - kPreviewPadding * 2.0f);
-  const float normalized_x = (position.x - kPreviewWorldMinX) / (kPreviewWorldMaxX - kPreviewWorldMinX);
-  const float normalized_y = (position.y - kPreviewWorldMinY) / (kPreviewWorldMaxY - kPreviewWorldMinY);
-  return ImVec2(
-    canvas_origin.x + kPreviewPadding + normalized_x * usable_width,
-    canvas_origin.y + canvas_size.y - kPreviewPadding - normalized_y * usable_height);
-}
-
 const AgentInterventionUiBinding* _FindUiBinding(
   const std::vector<AgentInterventionUiBinding>& bindings,
   const std::string& algorithm_name) {
@@ -398,33 +394,130 @@ void _ResizePreservingValues(std::vector<T>* values, size_t new_size) {
   values->resize(new_size);
 }
 
-std::array<float, 3> _ReadPreviewPositionFromAgent(
+bool _BuildRenderPreviewRequest(
   const agent::Agent& agent,
   size_t algorithm_index,
-  bool* out_valid) {
-  if (out_valid) {
-    *out_valid = false;
+  runtime_systems::RenderPreviewRequest* out_request,
+  std::string* out_error_message) {
+  if (!out_request) {
+    if (out_error_message) {
+      *out_error_message = "Preview request output pointer is null.";
+    }
+    return false;
   }
 
-  const AlgorithmContainerSet* container_set = agent.algorithm_container_set(algorithm_index);
+  out_request->Clear();
+
+  const agent::AgentAlgorithmCodecGroup* group = agent.algorithm_codec_group(algorithm_index);
+  if (!group || !group->intervention) {
+    return false;
+  }
+  const std::string algorithm_name = group->algorithm_profile.algorithm_name;
+
+  std::vector<agent::AlgorithmInterventionStageSpec> stage_specs;
+  if (!group->intervention->GetInterventionStageSpecs(&stage_specs) || stage_specs.empty()) {
+    return false;
+  }
+
+  const agent::AlgorithmInterventionStageSpec* result_stage = nullptr;
+  for (const agent::AlgorithmInterventionStageSpec& stage_spec : stage_specs) {
+    if (stage_spec.stage_kind == agent::AlgorithmInterventionStageKind::ResultRender) {
+      result_stage = &stage_spec;
+      break;
+    }
+  }
+  if (!result_stage) {
+    return false;
+  }
+  if (result_stage->shader.vertex_shader_path.empty() || result_stage->shader.fragment_shader_path.empty()) {
+    if (out_error_message) {
+      *out_error_message = "Result-render stage is missing shader paths.";
+    }
+    return false;
+  }
+
+  const agent::AlgorithmObject* algorithm_object = agent.algorithm_object(algorithm_index);
+  if (!algorithm_object) {
+    if (out_error_message) {
+      *out_error_message = "Algorithm object is unavailable.";
+    }
+    return false;
+  }
+
+  const AlgorithmContainerSet* container_set = algorithm_object->container_set();
   if (!container_set) {
-    return {0.0f, 0.0f, 0.0f};
+    if (out_error_message) {
+      *out_error_message = "Algorithm container set is unavailable.";
+    }
+    return false;
   }
 
-  const auto* container = FindAlgorithmContainer(*container_set, "pos");
-  if (!container) {
-    return {0.0f, 0.0f, 0.0f};
-  }
-  if (container->bytes.size() < sizeof(float) * 3u) {
-    return {0.0f, 0.0f, 0.0f};
+  out_request->stage_name = result_stage->stage_name;
+  out_request->vertex_shader_path = _ResolveAlgorithmShaderPath(algorithm_name, result_stage->shader.vertex_shader_path);
+  out_request->fragment_shader_path = _ResolveAlgorithmShaderPath(algorithm_name, result_stage->shader.fragment_shader_path);
+  out_request->storage_buffers.reserve(result_stage->used_algorithm_containers.size());
+
+  uint32_t instance_count = 0u;
+  bool have_instance_count = false;
+  for (const agent::AlgorithmInterventionContainerBinding& binding : result_stage->used_algorithm_containers) {
+    const AlgorithmContainer* container = FindAlgorithmContainer(*container_set, binding.container_name);
+    if (!container) {
+      if (binding.required) {
+        if (out_error_message) {
+          *out_error_message = "Missing preview container: " + binding.container_name;
+        }
+        out_request->Clear();
+        return false;
+      }
+      continue;
+    }
+    if (container->storage_kind != AlgorithmContainerStorageKind::Array) {
+      if (out_error_message) {
+        *out_error_message = "Preview container is not an array: " + binding.container_name;
+      }
+      out_request->Clear();
+      return false;
+    }
+    if (container->element_stride == 0u || container->bytes.empty()) {
+      if (binding.required) {
+        if (out_error_message) {
+          *out_error_message = "Preview container has no data: " + binding.container_name;
+        }
+        out_request->Clear();
+        return false;
+      }
+      continue;
+    }
+
+    runtime_systems::RenderPreviewBuffer preview_buffer{};
+    preview_buffer.binding_name = binding.container_name;
+    preview_buffer.element_stride = container->element_stride;
+    preview_buffer.bytes = container->bytes;
+    out_request->storage_buffers.push_back(std::move(preview_buffer));
+
+    const uint32_t buffer_instances = static_cast<uint32_t>(container->bytes.size() / container->element_stride);
+    if (!have_instance_count) {
+      instance_count = buffer_instances;
+      have_instance_count = true;
+    } else {
+      instance_count = std::min(instance_count, buffer_instances);
+    }
   }
 
-  std::array<float, 3> position{};
-  std::memcpy(position.data(), container->bytes.data(), sizeof(float) * 3u);
-  if (out_valid) {
-    *out_valid = true;
+  if (out_request->storage_buffers.empty()) {
+    if (out_error_message) {
+      *out_error_message = "Result-render stage does not expose any usable array container.";
+    }
+    out_request->Clear();
+    return false;
   }
-  return position;
+
+  out_request->instance_count = instance_count;
+  out_request->valid = out_request->instance_count > 0u;
+  if (!out_request->valid && out_error_message) {
+    *out_error_message = "Preview request has no drawable instances.";
+  }
+  return out_request->valid;
 }
 
 }  // namespace
@@ -1601,29 +1694,6 @@ void InteractUiPanel::DrawAlgorithmPreviewUi(IInteractUiHost& host) {
     return;
   }
 
-  const ImVec2 available = ImGui::GetContentRegionAvail();
-  const ImVec2 canvas_size{
-    std::max(available.x, 320.0f),
-    std::max(std::min(available.y, 260.0f), 220.0f),
-  };
-
-  const ImVec2 canvas_origin = ImGui::GetCursorScreenPos();
-  ImDrawList* draw_list = ImGui::GetWindowDrawList();
-  draw_list->AddRectFilled(
-    canvas_origin,
-    ImVec2(canvas_origin.x + canvas_size.x, canvas_origin.y + canvas_size.y),
-    IM_COL32(18, 22, 29, 255),
-    8.0f);
-  draw_list->AddRect(
-    canvas_origin,
-    ImVec2(canvas_origin.x + canvas_size.x, canvas_origin.y + canvas_size.y),
-    IM_COL32(120, 140, 160, 255),
-    8.0f,
-    0,
-    1.5f);
-
-  bool has_point = false;
-  std::array<float, 3> position{};
   const AgentManager& agent_manager = host.agent_manager();
   size_t preview_agent_index = 0u;
   if (agent_composer_ui_state_.selected_agent_index >= 0 &&
@@ -1631,32 +1701,19 @@ void InteractUiPanel::DrawAlgorithmPreviewUi(IInteractUiHost& host) {
     preview_agent_index = static_cast<size_t>(agent_composer_ui_state_.selected_agent_index);
   }
   const std::shared_ptr<agent::Agent> preview_agent = agent_manager.agent(preview_agent_index);
+  runtime_systems::RenderPreviewRequest preview_request{};
+  std::string preview_error_message;
   if (preview_agent) {
     size_t preview_algorithm_index = 0u;
     if (agent_composer_ui_state_.selected_algorithm_index >= 0 &&
         static_cast<size_t>(agent_composer_ui_state_.selected_algorithm_index) < preview_agent->algorithm_count()) {
       preview_algorithm_index = static_cast<size_t>(agent_composer_ui_state_.selected_algorithm_index);
     }
-    position = _ReadPreviewPositionFromAgent(*preview_agent, preview_algorithm_index, &has_point);
-  }
-
-  if (has_point) {
-    const Vec3 point_position{position[0], position[1], position[2]};
-    const ImVec2 point = _ProjectPreviewPoint(canvas_origin, canvas_size, point_position);
-    draw_list->AddCircleFilled(point, 8.0f, IM_COL32(255, 214, 102, 255));
-    draw_list->AddCircle(point, 12.0f, IM_COL32(255, 240, 200, 255), 0, 2.0f);
-  }
-
-  ImGui::InvisibleButton("temporaryTest_algorithm_preview_canvas", canvas_size);
-
-  if (has_point) {
-    ImGui::Text(
-      "Point position: (%.2f, %.2f, %.2f)",
-      position[0],
-      position[1],
-      position[2]);
-  } else {
-    ImGui::TextUnformatted("No algorithm preview point.");
+    _BuildRenderPreviewRequest(
+      *preview_agent,
+      preview_algorithm_index,
+      &preview_request,
+      &preview_error_message);
   }
 
   if (preview_agent) {
@@ -1674,8 +1731,20 @@ void InteractUiPanel::DrawAlgorithmPreviewUi(IInteractUiHost& host) {
       preview_group && !preview_group->algorithm_profile.algorithm_name.empty()
         ? preview_group->algorithm_profile.algorithm_name.c_str()
         : "none");
+    if (preview_request.valid) {
+      ImGui::Text("Stage: %s", preview_request.stage_name.c_str());
+      ImGui::Text("Buffers: %zu", preview_request.storage_buffers.size());
+      ImGui::Text("Instances: %u", preview_request.instance_count);
+    } else if (!preview_error_message.empty()) {
+      ImGui::TextWrapped("%s", preview_error_message.c_str());
+    } else {
+      ImGui::TextUnformatted("No drawable result-render stage.");
+    }
+  } else {
+    ImGui::TextUnformatted("No preview agent selected.");
   }
 
+  host.SetRenderPreviewRequest(std::move(preview_request));
   ImGui::End();
 }
 

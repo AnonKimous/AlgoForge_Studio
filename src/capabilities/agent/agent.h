@@ -100,6 +100,15 @@ struct AgentAlgorithmRuntimeState {
   AlgorithmReflectionSnapshot reflection_snapshot{};
 };
 
+class AlgorithmObject {
+ public:
+  AlgorithmContainerSet* mutable_container_set() { return &container_set_; }
+  const AlgorithmContainerSet* container_set() const { return &container_set_; }
+
+ private:
+  AlgorithmContainerSet container_set_{};
+};
+
 enum class AlgorithmAssemblyState {
   Pending,
   Assembling,
@@ -215,32 +224,43 @@ class IAlgorithmtemporaryTestMainThreadExecutor {
     AlgorithmPackageDebugState* debug_state) = 0;
 };
 
-class IAlgorithmInterventionPackageCodec {
- public:
-  virtual ~IAlgorithmInterventionPackageCodec() = default;
-
-  virtual bool BuildInterventionPacket(
-    const InteractionInterventionRequest& request,
-    IoBufferPacket* packet) const = 0;
-  virtual bool DecodeInterventionPacket(
-    const IoBufferPacket& packet,
-    InteractionInterventionRequest* request) const = 0;
+enum class AlgorithmInterventionStageKind {
+  ResultRender = 0,
+  FillSignal = 1,
+  ResourceRefill = 2,
+  Custom = 3,
 };
 
-class IAlgorithmInterventionPackageAgent {
- public:
-  virtual ~IAlgorithmInterventionPackageAgent() = default;
+struct AlgorithmInterventionContainerBinding {
+  std::string container_name;
+  std::string container_kind;
+  uint32_t tuple_width{0u};
+  bool required{true};
+};
 
+struct AlgorithmInterventionShaderSpec {
+  std::string vertex_shader_path;
+  std::string fragment_shader_path;
+  std::string pipeline_kind;
+};
+
+struct AlgorithmInterventionStageSpec {
+  std::string stage_name;
+  AlgorithmInterventionStageKind stage_kind{AlgorithmInterventionStageKind::Custom};
+  std::vector<AlgorithmInterventionContainerBinding> used_algorithm_containers;
+  AlgorithmInterventionShaderSpec shader;
+};
+
+class IAlgorithmIntervention {
+ public:
+  virtual ~IAlgorithmIntervention() = default;
+
+  virtual bool SupportsIntervention() const = 0;
   virtual void FillAgentToAlgorithmSignal(
     const AgentTickContext& context,
     AgentToAlgorithmSignal* out_signal) const = 0;
-};
-
-class IAlgorithmInterventionPackageAlgorithm {
- public:
-  virtual ~IAlgorithmInterventionPackageAlgorithm() = default;
-
-  virtual bool SupportsIntervention() const = 0;
+  virtual bool GetInterventionStageSpecs(
+    std::vector<AlgorithmInterventionStageSpec>* out_stage_specs) const = 0;
 };
 
 struct AgentAlgorithmCodecGroup {
@@ -253,9 +273,7 @@ struct AgentAlgorithmCodecGroup {
   bool cpu_symbol{true};
   bool gpu_symbol{true};
   std::shared_ptr<IAlgorithmtemporaryTestMainThreadExecutor> temporaryTest_main_thread_executor;
-  std::shared_ptr<IAlgorithmInterventionPackageCodec> intervention_codec;
-  std::shared_ptr<IAlgorithmInterventionPackageAgent> intervention_agent;
-  std::shared_ptr<IAlgorithmInterventionPackageAlgorithm> intervention_algorithm;
+  std::shared_ptr<IAlgorithmIntervention> intervention;
 };
 
 struct AgentInitConfig {
@@ -266,7 +284,7 @@ struct AgentInitConfig {
 struct AlgorithmAssemblySlot {
   size_t index{0u};
   AgentAlgorithmCodecGroup* algorithm_codec_group{nullptr};
-  AlgorithmContainerSet* algorithm_container_set{nullptr};
+  AlgorithmObject* algorithm_object{nullptr};
   AlgorithmAssemblyState* assembly_state{nullptr};
 };
 
@@ -291,11 +309,11 @@ class Agent {
   const AgentAlgorithmCodecGroup* algorithm_codec_group(size_t index) const {
     return index < algorithm_codec_groups_.size() ? &algorithm_codec_groups_[index] : nullptr;
   }
-  AlgorithmContainerSet* algorithm_container_set(size_t index) {
-    return index < algorithm_container_sets_.size() ? &algorithm_container_sets_[index] : nullptr;
+  AlgorithmObject* algorithm_object(size_t index) {
+    return index < algorithm_objects_.size() ? &algorithm_objects_[index] : nullptr;
   }
-  const AlgorithmContainerSet* algorithm_container_set(size_t index) const {
-    return index < algorithm_container_sets_.size() ? &algorithm_container_sets_[index] : nullptr;
+  const AlgorithmObject* algorithm_object(size_t index) const {
+    return index < algorithm_objects_.size() ? &algorithm_objects_[index] : nullptr;
   }
   AlgorithmAssemblyState algorithm_assembly_state(size_t index) const {
     return index < algorithm_assembly_states_.size() ? algorithm_assembly_states_[index] : AlgorithmAssemblyState::Failed;
@@ -326,7 +344,7 @@ class Agent {
   std::string agent_name_{};
   std::vector<AgentAlgorithmCodecGroup> algorithm_codec_groups_{};
   std::vector<AgentAlgorithmRuntimeState> algorithm_runtime_states_{};
-  std::vector<AlgorithmContainerSet> algorithm_container_sets_{};
+  std::vector<AlgorithmObject> algorithm_objects_{};
   std::vector<AlgorithmAssemblyState> algorithm_assembly_states_{};
 };
 

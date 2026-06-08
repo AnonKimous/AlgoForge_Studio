@@ -69,7 +69,7 @@ bool _SignalBlocksTick(
   if (!signal.needs_intervention) {
     return false;
   }
-  return !group.intervention_algorithm || group.intervention_algorithm->SupportsIntervention();
+  return !group.intervention || group.intervention->SupportsIntervention();
 }
 
 }  // namespace
@@ -78,16 +78,16 @@ bool Agent::Init(AgentInitConfig config) {
   agent_name_ = std::move(config.agent_name);
   algorithm_codec_groups_ = std::move(config.algorithm_codec_groups);
   algorithm_runtime_states_.clear();
-  algorithm_container_sets_.clear();
+  algorithm_objects_.clear();
   algorithm_assembly_states_.clear();
   algorithm_runtime_states_.reserve(algorithm_codec_groups_.size());
-  algorithm_container_sets_.reserve(algorithm_codec_groups_.size());
+  algorithm_objects_.reserve(algorithm_codec_groups_.size());
   algorithm_assembly_states_.reserve(algorithm_codec_groups_.size());
   for (const AgentAlgorithmCodecGroup& group : algorithm_codec_groups_) {
     AgentAlgorithmRuntimeState runtime_state{};
     runtime_state.algorithm_name = group.algorithm_profile.algorithm_name;
     algorithm_runtime_states_.push_back(std::move(runtime_state));
-    algorithm_container_sets_.push_back({});
+    algorithm_objects_.push_back({});
     algorithm_assembly_states_.push_back(AlgorithmAssemblyState::Pending);
   }
   initialized_ = true;
@@ -102,7 +102,7 @@ bool Agent::AppendAlgorithmCodecGroup(AgentAlgorithmCodecGroup group, size_t* ou
   algorithm_codec_groups_.push_back(std::move(group));
   algorithm_runtime_states_.push_back(AgentAlgorithmRuntimeState{});
   algorithm_runtime_states_.back().algorithm_name = algorithm_codec_groups_.back().algorithm_profile.algorithm_name;
-  algorithm_container_sets_.push_back({});
+  algorithm_objects_.push_back({});
   algorithm_assembly_states_.push_back(AlgorithmAssemblyState::Pending);
 
   if (out_index) {
@@ -121,8 +121,8 @@ void Agent::RefreshInterventionSignals(const AgentTickContext& context) {
     }
     AgentAlgorithmRuntimeState& runtime_state = algorithm_runtime_states_[i];
     runtime_state.agent_to_algorithm_signal = {};
-    if (algorithm_codec_groups_[i].intervention_agent) {
-      algorithm_codec_groups_[i].intervention_agent->FillAgentToAlgorithmSignal(
+    if (algorithm_codec_groups_[i].intervention) {
+      algorithm_codec_groups_[i].intervention->FillAgentToAlgorithmSignal(
         context,
         &runtime_state.agent_to_algorithm_signal);
     }
@@ -160,12 +160,12 @@ bool Agent::Tick(
     const bool is_ready =
       i < algorithm_assembly_states_.size() && algorithm_assembly_states_[i] == AlgorithmAssemblyState::Ready;
     if (allow_tick && is_ready) {
-      if (group.temporaryTest_main_thread_executor && i < algorithm_container_sets_.size()) {
+      if (group.temporaryTest_main_thread_executor && i < algorithm_objects_.size()) {
         if (!group.temporaryTest_main_thread_executor->temporaryTestExecuteOnMainThread(
               context,
               group.algorithm_profile,
               runtime_state.agent_to_algorithm_signal,
-              &algorithm_container_sets_[i],
+              algorithm_objects_[i].mutable_container_set(),
               &runtime_state.algorithm_to_agent_signal,
               &runtime_state.debug_state)) {
           runtime_state.algorithm_to_agent_signal.stop_requested = true;
@@ -179,7 +179,7 @@ bool Agent::Tick(
         collected_debug_state.signals.end());
       if (runtime_state.agent_to_algorithm_signal.reflection_collection_requested) {
         runtime_state.algorithm_to_agent_signal.reflection_collection_requested = true;
-        if (_CollectReflectionSnapshot(group, algorithm_container_sets_[i], &runtime_state.reflection_snapshot)) {
+        if (_CollectReflectionSnapshot(group, *algorithm_objects_[i].container_set(), &runtime_state.reflection_snapshot)) {
           runtime_state.algorithm_to_agent_signal.reflection_collection_requested = true;
         }
       }
@@ -245,24 +245,24 @@ void Agent::MarkAlgorithmAssemblyFailed(size_t index) {
 }
 
 bool Agent::GetAlgorithmAssemblySlot(size_t index, AlgorithmAssemblySlot* out_slot) {
-  if (!out_slot || index >= algorithm_codec_groups_.size() || index >= algorithm_container_sets_.size() ||
+  if (!out_slot || index >= algorithm_codec_groups_.size() || index >= algorithm_objects_.size() ||
       index >= algorithm_assembly_states_.size()) {
     return false;
   }
 
   out_slot->index = index;
   out_slot->algorithm_codec_group = &algorithm_codec_groups_[index];
-  out_slot->algorithm_container_set = &algorithm_container_sets_[index];
+  out_slot->algorithm_object = &algorithm_objects_[index];
   out_slot->assembly_state = &algorithm_assembly_states_[index];
   return true;
 }
 
 bool Agent::CollectAlgorithmReflection(size_t index, AlgorithmReflectionSnapshot* out_snapshot) const {
-  if (!out_snapshot || index >= algorithm_codec_groups_.size() || index >= algorithm_container_sets_.size()) {
+  if (!out_snapshot || index >= algorithm_codec_groups_.size() || index >= algorithm_objects_.size()) {
     return false;
   }
   const AgentAlgorithmCodecGroup& group = algorithm_codec_groups_[index];
-  const AlgorithmContainerSet& container_set = algorithm_container_sets_[index];
+  const AlgorithmContainerSet& container_set = *algorithm_objects_[index].container_set();
   return _CollectReflectionSnapshot(group, container_set, out_snapshot);
 }
 
@@ -271,7 +271,7 @@ void Agent::Destroy() {
   agent_name_.clear();
   algorithm_codec_groups_.clear();
   algorithm_runtime_states_.clear();
-  algorithm_container_sets_.clear();
+  algorithm_objects_.clear();
   algorithm_assembly_states_.clear();
 }
 

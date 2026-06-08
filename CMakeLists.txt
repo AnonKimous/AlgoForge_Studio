@@ -167,6 +167,7 @@ target_link_libraries(algorithm_management PUBLIC common_data Vulkan::Vulkan cjs
 add_library(runtime_systems STATIC
   src/runtime_systems/window/sdl_window.cpp
   src/runtime_systems/render/vma_impl.cpp
+  src/runtime_systems/render/preview_renderer.cpp
   src/runtime_systems/render/imgui_vulkan_runtime.cpp
   src/runtime_systems/runtime_environment.cpp
   ${VKB_SOURCE_DIR}/src/VkBootstrap.cpp
@@ -218,8 +219,26 @@ add_custom_command(
   VERBATIM
 )
 
+add_custom_command(
+  OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.vert.spv
+  COMMAND ${GLSLC} -o ${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.vert.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.vert
+  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.vert
+  VERBATIM
+)
+
+add_custom_command(
+  OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.frag.spv
+  COMMAND ${GLSLC} -o ${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.frag.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.frag
+  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.frag
+  VERBATIM
+)
+
 add_custom_target(shaders DEPENDS
   ${SHADER_OUTPUT_DIR}/physics_convolution.comp.spv
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.vert.spv
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.frag.spv
 )
 
 add_executable(min_vulkan_win32 WIN32

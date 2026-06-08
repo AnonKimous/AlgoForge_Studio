@@ -11,15 +11,13 @@ struct AlgorithmReflector;
 namespace agent {
 class IAlgorithmPackageCodec;
 class IAlgorithmPackageDecomposer;
-class IAlgorithmInterventionPackageCodec;
-class IAlgorithmInterventionPackageAgent;
-class IAlgorithmInterventionPackageAlgorithm;
+class IAlgorithmIntervention;
 class IAlgorithmtemporaryTestMainThreadExecutor;
 }  // namespace agent
 
 namespace algorithm_library_plugin {
 
-inline constexpr uint32_t kAlgorithmPluginApiVersion = 1u;
+inline constexpr uint32_t kAlgorithmPluginApiVersion = 3u;
 
 #if defined(ALGORITHM_LIBRARY_PLUGIN_BUILD)
 #define ALGORITHM_LIBRARY_PLUGIN_API __declspec(dllexport)
@@ -45,14 +43,8 @@ struct AlgorithmPluginBundle {
   agent::IAlgorithmPackageDecomposer* decomposer{nullptr};
   void (*destroy_decomposer)(agent::IAlgorithmPackageDecomposer*){nullptr};
 
-  agent::IAlgorithmInterventionPackageCodec* intervention_codec{nullptr};
-  void (*destroy_intervention_codec)(agent::IAlgorithmInterventionPackageCodec*){nullptr};
-
-  agent::IAlgorithmInterventionPackageAgent* intervention_agent{nullptr};
-  void (*destroy_intervention_agent)(agent::IAlgorithmInterventionPackageAgent*){nullptr};
-
-  agent::IAlgorithmInterventionPackageAlgorithm* intervention_algorithm{nullptr};
-  void (*destroy_intervention_algorithm)(agent::IAlgorithmInterventionPackageAlgorithm*){nullptr};
+  agent::IAlgorithmIntervention* intervention{nullptr};
+  void (*destroy_intervention)(agent::IAlgorithmIntervention*){nullptr};
 
   agent::IAlgorithmtemporaryTestMainThreadExecutor* temporary_test_executor{nullptr};
   void (*destroy_temporary_test_executor)(agent::IAlgorithmtemporaryTestMainThreadExecutor*){nullptr};
@@ -65,12 +57,8 @@ struct AlgorithmPluginBundle {
     destroy_reflector = nullptr;
     decomposer = nullptr;
     destroy_decomposer = nullptr;
-    intervention_codec = nullptr;
-    destroy_intervention_codec = nullptr;
-    intervention_agent = nullptr;
-    destroy_intervention_agent = nullptr;
-    intervention_algorithm = nullptr;
-    destroy_intervention_algorithm = nullptr;
+    intervention = nullptr;
+    destroy_intervention = nullptr;
     temporary_test_executor = nullptr;
     destroy_temporary_test_executor = nullptr;
   }

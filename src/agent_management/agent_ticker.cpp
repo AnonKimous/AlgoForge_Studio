@@ -17,7 +17,7 @@ bool _SignalBlocksTick(
   if (!signal.needs_intervention) {
     return false;
   }
-  return !group.intervention_algorithm || group.intervention_algorithm->SupportsIntervention();
+  return !group.intervention || group.intervention->SupportsIntervention();
 }
 
 }  // namespace

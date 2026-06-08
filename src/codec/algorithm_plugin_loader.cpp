@@ -119,6 +119,19 @@ bool TryLoadAlgorithmPluginComponents(
     return false;
   }
 
+  if (request.api_version != algorithm_library_plugin::kAlgorithmPluginApiVersion) {
+    _SetErrorMessage(
+      out_error_message,
+      "Algorithm plugin request ABI version mismatch for: " + plugin_path.string());
+    return false;
+  }
+  if (bundle.api_version != algorithm_library_plugin::kAlgorithmPluginApiVersion) {
+    _SetErrorMessage(
+      out_error_message,
+      "Algorithm plugin bundle ABI version mismatch for: " + plugin_path.string());
+    return false;
+  }
+
   out_components->cpu_symbol = bundle.cpu_symbol;
   out_components->gpu_symbol = bundle.gpu_symbol;
 
@@ -128,22 +141,10 @@ bool TryLoadAlgorithmPluginComponents(
   if (bundle.decomposer && bundle.destroy_decomposer) {
     out_components->decomposer = _WrapPluginObject(bundle.decomposer, bundle.destroy_decomposer, module_guard);
   }
-  if (bundle.intervention_codec && bundle.destroy_intervention_codec) {
-    out_components->intervention_codec = _WrapPluginObject(
-      bundle.intervention_codec,
-      bundle.destroy_intervention_codec,
-      module_guard);
-  }
-  if (bundle.intervention_agent && bundle.destroy_intervention_agent) {
-    out_components->intervention_agent = _WrapPluginObject(
-      bundle.intervention_agent,
-      bundle.destroy_intervention_agent,
-      module_guard);
-  }
-  if (bundle.intervention_algorithm && bundle.destroy_intervention_algorithm) {
-    out_components->intervention_algorithm = _WrapPluginObject(
-      bundle.intervention_algorithm,
-      bundle.destroy_intervention_algorithm,
+  if (bundle.intervention && bundle.destroy_intervention) {
+    out_components->intervention = _WrapPluginObject(
+      bundle.intervention,
+      bundle.destroy_intervention,
       module_guard);
   }
   if (bundle.temporary_test_executor && bundle.destroy_temporary_test_executor) {

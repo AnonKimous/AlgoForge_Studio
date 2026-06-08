@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common_data/common_data.h"
+#include "runtime_systems/render/render_preview_request.h"
 
 #include <functional>
 #include <memory>
@@ -38,6 +39,7 @@ class RuntimeEnvironment {
     RuntimeExecutionSymbols execution_symbols = {});
   bool Tick();
   void SetDrawCallback(DrawCallback callback);
+  void SetRenderPreviewRequest(RenderPreviewRequest request);
   void SetExecutionSymbols(RuntimeExecutionSymbols execution_symbols);
   void Destroy();
 

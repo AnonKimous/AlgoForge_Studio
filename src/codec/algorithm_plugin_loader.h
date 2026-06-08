@@ -16,9 +16,7 @@ struct AlgorithmPluginComponents {
 
   std::shared_ptr<agent::IAlgorithmPackageCodec> reflector{};
   std::shared_ptr<agent::IAlgorithmPackageDecomposer> decomposer{};
-  std::shared_ptr<agent::IAlgorithmInterventionPackageCodec> intervention_codec{};
-  std::shared_ptr<agent::IAlgorithmInterventionPackageAgent> intervention_agent{};
-  std::shared_ptr<agent::IAlgorithmInterventionPackageAlgorithm> intervention_algorithm{};
+  std::shared_ptr<agent::IAlgorithmIntervention> intervention{};
   std::shared_ptr<agent::IAlgorithmtemporaryTestMainThreadExecutor> temporary_test_executor{};
 };
 

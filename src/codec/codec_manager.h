@@ -12,16 +12,14 @@
 
 namespace agent {
 struct AgentAlgorithmCodecGroup;
-class IAlgorithmInterventionPackageAgent;
-class IAlgorithmInterventionPackageAlgorithm;
-class IAlgorithmInterventionPackageCodec;
+class IAlgorithmIntervention;
 class IAlgorithmPackageCodec;
 class IAlgorithmPackageDecomposer;
 }  // namespace agent
 
 namespace codec {
 
-inline constexpr const char* kAlgorithmInterventionCodecIoProtocolName = "algorithm_intervention_codec_v2";
+inline constexpr const char* kAlgorithmInterventionIoProtocolName = "algorithm_intervention_v2";
 
 struct MeshCoderOutput {
   std::vector<Vec3> vertices;
@@ -113,19 +111,9 @@ bool CreateAlgorithmPackageDecomposerByName(
   std::shared_ptr<agent::IAlgorithmPackageDecomposer>* out_decomposer,
   std::string* out_error_message = nullptr);
 
-bool CreateAlgorithmInterventionPackageCodecByName(
+bool CreateAlgorithmInterventionByName(
   const std::string& algorithm_name,
-  std::shared_ptr<agent::IAlgorithmInterventionPackageCodec>* out_codec,
-  std::string* out_error_message = nullptr);
-
-bool CreateAlgorithmInterventionPackageAgentByName(
-  const std::string& algorithm_name,
-  std::shared_ptr<agent::IAlgorithmInterventionPackageAgent>* out_agent,
-  std::string* out_error_message = nullptr);
-
-bool CreateAlgorithmInterventionPackageAlgorithmByName(
-  const std::string& algorithm_name,
-  std::shared_ptr<agent::IAlgorithmInterventionPackageAlgorithm>* out_algorithm,
+  std::shared_ptr<agent::IAlgorithmIntervention>* out_intervention,
   std::string* out_error_message = nullptr);
 
 bool CreateAlgorithmCodecGroupByName(

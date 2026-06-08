@@ -72,6 +72,12 @@ void RuntimeEnvironment::SetDrawCallback(DrawCallback callback) {
   }
 }
 
+void RuntimeEnvironment::SetRenderPreviewRequest(RenderPreviewRequest request) {
+  if (imgui_runtime_) {
+    imgui_runtime_->SetRenderPreviewRequest(std::move(request));
+  }
+}
+
 void RuntimeEnvironment::SetExecutionSymbols(RuntimeExecutionSymbols execution_symbols) {
   execution_symbols_ = execution_symbols;
 }

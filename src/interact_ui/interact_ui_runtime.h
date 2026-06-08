@@ -9,6 +9,7 @@
 #include <chrono>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace interact_ui {
@@ -29,6 +30,10 @@ class InteractUiRuntime : public IInteractUiHost {
   const InputState& input() const override { return runtime_environment_.input(); }
   Vec2 mouse_position() const override { return runtime_environment_.MousePosition(); }
   float frame_dt_seconds() const override { return frame_dt_; }
+  void SetRenderPreviewRequest(runtime_systems::RenderPreviewRequest request) override {
+    render_preview_request_ = std::move(request);
+    runtime_environment_.SetRenderPreviewRequest(render_preview_request_);
+  }
   std::string& ui_status_message() override { return ui_status_message_; }
   const std::string& ui_status_message() const override { return ui_status_message_; }
 
@@ -36,6 +41,7 @@ class InteractUiRuntime : public IInteractUiHost {
   AgentManager agent_manager_{};
   runtime_systems::RuntimeEnvironment runtime_environment_{};
   InteractUiPanel ui_panel_{};
+  runtime_systems::RenderPreviewRequest render_preview_request_{};
   std::string ui_status_message_{};
   std::chrono::steady_clock::time_point last_frame_time_{};
   float frame_dt_{0.0f};

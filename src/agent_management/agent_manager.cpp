@@ -163,13 +163,13 @@ bool AgentManager::AttachAlgorithmToAgent(
     return false;
   }
 
-  AlgorithmContainerSet* algorithm_container_set = managed_agents_[agent_index]->agent->algorithm_container_set(algorithm_index);
-  if (!algorithm_container_set) {
+  agent::AlgorithmObject* algorithm_object = managed_agents_[agent_index]->agent->algorithm_object(algorithm_index);
+  if (!algorithm_object) {
     managed_agents_[agent_index]->agent->MarkAlgorithmAssemblyFailed(algorithm_index);
-    set_error("Failed to access algorithm container set.");
+    set_error("Failed to access algorithm object.");
     return false;
   }
-  *algorithm_container_set = std::move(container_set);
+  *algorithm_object->mutable_container_set() = std::move(container_set);
   managed_agents_[agent_index]->agent->MarkAlgorithmAssemblyReady(algorithm_index);
 
   if (out_algorithm_index) {

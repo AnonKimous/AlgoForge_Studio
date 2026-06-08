@@ -444,47 +444,17 @@ bool CreateAlgorithmPackageDecomposerByName(
   return true;
 }
 
-bool CreateAlgorithmInterventionPackageCodecByName(
+bool CreateAlgorithmInterventionByName(
   const std::string& algorithm_name,
-  std::shared_ptr<agent::IAlgorithmInterventionPackageCodec>* out_codec,
+  std::shared_ptr<agent::IAlgorithmIntervention>* out_intervention,
   std::string* out_error_message) {
-  if (!out_codec) {
-    _SetErrorMessage(out_error_message, "Intervention codec output pointer is null.");
+  if (!out_intervention) {
+    _SetErrorMessage(out_error_message, "Intervention output pointer is null.");
     return false;
   }
   (void)algorithm_name;
 
-  out_codec->reset();
-  _SetErrorMessage(out_error_message, {});
-  return true;
-}
-
-bool CreateAlgorithmInterventionPackageAgentByName(
-  const std::string& algorithm_name,
-  std::shared_ptr<agent::IAlgorithmInterventionPackageAgent>* out_agent,
-  std::string* out_error_message) {
-  if (!out_agent) {
-    _SetErrorMessage(out_error_message, "Intervention agent output pointer is null.");
-    return false;
-  }
-  (void)algorithm_name;
-
-  out_agent->reset();
-  _SetErrorMessage(out_error_message, {});
-  return true;
-}
-
-bool CreateAlgorithmInterventionPackageAlgorithmByName(
-  const std::string& algorithm_name,
-  std::shared_ptr<agent::IAlgorithmInterventionPackageAlgorithm>* out_algorithm,
-  std::string* out_error_message) {
-  if (!out_algorithm) {
-    _SetErrorMessage(out_error_message, "Intervention algorithm output pointer is null.");
-    return false;
-  }
-  (void)algorithm_name;
-
-  out_algorithm->reset();
+  out_intervention->reset();
   _SetErrorMessage(out_error_message, {});
   return true;
 }
@@ -508,9 +478,7 @@ bool CreateAlgorithmCodecGroupByName(
     group.gpu_symbol = plugin_components.gpu_symbol;
     group.reflector = plugin_components.reflector;
     group.decomposer = plugin_components.decomposer;
-    group.intervention_codec = plugin_components.intervention_codec;
-    group.intervention_agent = plugin_components.intervention_agent;
-    group.intervention_algorithm = plugin_components.intervention_algorithm;
+    group.intervention = plugin_components.intervention;
     group.temporaryTest_main_thread_executor = plugin_components.temporary_test_executor;
     if (plugin_components.has_runtime_reflector) {
       group.algorithm_reflector = std::make_shared<algorithm::AlgorithmReflector>(
@@ -539,21 +507,9 @@ bool CreateAlgorithmCodecGroupByName(
         out_error_message)) {
     return false;
   }
-  if (!CreateAlgorithmInterventionPackageCodecByName(
+  if (!CreateAlgorithmInterventionByName(
         algorithm_name,
-        &group.intervention_codec,
-        out_error_message)) {
-    return false;
-  }
-  if (!CreateAlgorithmInterventionPackageAgentByName(
-        algorithm_name,
-        &group.intervention_agent,
-        out_error_message)) {
-    return false;
-  }
-  if (!CreateAlgorithmInterventionPackageAlgorithmByName(
-        algorithm_name,
-        &group.intervention_algorithm,
+        &group.intervention,
         out_error_message)) {
     return false;
   }
