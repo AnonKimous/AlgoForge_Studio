@@ -1,5 +1,7 @@
 #include "codec/algorithm_plugin_loader.h"
 
+#include "algorithm_management/algorithm_manager.h"
+
 #include <windows.h>
 
 #include <filesystem>
@@ -159,8 +161,8 @@ bool TryLoadAlgorithmPluginComponents(
   if (create_reflector_fn) {
     algorithm::AlgorithmReflector runtime_reflector{};
     if (create_reflector_fn(&request, &runtime_reflector)) {
-      out_components->runtime_reflector = std::move(runtime_reflector);
-      out_components->has_runtime_reflector = true;
+      out_components->runtime_reflector =
+        std::make_shared<algorithm::AlgorithmReflector>(std::move(runtime_reflector));
     }
   }
 

@@ -6,8 +6,10 @@
 #include <fstream>
 #include <filesystem>
 #include <imgui.h>
+#include <SDL3/SDL.h>
 #include <sstream>
 
+#include "codec/codec_manager.h"
 #include "cJSON.h"
 
 namespace interact_ui {
@@ -46,6 +48,11 @@ std::string _AlgorithmLibraryRootPath() {
     }
   }
   return candidates[0].string();
+}
+
+std::string _ProjectDataRootPath() {
+  const std::filesystem::path base_path(SDL_GetBasePath());
+  return (base_path.parent_path().parent_path() / "data").string();
 }
 
 std::string _ResolveAlgorithmShaderPath(
@@ -555,8 +562,8 @@ void InteractUiPanel::InitializeFileBrowserDefaults() {
     return;
   }
 
-  const std::filesystem::path current_root = std::filesystem::current_path();
-  _CopyTextToBuffer(current_root.string().c_str(), &file_browser_ui_state_.root_path);
+  const std::string data_root_path = _ProjectDataRootPath();
+  _CopyTextToBuffer(data_root_path.c_str(), &file_browser_ui_state_.root_path);
   _CopyTextToBuffer(file_browser_ui_state_.root_path.data(), &file_browser_ui_state_.current_path);
   file_browser_ui_state_.entry_names.clear();
   file_browser_ui_state_.entry_paths.clear();

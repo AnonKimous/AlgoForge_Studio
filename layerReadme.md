@@ -24,7 +24,7 @@ When code and docs disagree, follow the code and update the docs.
 - `algorithm_management` is a strict main-trunk layer.
 - `algorithm_management` owns container-manifest loading, manifest-name resolution, and runtime container creation helpers only.
 - `agent_execute` owns runtime binding and per-frame ticking only.
-- `interact_ui` owns editor-facing UI and the app-facing facade.
+- `interact_ui` is split into an interaction host half and an editor-facing UI half.
 - `app_orchestration` owns startup wiring only.
 - Modules under `src/capabilities` are capability modules, not strict main-trunk hops.
 - Capability modules may aggregate lower-level contracts, but they must not introduce upward dependencies into strict trunk layers.
@@ -34,11 +34,11 @@ When code and docs disagree, follow the code and update the docs.
 
 Strict main-trunk layering path:
 
-`common_data -> codec -> algorithm_management -> agent_execute -> interact_ui -> app_orchestration`
+`common_data -> codec -> algorithm_management -> agent_execute -> interact_ui(host) + interact_ui(ui) -> app_orchestration`
 
 Runtime shell support path:
 
-`common_data -> runtime_systems -> interact_ui -> app_orchestration`
+`common_data -> runtime_systems -> interact_ui(host) -> interact_ui(ui) -> app_orchestration`
 
 Capability modules grouped under `src/capabilities`:
 
@@ -54,8 +54,9 @@ Current project-library dependency graph from `CMakeLists.txt`:
 - `runtime_systems -> common_data`
 - `agent -> common_data + algorithm_management + codec`
 - `agent_execute -> common_data + agent`
-- `interact_ui -> agent_execute + runtime_systems`
-- `app_orchestration/main.cpp -> interact_ui + common_data`
+- `interact_ui(host) -> agent_execute + runtime_systems`
+- `interact_ui(ui) -> interact_ui(host)`
+- `app_orchestration/main.cpp -> interact_ui(host) + interact_ui(ui) + common_data`
 
 Important note:
 
@@ -100,7 +101,7 @@ src/
 - `algorithm_management`: `algorithm_management/algorithm_manager.h`
 - `runtime_systems`: `runtime_systems/runtime_environment.h`
 - `agent_execute`: `agent_execute/agent_execute_runtime.h`
-- `interact_ui`: `interact_ui/interact_ui_runtime.h`
+- `interact_ui`: `interact_ui/interact_ui_runtime.h` and `interact_ui/interact_ui_panel.h`
 
 ## Module Roles
 
@@ -182,24 +183,31 @@ It should not:
 
 ### `interact_ui`
 
-Editor-facing UI facade that bridges `RuntimeEnvironment` and
-`AgentExecuteRuntime`.
+This layer is split into:
 
-It owns:
+- interaction host runtime: `InteractUiRuntime`
+- editor-facing UI surface: `InteractUiPanel`
 
-- the live mesh shown by the UI
+`InteractUiRuntime` owns:
+
+- window/runtime lifetime
+- the managed agent registry
+- frame timing and UI-exposed state
+
+`InteractUiPanel` owns:
+
 - editor-facing panels
 - custom intervention UI integration
 
-It should stay above runtime binding and below top-level orchestration.
+`app_orchestration/main.cpp` composes the two halves.
 
 ## Current Runtime Flow
 
 1. `main.cpp` builds a default triangle mesh.
-2. `InteractUiRuntime::Init` receives that mesh and initializes `RuntimeEnvironment`.
-3. `RuntimeEnvironment` drives the SDL and ImGui frame loop.
-4. `InteractUiRuntime::DrawInteractUi` calls `AgentExecuteRuntime::Tick`.
-5. `AgentExecuteRuntime` delegates to `AgentTicker` only when an agent is loaded.
+2. `InteractUiRuntime::Init` initializes `RuntimeEnvironment`.
+3. `app_orchestration/main.cpp` binds `InteractUiPanel` to the runtime host and sets the draw callback.
+4. `RuntimeEnvironment` drives the SDL and ImGui frame loop.
+5. `InteractUiPanel::Draw` calls into the managed agent registry through `IInteractUiHost`.
 6. `AgentTicker` builds macro tick context and lets `Agent` tick its attached algorithm codec groups.
 
 ## Quick Guidance For AI Agents
@@ -214,5 +222,5 @@ When changing code:
 6. Keep cross-layer package hooks in `capabilities/agent`.
 7. Keep optional adapters in `capabilities/sidecar`.
 8. Keep runtime binding in `agent_execute`.
-9. Keep editor behavior in `interact_ui`.
+9. Keep interaction-host behavior in `interact_ui` runtime and editor behavior in `interact_ui` panel.
 10. Do not claim a full execution pipeline exists unless you also implement it.

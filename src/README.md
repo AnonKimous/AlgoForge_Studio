@@ -20,7 +20,7 @@ separates intentionally cross-layer code into `src/capabilities`.
 - `algorithm_management`: `algorithm_management/algorithm_manager.h`
 - `runtime_systems`: `runtime_systems/runtime_environment.h`
 - `agent_management`: `agent_management/agent_manager.h`
-- `interact_ui`: `interact_ui/interact_ui_runtime.h` (interaction host surface)
+- `interact_ui`: `interact_ui/interact_ui_runtime.h` for the interaction host surface, `interact_ui/interact_ui_panel.h` for the editor-facing UI
 
 ## Notes
 

@@ -127,6 +127,9 @@ target_include_directories(cjson PUBLIC ${PROJECT_INCLUDE_DIRS})
 add_library(codec STATIC
   src/codec/codec_manager.cpp
   src/codec/algorithm_plugin_loader.cpp
+  src/codec/codec_decomposer.cpp
+  src/codec/codec_reflector.cpp
+  src/codec/codec_intervention.cpp
   src/codec/codecset_loader.cpp
 )
 target_include_directories(codec PUBLIC ${PROJECT_INCLUDE_DIRS})

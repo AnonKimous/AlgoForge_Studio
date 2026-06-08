@@ -153,8 +153,7 @@ TemporaryTestInterventionSchema _LoadInterventionSchema(const algorithm_library_
     return schema;
   }
 
-  const cJSON* stage_item = nullptr;
-  cJSON_ArrayForEach(stage_item, stages) {
+  for (const cJSON* stage_item = stages->child; stage_item; stage_item = stage_item->next) {
     if (!stage_item || !cJSON_IsObject(stage_item) || !stage_item->string) {
       continue;
     }
@@ -343,7 +342,7 @@ class TemporaryTestLineMotionDecomposer final : public agent::IAlgorithmPackageD
     : schema_(std::move(schema)) {}
 
   bool GetRequestedResources(
-    const AlgorithmProfile& algorithm_profile,
+    const algorithm::AlgorithmProfile& algorithm_profile,
     agent::AlgorithmRequestedResources* out_requested_resources) const override {
     if (!out_requested_resources) {
       return false;
@@ -366,7 +365,7 @@ class TemporaryTestLineMotionDecomposer final : public agent::IAlgorithmPackageD
   }
 
   bool GetRequestedDescriptorBindings(
-    const AlgorithmProfile& algorithm_profile,
+    const algorithm::AlgorithmProfile& algorithm_profile,
     agent::AlgorithmRequestedDescriptorBindings* out_requested_descriptor_bindings) const override {
     if (!out_requested_descriptor_bindings) {
       return false;
@@ -390,10 +389,10 @@ class TemporaryTestLineMotionDecomposer final : public agent::IAlgorithmPackageD
   }
 
   bool Decompose(
-    const AlgorithmProfile& algorithm_profile,
+    const algorithm::AlgorithmProfile& algorithm_profile,
     const std::vector<agent::AlgorithmResourceBinding>& resource_bindings,
     const std::vector<agent::AlgorithmDescriptorValue>& descriptor_values,
-    AlgorithmContainerSet* container_set,
+    algorithm::AlgorithmContainerSet* container_set,
     std::string* out_error_message) const override {
     if (!container_set) {
       if (out_error_message) {
