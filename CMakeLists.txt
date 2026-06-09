@@ -173,6 +173,7 @@ add_library(runtime_systems STATIC
   src/runtime_systems/render/preview_renderer.cpp
   src/runtime_systems/render/imgui_vulkan_runtime.cpp
   src/runtime_systems/runtime_environment.cpp
+  src/runtime_systems/memory_manager.cpp
   ${VKB_SOURCE_DIR}/src/VkBootstrap.cpp
   ${IMGUI_SOURCE_DIR}/imgui.cpp
   ${IMGUI_SOURCE_DIR}/imgui_draw.cpp
@@ -184,6 +185,7 @@ add_library(runtime_systems STATIC
 target_include_directories(runtime_systems PUBLIC ${PROJECT_INCLUDE_DIRS})
 target_compile_definitions(runtime_systems PRIVATE RUNTIME_SYSTEMS_LAYER_INTERNAL_BUILD=1)
 target_link_libraries(runtime_systems PUBLIC common_data Vulkan::Vulkan ${SDL3_LINK_LIBS})
+target_link_libraries(algorithm_management PUBLIC runtime_systems)
 
 add_library(agent STATIC
   src/capabilities/agent/agent.cpp

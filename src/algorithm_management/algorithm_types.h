@@ -13,6 +13,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory_resource>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -89,7 +90,7 @@ struct AlgorithmContainer {
   AlgorithmContainerStorageKind storage_kind{AlgorithmContainerStorageKind::Array};
   uint32_t element_count{};
   uint32_t element_stride{};
-  std::vector<std::byte> bytes;
+  std::pmr::vector<std::byte> bytes;
 };
 
 struct AlgorithmContainerSet {

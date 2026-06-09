@@ -499,7 +499,7 @@ bool _BuildRenderPreviewRequest(
     runtime_systems::RenderPreviewBuffer preview_buffer{};
     preview_buffer.binding_name = binding.container_name;
     preview_buffer.element_stride = container->element_stride;
-    preview_buffer.bytes = container->bytes;
+    preview_buffer.bytes.assign(container->bytes.begin(), container->bytes.end());
     out_request->storage_buffers.push_back(std::move(preview_buffer));
 
     const uint32_t buffer_instances = static_cast<uint32_t>(container->bytes.size() / container->element_stride);

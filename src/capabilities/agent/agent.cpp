@@ -46,7 +46,7 @@ bool _CollectReflectionSnapshot(
       value.container_name = container_name;
       value.filter_name = binding.filter_name;
       value.storage_kind = container->storage_kind;
-      value.bytes = container->bytes;
+      value.bytes.assign(container->bytes.begin(), container->bytes.end());
 
       if (container->storage_kind == algorithm::AlgorithmContainerStorageKind::Array) {
         out_snapshot->variable_arrays.push_back(std::move(value));

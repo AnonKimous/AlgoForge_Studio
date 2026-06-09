@@ -1,5 +1,7 @@
 #include "algorithm_container_manifest.h"
 
+#include "runtime_systems/memory_manager.h"
+
 #include "cJSON.h"
 
 #include <algorithm>
@@ -521,6 +523,7 @@ bool _AppendRuntimeContainer(
   AlgorithmContainerSet* out_container_set,
   std::string* out_error_message) {
   if (!out_container_set) return false;
+  (void)runtime_systems::MemoryManager::Instance();
 
   if (item.name.empty()) {
     if (out_error_message) {

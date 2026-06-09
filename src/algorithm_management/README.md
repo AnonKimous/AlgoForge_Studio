@@ -14,6 +14,7 @@ This strict trunk layer provides the algorithm manager surface.
 3. `AlgorithmManager_CreateContainersFromManifestFile` creates real runtime containers from that manifest and reuses a cached template for repeated requests from the same manifest.
 4. `AlgorithmManager_CreateReflectorFromManifestName` and `AlgorithmManager_CreateReflectorFromManifestFile` build reflector metadata from the same manifest when a reflector section exists.
 5. `AlgorithmManager_TryCreateReflectorFromAlgorithmName` is the optional algorithm-name shortcut: if no same-name manifest exists, it returns an empty reflector instead of failing.
+6. Runtime container byte buffers are currently backed by `runtime_systems::MemoryManager`, which also serves as the monitoring hook for future allocator enforcement.
 
 ## Public Interface Rule
 
