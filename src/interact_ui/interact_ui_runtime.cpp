@@ -9,7 +9,14 @@ InteractUiRuntime::~InteractUiRuntime() = default;
 bool InteractUiRuntime::Init(const char* window_title, int width, int height) {
   agent_manager_.Destroy();
   ui_status_message_.clear();
-  if (!runtime_environment_.Init(window_title ? window_title : "Interact & UI", width, height)) {
+  if (!runtime_environment_.Init(window_title ? window_title : "debugTool", width, height)) {
+    return false;
+  }
+  AgentCreateSpec default_agent_spec{};
+  default_agent_spec.agent_name = "debug_agent";
+  default_agent_spec.limit_fps_flag = 120u;
+  if (!agent_manager_.CreateAgent(std::move(default_agent_spec))) {
+    runtime_environment_.Destroy();
     return false;
   }
   frame_dt_ = 0.0f;

@@ -23,9 +23,10 @@ When code and docs disagree, follow the code and update the docs.
 - `codec` owns encode/decode and reflection helpers. It is not a general file-IO layer.
 - `algorithm_management` is a strict main-trunk layer.
 - `algorithm_management` owns container-manifest loading, manifest-name resolution, and runtime container creation helpers only.
-- `agent_execute` owns runtime binding and per-frame ticking only.
-- `interact_ui` is split into an interaction host half and an editor-facing UI half.
-- `app_orchestration` owns startup wiring only.
+- `kernal_all` owns the non-UI debug host backend and agent/runtime wiring.
+- `interact_ui` is the editor-facing UI surface.
+- `sdk` is the external agent/algorithm submission surface.
+- `debugTool` owns startup wiring for the debug executable only.
 - Modules under `src/capabilities` are capability modules, not strict main-trunk hops.
 - Capability modules may aggregate lower-level contracts, but they must not introduce upward dependencies into strict trunk layers.
 - Optional capabilities must be linked explicitly by any consumer.
@@ -34,11 +35,15 @@ When code and docs disagree, follow the code and update the docs.
 
 Strict main-trunk layering path:
 
-`common_data -> codec -> algorithm_management -> agent_execute -> interact_ui(host) + interact_ui(ui) -> app_orchestration`
+`common_data -> codec -> algorithm_management -> agent -> agent_management -> kernal_all -> debugTool`
 
 Runtime shell support path:
 
-`common_data -> runtime_systems -> interact_ui(host) -> interact_ui(ui) -> app_orchestration`
+`common_data -> runtime_systems -> kernal_all -> debugTool`
+
+UI path:
+
+`common_data -> agent_management -> interact_ui(ui) -> debugTool`
 
 Capability modules grouped under `src/capabilities`:
 
@@ -53,10 +58,11 @@ Current project-library dependency graph from `CMakeLists.txt`:
 - `algorithm_management -> common_data`
 - `runtime_systems -> common_data`
 - `agent -> common_data + algorithm_management + codec`
-- `agent_execute -> common_data + agent`
-- `interact_ui(host) -> agent_execute + runtime_systems`
-- `interact_ui(ui) -> interact_ui(host)`
-- `app_orchestration/main.cpp -> interact_ui(host) + interact_ui(ui) + common_data`
+- `agent -> common_data + algorithm_management + codec`
+- `agent_management -> common_data + agent`
+- `kernal_all -> common_data + agent_management + runtime_systems`
+- `interact_ui(ui) -> common_data + agent_management + runtime_systems + codec`
+- `debugTool -> kernal_all + interact_ui(ui) + common_data`
 
 Important note:
 
@@ -89,9 +95,10 @@ src/
 ├─ common_data/
 ├─ codec/
 ├─ runtime_systems/
-├─ agent_execute/
+├─ kernal_all/
+├─ sdk/
 ├─ interact_ui/
-└─ app_orchestration/
+└─ debug_tool/
 ```
 
 ## Public Interfaces
@@ -100,8 +107,9 @@ src/
 - `codec`: `codec/codec_manager.h`
 - `algorithm_management`: `algorithm_management/algorithm_manager.h`
 - `runtime_systems`: `runtime_systems/runtime_environment.h`
-- `agent_execute`: `agent_execute/agent_execute_runtime.h`
+- `kernal_all`: no public interface; it is an internal debug backend target
 - `interact_ui`: `interact_ui/interact_ui_runtime.h` and `interact_ui/interact_ui_panel.h`
+- `sdk`: `sdk/sdk_kernel.h` and `sdk/sdk_decomposer.h`
 
 ## Module Roles
 
@@ -164,48 +172,49 @@ Current sidecar:
 
 - `mesh_io`: OBJ mesh import/export on top of `common_data::Mesh`
 
-### `agent_execute`
+### `kernal_all`
 
-Strict trunk layer above `capabilities/agent`.
+Debug backend layer for the executable. It owns:
 
-It owns:
-
-- loading and unloading one bound agent
-- driving `AgentTicker`
-- exposing runtime-facing signal state
-- macro-level per-frame delegation into `Agent`
+- runtime lifetime
+- the managed agent registry
+- frame timing
+- non-UI create/attach orchestration
 
 It should not:
 
-- own SDL/Vulkan runtime state
-- absorb package composition policy
-- turn into a UI module
+- render editor widgets directly
+- become the SDK surface
 
 ### `interact_ui`
 
 This layer is split into:
 
-- interaction host runtime: `InteractUiRuntime`
+- interaction host runtime backend: `InteractUiRuntime` compiled into `kernal_all`
 - editor-facing UI surface: `InteractUiPanel`
-
-`InteractUiRuntime` owns:
-
-- window/runtime lifetime
-- the managed agent registry
-- frame timing and UI-exposed state
 
 `InteractUiPanel` owns:
 
 - editor-facing panels
 - custom intervention UI integration
 
-`app_orchestration/main.cpp` composes the two halves.
+`debugTool` composes the backend and the UI surface.
+
+### `sdk`
+
+The SDK surface is for agent and algorithm submission.
+
+It should:
+
+- expose agent creation, destruction, algorithm mounting, resource mounting, algorithm submission, and unmounting
+- avoid UI dependencies
+- avoid reflector/intervention UI surfaces
 
 ## Current Runtime Flow
 
 1. `main.cpp` builds a default triangle mesh.
 2. `InteractUiRuntime::Init` initializes `RuntimeEnvironment`.
-3. `app_orchestration/main.cpp` binds `InteractUiPanel` to the runtime host and sets the draw callback.
+3. `debugTool` binds `InteractUiPanel` to the runtime host and sets the draw callback.
 4. `RuntimeEnvironment` drives the SDL and ImGui frame loop.
 5. `InteractUiPanel::Draw` calls into the managed agent registry through `IInteractUiHost`.
 6. `AgentTicker` builds macro tick context and lets `Agent` tick its attached algorithm codec groups.
@@ -221,6 +230,6 @@ When changing code:
 5. Keep manifest loading and runtime container creation helpers in `algorithm_management`.
 6. Keep cross-layer package hooks in `capabilities/agent`.
 7. Keep optional adapters in `capabilities/sidecar`.
-8. Keep runtime binding in `agent_execute`.
-9. Keep interaction-host behavior in `interact_ui` runtime and editor behavior in `interact_ui` panel.
+8. Keep runtime binding in `kernal_all`.
+9. Keep interaction-host behavior in `interact_ui` runtime backend and editor behavior in `interact_ui` panel.
 10. Do not claim a full execution pipeline exists unless you also implement it.

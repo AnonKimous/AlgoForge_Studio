@@ -31,7 +31,8 @@ void main() {
   );
 
   vec2 corner = quad_offsets[gl_VertexIndex];
-  vec2 radius = vec2(0.04, 0.04);
+  // Make the sample marker easy to spot even when the data is sitting at the origin.
+  vec2 radius = vec2(0.12, 0.12);
   gl_Position = vec4(pos.xy + corner * radius, pos.z, 1.0);
   v_uv = corner;
 }

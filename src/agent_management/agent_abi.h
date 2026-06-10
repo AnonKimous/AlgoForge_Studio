@@ -49,6 +49,16 @@ struct AlgorithmDescriptorValue {
   float scalar_value{0.0f};
 };
 
+enum class AlgorithmMountMode {
+  Direct = 0,
+  StandardContainer = 1,
+};
+
+enum class AlgorithmExecutionPreference {
+  Cpu = 0,
+  Gpu = 1,
+};
+
 struct AlgorithmPackageDebugState {
   std::vector<codec::AdvancedAlgorithmDebugSignal> signals;
 };
@@ -194,10 +204,13 @@ struct AgentAlgorithmCodecGroup {
   std::shared_ptr<IAlgorithmPackageCodec> reflector;
   std::shared_ptr<IAlgorithmPackageDecomposer> decomposer;
   std::shared_ptr<algorithm::AlgorithmReflector> algorithm_reflector;
+  std::shared_ptr<algorithm::AlgorithmContainerSet> shared_container_set;
   std::vector<AlgorithmResourceBinding> resource_bindings;
   std::vector<AlgorithmDescriptorValue> descriptor_values;
   bool cpu_symbol{true};
   bool gpu_symbol{true};
+  AlgorithmMountMode mount_mode{AlgorithmMountMode::Direct};
+  AlgorithmExecutionPreference execution_preference{AlgorithmExecutionPreference::Gpu};
   std::shared_ptr<IAlgorithmtemporaryTestMainThreadExecutor> temporaryTest_main_thread_executor;
   std::shared_ptr<IAlgorithmIntervention> intervention;
 };

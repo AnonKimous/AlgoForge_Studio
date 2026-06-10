@@ -543,12 +543,75 @@ class TemporaryTestLineMotionIntervention final : public agent::IAlgorithmInterv
   TemporaryTestInterventionSchema schema_{};
 };
 
+void _AdvancePositionContainer(algorithm::AlgorithmContainer* container) {
+  if (!container || container->storage_kind != algorithm::AlgorithmContainerStorageKind::Array) {
+    return;
+  }
+  if (container->element_stride < sizeof(float) * 3u) {
+    return;
+  }
+  if (container->bytes.size() < sizeof(float) * 3u) {
+    return;
+  }
+
+  const size_t element_count = container->element_stride == 0u
+    ? 0u
+    : container->bytes.size() / container->element_stride;
+  for (size_t index = 0; index < element_count; ++index) {
+    const size_t byte_offset = index * container->element_stride;
+    float xyz[3]{};
+    std::memcpy(xyz, container->bytes.data() + byte_offset, sizeof(xyz));
+    xyz[0] += 0.10f;
+    xyz[1] += 0.03f;
+    std::memcpy(container->bytes.data() + byte_offset, xyz, sizeof(xyz));
+  }
+}
+
+class TemporaryTestLineMotionMainThreadExecutor final : public agent::IAlgorithmtemporaryTestMainThreadExecutor {
+ public:
+  bool temporaryTestExecuteOnMainThread(
+    const agent::AgentTickContext& context,
+    const algorithm::AlgorithmProfile& algorithm_profile,
+    const AgentToAlgorithmSignal& agent_to_algorithm_signal,
+    algorithm::AlgorithmContainerSet* algorithm_container_set,
+    AlgorithmToAgentSignal* algorithm_to_agent_signal,
+    agent::AlgorithmPackageDebugState* debug_state) override {
+    (void)context;
+    (void)algorithm_profile;
+    (void)agent_to_algorithm_signal;
+    if (!algorithm_container_set) {
+      return false;
+    }
+
+    algorithm::AlgorithmContainer* container = algorithm::FindAlgorithmContainer(algorithm_container_set, "pos");
+    if (!container) {
+      return false;
+    }
+
+    _AdvancePositionContainer(container);
+    if (algorithm_to_agent_signal) {
+      *algorithm_to_agent_signal = {};
+    }
+    if (debug_state) {
+      debug_state->signals.push_back(codec::AdvancedAlgorithmDebugSignal{
+        .name = "temporary_test_line_motion.cpu_tick",
+        .payload = "Advanced pos on the main thread.",
+      });
+    }
+    return true;
+  }
+};
+
 void _DestroyDecomposer(agent::IAlgorithmPackageDecomposer* decomposer) {
   delete decomposer;
 }
 
 void _DestroyIntervention(agent::IAlgorithmIntervention* intervention) {
   delete intervention;
+}
+
+void _DestroyTemporaryTestExecutor(agent::IAlgorithmtemporaryTestMainThreadExecutor* executor) {
+  delete executor;
 }
 
 }  // namespace
@@ -578,6 +641,8 @@ extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateBundle(
   out_bundle->destroy_decomposer = &_DestroyDecomposer;
   out_bundle->intervention = new TemporaryTestLineMotionIntervention(intervention_schema);
   out_bundle->destroy_intervention = &_DestroyIntervention;
+  out_bundle->temporary_test_executor = new TemporaryTestLineMotionMainThreadExecutor();
+  out_bundle->destroy_temporary_test_executor = &_DestroyTemporaryTestExecutor;
   return true;
 }
 
@@ -588,7 +653,7 @@ extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateRuntimeReflec
     return false;
   }
 
-  return algorithm_management::AlgorithmManager_TryCreateReflectorFromAlgorithmName(
+  return algorithm_management::TryCreateAlgorithmReflectorFromAlgorithmName(
     request->algorithm_name ? request->algorithm_name : "",
     out_reflector,
     nullptr);

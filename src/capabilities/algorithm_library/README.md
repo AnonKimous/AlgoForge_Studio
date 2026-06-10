@@ -27,7 +27,7 @@ The reflector and intervention files are optional. Some algorithms only provide
 the container manifest and decomposer description.
 
 The plugin module is also optional. If it exists, the host tries to load it
-first; otherwise it falls back to the legacy JSON-driven compatibility path.
+first.
 
 ## UI Catalog
 
@@ -37,5 +37,4 @@ to their bundle names.
 
 ## Compatibility
 
-Legacy flat files are still accepted by the loaders for now, but new bundles
-should use the subdirectory layout above.
+Use the subdirectory layout above for new bundles.

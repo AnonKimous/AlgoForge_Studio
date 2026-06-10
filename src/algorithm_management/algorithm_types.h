@@ -85,6 +85,19 @@ enum class AlgorithmContainerStorageKind {
   TemporaryCache,
 };
 
+struct AlgorithmStandardContainerLayout {
+  std::string layout_name;
+  std::string layout_kind;
+  uint32_t variable_count{0u};
+  uint32_t array_count{0u};
+  std::string variable_prefix{"v"};
+  std::string array_prefix{"a"};
+
+  bool enabled() const {
+    return !layout_name.empty() && (variable_count > 0u || array_count > 0u);
+  }
+};
+
 struct AlgorithmContainer {
   std::string name;
   AlgorithmContainerStorageKind storage_kind{AlgorithmContainerStorageKind::Array};
@@ -95,6 +108,7 @@ struct AlgorithmContainer {
 
 struct AlgorithmContainerSet {
   std::string algorithm_name;
+  AlgorithmStandardContainerLayout standard_layout{};
   std::vector<AlgorithmContainer> arrays;
   std::vector<AlgorithmContainer> temporary_registers;
   std::vector<AlgorithmContainer> temporary_caches;

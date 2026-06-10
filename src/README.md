@@ -21,6 +21,14 @@ separates intentionally cross-layer code into `src/capabilities`.
 - `runtime_systems`: `runtime_systems/runtime_environment.h`, `runtime_systems/memory_manager.h`
 - `agent_management`: `agent_management/agent_manager.h`
 - `interact_ui`: `interact_ui/interact_ui_runtime.h` for the interaction host surface, `interact_ui/interact_ui_panel.h` for the editor-facing UI
+- `sdk`: `sdk/sdk_kernel.h` for the external agent/algorithm submission surface and `sdk/sdk_decomposer.h` for the decomposer helper surface
+
+## Debug-Only Hooks
+
+- Reflectors and intervention packages are debug-tool features.
+- They may be used by `debugTool` for inspection, preview, and custom editor UI.
+- The external SDK surface does not expose reflector or intervention APIs.
+- If a consumer is building against `sdk`, it should treat those hooks as unavailable by design.
 
 ## Notes
 
@@ -32,3 +40,4 @@ separates intentionally cross-layer code into `src/capabilities`.
 - The same algorithm manifest may optionally create a reflector; reflector creation must also stay manifest-driven rather than descriptor-driven.
 - For the runtime-systems layer, internal window/render headers are not public.
 - For the agent-management layer, the only public interface header is `agent_management/agent_manager.h`.
+- `debugTool` is the debug executable surface. External SDK consumers should use `sdk/sdk_kernel.h` and should not depend on the UI layer.

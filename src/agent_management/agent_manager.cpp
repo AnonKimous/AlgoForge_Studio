@@ -1,5 +1,7 @@
 #include "agent_manager.h"
 
+#include "algorithm_management/algorithm_manager.h"
+
 #define AGENT_MANAGEMENT_LAYER_PUBLIC_FACADE_INCLUDE 1
 #include "agent_management/agent_ticker.h"
 #undef AGENT_MANAGEMENT_LAYER_PUBLIC_FACADE_INCLUDE
@@ -7,13 +9,126 @@
 #include "codec/codec_manager.h"
 
 #include <memory>
+#include <chrono>
+#include <unordered_map>
 #include <utility>
 
 namespace agent_management {
 
+namespace {
+
+struct BuiltAlgorithmMount {
+  agent::AgentAlgorithmCodecGroup group{};
+  std::shared_ptr<algorithm::AlgorithmContainerSet> container_set{};
+  std::string error_message;
+  bool ok{false};
+};
+
+std::string _StandardLayoutKey(const algorithm::AlgorithmContainerSet& container_set) {
+  if (container_set.standard_layout.enabled()) {
+    return container_set.standard_layout.layout_name;
+  }
+  return container_set.algorithm_name;
+}
+
+BuiltAlgorithmMount _BuildAlgorithmMount(
+  const std::string& algorithm_name,
+  const std::vector<agent::AlgorithmResourceBinding>& resource_bindings,
+  const std::vector<agent::AlgorithmDescriptorValue>& descriptor_values,
+  agent::AlgorithmMountMode mount_mode,
+  agent::AlgorithmExecutionPreference execution_preference,
+  std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>* standard_shared_container_sets) {
+  BuiltAlgorithmMount result{};
+
+  std::string error_message;
+  agent::AgentAlgorithmCodecGroup group{};
+  if (!codec::CreateAlgorithmCodecGroupByName(algorithm_name, &group, &error_message)) {
+    result.error_message = error_message.empty()
+      ? ("Failed to create algorithm codec group for '" + algorithm_name + "'.")
+      : std::move(error_message);
+    return result;
+  }
+
+  group.algorithm_profile.algorithm_name = algorithm_name;
+  group.resource_bindings = resource_bindings;
+  group.descriptor_values = descriptor_values;
+  group.mount_mode = mount_mode;
+  group.execution_preference = execution_preference;
+
+  std::shared_ptr<algorithm::AlgorithmContainerSet> container_set_handle;
+  algorithm::AlgorithmContainerSet container_set{};
+  if (!algorithm_management::CreateAlgorithmContainersFromManifestName(
+        group.algorithm_profile.container_manifest_name,
+        &container_set,
+        &error_message)) {
+    result.error_message = error_message.empty()
+      ? ("Failed to create containers for '" + algorithm_name + "'.")
+      : std::move(error_message);
+    return result;
+  }
+
+  const bool use_shared_standard_container =
+    mount_mode == agent::AlgorithmMountMode::StandardContainer &&
+    container_set.standard_layout.enabled() &&
+    standard_shared_container_sets;
+
+  if (use_shared_standard_container) {
+    const std::string shared_key = _StandardLayoutKey(container_set);
+    if (!shared_key.empty()) {
+      auto found = standard_shared_container_sets->find(shared_key);
+      if (found != standard_shared_container_sets->end() && found->second) {
+        container_set_handle = found->second;
+      } else {
+        container_set_handle = std::make_shared<algorithm::AlgorithmContainerSet>(std::move(container_set));
+        (*standard_shared_container_sets)[shared_key] = container_set_handle;
+      }
+    }
+  }
+
+  if (!container_set_handle) {
+    container_set_handle = std::make_shared<algorithm::AlgorithmContainerSet>(std::move(container_set));
+  }
+
+  if (!group.decomposer) {
+    result.error_message = "Algorithm decomposer is unavailable for '" + algorithm_name + "'.";
+    return result;
+  }
+
+  if (!group.decomposer->Decompose(
+        group.algorithm_profile,
+        group.resource_bindings,
+        group.descriptor_values,
+        container_set_handle.get(),
+        &error_message)) {
+    result.error_message = error_message.empty()
+      ? ("Failed to decompose algorithm inputs for '" + algorithm_name + "'.")
+      : std::move(error_message);
+    return result;
+  }
+
+  group.shared_container_set = container_set_handle;
+  result.group = std::move(group);
+  result.container_set = std::move(container_set_handle);
+  result.ok = true;
+  return result;
+}
+
+}  // namespace
+
 struct AgentManager::ManagedAgentEntry {
   std::shared_ptr<agent::Agent> agent{};
   AgentTicker ticker{};
+  std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>> standard_shared_container_sets{};
+  uint32_t limit_fps_flag{120u};
+  bool one_shot_tick_consumed{false};
+  std::chrono::steady_clock::time_point last_tick_time{};
+  bool last_tick_time_valid{false};
+
+  void ResetTickBudget() {
+    one_shot_tick_consumed = false;
+    last_tick_time = {};
+    last_tick_time_valid = false;
+  }
 };
 
 AgentManager::AgentManager() = default;
@@ -26,16 +141,19 @@ bool AgentManager::CreateAgent(AgentCreateSpec spec, size_t* out_agent_index) {
   auto agent_instance = std::make_shared<agent::Agent>();
   agent::AgentInitConfig agent_config{};
   agent_config.agent_name = std::move(spec.agent_name);
+  std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>> standard_shared_container_sets;
   for (const AgentCreateSpec::AlgorithmMountSpec& mount_spec : spec.algorithm_mount_specs) {
-    agent::AgentAlgorithmCodecGroup group{};
-    std::string error_message;
-    if (!codec::CreateAlgorithmCodecGroupByName(mount_spec.algorithm_name, &group, &error_message)) {
+    BuiltAlgorithmMount built_mount = _BuildAlgorithmMount(
+      mount_spec.algorithm_name,
+      mount_spec.resource_bindings,
+      mount_spec.descriptor_values,
+      mount_spec.mount_mode,
+      agent::AlgorithmExecutionPreference::Gpu,
+      &standard_shared_container_sets);
+    if (!built_mount.ok) {
       return false;
     }
-    group.algorithm_profile.algorithm_name = mount_spec.algorithm_name;
-    group.resource_bindings = mount_spec.resource_bindings;
-    group.descriptor_values = mount_spec.descriptor_values;
-    agent_config.algorithm_codec_groups.push_back(std::move(group));
+    agent_config.algorithm_codec_groups.push_back(std::move(built_mount.group));
   }
 
   if (!agent::agent_init(agent_instance.get(), std::move(agent_config))) {
@@ -45,6 +163,9 @@ bool AgentManager::CreateAgent(AgentCreateSpec spec, size_t* out_agent_index) {
   auto managed_agent = std::make_shared<ManagedAgentEntry>();
   managed_agent->agent = std::move(agent_instance);
   managed_agent->ticker.Init(managed_agent->agent);
+  managed_agent->standard_shared_container_sets = std::move(standard_shared_container_sets);
+  managed_agent->limit_fps_flag = spec.limit_fps_flag;
+  managed_agent->ResetTickBudget();
 
   managed_agents_.push_back(std::move(managed_agent));
   if (out_agent_index) {
@@ -75,11 +196,34 @@ void AgentManager::ClearAgents() {
 
 bool AgentManager::Tick(const InputState& input, Vec2 mouse_pixel, float dt_seconds) {
   combined_algorithm_to_agent_signal_ = {};
+  const auto now = std::chrono::steady_clock::now();
   for (std::shared_ptr<ManagedAgentEntry>& managed_agent : managed_agents_) {
     if (!managed_agent) {
       continue;
     }
+    if (managed_agent->limit_fps_flag == 0u) {
+      if (managed_agent->one_shot_tick_consumed) {
+        continue;
+      }
+    } else {
+      const float min_dt_seconds = 1.0f / static_cast<float>(managed_agent->limit_fps_flag);
+      if (managed_agent->last_tick_time_valid) {
+        const float elapsed_seconds =
+          std::chrono::duration<float>(now - managed_agent->last_tick_time).count();
+        if (elapsed_seconds < min_dt_seconds) {
+          continue;
+        }
+      }
+    }
+
     managed_agent->ticker.Tick(input, mouse_pixel, dt_seconds);
+    if (managed_agent->limit_fps_flag == 0u) {
+      managed_agent->one_shot_tick_consumed = true;
+    } else {
+      managed_agent->last_tick_time = now;
+      managed_agent->last_tick_time_valid = true;
+    }
+
     const AlgorithmToAgentSignal& signal = managed_agent->ticker.algorithm_to_agent_signal();
     combined_algorithm_to_agent_signal_.intervention_applied =
       combined_algorithm_to_agent_signal_.intervention_applied || signal.intervention_applied;
@@ -102,7 +246,9 @@ bool AgentManager::AttachAlgorithmToAgent(
   const std::vector<agent::AlgorithmResourceBinding>& resource_bindings,
   const std::vector<agent::AlgorithmDescriptorValue>& descriptor_values,
   size_t* out_algorithm_index,
-  std::string* out_error_message) {
+  std::string* out_error_message,
+  agent::AlgorithmMountMode mount_mode,
+  agent::AlgorithmExecutionPreference execution_preference) {
   auto set_error = [&](const std::string& message) {
     if (out_error_message) {
       *out_error_message = message;
@@ -114,48 +260,20 @@ bool AgentManager::AttachAlgorithmToAgent(
     return false;
   }
 
-  agent::AgentAlgorithmCodecGroup group{};
-  std::string error_message;
-  if (!codec::CreateAlgorithmCodecGroupByName(algorithm_name, &group, &error_message)) {
-    set_error(error_message.empty()
-      ? ("Failed to create algorithm codec group for '" + algorithm_name + "'.")
-      : error_message);
-    return false;
-  }
-
-  group.algorithm_profile.algorithm_name = algorithm_name;
-  group.resource_bindings = resource_bindings;
-  group.descriptor_values = descriptor_values;
-
-  AlgorithmContainerSet container_set{};
-  if (!AlgorithmManager_CreateContainersFromManifestName(
-        group.algorithm_profile.container_manifest_name,
-        &container_set,
-        &error_message)) {
-    set_error(error_message.empty()
-      ? ("Failed to create containers for '" + algorithm_name + "'.")
-      : error_message);
-    return false;
-  }
-
-  if (!group.decomposer) {
-    set_error("Algorithm decomposer is unavailable for '" + algorithm_name + "'.");
-    return false;
-  }
-  if (!group.decomposer->Decompose(
-        group.algorithm_profile,
-        group.resource_bindings,
-        group.descriptor_values,
-        &container_set,
-        &error_message)) {
-    set_error(error_message.empty()
-      ? ("Failed to decompose algorithm inputs for '" + algorithm_name + "'.")
-      : error_message);
+  BuiltAlgorithmMount built_mount = _BuildAlgorithmMount(
+    algorithm_name,
+    resource_bindings,
+    descriptor_values,
+    mount_mode,
+    execution_preference,
+    &managed_agents_[agent_index]->standard_shared_container_sets);
+  if (!built_mount.ok) {
+    set_error(built_mount.error_message);
     return false;
   }
 
   size_t algorithm_index = 0u;
-  if (!managed_agents_[agent_index]->agent->AppendAlgorithmCodecGroup(std::move(group), &algorithm_index)) {
+  if (!managed_agents_[agent_index]->agent->AppendAlgorithmCodecGroup(std::move(built_mount.group), &algorithm_index)) {
     set_error("Failed to append algorithm group to agent.");
     return false;
   }
@@ -171,12 +289,37 @@ bool AgentManager::AttachAlgorithmToAgent(
     set_error("Failed to access algorithm object.");
     return false;
   }
-  *algorithm_object->mutable_container_set() = std::move(container_set);
+  algorithm_object->SetContainerSet(std::move(built_mount.container_set));
   managed_agents_[agent_index]->agent->MarkAlgorithmAssemblyReady(algorithm_index);
+  managed_agents_[agent_index]->ResetTickBudget();
 
   if (out_algorithm_index) {
     *out_algorithm_index = algorithm_index;
   }
+  return true;
+}
+
+bool AgentManager::DetachAlgorithmFromAgent(
+  size_t agent_index,
+  size_t algorithm_index,
+  std::string* out_error_message) {
+  auto set_error = [&](const std::string& message) {
+    if (out_error_message) {
+      *out_error_message = message;
+    }
+  };
+
+  if (agent_index >= managed_agents_.size() || !managed_agents_[agent_index] || !managed_agents_[agent_index]->agent) {
+    set_error("Selected agent is unavailable.");
+    return false;
+  }
+
+  const std::shared_ptr<agent::Agent> managed_agent = managed_agents_[agent_index]->agent;
+  if (!managed_agent->RemoveAlgorithm(algorithm_index)) {
+    set_error("Selected algorithm is unavailable.");
+    return false;
+  }
+  managed_agents_[agent_index]->ResetTickBudget();
   return true;
 }
 

@@ -333,6 +333,22 @@ struct RequestedDescriptorEntry {
   uint32_t array_index{0u};
 };
 
+const agent::AlgorithmReflectionValue* _FindReflectionValue(
+  const agent::AlgorithmReflectionSnapshot& snapshot,
+  const std::string& container_name) {
+  for (const agent::AlgorithmReflectionValue& value : snapshot.variables) {
+    if (value.container_name == container_name) {
+      return &value;
+    }
+  }
+  for (const agent::AlgorithmReflectionValue& value : snapshot.variable_arrays) {
+    if (value.container_name == container_name) {
+      return &value;
+    }
+  }
+  return nullptr;
+}
+
 bool _QueryAlgorithmRequestedBindings(
   const std::string& algorithm_name,
   std::vector<RequestedResourceEntry>* out_resources,
@@ -404,6 +420,7 @@ void _ResizePreservingValues(std::vector<T>* values, size_t new_size) {
 bool _BuildRenderPreviewRequest(
   const agent::Agent& agent,
   size_t algorithm_index,
+  const agent::AgentAlgorithmRuntimeState* runtime_state,
   runtime_systems::RenderPreviewRequest* out_request,
   std::string* out_error_message) {
   if (!out_request) {
@@ -459,6 +476,9 @@ bool _BuildRenderPreviewRequest(
     return false;
   }
 
+  const agent::AlgorithmReflectionSnapshot* reflection_snapshot =
+    runtime_state && runtime_state->reflection_snapshot.valid ? &runtime_state->reflection_snapshot : nullptr;
+
   out_request->stage_name = result_stage->stage_name;
   out_request->vertex_shader_path = _ResolveAlgorithmShaderPath(algorithm_name, result_stage->shader.vertex_shader_path);
   out_request->fragment_shader_path = _ResolveAlgorithmShaderPath(algorithm_name, result_stage->shader.fragment_shader_path);
@@ -485,7 +505,14 @@ bool _BuildRenderPreviewRequest(
       out_request->Clear();
       return false;
     }
-    if (container->element_stride == 0u || container->bytes.empty()) {
+    const agent::AlgorithmReflectionValue* reflected_value = nullptr;
+    if (reflection_snapshot) {
+      reflected_value = _FindReflectionValue(*reflection_snapshot, binding.container_name);
+    }
+
+    const bool has_reflected_bytes = reflected_value && !reflected_value->bytes.empty();
+    const bool has_container_bytes = !container->bytes.empty();
+    if (container->element_stride == 0u || (!has_reflected_bytes && !has_container_bytes)) {
       if (binding.required) {
         if (out_error_message) {
           *out_error_message = "Preview container has no data: " + binding.container_name;
@@ -499,7 +526,11 @@ bool _BuildRenderPreviewRequest(
     runtime_systems::RenderPreviewBuffer preview_buffer{};
     preview_buffer.binding_name = binding.container_name;
     preview_buffer.element_stride = container->element_stride;
-    preview_buffer.bytes.assign(container->bytes.begin(), container->bytes.end());
+    if (has_reflected_bytes && reflected_value->storage_kind == container->storage_kind) {
+      preview_buffer.bytes = reflected_value->bytes;
+    } else {
+      preview_buffer.bytes.assign(container->bytes.begin(), container->bytes.end());
+    }
     out_request->storage_buffers.push_back(std::move(preview_buffer));
 
     const uint32_t buffer_instances = static_cast<uint32_t>(container->bytes.size() / container->element_stride);
@@ -542,6 +573,7 @@ void InteractUiPanel::InitializeAgentComposerDefaults() {
   agent_composer_ui_state_.selected_algorithm_catalog_index = -1;
   agent_composer_ui_state_.selected_agent_index = -1;
   agent_composer_ui_state_.selected_algorithm_index = -1;
+  agent_composer_ui_state_.execution_preference = agent::AlgorithmExecutionPreference::Gpu;
   agent_composer_ui_state_.algorithm_catalog_loaded = false;
   agent_composer_ui_state_.algorithm_catalog_error.clear();
   agent_composer_ui_state_.reflected_algorithm_name.clear();
@@ -712,8 +744,22 @@ void InteractUiPanel::DrawCustomInterventionUi(
 void InteractUiPanel::DrawAgentComposerUi(IInteractUiHost& host) {
   InitializeAgentComposerDefaults();
 
-  ImGui::SeparatorText("Create Agent");
-  ImGui::InputText("Agent Name", agent_composer_ui_state_.agent_name.data(), agent_composer_ui_state_.agent_name.size());
+  ImGui::SeparatorText("Debug Agent");
+  AgentManager& agent_manager = host.agent_manager();
+  ImGui::Text("Built-in agent count: %zu", agent_manager.agent_count());
+  if (!agent_manager.has_agents()) {
+    ImGui::TextUnformatted("Debug agent is unavailable.");
+    return;
+  }
+
+  agent_composer_ui_state_.selected_agent_index = 0;
+  const std::shared_ptr<agent::Agent> selected_agent = agent_manager.agent(0u);
+  ImGui::Text(
+    "Target Agent: %s",
+    selected_agent && !selected_agent->agent_name().empty()
+      ? selected_agent->agent_name().c_str()
+      : "Debug Agent");
+
   if (!agent_composer_ui_state_.algorithm_catalog_entries.empty()) {
     const std::string current_display = (agent_composer_ui_state_.selected_algorithm_catalog_index >= 0 &&
       agent_composer_ui_state_.selected_algorithm_catalog_index <
@@ -738,61 +784,7 @@ void InteractUiPanel::DrawAgentComposerUi(IInteractUiHost& host) {
     ImGui::TextWrapped("%s", agent_composer_ui_state_.algorithm_catalog_error.c_str());
   }
 
-  if (ImGui::Button("Create Agent")) {
-    const std::string agent_name = _TrimCopy(agent_composer_ui_state_.agent_name.data());
-    AgentCreateSpec create_spec{};
-    create_spec.agent_name = agent_name.empty() ? "unnamed_agent" : agent_name;
-
-    size_t created_agent_index = 0u;
-    if (!host.agent_manager().CreateAgent(std::move(create_spec), &created_agent_index)) {
-      host.ui_status_message() = "Failed to create managed agent shell.";
-    } else {
-      agent_composer_ui_state_.selected_agent_index = static_cast<int>(created_agent_index);
-      _CopyTextToBuffer("", &agent_composer_ui_state_.agent_name);
-      host.ui_status_message() = "Agent shell created.";
-    }
-  }
-
   ImGui::SeparatorText("Mount Algorithm");
-  AgentManager& agent_manager = host.agent_manager();
-  if (!agent_manager.has_agents()) {
-    ImGui::TextUnformatted("Create an agent shell first.");
-    return;
-  }
-
-  if (agent_composer_ui_state_.selected_agent_index < 0 ||
-      agent_composer_ui_state_.selected_agent_index >= static_cast<int>(agent_manager.agent_count())) {
-    agent_composer_ui_state_.selected_agent_index = static_cast<int>(agent_manager.agent_count() - 1u);
-  }
-
-  const std::shared_ptr<agent::Agent> selected_agent =
-    agent_manager.agent(static_cast<size_t>(agent_composer_ui_state_.selected_agent_index));
-  const std::string current_agent_display = selected_agent
-    ? (selected_agent->agent_name().empty()
-      ? ("Agent #" + std::to_string(agent_composer_ui_state_.selected_agent_index))
-      : ("Agent #" + std::to_string(agent_composer_ui_state_.selected_agent_index) + "  " +
-          selected_agent->agent_name()))
-    : "Select agent...";
-  if (ImGui::BeginCombo("Target Agent", current_agent_display.c_str())) {
-    for (size_t i = 0; i < agent_manager.agent_count(); ++i) {
-      const std::shared_ptr<agent::Agent> managed_agent = agent_manager.agent(i);
-      if (!managed_agent) {
-        continue;
-      }
-      const std::string label = managed_agent->agent_name().empty()
-        ? ("Agent #" + std::to_string(i))
-        : ("Agent #" + std::to_string(i) + "  " + managed_agent->agent_name());
-      const bool is_selected = static_cast<int>(i) == agent_composer_ui_state_.selected_agent_index;
-      if (ImGui::Selectable(label.c_str(), is_selected)) {
-        agent_composer_ui_state_.selected_agent_index = static_cast<int>(i);
-      }
-      if (is_selected) {
-        ImGui::SetItemDefaultFocus();
-      }
-    }
-    ImGui::EndCombo();
-  }
-
   ImGui::TextUnformatted("Use the Files page to browse folders and drag paths into resource slots.");
 
   const std::string algorithm_name = _TrimCopy(agent_composer_ui_state_.algorithm_name.data());
@@ -859,6 +851,32 @@ void InteractUiPanel::DrawAgentComposerUi(IInteractUiHost& host) {
 
   if (!agent_composer_ui_state_.reflection_error.empty()) {
     ImGui::TextWrapped("%s", agent_composer_ui_state_.reflection_error.c_str());
+  }
+
+  ImGui::SeparatorText("Execution Mode");
+  const char* execution_mode_text = "GPU";
+  switch (agent_composer_ui_state_.execution_preference) {
+    case agent::AlgorithmExecutionPreference::Cpu: execution_mode_text = "CPU"; break;
+    case agent::AlgorithmExecutionPreference::Gpu: execution_mode_text = "GPU"; break;
+  }
+  if (ImGui::BeginCombo("Backend", execution_mode_text)) {
+    const struct Option {
+      const char* label;
+      agent::AlgorithmExecutionPreference value;
+    } options[] = {
+      {"CPU", agent::AlgorithmExecutionPreference::Cpu},
+      {"GPU", agent::AlgorithmExecutionPreference::Gpu},
+    };
+    for (const Option& option : options) {
+      const bool is_selected = agent_composer_ui_state_.execution_preference == option.value;
+      if (ImGui::Selectable(option.label, is_selected)) {
+        agent_composer_ui_state_.execution_preference = option.value;
+      }
+      if (is_selected) {
+        ImGui::SetItemDefaultFocus();
+      }
+    }
+    ImGui::EndCombo();
   }
 
   ImGui::SeparatorText("Requested Resources");
@@ -968,17 +986,8 @@ void InteractUiPanel::DrawAgentComposerUi(IInteractUiHost& host) {
     return;
   }
 
-  if (agent_composer_ui_state_.selected_agent_index < 0) {
-    host.ui_status_message() = "Create an agent shell first.";
-    return;
-  }
   if (algorithm_name.empty()) {
     host.ui_status_message() = "Algorithm name must not be empty.";
-    return;
-  }
-
-  if (static_cast<size_t>(agent_composer_ui_state_.selected_agent_index) >= agent_manager.agent_count()) {
-    host.ui_status_message() = "Selected agent is no longer available.";
     return;
   }
 
@@ -1000,21 +1009,23 @@ void InteractUiPanel::DrawAgentComposerUi(IInteractUiHost& host) {
 
   size_t attached_algorithm_index = 0u;
   std::string attach_error_message;
-  if (!agent_manager.AttachAlgorithmToAgent(
-        static_cast<size_t>(agent_composer_ui_state_.selected_agent_index),
+  if (!host.AttachAlgorithmToAgent(
+        0u,
         algorithm_name,
         resource_bindings,
         descriptor_values,
         &attached_algorithm_index,
-        &attach_error_message)) {
+        &attach_error_message,
+        agent::AlgorithmMountMode::Direct,
+        agent_composer_ui_state_.execution_preference)) {
     host.ui_status_message() = attach_error_message.empty()
-      ? "Failed to attach algorithm to agent."
+      ? "Failed to attach algorithm to built-in agent."
       : std::move(attach_error_message);
     return;
   }
 
   (void)attached_algorithm_index;
-  host.ui_status_message() = "Algorithm attached to agent.";
+  host.ui_status_message() = "Algorithm attached to built-in agent.";
 }
 
 void InteractUiPanel::DrawAgentBindingUi(IInteractUiHost& host) {
@@ -1023,18 +1034,9 @@ void InteractUiPanel::DrawAgentBindingUi(IInteractUiHost& host) {
 
   AgentManager& agent_manager = host.agent_manager();
   ImGui::Text("Managed agents: %zu", agent_manager.agent_count());
-  if (agent_manager.has_agents()) {
-    if (ImGui::Button("Clear All Agents")) {
-      agent_manager.ClearAgents();
-      managed_agent_ui_bindings_.clear();
-      active_custom_ui_slots_.clear();
-      agent_composer_ui_state_.selected_agent_index = -1;
-      host.ui_status_message() = "Cleared all managed agents.";
-    }
-  }
 
   if (!agent_manager.has_agents()) {
-    ImGui::TextUnformatted("No managed agents.");
+    ImGui::TextUnformatted("Built-in debug agent is unavailable.");
     return;
   }
 
@@ -1048,36 +1050,6 @@ void InteractUiPanel::DrawAgentBindingUi(IInteractUiHost& host) {
       ? ("Agent #" + std::to_string(agent_index))
       : ("Agent #" + std::to_string(agent_index) + "  " + managed_agent->agent_name());
     ImGui::SeparatorText(agent_header.c_str());
-    if (ImGui::Button(("Destroy Agent##" + std::to_string(agent_index)).c_str())) {
-      agent_manager.DestroyAgent(agent_index);
-      managed_agent_ui_bindings_.erase(
-        std::remove_if(
-          managed_agent_ui_bindings_.begin(),
-          managed_agent_ui_bindings_.end(),
-          [&](const ManagedAgentInterventionUiBindings& bindings) {
-            return bindings.agent_index == agent_index;
-          }),
-        managed_agent_ui_bindings_.end());
-      for (ManagedAgentInterventionUiBindings& bindings : managed_agent_ui_bindings_) {
-        if (bindings.agent_index > agent_index) {
-          --bindings.agent_index;
-        }
-      }
-      if (agent_composer_ui_state_.selected_agent_index == static_cast<int>(agent_index)) {
-        const size_t remaining_agents = agent_manager.agent_count();
-        if (remaining_agents == 0u) {
-          agent_composer_ui_state_.selected_agent_index = -1;
-        } else if (agent_index >= remaining_agents) {
-          agent_composer_ui_state_.selected_agent_index = static_cast<int>(remaining_agents - 1u);
-        }
-      } else if (agent_composer_ui_state_.selected_agent_index > static_cast<int>(agent_index)) {
-        --agent_composer_ui_state_.selected_agent_index;
-      }
-      active_custom_ui_slots_.clear();
-      host.ui_status_message() = "Destroyed managed agent.";
-      break;
-    }
-
     ImGui::Text("Algorithms: %zu", managed_agent->algorithm_count());
     for (size_t algorithm_index = 0; algorithm_index < managed_agent->algorithm_count(); ++algorithm_index) {
       const agent::AgentAlgorithmCodecGroup* group = managed_agent->algorithm_codec_group(algorithm_index);
@@ -1171,6 +1143,7 @@ void InteractUiPanel::DrawFileBrowserUi(IInteractUiHost&) {
 
   if (file_browser_ui_state_.entry_names.empty()) {
     ImGui::TextUnformatted("No files or folders in this directory.");
+    ImGui::End();
     return;
   }
 
@@ -1230,40 +1203,19 @@ void InteractUiPanel::DrawAgentManagerUi(IInteractUiHost& host) {
   }
   AgentManager& agent_manager = host.agent_manager();
 
-  ImGui::SeparatorText("Create Agent");
-  ImGui::InputText("Agent Name", agent_composer_ui_state_.agent_name.data(), agent_composer_ui_state_.agent_name.size());
-  if (ImGui::Button("Create Agent")) {
-    const std::string agent_name = _TrimCopy(agent_composer_ui_state_.agent_name.data());
-    AgentCreateSpec create_spec{};
-    create_spec.agent_name = agent_name.empty() ? "unnamed_agent" : agent_name;
-
-    size_t created_agent_index = 0u;
-    if (!host.agent_manager().CreateAgent(std::move(create_spec), &created_agent_index)) {
-      host.ui_status_message() = "Failed to create managed agent shell.";
-    } else {
-      agent_composer_ui_state_.selected_agent_index = static_cast<int>(created_agent_index);
-      _CopyTextToBuffer("", &agent_composer_ui_state_.agent_name);
-      host.ui_status_message() = "Agent shell created.";
-    }
-  }
-
-  ImGui::SeparatorText("Managed Agents");
-  ImGui::Text("Managed agents: %zu", agent_manager.agent_count());
+  ImGui::SeparatorText("Debug Agent");
+  ImGui::Text("Built-in agent count: %zu", agent_manager.agent_count());
   if (!agent_manager.has_agents()) {
-    ImGui::TextUnformatted("No managed agents.");
+    ImGui::TextUnformatted("Debug agent is unavailable.");
     ImGui::End();
     return;
   }
 
   if (agent_composer_ui_state_.selected_agent_index < 0 ||
       agent_composer_ui_state_.selected_agent_index >= static_cast<int>(agent_manager.agent_count())) {
-    agent_composer_ui_state_.selected_agent_index = static_cast<int>(agent_manager.agent_count() - 1u);
+    agent_composer_ui_state_.selected_agent_index = 0;
   }
-
-  auto select_agent = [&](size_t agent_index, int algorithm_index) {
-    agent_composer_ui_state_.selected_agent_index = static_cast<int>(agent_index);
-    agent_composer_ui_state_.selected_algorithm_index = algorithm_index;
-  };
+  agent_composer_ui_state_.selected_agent_index = 0;
 
   for (size_t agent_index = 0; agent_index < agent_manager.agent_count(); ++agent_index) {
     const std::shared_ptr<agent::Agent> managed_agent = agent_manager.agent(agent_index);
@@ -1280,27 +1232,21 @@ void InteractUiPanel::DrawAgentManagerUi(IInteractUiHost& host) {
         ImGuiTreeNodeFlags_Leaf |
         ImGuiTreeNodeFlags_NoTreePushOnOpen |
         ImGuiTreeNodeFlags_SpanAvailWidth |
-        ((static_cast<int>(agent_index) == agent_composer_ui_state_.selected_agent_index)
+        ((agent_index == 0u)
           ? ImGuiTreeNodeFlags_Selected
           : 0);
       ImGui::TreeNodeEx(agent_header.c_str(), leaf_flags);
-      if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
-        select_agent(agent_index, -1);
-      }
       ImGui::TextUnformatted("No algorithms.");
     } else {
       ImGuiTreeNodeFlags flags =
         ImGuiTreeNodeFlags_OpenOnArrow |
         ImGuiTreeNodeFlags_OpenOnDoubleClick |
         ImGuiTreeNodeFlags_SpanAvailWidth;
-      if (static_cast<int>(agent_index) == agent_composer_ui_state_.selected_agent_index) {
+      if (agent_index == 0u) {
         flags |= ImGuiTreeNodeFlags_Selected;
       }
 
       const bool opened = ImGui::TreeNodeEx(agent_header.c_str(), flags);
-      if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
-        select_agent(agent_index, 0);
-      }
 
       if (opened) {
         for (size_t algorithm_index = 0; algorithm_index < managed_agent->algorithm_count(); ++algorithm_index) {
@@ -1312,61 +1258,16 @@ void InteractUiPanel::DrawAgentManagerUi(IInteractUiHost& host) {
             ? ("<algorithm " + std::to_string(algorithm_index) + ">")
             : group->algorithm_profile.algorithm_name;
           const bool algorithm_selected =
-            static_cast<int>(agent_index) == agent_composer_ui_state_.selected_agent_index &&
+            agent_index == 0u &&
             static_cast<int>(algorithm_index) == agent_composer_ui_state_.selected_algorithm_index;
           if (ImGui::Selectable(algorithm_name.c_str(), algorithm_selected)) {
-            select_agent(agent_index, static_cast<int>(algorithm_index));
+            agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(algorithm_index);
           }
         }
         ImGui::TreePop();
       }
     }
     ImGui::PopID();
-  }
-
-  ImGui::Separator();
-  if (ImGui::Button("Destroy Selected Agent")) {
-    const int selected_agent_index = agent_composer_ui_state_.selected_agent_index;
-    if (selected_agent_index >= 0 &&
-        static_cast<size_t>(selected_agent_index) < agent_manager.agent_count() &&
-        agent_manager.DestroyAgent(static_cast<size_t>(selected_agent_index))) {
-      managed_agent_ui_bindings_.erase(
-        std::remove_if(
-          managed_agent_ui_bindings_.begin(),
-          managed_agent_ui_bindings_.end(),
-          [&](const ManagedAgentInterventionUiBindings& bindings) {
-            return bindings.agent_index == static_cast<size_t>(selected_agent_index);
-          }),
-        managed_agent_ui_bindings_.end());
-      for (ManagedAgentInterventionUiBindings& bindings : managed_agent_ui_bindings_) {
-        if (bindings.agent_index > static_cast<size_t>(selected_agent_index)) {
-          --bindings.agent_index;
-        }
-      }
-      active_custom_ui_slots_.clear();
-      if (agent_manager.agent_count() == 0u) {
-        agent_composer_ui_state_.selected_agent_index = -1;
-        agent_composer_ui_state_.selected_algorithm_index = -1;
-      } else if (static_cast<size_t>(selected_agent_index) >= agent_manager.agent_count()) {
-        agent_composer_ui_state_.selected_agent_index = static_cast<int>(agent_manager.agent_count() - 1u);
-        agent_composer_ui_state_.selected_algorithm_index =
-          agent_manager.agent(agent_manager.agent_count() - 1u)->algorithm_count() > 0u ? 0 : -1;
-      } else {
-        const std::shared_ptr<agent::Agent> selected_agent = agent_manager.agent(static_cast<size_t>(selected_agent_index));
-        agent_composer_ui_state_.selected_algorithm_index =
-          selected_agent && selected_agent->algorithm_count() > 0u ? 0 : -1;
-      }
-      host.ui_status_message() = "Destroyed managed agent.";
-    }
-  }
-  ImGui::SameLine();
-  if (ImGui::Button("Clear All Agents")) {
-    agent_manager.ClearAgents();
-    managed_agent_ui_bindings_.clear();
-    active_custom_ui_slots_.clear();
-    agent_composer_ui_state_.selected_agent_index = -1;
-    agent_composer_ui_state_.selected_algorithm_index = -1;
-    host.ui_status_message() = "Cleared all managed agents.";
   }
 
   ImGui::End();
@@ -1381,27 +1282,22 @@ void InteractUiPanel::DrawAgentDetailUi(IInteractUiHost& host) {
   }
   AgentManager& agent_manager = host.agent_manager();
   if (!agent_manager.has_agents()) {
-    ImGui::TextUnformatted("Create an agent shell first.");
+    ImGui::TextUnformatted("Built-in debug agent is unavailable.");
     ImGui::End();
     return;
   }
 
-  if (agent_composer_ui_state_.selected_agent_index < 0 ||
-      agent_composer_ui_state_.selected_agent_index >= static_cast<int>(agent_manager.agent_count())) {
-    agent_composer_ui_state_.selected_agent_index = static_cast<int>(agent_manager.agent_count() - 1u);
-  }
-
-  const std::shared_ptr<agent::Agent> selected_agent =
-    agent_manager.agent(static_cast<size_t>(agent_composer_ui_state_.selected_agent_index));
+  agent_composer_ui_state_.selected_agent_index = 0;
+  const std::shared_ptr<agent::Agent> selected_agent = agent_manager.agent(0u);
   if (!selected_agent) {
-    ImGui::TextUnformatted("Selected agent is unavailable.");
+    ImGui::TextUnformatted("Built-in debug agent is unavailable.");
     ImGui::End();
     return;
   }
 
   const std::string selected_agent_header = selected_agent->agent_name().empty()
-    ? ("Agent #" + std::to_string(agent_composer_ui_state_.selected_agent_index))
-    : ("Agent #" + std::to_string(agent_composer_ui_state_.selected_agent_index) + "  " + selected_agent->agent_name());
+    ? "Debug Agent"
+    : ("Debug Agent  " + selected_agent->agent_name());
   ImGui::SeparatorText("Selected Algorithm");
   ImGui::Text("Target Agent: %s", selected_agent_header.c_str());
 
@@ -1415,6 +1311,10 @@ void InteractUiPanel::DrawAgentDetailUi(IInteractUiHost& host) {
   const agent::AgentAlgorithmCodecGroup* selected_group =
     selected_algorithm_index >= 0
       ? selected_agent->algorithm_codec_group(static_cast<size_t>(selected_algorithm_index))
+      : nullptr;
+  const agent::AgentAlgorithmRuntimeState* selected_runtime_state =
+    selected_algorithm_index >= 0
+      ? selected_agent->algorithm_runtime_state(static_cast<size_t>(selected_algorithm_index))
       : nullptr;
   const std::string selected_algorithm_name = selected_group
     ? (selected_group->algorithm_profile.algorithm_name.empty()
@@ -1450,11 +1350,48 @@ void InteractUiPanel::DrawAgentDetailUi(IInteractUiHost& host) {
       }
     }
 
-    const agent::AgentAlgorithmRuntimeState* runtime_state = selected_agent->algorithm_runtime_state(static_cast<size_t>(selected_algorithm_index));
-    if (runtime_state && runtime_state->reflection_snapshot.valid) {
+    if (selected_runtime_state && selected_runtime_state->reflection_snapshot.valid) {
       ImGui::SeparatorText("Reflection Snapshot");
-      ImGui::Text("Variables: %zu", runtime_state->reflection_snapshot.variables.size());
-      ImGui::Text("Variable Arrays: %zu", runtime_state->reflection_snapshot.variable_arrays.size());
+      ImGui::Text("Variables: %zu", selected_runtime_state->reflection_snapshot.variables.size());
+      for (const agent::AlgorithmReflectionValue& value : selected_runtime_state->reflection_snapshot.variables) {
+        if (value.bytes.size() >= sizeof(float) * 3u) {
+          float xyz[3]{};
+          std::memcpy(xyz, value.bytes.data(), sizeof(xyz));
+          ImGui::BulletText(
+            "%s -> %s: (%.3f, %.3f, %.3f)",
+            value.reflection_object_name.c_str(),
+            value.container_name.c_str(),
+            xyz[0],
+            xyz[1],
+            xyz[2]);
+        } else {
+          ImGui::BulletText(
+            "%s -> %s: %zu bytes",
+            value.reflection_object_name.c_str(),
+            value.container_name.c_str(),
+            value.bytes.size());
+        }
+      }
+      ImGui::Text("Variable Arrays: %zu", selected_runtime_state->reflection_snapshot.variable_arrays.size());
+      for (const agent::AlgorithmReflectionValue& value : selected_runtime_state->reflection_snapshot.variable_arrays) {
+        if (value.bytes.size() >= sizeof(float) * 3u) {
+          float xyz[3]{};
+          std::memcpy(xyz, value.bytes.data(), sizeof(xyz));
+          ImGui::BulletText(
+            "%s -> %s: (%.3f, %.3f, %.3f)",
+            value.reflection_object_name.c_str(),
+            value.container_name.c_str(),
+            xyz[0],
+            xyz[1],
+            xyz[2]);
+        } else {
+          ImGui::BulletText(
+            "%s -> %s: %zu bytes",
+            value.reflection_object_name.c_str(),
+            value.container_name.c_str(),
+            value.bytes.size());
+        }
+      }
     }
   } else {
     ImGui::TextUnformatted("Select an algorithm in Agent Manager.");
@@ -1507,6 +1444,32 @@ void InteractUiPanel::DrawAgentDetailUi(IInteractUiHost& host) {
     agent_composer_ui_state_.algorithm_name.size());
   if (!agent_composer_ui_state_.reflection_error.empty()) {
     ImGui::TextWrapped("%s", agent_composer_ui_state_.reflection_error.c_str());
+  }
+
+  ImGui::SeparatorText("Execution Mode");
+  const char* execution_mode_text = "GPU";
+  switch (agent_composer_ui_state_.execution_preference) {
+    case agent::AlgorithmExecutionPreference::Cpu: execution_mode_text = "CPU"; break;
+    case agent::AlgorithmExecutionPreference::Gpu: execution_mode_text = "GPU"; break;
+  }
+  if (ImGui::BeginCombo("Backend", execution_mode_text)) {
+    const struct Option {
+      const char* label;
+      agent::AlgorithmExecutionPreference value;
+    } options[] = {
+      {"CPU", agent::AlgorithmExecutionPreference::Cpu},
+      {"GPU", agent::AlgorithmExecutionPreference::Gpu},
+    };
+    for (const Option& option : options) {
+      const bool is_selected = agent_composer_ui_state_.execution_preference == option.value;
+      if (ImGui::Selectable(option.label, is_selected)) {
+        agent_composer_ui_state_.execution_preference = option.value;
+      }
+      if (is_selected) {
+        ImGui::SetItemDefaultFocus();
+      }
+    }
+    ImGui::EndCombo();
   }
 
   const std::string algorithm_name = _TrimCopy(agent_composer_ui_state_.algorithm_name.data());
@@ -1653,7 +1616,48 @@ void InteractUiPanel::DrawAgentDetailUi(IInteractUiHost& host) {
     }
   }
 
-  if (ImGui::Button("Attach Algorithm")) {
+  ImGui::SeparatorText("Preview And Mount");
+  runtime_systems::RenderPreviewRequest preview_request{};
+  std::string preview_error_message;
+  if (selected_agent) {
+    size_t preview_algorithm_index = 0u;
+    if (selected_algorithm_index >= 0) {
+      preview_algorithm_index = static_cast<size_t>(selected_algorithm_index);
+    }
+    _BuildRenderPreviewRequest(
+      *selected_agent,
+      preview_algorithm_index,
+      selected_runtime_state,
+      &preview_request,
+      &preview_error_message);
+  }
+  if (preview_request.valid) {
+    ImGui::Text("Preview Stage: %s", preview_request.stage_name.c_str());
+    ImGui::Text("Preview Buffers: %zu", preview_request.storage_buffers.size());
+    ImGui::Text("Preview Instances: %u", preview_request.instance_count);
+    host.SetRenderPreviewRequest(preview_request);
+  } else if (!preview_error_message.empty()) {
+    ImGui::TextWrapped("%s", preview_error_message.c_str());
+  } else {
+    ImGui::TextUnformatted("No drawable result-render stage.");
+  }
+
+  const bool submit_preview_clicked = ImGui::Button("Submit Preview");
+  ImGui::SameLine();
+  const bool attach_algorithm_clicked = ImGui::Button("Attach Algorithm");
+
+  if (submit_preview_clicked) {
+    if (preview_request.valid) {
+      host.SetRenderPreviewRequest(preview_request);
+      host.ui_status_message() = "Preview submitted to the renderer.";
+    } else {
+      host.ui_status_message() = preview_error_message.empty()
+        ? "Preview request is invalid."
+        : std::move(preview_error_message);
+    }
+  }
+
+  if (attach_algorithm_clicked) {
     if (algorithm_name.empty()) {
       host.ui_status_message() = "Algorithm name must not be empty.";
     } else {
@@ -1675,19 +1679,63 @@ void InteractUiPanel::DrawAgentDetailUi(IInteractUiHost& host) {
 
       size_t attached_algorithm_index = 0u;
       std::string attach_error_message;
-      if (!agent_manager.AttachAlgorithmToAgent(
-            static_cast<size_t>(agent_composer_ui_state_.selected_agent_index),
+      if (!host.AttachAlgorithmToAgent(
+            0u,
             algorithm_name,
             resource_bindings,
             descriptor_values,
             &attached_algorithm_index,
-            &attach_error_message)) {
+            &attach_error_message,
+            agent::AlgorithmMountMode::Direct,
+            agent_composer_ui_state_.execution_preference)) {
         host.ui_status_message() = attach_error_message.empty()
-          ? "Failed to attach algorithm to agent."
+          ? "Failed to attach algorithm to built-in agent."
           : std::move(attach_error_message);
       } else {
-        (void)attached_algorithm_index;
-        host.ui_status_message() = "Algorithm attached to agent.";
+        agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(attached_algorithm_index);
+        host.ui_status_message() = "Algorithm attached to built-in agent.";
+      }
+    }
+  }
+
+  ImGui::SameLine();
+  const bool reset_algorithm_clicked = ImGui::Button("Reset Selected Algorithm");
+  if (reset_algorithm_clicked) {
+    if (!selected_group || selected_algorithm_index < 0) {
+      host.ui_status_message() = "No algorithm is selected to reset.";
+    } else {
+      const std::string reset_algorithm_name = selected_group->algorithm_profile.algorithm_name;
+      const std::vector<agent::AlgorithmResourceBinding> reset_resource_bindings = selected_group->resource_bindings;
+      const std::vector<agent::AlgorithmDescriptorValue> reset_descriptor_values = selected_group->descriptor_values;
+      const agent::AlgorithmMountMode reset_mount_mode = selected_group->mount_mode;
+      const agent::AlgorithmExecutionPreference reset_execution_preference = selected_group->execution_preference;
+      std::string reset_error_message;
+      if (!host.agent_manager().DetachAlgorithmFromAgent(
+            0u,
+            static_cast<size_t>(selected_algorithm_index),
+            &reset_error_message)) {
+        host.ui_status_message() = reset_error_message.empty()
+          ? "Failed to unload the selected algorithm."
+          : std::move(reset_error_message);
+      } else {
+        size_t reset_attached_algorithm_index = 0u;
+        if (!host.AttachAlgorithmToAgent(
+              0u,
+              reset_algorithm_name,
+              reset_resource_bindings,
+              reset_descriptor_values,
+              &reset_attached_algorithm_index,
+              &reset_error_message,
+              reset_mount_mode,
+              reset_execution_preference)) {
+          agent_composer_ui_state_.selected_algorithm_index = -1;
+          host.ui_status_message() = reset_error_message.empty()
+            ? "Failed to reattach the selected algorithm."
+            : std::move(reset_error_message);
+        } else {
+          agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(reset_attached_algorithm_index);
+          host.ui_status_message() = "Selected algorithm was reset.";
+        }
       }
     }
   }
@@ -1695,90 +1743,103 @@ void InteractUiPanel::DrawAgentDetailUi(IInteractUiHost& host) {
   ImGui::End();
 }
 
+void InteractUiPanel::DrawWindowMenu() {
+  if (!ImGui::BeginMainMenuBar()) {
+    return;
+  }
+
+  if (ImGui::BeginMenu("Window")) {
+    if (ImGui::MenuItem("Show All")) {
+      show_agent_manager_window_ = true;
+      show_agent_detail_window_ = true;
+      show_file_browser_window_ = true;
+      show_render_preview_window_ = true;
+      show_runtime_status_window_ = true;
+    }
+    if (ImGui::MenuItem("Hide All")) {
+      show_agent_manager_window_ = false;
+      show_agent_detail_window_ = false;
+      show_file_browser_window_ = false;
+      show_render_preview_window_ = false;
+      show_runtime_status_window_ = false;
+    }
+    ImGui::Separator();
+    ImGui::MenuItem("Agent Manager", nullptr, &show_agent_manager_window_);
+    ImGui::MenuItem("Algorithm Detail", nullptr, &show_agent_detail_window_);
+    ImGui::MenuItem("Files", nullptr, &show_file_browser_window_);
+    ImGui::MenuItem("Render Preview", nullptr, &show_render_preview_window_);
+    ImGui::MenuItem("Runtime Status", nullptr, &show_runtime_status_window_);
+    ImGui::EndMenu();
+  }
+
+  ImGui::EndMainMenuBar();
+}
+
 void InteractUiPanel::DrawAlgorithmPreviewUi(IInteractUiHost& host) {
-  if (!ImGui::Begin("Render Preview")) {
+  ImGui::SetNextWindowBgAlpha(0.0f);
+  const ImGuiWindowFlags window_flags =
+    ImGuiWindowFlags_NoDecoration |
+    ImGuiWindowFlags_NoBackground |
+    ImGuiWindowFlags_NoScrollbar |
+    ImGuiWindowFlags_NoScrollWithMouse;
+  if (!ImGui::Begin("Render Preview", nullptr, window_flags)) {
     ImGui::End();
     return;
   }
 
-  const AgentManager& agent_manager = host.agent_manager();
-  size_t preview_agent_index = 0u;
-  if (agent_composer_ui_state_.selected_agent_index >= 0 &&
-      static_cast<size_t>(agent_composer_ui_state_.selected_agent_index) < agent_manager.agent_count()) {
-    preview_agent_index = static_cast<size_t>(agent_composer_ui_state_.selected_agent_index);
-  }
-  const std::shared_ptr<agent::Agent> preview_agent = agent_manager.agent(preview_agent_index);
-  runtime_systems::RenderPreviewRequest preview_request{};
-  std::string preview_error_message;
-  if (preview_agent) {
-    size_t preview_algorithm_index = 0u;
-    if (agent_composer_ui_state_.selected_algorithm_index >= 0 &&
-        static_cast<size_t>(agent_composer_ui_state_.selected_algorithm_index) < preview_agent->algorithm_count()) {
-      preview_algorithm_index = static_cast<size_t>(agent_composer_ui_state_.selected_algorithm_index);
+  if (host.has_render_preview_texture()) {
+    const ImVec2 texture_size = host.render_preview_texture_size();
+    const ImVec2 available_size = ImGui::GetContentRegionAvail();
+    float draw_width = texture_size.x;
+    float draw_height = texture_size.y;
+    if (available_size.x > 0.0f && available_size.y > 0.0f && texture_size.x > 0.0f && texture_size.y > 0.0f) {
+      const float scale_x = available_size.x / texture_size.x;
+      const float scale_y = available_size.y / texture_size.y;
+      const float scale = std::min(scale_x, scale_y);
+      if (scale > 0.0f) {
+        draw_width = texture_size.x * scale;
+        draw_height = texture_size.y * scale;
+      }
     }
-    _BuildRenderPreviewRequest(
-      *preview_agent,
-      preview_algorithm_index,
-      &preview_request,
-      &preview_error_message);
+    ImGui::Image(host.render_preview_texture_id(), ImVec2(draw_width, draw_height));
   }
-
-  if (preview_agent) {
-    const std::string agent_label = preview_agent->agent_name().empty()
-      ? ("Agent #" + std::to_string(preview_agent_index))
-      : ("Agent #" + std::to_string(preview_agent_index) + "  " + preview_agent->agent_name());
-    const agent::AgentAlgorithmCodecGroup* preview_group = nullptr;
-    if (agent_composer_ui_state_.selected_algorithm_index >= 0 &&
-        static_cast<size_t>(agent_composer_ui_state_.selected_algorithm_index) < preview_agent->algorithm_count()) {
-      preview_group = preview_agent->algorithm_codec_group(static_cast<size_t>(agent_composer_ui_state_.selected_algorithm_index));
-    }
-    ImGui::Text("Preview Agent: %s", agent_label.c_str());
-    ImGui::Text(
-      "Preview Algorithm: %s",
-      preview_group && !preview_group->algorithm_profile.algorithm_name.empty()
-        ? preview_group->algorithm_profile.algorithm_name.c_str()
-        : "none");
-    if (preview_request.valid) {
-      ImGui::Text("Stage: %s", preview_request.stage_name.c_str());
-      ImGui::Text("Buffers: %zu", preview_request.storage_buffers.size());
-      ImGui::Text("Instances: %u", preview_request.instance_count);
-    } else if (!preview_error_message.empty()) {
-      ImGui::TextWrapped("%s", preview_error_message.c_str());
-    } else {
-      ImGui::TextUnformatted("No drawable result-render stage.");
-    }
-  } else {
-    ImGui::TextUnformatted("No preview agent selected.");
-  }
-
-  host.SetRenderPreviewRequest(std::move(preview_request));
   ImGui::End();
 }
 
 void InteractUiPanel::DrawInteractUi(IInteractUiHost& host) {
-  const InputState& input = host.input();
-  const Vec2 mouse_position = host.mouse_position();
-  host.agent_manager().Tick(input, mouse_position, host.frame_dt_seconds());
+  host.TickManagedAgents();
+
+  DrawWindowMenu();
 
   if (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_DockingEnable) {
     ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(), ImGuiDockNodeFlags_PassthruCentralNode);
   }
 
-  DrawAgentManagerUi(host);
-  DrawAgentDetailUi(host);
-  DrawFileBrowserUi(host);
-  DrawAlgorithmPreviewUi(host);
-
-  if (!ImGui::Begin("Runtime Status")) {
-    ImGui::End();
-    return;
+  if (show_agent_manager_window_) {
+    DrawAgentManagerUi(host);
   }
-  ImGui::Text("Status: %s", host.ui_status_message().empty() ? "ready" : host.ui_status_message().c_str());
-  ImGui::Text("Managed agents: %zu", host.agent_manager().agent_count());
-  ImGui::Text(
-    "Algorithm signal: %s",
-    host.agent_manager().combined_algorithm_to_agent_signal().pause_requested ? "pause requested" : "idle");
-  ImGui::End();
+  if (show_agent_detail_window_) {
+    DrawAgentDetailUi(host);
+  }
+  if (show_file_browser_window_) {
+    DrawFileBrowserUi(host);
+  }
+  if (show_render_preview_window_) {
+    DrawAlgorithmPreviewUi(host);
+  }
+
+  if (show_runtime_status_window_) {
+    if (!ImGui::Begin("Runtime Status")) {
+      ImGui::End();
+      return;
+    }
+    ImGui::Text("Status: %s", host.ui_status_message().empty() ? "ready" : host.ui_status_message().c_str());
+    ImGui::Text("Managed agents: %zu", host.agent_manager().agent_count());
+    ImGui::Text(
+      "Algorithm signal: %s",
+      host.agent_manager().combined_algorithm_to_agent_signal().pause_requested ? "pause requested" : "idle");
+    ImGui::End();
+  }
 }
 
 void InteractUiPanel::Draw(IInteractUiHost& host) {
@@ -1788,6 +1849,11 @@ void InteractUiPanel::Draw(IInteractUiHost& host) {
 void InteractUiPanel::Destroy() {
   agent_composer_ui_state_ = {};
   agent_composer_defaults_initialized_ = false;
+  show_agent_manager_window_ = true;
+  show_agent_detail_window_ = true;
+  show_file_browser_window_ = true;
+  show_render_preview_window_ = true;
+  show_runtime_status_window_ = true;
   managed_agent_ui_bindings_.clear();
   active_custom_ui_slots_.clear();
 }

@@ -35,6 +35,15 @@ bool CreateAlgorithmCodecGroupByName(
     if (plugin_components.runtime_reflector) {
       group.algorithm_reflector = std::move(plugin_components.runtime_reflector);
     }
+    if (!group.algorithm_reflector) {
+      algorithm::AlgorithmReflector runtime_reflector{};
+      if (algorithm_management::TryCreateAlgorithmReflectorFromAlgorithmName(
+            algorithm_name,
+            &runtime_reflector,
+            nullptr)) {
+        group.algorithm_reflector = std::make_shared<algorithm::AlgorithmReflector>(std::move(runtime_reflector));
+      }
+    }
     *out_group = std::move(group);
     if (out_error_message) {
       out_error_message->clear();
@@ -70,7 +79,7 @@ bool CreateAlgorithmCodecGroupByName(
     return false;
   }
   algorithm::AlgorithmReflector runtime_reflector{};
-  if (algorithm_management::AlgorithmManager_TryCreateReflectorFromAlgorithmName(
+  if (algorithm_management::TryCreateAlgorithmReflectorFromAlgorithmName(
         algorithm_name,
         &runtime_reflector,
         nullptr)) {

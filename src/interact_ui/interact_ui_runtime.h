@@ -5,6 +5,7 @@
 #include "runtime_systems/runtime_environment.h"
 
 #include <chrono>
+#include <vector>
 #include <string>
 #include <utility>
 
@@ -20,9 +21,40 @@ class InteractUiRuntime : public IInteractUiHost {
 
   AgentManager& agent_manager() override { return agent_manager_; }
   const AgentManager& agent_manager() const override { return agent_manager_; }
+  bool CreateAgent(AgentCreateSpec spec, size_t* out_agent_index = nullptr) override {
+    return agent_manager_.CreateAgent(std::move(spec), out_agent_index);
+  }
+  bool AttachAlgorithmToAgent(
+    size_t agent_index,
+    const std::string& algorithm_name,
+    const std::vector<agent::AlgorithmResourceBinding>& resource_bindings,
+    const std::vector<agent::AlgorithmDescriptorValue>& descriptor_values,
+    size_t* out_algorithm_index = nullptr,
+    std::string* out_error_message = nullptr,
+    agent::AlgorithmMountMode mount_mode = agent::AlgorithmMountMode::Direct,
+    agent::AlgorithmExecutionPreference execution_preference = agent::AlgorithmExecutionPreference::Gpu) override {
+    return agent_manager_.AttachAlgorithmToAgent(
+      agent_index,
+      algorithm_name,
+      resource_bindings,
+      descriptor_values,
+      out_algorithm_index,
+      out_error_message,
+      mount_mode,
+      execution_preference);
+  }
+  bool TickManagedAgents() override {
+    return agent_manager_.Tick(runtime_environment_.input(), runtime_environment_.MousePosition(), frame_dt_);
+  }
+  void ClearAgents() override {
+    agent_manager_.ClearAgents();
+  }
   const InputState& input() const override { return runtime_environment_.input(); }
   Vec2 mouse_position() const override { return runtime_environment_.MousePosition(); }
   float frame_dt_seconds() const override { return frame_dt_; }
+  bool has_render_preview_texture() const override { return runtime_environment_.HasRenderPreviewTexture(); }
+  ImTextureID render_preview_texture_id() const override { return runtime_environment_.RenderPreviewTextureId(); }
+  ImVec2 render_preview_texture_size() const override { return runtime_environment_.RenderPreviewTextureSize(); }
   void SetRenderPreviewRequest(runtime_systems::RenderPreviewRequest request) override {
     render_preview_request_ = std::move(request);
     runtime_environment_.SetRenderPreviewRequest(render_preview_request_);

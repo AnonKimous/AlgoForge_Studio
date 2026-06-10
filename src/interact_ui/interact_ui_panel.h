@@ -90,6 +90,7 @@ class InteractUiPanel {
       uint32_t array_index{0u};
       float scalar_value{0.0f};
     };
+    agent::AlgorithmExecutionPreference execution_preference{agent::AlgorithmExecutionPreference::Gpu};
     std::vector<interact_ui::AlgorithmCatalogEntry> algorithm_catalog_entries;
     int selected_algorithm_catalog_index{-1};
     int selected_agent_index{-1};
@@ -128,6 +129,7 @@ class InteractUiPanel {
   };
 
   void DrawInteractUi(IInteractUiHost& host);
+  void DrawWindowMenu();
   void DrawAgentComposerUi(IInteractUiHost& host);
   void DrawAgentBindingUi(IInteractUiHost& host);
   void DrawAgentManagerUi(IInteractUiHost& host);
@@ -149,6 +151,11 @@ class InteractUiPanel {
   bool agent_composer_defaults_initialized_{false};
   bool file_browser_defaults_initialized_{false};
   UiPage selected_page_{UiPage::Agents};
+  bool show_agent_manager_window_{true};
+  bool show_agent_detail_window_{true};
+  bool show_file_browser_window_{true};
+  bool show_render_preview_window_{true};
+  bool show_runtime_status_window_{true};
   std::vector<ManagedAgentInterventionUiBindings> managed_agent_ui_bindings_{};
   std::vector<ActiveCustomInterventionUiSlot> active_custom_ui_slots_{};
 };

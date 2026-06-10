@@ -5,6 +5,7 @@
 
 #include <functional>
 #include <memory>
+#include <imgui.h>
 
 namespace runtime_systems {
 
@@ -41,6 +42,9 @@ class RuntimeEnvironment {
   void SetDrawCallback(DrawCallback callback);
   void SetRenderPreviewRequest(RenderPreviewRequest request);
   void SetExecutionSymbols(RuntimeExecutionSymbols execution_symbols);
+  bool HasRenderPreviewTexture() const;
+  ImTextureID RenderPreviewTextureId() const;
+  ImVec2 RenderPreviewTextureSize() const;
   void Destroy();
 
   const InputState& input() const;

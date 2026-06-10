@@ -13,7 +13,7 @@ int main(int argc, char** argv) {
 
     InteractUiRuntime runtime;
     InteractUiPanel ui_panel;
-    if (!runtime.Init("Interact & UI", 1280, 720)) {
+    if (!runtime.Init("debugTool", 1280, 720)) {
       throw std::runtime_error("InteractUiRuntime init failed");
     }
     runtime.runtime_environment().SetDrawCallback([&]() {
@@ -27,7 +27,7 @@ int main(int argc, char** argv) {
     runtime.Destroy();
     return 0;
   } catch (const std::exception& e) {
-    std::cerr << "Editor error: " << e.what() << '\n';
+    std::cerr << "debugTool error: " << e.what() << '\n';
     return 1;
   }
 }

@@ -21,7 +21,7 @@ Use `validationlayer:off` or `vaildlayer:off` to disable it explicitly.
 
 The app opens a Windows named pipe:
 
-`\\.\pipe\min_vulkan_win32_validation_layer`
+`\\.\pipe\debugTool_validation_layer`
 
 Clients connect, send a small request string or script, and read back a JSON response.
 

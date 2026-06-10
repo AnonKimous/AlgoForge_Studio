@@ -21,13 +21,26 @@ class PreviewRenderer {
     VkPhysicalDevice physical_device,
     VkDevice device,
     VkDescriptorPool descriptor_pool,
-    VkRenderPass render_pass,
     VmaAllocator allocator);
   void SetRequest(RenderPreviewRequest request);
-  bool Record(VkCommandBuffer command_buffer, uint32_t width, uint32_t height);
+  bool Record(VkCommandBuffer command_buffer);
+  bool HasTexture() const;
+  VkDescriptorSet PreviewTextureDescriptorSet() const;
+  VkExtent2D PreviewTextureExtent() const;
   void Destroy();
 
  private:
+  struct PreviewTargetResource {
+    VkImage image{VK_NULL_HANDLE};
+    VmaAllocation allocation{VK_NULL_HANDLE};
+    VkImageView view{VK_NULL_HANDLE};
+    VkRenderPass render_pass{VK_NULL_HANDLE};
+    VkFramebuffer framebuffer{VK_NULL_HANDLE};
+    VkDescriptorSet descriptor_set{VK_NULL_HANDLE};
+    VkExtent2D extent{1024u, 1024u};
+    VkFormat format{VK_FORMAT_R8G8B8A8_UNORM};
+  };
+
   struct PreviewBufferResource {
     VkBuffer buffer{VK_NULL_HANDLE};
     VmaAllocation allocation{VK_NULL_HANDLE};
@@ -52,9 +65,12 @@ class PreviewRenderer {
   static std::vector<std::byte> ReadBinaryFile(const std::string& path);
   static std::string ResolveShaderBinaryPath(const std::string& path);
 
+  bool EnsureTarget();
   bool EnsurePipeline();
   bool CreatePipeline();
+  bool CreateTarget();
   void DestroyPipeline();
+  void DestroyTarget();
   bool RecreateBuffers();
   bool UpdateBuffers();
   bool UploadBuffer(
@@ -65,10 +81,10 @@ class PreviewRenderer {
   VkPhysicalDevice physical_device_{VK_NULL_HANDLE};
   VkDevice device_{VK_NULL_HANDLE};
   VkDescriptorPool descriptor_pool_{VK_NULL_HANDLE};
-  VkRenderPass render_pass_{VK_NULL_HANDLE};
   VmaAllocator allocator_{VK_NULL_HANDLE};
 
   RenderPreviewRequest request_{};
+  PreviewTargetResource target_{};
   PreviewPipelineResource pipeline_{};
 };
 

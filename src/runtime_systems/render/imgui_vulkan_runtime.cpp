@@ -1,7 +1,10 @@
 #include "imgui_vulkan_runtime.h"
 
+#include "runtime_systems/algorithm_gpu_context.h"
+
 #include <algorithm>
 #include <cstring>
+#include <cstdint>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -48,7 +51,7 @@ void ImGuiVulkanRuntime::SetupVulkan(const char* app_name, SDL_Window* window) {
 
   VkApplicationInfo app_info{};
   app_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-  app_info.pApplicationName = app_name ? app_name : "Agent Debug UI";
+  app_info.pApplicationName = app_name ? app_name : "debugTool";
   app_info.apiVersion = VK_API_VERSION_1_3;
 
   VkInstanceCreateInfo create_info{};
@@ -103,11 +106,22 @@ void ImGuiVulkanRuntime::SetupVulkan(const char* app_name, SDL_Window* window) {
   queue_create_info.queueCount = 1;
   queue_create_info.pQueuePriorities = &queue_priority;
 
+  VkPhysicalDeviceFeatures available_features{};
+  vkGetPhysicalDeviceFeatures(physical_device_, &available_features);
+  if (!available_features.vertexPipelineStoresAndAtomics) {
+    throw std::runtime_error(
+      "Selected Vulkan device does not support vertexPipelineStoresAndAtomics, so GPU tick cannot write back from vertex shader.");
+  }
+
+  VkPhysicalDeviceFeatures enabled_features{};
+  enabled_features.vertexPipelineStoresAndAtomics = VK_TRUE;
+
   const char* device_extensions[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
   VkDeviceCreateInfo device_create_info{};
   device_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
   device_create_info.queueCreateInfoCount = 1;
   device_create_info.pQueueCreateInfos = &queue_create_info;
+  device_create_info.pEnabledFeatures = &enabled_features;
   device_create_info.enabledExtensionCount = 1;
   device_create_info.ppEnabledExtensionNames = device_extensions;
 
@@ -136,6 +150,16 @@ void ImGuiVulkanRuntime::SetupVulkan(const char* app_name, SDL_Window* window) {
   pool_info.poolSizeCount = static_cast<uint32_t>(sizeof(pool_sizes) / sizeof(pool_sizes[0]));
   pool_info.pPoolSizes = pool_sizes;
   CheckVkResult(vkCreateDescriptorPool(device_, &pool_info, allocator_, &descriptor_pool_));
+
+  AlgorithmGpuContextRegistry::Instance().Set(AlgorithmGpuExecutionContext{
+    .instance = instance_,
+    .physical_device = physical_device_,
+    .device = device_,
+    .queue = queue_,
+    .queue_family = queue_family_,
+    .descriptor_pool = descriptor_pool_,
+    .allocator = vma_allocator_,
+  });
 }
 
 void ImGuiVulkanRuntime::SetupVulkanWindow(SDL_Window* window, int width, int height) {
@@ -189,6 +213,7 @@ void ImGuiVulkanRuntime::CleanupVulkanWindow() {
 }
 
 void ImGuiVulkanRuntime::CleanupVulkan() {
+  AlgorithmGpuContextRegistry::Instance().Clear();
   if (vma_allocator_ != VK_NULL_HANDLE) {
     vmaDestroyAllocator(vma_allocator_);
     vma_allocator_ = VK_NULL_HANDLE;
@@ -234,6 +259,10 @@ bool ImGuiVulkanRuntime::FrameRender(ImDrawData* draw_data) {
   begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   CheckVkResult(vkBeginCommandBuffer(fd->CommandBuffer, &begin_info));
 
+  if (preview_renderer_) {
+    preview_renderer_->Record(fd->CommandBuffer);
+  }
+
   VkRenderPassBeginInfo render_pass_begin_info{};
   render_pass_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
   render_pass_begin_info.renderPass = main_window_.RenderPass;
@@ -244,9 +273,6 @@ bool ImGuiVulkanRuntime::FrameRender(ImDrawData* draw_data) {
   render_pass_begin_info.pClearValues = &main_window_.ClearValue;
   vkCmdBeginRenderPass(fd->CommandBuffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
 
-  if (preview_renderer_) {
-    preview_renderer_->Record(fd->CommandBuffer, main_window_.Width, main_window_.Height);
-  }
   ImGui_ImplVulkan_RenderDrawData(draw_data, fd->CommandBuffer);
 
   vkCmdEndRenderPass(fd->CommandBuffer);
@@ -336,13 +362,31 @@ bool ImGuiVulkanRuntime::Init(SDL_Window* window, const char* app_name) {
   if (!preview_renderer_) {
     preview_renderer_ = std::make_unique<PreviewRenderer>();
   }
-  if (!preview_renderer_->Init(instance_, physical_device_, device_, descriptor_pool_, main_window_.RenderPass, vma_allocator_)) {
+  if (!preview_renderer_->Init(instance_, physical_device_, device_, descriptor_pool_, vma_allocator_)) {
     Destroy();
     return false;
   }
 
   initialized_ = true;
   return true;
+}
+
+bool ImGuiVulkanRuntime::HasRenderPreviewTexture() const {
+  return preview_renderer_ ? preview_renderer_->HasTexture() : false;
+}
+
+ImTextureID ImGuiVulkanRuntime::RenderPreviewTextureId() const {
+  return preview_renderer_
+    ? (ImTextureID)(intptr_t)preview_renderer_->PreviewTextureDescriptorSet()
+    : ImTextureID{};
+}
+
+ImVec2 ImGuiVulkanRuntime::RenderPreviewTextureSize() const {
+  if (!preview_renderer_) {
+    return ImVec2{};
+  }
+  const VkExtent2D extent = preview_renderer_->PreviewTextureExtent();
+  return ImVec2(static_cast<float>(extent.width), static_cast<float>(extent.height));
 }
 
 void ImGuiVulkanRuntime::SetDrawCallback(DrawCallback callback) {
@@ -430,6 +474,13 @@ void ImGuiVulkanRuntime::Destroy() {
     return;
   }
 
+  if (preview_renderer_) {
+    preview_renderer_->Destroy();
+    preview_renderer_.reset();
+  }
+
+  CleanupVulkanWindow();
+
   if (vulkan_backend_initialized_) {
     ImGui_ImplVulkan_Shutdown();
     vulkan_backend_initialized_ = false;
@@ -442,13 +493,6 @@ void ImGuiVulkanRuntime::Destroy() {
     ImGui::DestroyContext();
     imgui_context_created_ = false;
   }
-
-  if (preview_renderer_) {
-    preview_renderer_->Destroy();
-    preview_renderer_.reset();
-  }
-
-  CleanupVulkanWindow();
   CleanupVulkan();
 
   initialized_ = false;

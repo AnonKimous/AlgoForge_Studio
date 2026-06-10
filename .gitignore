@@ -1,8 +1,10 @@
 # Build outputs
 build/
+build_algorithms/
 out/
 bin/
 lib/
+sdk/
 
 # CMake
 CMakeFiles/

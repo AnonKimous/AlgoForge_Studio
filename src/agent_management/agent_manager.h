@@ -11,10 +11,13 @@ namespace agent_management {
 
 struct AgentCreateSpec {
   std::string agent_name;
+  // 0 means "tick once and then hold"; otherwise this is the maximum tick rate in Hz.
+  uint32_t limit_fps_flag{120u};
   struct AlgorithmMountSpec {
     std::string algorithm_name;
     std::vector<agent::AlgorithmResourceBinding> resource_bindings;
     std::vector<agent::AlgorithmDescriptorValue> descriptor_values;
+    agent::AlgorithmMountMode mount_mode{agent::AlgorithmMountMode::Direct};
   };
   std::vector<AlgorithmMountSpec> algorithm_mount_specs;
 };
@@ -59,6 +62,12 @@ class AgentManager {
     const std::vector<agent::AlgorithmResourceBinding>& resource_bindings,
     const std::vector<agent::AlgorithmDescriptorValue>& descriptor_values,
     size_t* out_algorithm_index = nullptr,
+    std::string* out_error_message = nullptr,
+    agent::AlgorithmMountMode mount_mode = agent::AlgorithmMountMode::Direct,
+    agent::AlgorithmExecutionPreference execution_preference = agent::AlgorithmExecutionPreference::Gpu);
+  bool DetachAlgorithmFromAgent(
+    size_t agent_index,
+    size_t algorithm_index,
     std::string* out_error_message = nullptr);
   bool DestroyAgent(size_t agent_index);
   void ClearAgents();

@@ -26,10 +26,13 @@ class ImGuiVulkanRuntime {
  public:
   using DrawCallback = std::function<void()>;
 
-  bool Init(SDL_Window* window, const char* app_name = "Agent Debug UI");
+  bool Init(SDL_Window* window, const char* app_name = "debugTool");
   bool Tick(SDL_Window* window);
   void SetDrawCallback(DrawCallback callback);
   void SetRenderPreviewRequest(RenderPreviewRequest request);
+  bool HasRenderPreviewTexture() const;
+  ImTextureID RenderPreviewTextureId() const;
+  ImVec2 RenderPreviewTextureSize() const;
   void Destroy();
 
  private:

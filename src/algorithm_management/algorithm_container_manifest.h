@@ -35,6 +35,7 @@ struct AlgorithmReflectorManifestItem {
 struct AlgorithmContainerManifest {
   std::string algorithm_name;
   std::string solve_precision{"fp32"};
+  AlgorithmStandardContainerLayout standard_layout{};
   std::vector<AlgorithmContainerManifestItem> variables;
   std::vector<AlgorithmContainerManifestItem> variable_arrays;
   std::vector<AlgorithmReflectorManifestItem> reflectors;

@@ -54,6 +54,49 @@ struct ManifestTemplateCache {
   std::unordered_map<std::string, AlgorithmReflector> reflectors_by_manifest_path;
 };
 
+AlgorithmContainerManifestItem _MakeManifestItem(
+  const std::string& name,
+  AlgorithmContainerStorageKind storage_kind,
+  const std::string& default_precision) {
+  AlgorithmContainerManifestItem item{};
+  item.name = name;
+  item.kind = storage_kind == AlgorithmContainerStorageKind::Array ? "array" : "scalar";
+  item.precision = default_precision;
+  item.count = 1u;
+  item.count_specified = true;
+  return item;
+}
+
+void _AppendStandardLayout(
+  const AlgorithmStandardContainerLayout& layout,
+  const std::string& default_precision,
+  std::vector<AlgorithmContainerManifestItem>* out_variables,
+  std::vector<AlgorithmContainerManifestItem>* out_variable_arrays) {
+  if (!layout.enabled()) {
+    return;
+  }
+
+  if (out_variables) {
+    out_variables->reserve(out_variables->size() + static_cast<size_t>(layout.variable_count));
+    for (uint32_t i = 0; i < layout.variable_count; ++i) {
+      out_variables->push_back(_MakeManifestItem(
+        layout.variable_prefix + std::to_string(i + 1u),
+        AlgorithmContainerStorageKind::TemporaryRegister,
+        default_precision));
+    }
+  }
+
+  if (out_variable_arrays) {
+    out_variable_arrays->reserve(out_variable_arrays->size() + static_cast<size_t>(layout.array_count));
+    for (uint32_t i = 0; i < layout.array_count; ++i) {
+      out_variable_arrays->push_back(_MakeManifestItem(
+        layout.array_prefix + std::to_string(i + 1u),
+        AlgorithmContainerStorageKind::Array,
+        default_precision));
+    }
+  }
+}
+
 std::string _Trim(std::string value) {
   const auto is_space = [](unsigned char ch) { return std::isspace(ch) != 0; };
   value.erase(value.begin(), std::find_if(value.begin(), value.end(), [&](char ch) { return !is_space(static_cast<unsigned char>(ch)); }));
@@ -418,6 +461,31 @@ bool _ParseReflectorSection(
   return true;
 }
 
+bool _ParseStandardLayoutSection(
+  const cJSON* section_object,
+  AlgorithmStandardContainerLayout* out_layout) {
+  if (!out_layout) return false;
+  *out_layout = {};
+  if (!section_object || !cJSON_IsObject(section_object)) {
+    return true;
+  }
+
+  out_layout->layout_name = _GetStringField(section_object, "name", _GetStringField(section_object, "layout_name", ""));
+  out_layout->layout_kind = _GetStringField(section_object, "kind", _GetStringField(section_object, "layout_kind", ""));
+  out_layout->variable_count = _GetUintField(section_object, "variable_count", _GetUintField(section_object, "variables", 0u));
+  out_layout->array_count = _GetUintField(section_object, "array_count", _GetUintField(section_object, "arrays", 0u));
+  out_layout->variable_prefix = _GetStringField(section_object, "variable_prefix", _GetStringField(section_object, "variable_slot_prefix", "v"));
+  out_layout->array_prefix = _GetStringField(section_object, "array_prefix", _GetStringField(section_object, "array_slot_prefix", "a"));
+
+  if (out_layout->variable_prefix.empty()) {
+    out_layout->variable_prefix = "v";
+  }
+  if (out_layout->array_prefix.empty()) {
+    out_layout->array_prefix = "a";
+  }
+  return true;
+}
+
 bool _LoadManifestFromJsonRoot(
   const cJSON* root,
   AlgorithmContainerManifest* out_manifest,
@@ -444,9 +512,27 @@ bool _LoadManifestFromJsonRoot(
 
   out_manifest->algorithm_name = algorithm_name;
   out_manifest->solve_precision = solve_precision;
+  out_manifest->standard_layout = {};
   out_manifest->variables.clear();
   out_manifest->variable_arrays.clear();
   out_manifest->reflectors.clear();
+
+  const cJSON* standard_layout = cJSON_GetObjectItemCaseSensitive(root, "standardLayout");
+  if (!standard_layout) {
+    standard_layout = cJSON_GetObjectItemCaseSensitive(root, "standard_layout");
+  }
+  if (!standard_layout) {
+    standard_layout = cJSON_GetObjectItemCaseSensitive(root, "standardContainer");
+  }
+  if (!standard_layout) {
+    standard_layout = cJSON_GetObjectItemCaseSensitive(root, "standard_container");
+  }
+  if (!_ParseStandardLayoutSection(standard_layout, &out_manifest->standard_layout)) {
+    if (out_error_message) {
+      *out_error_message = "Failed to parse standard container layout.";
+    }
+    return false;
+  }
 
   const cJSON* variables = cJSON_GetObjectItemCaseSensitive(root, "variable");
   const cJSON* variable_arrays = cJSON_GetObjectItemCaseSensitive(root, "variableArray");
@@ -474,13 +560,25 @@ bool _LoadManifestFromJsonRoot(
     if (out_error_message) {
       *out_error_message = "Manifest must contain at least one of 'variable' or 'variableArray'.";
     }
-    return false;
   }
 
   if (variables && !_ParseManifestSection(variables, default_precision, ManifestSection::Variable, &out_manifest->variables)) {
     return false;
   }
   if (variable_arrays && !_ParseManifestSection(variable_arrays, default_precision, ManifestSection::VariableArray, &out_manifest->variable_arrays)) {
+    return false;
+  }
+  if (out_manifest->standard_layout.enabled()) {
+    _AppendStandardLayout(
+      out_manifest->standard_layout,
+      default_precision,
+      &out_manifest->variables,
+      &out_manifest->variable_arrays);
+  }
+  if (out_manifest->variables.empty() && out_manifest->variable_arrays.empty()) {
+    if (out_error_message) {
+      *out_error_message = "Manifest must contain at least one of 'variable', 'variableArray', or 'standardLayout'.";
+    }
     return false;
   }
   if (reflectors && !_ParseReflectorSection(reflectors, &out_manifest->reflectors, out_error_message)) {
@@ -771,6 +869,7 @@ bool CreateAlgorithmContainersFromManifest(
 
   AlgorithmContainerSet container_set{};
   container_set.algorithm_name = manifest.algorithm_name;
+  container_set.standard_layout = manifest.standard_layout;
 
   for (const AlgorithmContainerManifestItem& item : manifest.variables) {
     AlgorithmContainerStorageKind storage_kind = AlgorithmContainerStorageKind::TemporaryRegister;

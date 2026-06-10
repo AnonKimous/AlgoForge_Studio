@@ -1,5 +1,6 @@
 #include "agent.h"
 
+#include <algorithm>
 #include <utility>
 
 namespace agent {
@@ -87,7 +88,8 @@ bool Agent::Init(AgentInitConfig config) {
     AgentAlgorithmRuntimeState runtime_state{};
     runtime_state.algorithm_name = group.algorithm_profile.algorithm_name;
     algorithm_runtime_states_.push_back(std::move(runtime_state));
-    algorithm_objects_.push_back({});
+    algorithm_objects_.emplace_back();
+    algorithm_objects_.back().SetContainerSet(group.shared_container_set);
     algorithm_assembly_states_.push_back(AlgorithmAssemblyState::Pending);
   }
   initialized_ = true;
@@ -102,12 +104,26 @@ bool Agent::AppendAlgorithmCodecGroup(AgentAlgorithmCodecGroup group, size_t* ou
   algorithm_codec_groups_.push_back(std::move(group));
   algorithm_runtime_states_.push_back(AgentAlgorithmRuntimeState{});
   algorithm_runtime_states_.back().algorithm_name = algorithm_codec_groups_.back().algorithm_profile.algorithm_name;
-  algorithm_objects_.push_back({});
+  algorithm_objects_.emplace_back();
+  algorithm_objects_.back().SetContainerSet(algorithm_codec_groups_.back().shared_container_set);
   algorithm_assembly_states_.push_back(AlgorithmAssemblyState::Pending);
 
   if (out_index) {
     *out_index = algorithm_codec_groups_.size() - 1u;
   }
+  return true;
+}
+
+bool Agent::RemoveAlgorithm(size_t index) {
+  if (!initialized_ || index >= algorithm_codec_groups_.size() || index >= algorithm_runtime_states_.size() ||
+      index >= algorithm_objects_.size() || index >= algorithm_assembly_states_.size()) {
+    return false;
+  }
+
+  algorithm_codec_groups_.erase(algorithm_codec_groups_.begin() + static_cast<std::ptrdiff_t>(index));
+  algorithm_runtime_states_.erase(algorithm_runtime_states_.begin() + static_cast<std::ptrdiff_t>(index));
+  algorithm_objects_.erase(algorithm_objects_.begin() + static_cast<std::ptrdiff_t>(index));
+  algorithm_assembly_states_.erase(algorithm_assembly_states_.begin() + static_cast<std::ptrdiff_t>(index));
   return true;
 }
 
@@ -140,11 +156,11 @@ bool Agent::Tick(
   out_result->algorithm_to_agent_signal = {};
   out_result->algorithm_runtime_states.clear();
   out_result->algorithm_runtime_states.reserve(algorithm_codec_groups_.size());
+  algorithm_execution_end_queue_.clear();
 
-  std::vector<AgentAlgorithmRuntimeState> updated_runtime_states;
-  updated_runtime_states.reserve(algorithm_codec_groups_.size());
+  std::vector<AgentAlgorithmRuntimeState> updated_runtime_states(algorithm_codec_groups_.size());
 
-  for (size_t i = 0; i < algorithm_codec_groups_.size(); ++i) {
+  auto process_index = [&](size_t i) {
     const AgentAlgorithmCodecGroup& group = algorithm_codec_groups_[i];
     AgentAlgorithmRuntimeState runtime_state{};
     if (i < algorithm_runtime_states_.size()) {
@@ -159,15 +175,53 @@ bool Agent::Tick(
     const bool allow_tick = i < allow_tick_mask.size() ? allow_tick_mask[i] : true;
     const bool is_ready =
       i < algorithm_assembly_states_.size() && algorithm_assembly_states_[i] == AlgorithmAssemblyState::Ready;
+    const AlgorithmObject* algorithm_object = i < algorithm_objects_.size() ? &algorithm_objects_[i] : nullptr;
     if (allow_tick && is_ready) {
-      if (group.temporaryTest_main_thread_executor && i < algorithm_objects_.size()) {
-        if (!group.temporaryTest_main_thread_executor->temporaryTestExecuteOnMainThread(
+      const bool allow_gpu_execution =
+        group.gpu_symbol &&
+        group.execution_preference == AlgorithmExecutionPreference::Gpu;
+      const bool allow_cpu_execution =
+        group.cpu_symbol &&
+        group.execution_preference == AlgorithmExecutionPreference::Cpu;
+      bool gpu_tick_executed = false;
+      if (allow_gpu_execution && algorithm_object) {
+        std::string gpu_error_message;
+        gpu_tick_executed = algorithm_management::job_gpu::Execute(
+          group,
+          algorithm_objects_[i].mutable_container_set(),
+          context,
+          &gpu_error_message);
+        if (!gpu_tick_executed && !gpu_error_message.empty()) {
+          runtime_state.algorithm_to_agent_signal.stop_requested = true;
+        }
+        if (gpu_tick_executed) {
+          algorithm_execution_end_queue_.push_back(i);
+        }
+      }
+      if (allow_cpu_execution && !gpu_tick_executed && group.temporaryTest_main_thread_executor && algorithm_object) {
+        if (!algorithm_management::job_cpu::Execute(
+              group,
               context,
-              group.algorithm_profile,
               runtime_state.agent_to_algorithm_signal,
               algorithm_objects_[i].mutable_container_set(),
               &runtime_state.algorithm_to_agent_signal,
               &runtime_state.debug_state)) {
+          runtime_state.algorithm_to_agent_signal.stop_requested = true;
+        }
+      }
+      const bool needs_gpu_state_sync =
+        gpu_tick_executed &&
+        algorithm_object &&
+        algorithm_object->container_set() &&
+        (
+          (group.algorithm_reflector && !group.algorithm_reflector->empty()) ||
+          runtime_state.agent_to_algorithm_signal.reflection_collection_requested);
+      if (needs_gpu_state_sync) {
+        std::string gpu_sync_error_message;
+        if (!algorithm_management::job_gpu::Synchronize(
+              group,
+              algorithm_object->mutable_container_set(),
+              &gpu_sync_error_message)) {
           runtime_state.algorithm_to_agent_signal.stop_requested = true;
         }
       }
@@ -177,9 +231,14 @@ bool Agent::Tick(
         runtime_state.debug_state.signals.end(),
         collected_debug_state.signals.begin(),
         collected_debug_state.signals.end());
-      if (runtime_state.agent_to_algorithm_signal.reflection_collection_requested) {
+      const bool has_runtime_reflector = group.algorithm_reflector && !group.algorithm_reflector->empty();
+      if (has_runtime_reflector && algorithm_object && algorithm_object->container_set() &&
+          _CollectReflectionSnapshot(group, *algorithm_object->container_set(), &runtime_state.reflection_snapshot)) {
         runtime_state.algorithm_to_agent_signal.reflection_collection_requested = true;
-        if (_CollectReflectionSnapshot(group, *algorithm_objects_[i].container_set(), &runtime_state.reflection_snapshot)) {
+      } else if (runtime_state.agent_to_algorithm_signal.reflection_collection_requested) {
+        runtime_state.algorithm_to_agent_signal.reflection_collection_requested = true;
+        if (algorithm_object && algorithm_object->container_set() &&
+            _CollectReflectionSnapshot(group, *algorithm_object->container_set(), &runtime_state.reflection_snapshot)) {
           runtime_state.algorithm_to_agent_signal.reflection_collection_requested = true;
         }
       }
@@ -214,10 +273,18 @@ bool Agent::Tick(
       out_result->algorithm_to_agent_signal.reflection_collection_requested ||
       runtime_state.algorithm_to_agent_signal.reflection_collection_requested;
 
-    out_result->algorithm_runtime_states.push_back(runtime_state);
-    updated_runtime_states.push_back(std::move(runtime_state));
+    updated_runtime_states[i] = std::move(runtime_state);
+  };
+
+  for (size_t index = 0; index < algorithm_codec_groups_.size(); ++index) {
+    process_index(index);
   }
 
+  for (const AgentAlgorithmRuntimeState& runtime_state : updated_runtime_states) {
+    out_result->algorithm_runtime_states.push_back(runtime_state);
+  }
+
+  algorithm_execution_end_queue_.clear();
   algorithm_runtime_states_ = std::move(updated_runtime_states);
   return true;
 }
@@ -262,8 +329,11 @@ bool Agent::CollectAlgorithmReflection(size_t index, AlgorithmReflectionSnapshot
     return false;
   }
   const AgentAlgorithmCodecGroup& group = algorithm_codec_groups_[index];
-  const AlgorithmContainerSet& container_set = *algorithm_objects_[index].container_set();
-  return _CollectReflectionSnapshot(group, container_set, out_snapshot);
+  const AlgorithmContainerSet* container_set = algorithm_objects_[index].container_set();
+  if (!container_set) {
+    return false;
+  }
+  return _CollectReflectionSnapshot(group, *container_set, out_snapshot);
 }
 
 void Agent::Destroy() {
@@ -273,6 +343,7 @@ void Agent::Destroy() {
   algorithm_runtime_states_.clear();
   algorithm_objects_.clear();
   algorithm_assembly_states_.clear();
+  algorithm_execution_end_queue_.clear();
 }
 
 }  // namespace agent

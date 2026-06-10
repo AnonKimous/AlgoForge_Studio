@@ -41,10 +41,10 @@ bool RuntimeEnvironment::Init(
 
   try {
     window_ = std::unique_ptr<SdlWindow, SdlWindowDeleter>(
-      new SdlWindow(window_title ? window_title : "Interact & UI", width, height));
+      new SdlWindow(window_title ? window_title : "debugTool", width, height));
     imgui_runtime_ = std::unique_ptr<ImGuiVulkanRuntime, ImGuiVulkanRuntimeDeleter>(
       new ImGuiVulkanRuntime());
-    if (!imgui_runtime_->Init(window_->native_handle().window, window_title ? window_title : "Interact & UI")) {
+    if (!imgui_runtime_->Init(window_->native_handle().window, window_title ? window_title : "debugTool")) {
       Destroy();
       return false;
     }
@@ -80,6 +80,18 @@ void RuntimeEnvironment::SetRenderPreviewRequest(RenderPreviewRequest request) {
 
 void RuntimeEnvironment::SetExecutionSymbols(RuntimeExecutionSymbols execution_symbols) {
   execution_symbols_ = execution_symbols;
+}
+
+bool RuntimeEnvironment::HasRenderPreviewTexture() const {
+  return imgui_runtime_ ? imgui_runtime_->HasRenderPreviewTexture() : false;
+}
+
+ImTextureID RuntimeEnvironment::RenderPreviewTextureId() const {
+  return imgui_runtime_ ? imgui_runtime_->RenderPreviewTextureId() : ImTextureID{};
+}
+
+ImVec2 RuntimeEnvironment::RenderPreviewTextureSize() const {
+  return imgui_runtime_ ? imgui_runtime_->RenderPreviewTextureSize() : ImVec2{};
 }
 
 const InputState& RuntimeEnvironment::input() const {

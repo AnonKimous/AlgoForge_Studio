@@ -11,5 +11,8 @@
       "shape": [3],
       "count": 1
     }
+  },
+  "reflector": {
+    "vertex_position": ["pos"]
   }
 }

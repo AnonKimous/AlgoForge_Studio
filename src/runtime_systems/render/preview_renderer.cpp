@@ -8,6 +8,8 @@
 #include <string>
 #include <utility>
 
+#include <imgui_impl_vulkan.h>
+
 namespace runtime_systems {
 
 namespace {
@@ -69,13 +71,11 @@ bool PreviewRenderer::Init(
   VkPhysicalDevice physical_device,
   VkDevice device,
   VkDescriptorPool descriptor_pool,
-  VkRenderPass render_pass,
   VmaAllocator allocator) {
   instance_ = instance;
   physical_device_ = physical_device;
   device_ = device;
   descriptor_pool_ = descriptor_pool;
-  render_pass_ = render_pass;
   allocator_ = allocator;
   return true;
 }
@@ -84,7 +84,20 @@ void PreviewRenderer::SetRequest(RenderPreviewRequest request) {
   request_ = std::move(request);
   if (!request_.valid) {
     DestroyPipeline();
+    DestroyTarget();
   }
+}
+
+bool PreviewRenderer::HasTexture() const {
+  return target_.descriptor_set != VK_NULL_HANDLE;
+}
+
+VkDescriptorSet PreviewRenderer::PreviewTextureDescriptorSet() const {
+  return target_.descriptor_set;
+}
+
+VkExtent2D PreviewRenderer::PreviewTextureExtent() const {
+  return target_.extent;
 }
 
 bool PreviewRenderer::UploadBuffer(
@@ -131,9 +144,144 @@ bool PreviewRenderer::UploadBuffer(
       buffer_resource->allocation_info.pMappedData,
       source_buffer.bytes.data(),
       source_buffer.bytes.size());
+    CheckVkResult(vmaFlushAllocation(
+      allocator_,
+      buffer_resource->allocation,
+      0u,
+      buffer_resource->size_bytes));
   }
 
   return true;
+}
+
+bool PreviewRenderer::CreateTarget() {
+  if (target_.descriptor_set != VK_NULL_HANDLE) {
+    return true;
+  }
+  if (device_ == VK_NULL_HANDLE || allocator_ == VK_NULL_HANDLE || descriptor_pool_ == VK_NULL_HANDLE) {
+    return false;
+  }
+
+  try {
+    VkImageCreateInfo image_info{};
+    image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    image_info.imageType = VK_IMAGE_TYPE_2D;
+    image_info.format = target_.format;
+    image_info.extent = {target_.extent.width, target_.extent.height, 1u};
+    image_info.mipLevels = 1;
+    image_info.arrayLayers = 1;
+    image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+    image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    image_info.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    VmaAllocationCreateInfo allocation_info{};
+    allocation_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+
+    CheckVkResult(vmaCreateImage(
+      allocator_,
+      &image_info,
+      &allocation_info,
+      &target_.image,
+      &target_.allocation,
+      nullptr));
+
+    VkImageViewCreateInfo view_info{};
+    view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    view_info.image = target_.image;
+    view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    view_info.format = target_.format;
+    view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    view_info.subresourceRange.levelCount = 1;
+    view_info.subresourceRange.layerCount = 1;
+    CheckVkResult(vkCreateImageView(device_, &view_info, nullptr, &target_.view));
+
+    VkAttachmentDescription attachment{};
+    attachment.format = target_.format;
+    attachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    attachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    VkAttachmentReference color_attachment{};
+    color_attachment.attachment = 0;
+    color_attachment.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments = &color_attachment;
+
+    VkRenderPassCreateInfo render_pass_info{};
+    render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    render_pass_info.attachmentCount = 1;
+    render_pass_info.pAttachments = &attachment;
+    render_pass_info.subpassCount = 1;
+    render_pass_info.pSubpasses = &subpass;
+    CheckVkResult(vkCreateRenderPass(device_, &render_pass_info, nullptr, &target_.render_pass));
+
+    VkFramebufferCreateInfo framebuffer_info{};
+    framebuffer_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+    framebuffer_info.renderPass = target_.render_pass;
+    framebuffer_info.attachmentCount = 1;
+    framebuffer_info.pAttachments = &target_.view;
+    framebuffer_info.width = target_.extent.width;
+    framebuffer_info.height = target_.extent.height;
+    framebuffer_info.layers = 1;
+    CheckVkResult(vkCreateFramebuffer(device_, &framebuffer_info, nullptr, &target_.framebuffer));
+
+    target_.descriptor_set = ImGui_ImplVulkan_AddTexture(target_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    if (target_.descriptor_set == VK_NULL_HANDLE) {
+      throw std::runtime_error("ImGui_ImplVulkan_AddTexture returned null descriptor set");
+    }
+    return true;
+  } catch (...) {
+    DestroyTarget();
+    throw;
+  }
+}
+
+void PreviewRenderer::DestroyTarget() {
+  DestroyPipeline();
+  if (device_ == VK_NULL_HANDLE && allocator_ == VK_NULL_HANDLE) {
+    target_ = {};
+    return;
+  }
+
+  if (target_.descriptor_set != VK_NULL_HANDLE) {
+    ImGui_ImplVulkan_RemoveTexture(target_.descriptor_set);
+    target_.descriptor_set = VK_NULL_HANDLE;
+  }
+  if (target_.framebuffer != VK_NULL_HANDLE) {
+    vkDestroyFramebuffer(device_, target_.framebuffer, nullptr);
+    target_.framebuffer = VK_NULL_HANDLE;
+  }
+  if (target_.render_pass != VK_NULL_HANDLE) {
+    vkDestroyRenderPass(device_, target_.render_pass, nullptr);
+    target_.render_pass = VK_NULL_HANDLE;
+  }
+  if (target_.view != VK_NULL_HANDLE) {
+    vkDestroyImageView(device_, target_.view, nullptr);
+    target_.view = VK_NULL_HANDLE;
+  }
+  if (target_.image != VK_NULL_HANDLE) {
+    vmaDestroyImage(allocator_, target_.image, target_.allocation);
+    target_.image = VK_NULL_HANDLE;
+    target_.allocation = VK_NULL_HANDLE;
+  }
+}
+
+bool PreviewRenderer::EnsureTarget() {
+  if (target_.descriptor_set != VK_NULL_HANDLE) {
+    return true;
+  }
+  if (target_.image != VK_NULL_HANDLE || target_.view != VK_NULL_HANDLE || target_.render_pass != VK_NULL_HANDLE) {
+    DestroyTarget();
+  }
+  return CreateTarget();
 }
 
 bool PreviewRenderer::RecreateBuffers() {
@@ -165,6 +313,9 @@ bool PreviewRenderer::CreatePipeline() {
     return false;
   }
   if (request_.storage_buffers.empty()) {
+    return false;
+  }
+  if (!EnsureTarget()) {
     return false;
   }
 
@@ -307,7 +458,7 @@ bool PreviewRenderer::CreatePipeline() {
     pipeline_info.pColorBlendState = &color_blend;
     pipeline_info.pDynamicState = &dynamic_state;
     pipeline_info.layout = pipeline_.pipeline_layout;
-    pipeline_info.renderPass = render_pass_;
+    pipeline_info.renderPass = target_.render_pass;
     pipeline_info.subpass = 0;
 
     CheckVkResult(vkCreateGraphicsPipelines(device_, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &pipeline_.pipeline));
@@ -346,8 +497,11 @@ bool PreviewRenderer::UpdateBuffers() {
   return true;
 }
 
-bool PreviewRenderer::Record(VkCommandBuffer command_buffer, uint32_t width, uint32_t height) {
+bool PreviewRenderer::Record(VkCommandBuffer command_buffer) {
   if (!request_.valid) {
+    return false;
+  }
+  if (!EnsureTarget()) {
     return false;
   }
   if (!EnsurePipeline()) {
@@ -368,6 +522,15 @@ bool PreviewRenderer::Record(VkCommandBuffer command_buffer, uint32_t width, uin
     return false;
   }
 
+  VkDescriptorSetAllocateInfo alloc_info{};
+  alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+  alloc_info.descriptorPool = descriptor_pool_;
+  alloc_info.descriptorSetCount = 1;
+  alloc_info.pSetLayouts = &pipeline_.descriptor_set_layout;
+  if (pipeline_.descriptor_set == VK_NULL_HANDLE) {
+    CheckVkResult(vkAllocateDescriptorSets(device_, &alloc_info, &pipeline_.descriptor_set));
+  }
+
   std::vector<VkDescriptorBufferInfo> buffer_infos;
   buffer_infos.reserve(pipeline_.buffers.size());
   for (const PreviewBufferResource& buffer : pipeline_.buffers) {
@@ -381,7 +544,7 @@ bool PreviewRenderer::Record(VkCommandBuffer command_buffer, uint32_t width, uin
   std::vector<VkWriteDescriptorSet> descriptor_writes;
   descriptor_writes.reserve(buffer_infos.size());
   for (uint32_t i = 0; i < static_cast<uint32_t>(buffer_infos.size()); ++i) {
-    VkWriteDescriptorSet write{};
+    VkWriteDescriptorSet write{}; 
     write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     write.dstSet = pipeline_.descriptor_set;
     write.dstBinding = i;
@@ -390,16 +553,6 @@ bool PreviewRenderer::Record(VkCommandBuffer command_buffer, uint32_t width, uin
     write.descriptorCount = 1;
     write.pBufferInfo = &buffer_infos[i];
     descriptor_writes.push_back(write);
-  }
-
-  VkDescriptorSetAllocateInfo alloc_info{};
-  alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-  alloc_info.descriptorPool = descriptor_pool_;
-  alloc_info.descriptorSetCount = 1;
-  alloc_info.pSetLayouts = &pipeline_.descriptor_set_layout;
-
-  if (pipeline_.descriptor_set == VK_NULL_HANDLE) {
-    CheckVkResult(vkAllocateDescriptorSets(device_, &alloc_info, &pipeline_.descriptor_set));
   }
   if (!descriptor_writes.empty()) {
     vkUpdateDescriptorSets(
@@ -413,15 +566,28 @@ bool PreviewRenderer::Record(VkCommandBuffer command_buffer, uint32_t width, uin
   VkViewport viewport{};
   viewport.x = 0.0f;
   viewport.y = 0.0f;
-  viewport.width = static_cast<float>(width);
-  viewport.height = static_cast<float>(height);
+  viewport.width = static_cast<float>(target_.extent.width);
+  viewport.height = static_cast<float>(target_.extent.height);
   viewport.minDepth = 0.0f;
   viewport.maxDepth = 1.0f;
 
   VkRect2D scissor{};
   scissor.offset = {0, 0};
-  scissor.extent = {width, height};
+  scissor.extent = target_.extent;
 
+  VkRenderPassBeginInfo render_pass_begin_info{};
+  render_pass_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+  render_pass_begin_info.renderPass = target_.render_pass;
+  render_pass_begin_info.framebuffer = target_.framebuffer;
+  render_pass_begin_info.renderArea.extent = target_.extent;
+  VkClearValue clear_value{};
+  clear_value.color.float32[0] = 0.0f;
+  clear_value.color.float32[1] = 0.0f;
+  clear_value.color.float32[2] = 0.0f;
+  clear_value.color.float32[3] = 0.0f;
+  render_pass_begin_info.clearValueCount = 1;
+  render_pass_begin_info.pClearValues = &clear_value;
+  vkCmdBeginRenderPass(command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
   vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_.pipeline);
   vkCmdBindDescriptorSets(
     command_buffer,
@@ -435,6 +601,7 @@ bool PreviewRenderer::Record(VkCommandBuffer command_buffer, uint32_t width, uin
   vkCmdSetViewport(command_buffer, 0, 1, &viewport);
   vkCmdSetScissor(command_buffer, 0, 1, &scissor);
   vkCmdDraw(command_buffer, 4, instance_count, 0, 0);
+  vkCmdEndRenderPass(command_buffer);
   return true;
 }
 
@@ -475,12 +642,12 @@ void PreviewRenderer::DestroyPipeline() {
 
 void PreviewRenderer::Destroy() {
   DestroyPipeline();
+  DestroyTarget();
   request_.Clear();
   instance_ = VK_NULL_HANDLE;
   physical_device_ = VK_NULL_HANDLE;
   device_ = VK_NULL_HANDLE;
   descriptor_pool_ = VK_NULL_HANDLE;
-  render_pass_ = VK_NULL_HANDLE;
   allocator_ = VK_NULL_HANDLE;
 }
 

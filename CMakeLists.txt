@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(min_vulkan_win32 LANGUAGES C CXX)
+project(debugTool LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -19,19 +19,19 @@ endif()
 find_package(Vulkan REQUIRED)
 find_program(GLSLC glslc REQUIRED)
 
-set(DEPS_ROOT "${CMAKE_BINARY_DIR}/_deps" CACHE PATH "Root path for third-party sources and binaries")
+set(DEPS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party" CACHE PATH "Root path for third-party sources")
 
-set(SDL3_INCLUDE_DIR "${DEPS_ROOT}/sdl3-src/include" CACHE PATH "SDL3 include directory")
-set(SDL3_LIBRARY_DEBUG "${DEPS_ROOT}/sdl3-build/Debug/SDL3.lib" CACHE FILEPATH "SDL3 debug import/static library")
-set(SDL3_LIBRARY_RELEASE "${DEPS_ROOT}/sdl3-build/Release/SDL3.lib" CACHE FILEPATH "SDL3 release import/static library")
-set(SDL3_DLL_DEBUG "${DEPS_ROOT}/sdl3-build/Debug/SDL3.dll" CACHE FILEPATH "SDL3 debug runtime DLL")
-set(SDL3_DLL_RELEASE "${DEPS_ROOT}/sdl3-build/Release/SDL3.dll" CACHE FILEPATH "SDL3 release runtime DLL")
+set(SDL3_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/SDL-main/include" CACHE PATH "SDL3 include directory")
+set(SDL3_LIBRARY_DEBUG "D:/VulkanSDK/1.4.341.1/Lib/SDL3.lib" CACHE FILEPATH "SDL3 debug import/static library")
+set(SDL3_LIBRARY_RELEASE "D:/VulkanSDK/1.4.341.1/Lib/SDL3.lib" CACHE FILEPATH "SDL3 release import/static library")
+set(SDL3_DLL_DEBUG "D:/VulkanSDK/1.4.341.1/Bin/SDL3d.dll" CACHE FILEPATH "SDL3 debug runtime DLL")
+set(SDL3_DLL_RELEASE "D:/VulkanSDK/1.4.341.1/Bin/SDL3.dll" CACHE FILEPATH "SDL3 release runtime DLL")
 
-set(EIGEN_INCLUDE_DIR "${DEPS_ROOT}/eigen-src" CACHE PATH "Eigen include directory")
-set(IMGUI_SOURCE_DIR "${DEPS_ROOT}/imgui-src" CACHE PATH "Dear ImGui source directory")
-set(VKB_SOURCE_DIR "${DEPS_ROOT}/vk_bootstrap-src" CACHE PATH "VkBootstrap source directory")
-set(VMA_INCLUDE_DIR "${DEPS_ROOT}/vma-src/include" CACHE PATH "VMA include directory")
-set(SPIRV_REFLECT_SOURCE_DIR "${DEPS_ROOT}/spirv_reflect-src" CACHE PATH "SPIRV-Reflect source directory")
+set(EIGEN_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/eigen" CACHE PATH "Eigen include directory")
+set(IMGUI_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui-1.92.8-docking" CACHE PATH "Dear ImGui source directory")
+set(VKB_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/vkb" CACHE PATH "VkBootstrap source directory")
+set(VMA_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/VulkanMemoryAllocator-3.3.0/include" CACHE PATH "VMA include directory")
+set(SPIRV_REFLECT_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/SPIRV-Reflect-vulkan-sdk-1.4.350.0" CACHE PATH "SPIRV-Reflect source directory")
 
 function(require_file path hint)
   if(NOT EXISTS "${path}")
@@ -70,8 +70,6 @@ require_file("${VKB_SOURCE_DIR}/src/VkBootstrap.cpp" "Set VKB_SOURCE_DIR to a va
 require_file("${VMA_INCLUDE_DIR}/vk_mem_alloc.h" "Set VMA_INCLUDE_DIR to a valid VMA include directory.")
 require_file("${SPIRV_REFLECT_SOURCE_DIR}/spirv_reflect.h" "Set SPIRV_REFLECT_SOURCE_DIR to a valid SPIRV-Reflect source root.")
 require_file("${SPIRV_REFLECT_SOURCE_DIR}/spirv_reflect.c" "Set SPIRV_REFLECT_SOURCE_DIR to a valid SPIRV-Reflect source root.")
-require_file("${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyobjloader/tiny_obj_loader.h" "Pull tinyobjloader into third_party/tinyobjloader.")
-require_file("${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyobjloader/tiny_obj_loader.cc" "Pull tinyobjloader into third_party/tinyobjloader.")
 
 set(CMAKE_HELPER_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated_cmake")
 file(MAKE_DIRECTORY "${CMAKE_HELPER_DIR}")
@@ -90,7 +88,6 @@ file(WRITE "${VKB_COMPAT_INCLUDE_DIR}/vkb/VkBootstrap.h" "#pragma once\n#include
 
 set(PROJECT_INCLUDE_DIRS
   ${CMAKE_CURRENT_SOURCE_DIR}/src
-  ${CMAKE_CURRENT_SOURCE_DIR}/third_party
   ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cjson
   ${SDL3_INCLUDE_DIR}
   ${EIGEN_INCLUDE_DIR}
@@ -107,22 +104,26 @@ set(SDL3_LINK_LIBS
   optimized "${SDL3_LIBRARY_RELEASE}"
 )
 
+file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library" ALGORITHM_MANAGEMENT_MANIFEST_SEARCH_ROOT)
+
 add_library(common_data STATIC
   src/common_data/mesh.cpp
 )
 target_include_directories(common_data PUBLIC ${PROJECT_INCLUDE_DIRS})
 
-add_library(mesh_io STATIC
-  src/capabilities/sidecar/mesh_io.cpp
-  third_party/tinyobjloader/tiny_obj_loader.cc
-)
-target_include_directories(mesh_io PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(mesh_io PUBLIC common_data)
-
-add_library(cjson STATIC
+add_library(algorithm_management STATIC
+  src/algorithm_management/algorithm_container_manifest.cpp
+  src/algorithm_management/job_cpu.cpp
+  src/algorithm_management/job_gpu.cpp
+  ${SPIRV_REFLECT_SOURCE_DIR}/spirv_reflect.c
   third_party/cjson/cJSON.c
 )
-target_include_directories(cjson PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_include_directories(algorithm_management PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_compile_definitions(algorithm_management PRIVATE
+  ALGORITHM_MANAGEMENT_LAYER_INTERNAL_BUILD=1
+  ALGORITHM_MANAGEMENT_MANIFEST_SEARCH_ROOT="${ALGORITHM_MANAGEMENT_MANIFEST_SEARCH_ROOT}"
+)
+target_link_libraries(algorithm_management PUBLIC common_data Vulkan::Vulkan)
 
 add_library(codec STATIC
   src/codec/codec_manager.cpp
@@ -136,39 +137,12 @@ target_include_directories(codec PUBLIC ${PROJECT_INCLUDE_DIRS})
 target_compile_definitions(codec PRIVATE
   ALGORITHM_LIBRARY_RESOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library"
 )
-target_link_libraries(codec PUBLIC common_data PRIVATE algorithm_management cjson)
-
-add_library(temporary_test_line_motion_plugin MODULE
-  src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_plugin.cpp
-)
-target_include_directories(temporary_test_line_motion_plugin PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_compile_definitions(temporary_test_line_motion_plugin PRIVATE
-  ALGORITHM_LIBRARY_PLUGIN_BUILD=1
-  ALGORITHM_LIBRARY_RESOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library"
-)
-target_link_libraries(temporary_test_line_motion_plugin PRIVATE algorithm_management cjson common_data)
-set_target_properties(temporary_test_line_motion_plugin PROPERTIES
-  PREFIX ""
-  OUTPUT_NAME "temporary_test_line_motion"
-  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion"
-  LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion"
-)
-
-file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library" ALGORITHM_MANAGEMENT_MANIFEST_SEARCH_ROOT)
-
-add_library(algorithm_management STATIC
-  src/algorithm_management/algorithm_container_manifest.cpp
-  ${SPIRV_REFLECT_SOURCE_DIR}/spirv_reflect.c
-)
-target_include_directories(algorithm_management PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_compile_definitions(algorithm_management PRIVATE
-  ALGORITHM_MANAGEMENT_LAYER_INTERNAL_BUILD=1
-  ALGORITHM_MANAGEMENT_MANIFEST_SEARCH_ROOT="${ALGORITHM_MANAGEMENT_MANIFEST_SEARCH_ROOT}"
-)
-target_link_libraries(algorithm_management PUBLIC common_data Vulkan::Vulkan cjson)
+target_link_libraries(codec PUBLIC common_data PRIVATE algorithm_management)
 
 add_library(runtime_systems STATIC
   src/runtime_systems/window/sdl_window.cpp
+  src/runtime_systems/algorithm_gpu_context.cpp
+  src/runtime_systems/algorithm_gpu_executor.cpp
   src/runtime_systems/render/vma_impl.cpp
   src/runtime_systems/render/preview_renderer.cpp
   src/runtime_systems/render/imgui_vulkan_runtime.cpp
@@ -187,29 +161,51 @@ target_compile_definitions(runtime_systems PRIVATE RUNTIME_SYSTEMS_LAYER_INTERNA
 target_link_libraries(runtime_systems PUBLIC common_data Vulkan::Vulkan ${SDL3_LINK_LIBS})
 target_link_libraries(algorithm_management PUBLIC runtime_systems)
 
-add_library(agent STATIC
-  src/capabilities/agent/agent.cpp
-)
-target_include_directories(agent PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(agent PUBLIC common_data algorithm_management codec)
-
 add_library(agent_management STATIC
   src/agent_management/agent_ticker.cpp
   src/agent_management/agent_manager.cpp
+  src/capabilities/agent/agent.cpp
 )
 target_include_directories(agent_management PUBLIC ${PROJECT_INCLUDE_DIRS})
 target_compile_definitions(agent_management PRIVATE AGENT_MANAGEMENT_LAYER_INTERNAL_BUILD=1)
-target_link_libraries(agent_management PUBLIC common_data agent)
+target_link_libraries(agent_management PUBLIC common_data algorithm_management codec)
+
+add_library(kernal_all STATIC
+  src/interact_ui/interact_ui_runtime.cpp
+)
+target_include_directories(kernal_all PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_link_libraries(kernal_all PUBLIC common_data agent_management runtime_systems)
 
 add_library(interact_ui STATIC
   src/interact_ui/interact_ui_panel.cpp
-  src/interact_ui/interact_ui_runtime.cpp
 )
 target_include_directories(interact_ui PUBLIC ${PROJECT_INCLUDE_DIRS})
 target_compile_definitions(interact_ui PRIVATE
   PROJECT_DATA_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/data"
 )
 target_link_libraries(interact_ui PUBLIC agent_management runtime_systems codec)
+
+add_library(sdk STATIC
+  src/sdk/sdk_kernel.cpp
+)
+target_include_directories(sdk PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_link_libraries(sdk PUBLIC agent_management codec)
+
+set(SDK_PACKAGE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/sdk")
+set(SDK_PACKAGE_INCLUDE_DIR "${SDK_PACKAGE_ROOT}/include")
+
+add_custom_command(TARGET sdk POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E make_directory "${SDK_PACKAGE_INCLUDE_DIR}"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/sdk/sdk_kernel.h"
+    "${SDK_PACKAGE_INCLUDE_DIR}/sdk_kernel.h"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "$<TARGET_FILE:sdk>"
+    "${SDK_PACKAGE_ROOT}/$<TARGET_FILE_NAME:sdk>"
+  VERBATIM
+)
+
+option(BUILD_DEBUG_TOOL_SAMPLE_PLUGIN "Build the temporary sample algorithm plugin." OFF)
 
 set(SHADER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
 set(SHADER_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/shaders)
@@ -225,49 +221,83 @@ add_custom_command(
 )
 
 add_custom_command(
-  OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.vert.spv
-  COMMAND ${GLSLC} -o ${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.vert.spv
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.vert
-  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.vert
+  OUTPUT
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_gpu_tick.vert.spv
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_gpu_tick.frag.spv
+  COMMAND ${GLSLC} -o
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_gpu_tick.vert.spv"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_gpu_tick.vert"
+  COMMAND ${GLSLC} -o
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_gpu_tick.frag.spv"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_gpu_tick.frag"
+  DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_gpu_tick.vert"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_gpu_tick.frag"
   VERBATIM
 )
 
-add_custom_command(
-  OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.frag.spv
-  COMMAND ${GLSLC} -o ${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.frag.spv
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.frag
-  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.frag
-  VERBATIM
+add_custom_target(temporary_test_line_motion_gpu_tick_shaders DEPENDS
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_gpu_tick.vert.spv"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_gpu_tick.frag.spv"
 )
 
-add_custom_target(shaders DEPENDS
-  ${SHADER_OUTPUT_DIR}/physics_convolution.comp.spv
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.vert.spv
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.frag.spv
+if(BUILD_DEBUG_TOOL_SAMPLE_PLUGIN)
+  add_library(temporary_test_line_motion_plugin MODULE
+    src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_plugin.cpp
+  )
+  target_include_directories(temporary_test_line_motion_plugin PUBLIC ${PROJECT_INCLUDE_DIRS})
+  target_compile_definitions(temporary_test_line_motion_plugin PRIVATE
+    ALGORITHM_LIBRARY_PLUGIN_BUILD=1
+    ALGORITHM_LIBRARY_RESOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library"
+  )
+  target_link_libraries(temporary_test_line_motion_plugin PRIVATE algorithm_management codec common_data)
+  set_target_properties(temporary_test_line_motion_plugin PROPERTIES
+    PREFIX ""
+    OUTPUT_NAME "temporary_test_line_motion"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion"
+  )
+
+  add_custom_command(TARGET temporary_test_line_motion_plugin POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion"
+    COMMAND ${GLSLC} -o
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.vert.spv"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.vert"
+    COMMAND ${GLSLC} -o
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.frag.spv"
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.frag"
+    VERBATIM
+  )
+endif()
+
+add_executable(debugTool WIN32
+  src/debug_tool/main.cpp
 )
 
-add_executable(min_vulkan_win32 WIN32
-  src/app_orchestration/main.cpp
-)
-
-add_dependencies(min_vulkan_win32 shaders)
-add_dependencies(min_vulkan_win32 temporary_test_line_motion_plugin)
-
-target_link_libraries(min_vulkan_win32 PRIVATE
+target_link_libraries(debugTool PRIVATE
   interact_ui
+  kernal_all
   common_data
 )
+add_dependencies(debugTool temporary_test_line_motion_gpu_tick_shaders)
 
-target_compile_definitions(min_vulkan_win32 PRIVATE
+target_compile_definitions(debugTool PRIVATE
   WIN32_LEAN_AND_MEAN
   NOMINMAX
   SHADER_PHYSICS_CONV_PATH="${SHADER_PHYSICS_CONV_PATH}"
 )
 
 if(WIN32)
-  target_link_libraries(min_vulkan_win32 PRIVATE advapi32 user32 gdi32 shell32)
+  target_link_libraries(debugTool PRIVATE advapi32 user32 gdi32 shell32)
 
-  add_custom_command(TARGET min_vulkan_win32 PRE_BUILD
+  add_custom_command(TARGET debugTool POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${SHADER_OUTPUT_DIR}"
+    COMMAND ${GLSLC} -o "${SHADER_OUTPUT_DIR}/physics_convolution.comp.spv" "${SHADER_DIR}/physics_convolution.comp"
+    VERBATIM
+  )
+
+  add_custom_command(TARGET debugTool PRE_BUILD
     COMMAND ${CMAKE_COMMAND}
       "-DREQUIRED_FILE=$<IF:$<CONFIG:Debug>,${SDL3_LIBRARY_DEBUG},${SDL3_LIBRARY_RELEASE}>"
       "-DHINT_TEXT=$<IF:$<CONFIG:Debug>,Provide the SDL3 Debug library for Debug builds.,Provide the SDL3 Release library for non-Debug builds.>"
@@ -278,9 +308,9 @@ if(WIN32)
       -P "${CMAKE_HELPER_DIR}/require_generated_file.cmake"
   )
 
-  add_custom_command(TARGET min_vulkan_win32 POST_BUILD
+  add_custom_command(TARGET debugTool POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
     "$<IF:$<CONFIG:Debug>,${SDL3_DLL_DEBUG},${SDL3_DLL_RELEASE}>"
-    "$<TARGET_FILE_DIR:min_vulkan_win32>"
+    "$<TARGET_FILE_DIR:debugTool>"
   )
 endif()

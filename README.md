@@ -4,7 +4,10 @@ This project is a layered Vulkan + SDL3 sandbox for agent-driven physics and ren
 
 ## Runtime Model
 
-- `interact_ui` is the interaction host plus the thin editor UI panel.
+- `debugTool` is the debug executable.
+- `interact_ui` is the editor UI surface.
+- `kernal_all` is the non-UI debug host backend.
+- `sdk` is the external agent/algorithm submission surface.
 - An `agent` is the unit that carries algorithm packages, solver metadata, and intervention state.
 - The current default workflow is: choose resource descriptors -> keep the draft prefilled -> create an agent -> run immediately.
 
@@ -25,16 +28,23 @@ This project is a layered Vulkan + SDL3 sandbox for agent-driven physics and ren
 - `capabilities/sidecar` hosts optional sidecar capabilities such as mesh import/export.
 - `agent_management` owns the runtime path for creating agents, keeping all created agents, and ticking them.
 - `interact_ui` provides the manual agent composer and live debug UI panel without keeping a mesh resident in app state.
-- `app_orchestration` is the executable entry point.
+- `debugTool` is the executable entry point for interactive debugging.
+- `sdk` exposes the external agent/algorithm submission entry points.
 
 ## Execution Workflow
 
-- The interact UI creates agents from resource descriptors and algorithm bindings.
+- The interact UI and debug tool create agents from resource descriptors and algorithm bindings.
 - The project does not yet have a formal algorithm execution engine.
 - Current algorithm execution is still a temporary bring-up path: the main thread temporarily executes algorithm work through explicitly marked `temporaryTest` hooks.
 - Physics owns the evolving algorithm-side state.
 - Rendering reads the current algorithm-side data to draw points and edges.
 - The default preset is prefilled so the user only needs to create the agent to start work.
+
+## SDK Boundary
+
+- External SDK users should include `src/sdk/sdk_kernel.h`.
+- The SDK should not create UI.
+- The SDK should not touch reflector or intervention hooks.
 
 ## Agent Composition
 

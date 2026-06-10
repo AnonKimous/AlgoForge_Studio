@@ -58,11 +58,29 @@ struct AgentAlgorithmRuntimeState {
 
 class AlgorithmObject {
  public:
-  AlgorithmContainerSet* mutable_container_set() { return &container_set_; }
-  const AlgorithmContainerSet* container_set() const { return &container_set_; }
+  AlgorithmObject() : container_set_(std::make_shared<AlgorithmContainerSet>()) {}
+
+  AlgorithmContainerSet* mutable_container_set() {
+    EnsureContainerSet();
+    return container_set_.get();
+  }
+  const AlgorithmContainerSet* container_set() const {
+    return container_set_.get();
+  }
+  const std::shared_ptr<AlgorithmContainerSet>& shared_container_set() const { return container_set_; }
+  void SetContainerSet(std::shared_ptr<AlgorithmContainerSet> container_set) {
+    container_set_ = std::move(container_set);
+    EnsureContainerSet();
+  }
 
  private:
-  AlgorithmContainerSet container_set_{};
+  void EnsureContainerSet() {
+    if (!container_set_) {
+      container_set_ = std::make_shared<AlgorithmContainerSet>();
+    }
+  }
+
+  std::shared_ptr<AlgorithmContainerSet> container_set_{};
 };
 
 enum class AlgorithmAssemblyState {
@@ -95,6 +113,7 @@ class Agent {
  public:
   bool Init(AgentInitConfig config);
   bool AppendAlgorithmCodecGroup(AgentAlgorithmCodecGroup group, size_t* out_index = nullptr);
+  bool RemoveAlgorithm(size_t index);
   void RefreshInterventionSignals(const AgentTickContext& context);
   bool Tick(
     const AgentTickContext& context,
@@ -149,6 +168,7 @@ class Agent {
   std::vector<AgentAlgorithmRuntimeState> algorithm_runtime_states_{};
   std::vector<AlgorithmObject> algorithm_objects_{};
   std::vector<AlgorithmAssemblyState> algorithm_assembly_states_{};
+  std::vector<size_t> algorithm_execution_end_queue_{};
 };
 
 inline bool agent_init(Agent* agent_instance, AgentInitConfig config) {

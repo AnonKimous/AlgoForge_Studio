@@ -1,11 +1,5 @@
 {
-  "required_resources": [
-    {
-      "name": "mesh",
-      "kind": "mesh",
-      "required": true
-    }
-  ],
+  "required_resources": [],
   "descriptor_to_container": [
     {
       "descriptor": "v1",
