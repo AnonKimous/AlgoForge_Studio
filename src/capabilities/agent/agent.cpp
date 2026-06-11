@@ -175,7 +175,7 @@ bool Agent::Tick(
     const bool allow_tick = i < allow_tick_mask.size() ? allow_tick_mask[i] : true;
     const bool is_ready =
       i < algorithm_assembly_states_.size() && algorithm_assembly_states_[i] == AlgorithmAssemblyState::Ready;
-    const AlgorithmObject* algorithm_object = i < algorithm_objects_.size() ? &algorithm_objects_[i] : nullptr;
+    AlgorithmObject* algorithm_object = i < algorithm_objects_.size() ? &algorithm_objects_[i] : nullptr;
     if (allow_tick && is_ready) {
       const bool allow_gpu_execution =
         group.gpu_symbol &&

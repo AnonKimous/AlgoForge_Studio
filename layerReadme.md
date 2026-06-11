@@ -94,6 +94,9 @@ src/
 │     └─ README.md
 ├─ common_data/
 ├─ codec/
+│  ├─ codec_manager.h
+│  ├─ codec_intervention.h
+│  └─ codec_protocol.h
 ├─ runtime_systems/
 ├─ kernal_all/
 ├─ sdk/
@@ -104,7 +107,7 @@ src/
 ## Public Interfaces
 
 - `common_data`: specific headers or `common_data/common_data.h`
-- `codec`: `codec/codec_manager.h`
+- `codec`: `codec/codec_manager.h` and `codec/codec_intervention.h`
 - `algorithm_management`: `algorithm_management/algorithm_manager.h`
 - `runtime_systems`: `runtime_systems/runtime_environment.h`
 - `kernal_all`: no public interface; it is an internal debug backend target

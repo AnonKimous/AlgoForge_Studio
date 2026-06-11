@@ -9,7 +9,7 @@
 #include <SDL3/SDL.h>
 #include <sstream>
 
-#include "codec/codec_manager.h"
+#include "codec/codec_protocol.h"
 #include "cJSON.h"
 
 namespace interact_ui {

@@ -1023,6 +1023,13 @@ bool AlgorithmGpuExecutor::ExecuteGpuTick(
   return AlgorithmGpuExecutorImpl::Instance().ExecuteGpuTick(group, container_set, context, out_error_message);
 }
 
+bool AlgorithmGpuExecutor::SynchronizeGpuTickState(
+  const agent::AgentAlgorithmCodecGroup& group,
+  algorithm::AlgorithmContainerSet* container_set,
+  std::string* out_error_message) {
+  return AlgorithmGpuExecutorImpl::Instance().SynchronizeGpuTickState(group, container_set, out_error_message);
+}
+
 bool TryExecuteGpuTick(
   const agent::AgentAlgorithmCodecGroup& group,
   algorithm::AlgorithmContainerSet* container_set,

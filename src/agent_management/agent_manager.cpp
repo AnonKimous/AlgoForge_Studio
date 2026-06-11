@@ -6,7 +6,7 @@
 #include "agent_management/agent_ticker.h"
 #undef AGENT_MANAGEMENT_LAYER_PUBLIC_FACADE_INCLUDE
 
-#include "codec/codec_manager.h"
+#include "codec/codec_protocol.h"
 
 #include <memory>
 #include <chrono>
