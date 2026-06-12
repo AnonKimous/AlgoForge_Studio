@@ -29,6 +29,7 @@ class IInteractUiHost {
     agent::AlgorithmExecutionPreference execution_preference = agent::AlgorithmExecutionPreference::Gpu) = 0;
   virtual bool TickManagedAgents() = 0;
   virtual void ClearAgents() = 0;
+  virtual void ClearGpuExecutors() = 0;
 
   virtual const InputState& input() const = 0;
   virtual Vec2 mouse_position() const = 0;
@@ -36,6 +37,7 @@ class IInteractUiHost {
   virtual bool has_render_preview_texture() const = 0;
   virtual ImTextureID render_preview_texture_id() const = 0;
   virtual ImVec2 render_preview_texture_size() const = 0;
+  virtual void SetRenderPreviewExtent(ImVec2 extent) = 0;
   virtual void SetRenderPreviewRequest(runtime_systems::RenderPreviewRequest request) = 0;
 
   virtual std::string& ui_status_message() = 0;

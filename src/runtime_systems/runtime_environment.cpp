@@ -2,6 +2,7 @@
 
 #include <SDL3/SDL.h>
 
+#include "runtime_systems/algorithm_gpu_executor.h"
 #include "runtime_systems/render/imgui_vulkan_runtime.h"
 #include "runtime_systems/window/sdl_window.h"
 
@@ -75,6 +76,18 @@ void RuntimeEnvironment::SetDrawCallback(DrawCallback callback) {
 void RuntimeEnvironment::SetRenderPreviewRequest(RenderPreviewRequest request) {
   if (imgui_runtime_) {
     imgui_runtime_->SetRenderPreviewRequest(std::move(request));
+  }
+}
+
+void RuntimeEnvironment::SetRenderPreviewExtent(ImVec2 extent) {
+  if (imgui_runtime_) {
+    imgui_runtime_->SetRenderPreviewExtent(extent);
+  }
+}
+
+void RuntimeEnvironment::ClearGpuExecutors() {
+  if (imgui_runtime_) {
+    imgui_runtime_->ClearGpuExecutors();
   }
 }
 

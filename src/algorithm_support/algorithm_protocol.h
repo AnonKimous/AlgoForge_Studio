@@ -15,7 +15,7 @@ class IAlgorithmPackageSupport;
 class IAlgorithmPackageDecomposer;
 class IAlgorithmIntervention;
 class IAlgorithmtemporaryTestMainThreadExecutor;
-struct AgentAlgorithmSupportGroup;
+class AlgorithmObject;
 }  // namespace agent
 
 namespace algorithm_support {
@@ -101,9 +101,9 @@ bool CreateAlgorithmInterventionByName(
   std::shared_ptr<agent::IAlgorithmIntervention>* out_intervention,
   std::string* out_error_message = nullptr);
 
-bool CreateAlgorithmSupportGroupFromLocation(
+bool CreateAlgorithmObjectFromLocation(
   const algorithm::AlgorithmPackageLocation& package_location,
-  agent::AgentAlgorithmSupportGroup* out_group,
+  agent::AlgorithmObject* out_group,
   std::string* out_error_message = nullptr);
 
 }  // namespace algorithm_support

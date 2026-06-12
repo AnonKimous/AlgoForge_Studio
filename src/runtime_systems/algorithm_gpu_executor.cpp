@@ -195,7 +195,7 @@ class AlgorithmGpuExecutorImpl {
   }
 
   bool ExecuteGpuTick(
-    const agent::AgentAlgorithmSupportGroup& group,
+    const agent::AlgorithmObject& object,
     algorithm::AlgorithmContainerSet* container_set,
     const agent::AgentTickContext& context,
     std::string* out_error_message) {
@@ -203,14 +203,14 @@ class AlgorithmGpuExecutorImpl {
     if (!container_set) {
       _ThrowGpuTickError("AlgorithmContainerSet pointer is null.", out_error_message);
     }
-    if (!group.intervention) {
+    if (!object.intervention) {
       _ThrowGpuTickError(
         "GPU tick is unavailable because the algorithm has no intervention package.",
         out_error_message);
     }
 
     std::vector<agent::AlgorithmInterventionStageSpec> stage_specs;
-    if (!group.intervention->GetInterventionStageSpecs(&stage_specs) || stage_specs.empty()) {
+    if (!object.intervention->GetInterventionStageSpecs(&stage_specs) || stage_specs.empty()) {
       _ThrowGpuTickError(
         "GPU tick is unavailable because no intervention stages were exposed.",
         out_error_message);
@@ -248,15 +248,15 @@ class AlgorithmGpuExecutorImpl {
       }
 
       const std::string shader_key =
-        _StageShaderKey(group.algorithm_profile.algorithm_name, *gpu_stage, gpu_stage->used_algorithm_containers.size());
+        _StageShaderKey(object.algorithm_profile.algorithm_name, *gpu_stage, gpu_stage->used_algorithm_containers.size());
       GpuPipelineResource* pipeline =
-        _GetOrCreatePipeline(group.algorithm_profile.algorithm_name, shader_key, *gpu_stage);
+        _GetOrCreatePipeline(object.algorithm_profile.algorithm_name, shader_key, *gpu_stage);
       if (!pipeline) {
         _ThrowGpuTickError("Failed to create GPU pipeline.", out_error_message);
       }
 
       const std::string execution_state_key =
-        _ExecutionStateKey(group.algorithm_profile.algorithm_name, shader_key, container_set);
+        _ExecutionStateKey(object.algorithm_profile.algorithm_name, shader_key, container_set);
       auto state_it = execution_state_cache_.find(execution_state_key);
       if (state_it == execution_state_cache_.end()) {
         state_it = execution_state_cache_.emplace(execution_state_key, GpuExecutionState{}).first;
@@ -430,20 +430,20 @@ class AlgorithmGpuExecutorImpl {
   }
 
   bool SynchronizeGpuTickState(
-    const agent::AgentAlgorithmSupportGroup& group,
+    const agent::AlgorithmObject& object,
     algorithm::AlgorithmContainerSet* container_set,
     std::string* out_error_message) {
     if (!container_set) {
       _ThrowGpuTickError("AlgorithmContainerSet pointer is null.", out_error_message);
     }
-    if (!group.intervention) {
+    if (!object.intervention) {
       _ThrowGpuTickError(
         "GPU tick synchronization is unavailable because the algorithm has no intervention package.",
         out_error_message);
     }
 
     std::vector<agent::AlgorithmInterventionStageSpec> stage_specs;
-    if (!group.intervention->GetInterventionStageSpecs(&stage_specs) || stage_specs.empty()) {
+    if (!object.intervention->GetInterventionStageSpecs(&stage_specs) || stage_specs.empty()) {
       _ThrowGpuTickError(
         "GPU tick synchronization is unavailable because no intervention stages were exposed.",
         out_error_message);
@@ -463,9 +463,9 @@ class AlgorithmGpuExecutorImpl {
     }
 
     const std::string shader_key =
-      _StageShaderKey(group.algorithm_profile.algorithm_name, *gpu_stage, gpu_stage->used_algorithm_containers.size());
+      _StageShaderKey(object.algorithm_profile.algorithm_name, *gpu_stage, gpu_stage->used_algorithm_containers.size());
     const std::string execution_state_key =
-      _ExecutionStateKey(group.algorithm_profile.algorithm_name, shader_key, container_set);
+      _ExecutionStateKey(object.algorithm_profile.algorithm_name, shader_key, container_set);
     auto state_it = execution_state_cache_.find(execution_state_key);
     if (state_it == execution_state_cache_.end() || state_it->second.buffers.empty()) {
       _ThrowGpuTickError(
@@ -954,9 +954,9 @@ class AlgorithmGpuExecutorImpl {
 
     VkViewport viewport{};
     viewport.x = 0.0f;
-    viewport.y = 0.0f;
+    viewport.y = static_cast<float>(offscreen_target_.extent.height);
     viewport.width = static_cast<float>(offscreen_target_.extent.width);
-    viewport.height = static_cast<float>(offscreen_target_.extent.height);
+    viewport.height = -static_cast<float>(offscreen_target_.extent.height);
     viewport.minDepth = 0.0f;
     viewport.maxDepth = 1.0f;
 
@@ -1016,33 +1016,33 @@ void AlgorithmGpuExecutor::Clear() {
 }
 
 bool AlgorithmGpuExecutor::ExecuteGpuTick(
-  const agent::AgentAlgorithmSupportGroup& group,
+  const agent::AlgorithmObject& object,
   algorithm::AlgorithmContainerSet* container_set,
   const agent::AgentTickContext& context,
   std::string* out_error_message) {
-  return AlgorithmGpuExecutorImpl::Instance().ExecuteGpuTick(group, container_set, context, out_error_message);
+  return AlgorithmGpuExecutorImpl::Instance().ExecuteGpuTick(object, container_set, context, out_error_message);
 }
 
 bool AlgorithmGpuExecutor::SynchronizeGpuTickState(
-  const agent::AgentAlgorithmSupportGroup& group,
+  const agent::AlgorithmObject& object,
   algorithm::AlgorithmContainerSet* container_set,
   std::string* out_error_message) {
-  return AlgorithmGpuExecutorImpl::Instance().SynchronizeGpuTickState(group, container_set, out_error_message);
+  return AlgorithmGpuExecutorImpl::Instance().SynchronizeGpuTickState(object, container_set, out_error_message);
 }
 
 bool TryExecuteGpuTick(
-  const agent::AgentAlgorithmSupportGroup& group,
+  const agent::AlgorithmObject& object,
   algorithm::AlgorithmContainerSet* container_set,
   const agent::AgentTickContext& context,
   std::string* out_error_message) {
-  return AlgorithmGpuExecutor::Instance().ExecuteGpuTick(group, container_set, context, out_error_message);
+  return AlgorithmGpuExecutor::Instance().ExecuteGpuTick(object, container_set, context, out_error_message);
 }
 
 bool TrySynchronizeGpuTickState(
-  const agent::AgentAlgorithmSupportGroup& group,
+  const agent::AlgorithmObject& object,
   algorithm::AlgorithmContainerSet* container_set,
   std::string* out_error_message) {
-  return AlgorithmGpuExecutor::Instance().SynchronizeGpuTickState(group, container_set, out_error_message);
+  return AlgorithmGpuExecutor::Instance().SynchronizeGpuTickState(object, container_set, out_error_message);
 }
 
 }  // namespace runtime_systems

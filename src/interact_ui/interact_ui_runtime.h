@@ -49,12 +49,18 @@ class InteractUiRuntime : public IInteractUiHost {
   void ClearAgents() override {
     agent_manager_.ClearAgents();
   }
+  void ClearGpuExecutors() override {
+    runtime_environment_.ClearGpuExecutors();
+  }
   const InputState& input() const override { return runtime_environment_.input(); }
   Vec2 mouse_position() const override { return runtime_environment_.MousePosition(); }
   float frame_dt_seconds() const override { return frame_dt_; }
   bool has_render_preview_texture() const override { return runtime_environment_.HasRenderPreviewTexture(); }
   ImTextureID render_preview_texture_id() const override { return runtime_environment_.RenderPreviewTextureId(); }
   ImVec2 render_preview_texture_size() const override { return runtime_environment_.RenderPreviewTextureSize(); }
+  void SetRenderPreviewExtent(ImVec2 extent) override {
+    runtime_environment_.SetRenderPreviewExtent(extent);
+  }
   void SetRenderPreviewRequest(runtime_systems::RenderPreviewRequest request) override {
     render_preview_request_ = std::move(request);
     runtime_environment_.SetRenderPreviewRequest(render_preview_request_);
@@ -65,8 +71,8 @@ class InteractUiRuntime : public IInteractUiHost {
   const runtime_systems::RuntimeEnvironment& runtime_environment() const { return runtime_environment_; }
 
  private:
-  AgentManager agent_manager_{};
   runtime_systems::RuntimeEnvironment runtime_environment_{};
+  AgentManager agent_manager_{};
   runtime_systems::RenderPreviewRequest render_preview_request_{};
   std::string ui_status_message_{};
   std::chrono::steady_clock::time_point last_frame_time_{};

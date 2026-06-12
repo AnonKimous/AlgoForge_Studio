@@ -11,6 +11,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 if(WIN32)
   if(MSVC)
     message(STATUS "Windows: MSVC is the recommended toolchain for this project.")
+    add_compile_options("/utf-8")
   else()
     message(WARNING "Windows: MSVC is the recommended toolchain for this project, but continuing with the current compiler.")
   endif()
@@ -18,6 +19,7 @@ endif()
 
 find_package(Vulkan REQUIRED)
 find_program(GLSLC glslc REQUIRED)
+include(FetchContent)
 
 set(DEPS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party" CACHE PATH "Root path for third-party sources")
 
@@ -30,6 +32,7 @@ set(SDL3_DLL_RELEASE "D:/VulkanSDK/1.4.341.1/Bin/SDL3.dll" CACHE FILEPATH "SDL3 
 set(EIGEN_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/eigen" CACHE PATH "Eigen include directory")
 set(IMGUI_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui-1.92.8-docking" CACHE PATH "Dear ImGui source directory")
 set(VKB_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/vkb" CACHE PATH "VkBootstrap source directory")
+set(VKB_GITHUB_ARCHIVE_URL "https://github.com/charles-lunarg/vk-bootstrap/archive/refs/heads/main.zip" CACHE STRING "VkBootstrap GitHub archive URL")
 set(VMA_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/VulkanMemoryAllocator-3.3.0/include" CACHE PATH "VMA include directory")
 set(SPIRV_REFLECT_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/SPIRV-Reflect-vulkan-sdk-1.4.350.0" CACHE PATH "SPIRV-Reflect source directory")
 
@@ -65,6 +68,17 @@ require_file("${SDL3_INCLUDE_DIR}/SDL3/SDL.h" "Set SDL3_INCLUDE_DIR or prepare d
 require_sdl3_artifacts()
 require_file("${EIGEN_INCLUDE_DIR}/Eigen/Dense" "Set EIGEN_INCLUDE_DIR to a valid Eigen root.")
 require_file("${IMGUI_SOURCE_DIR}/imgui.h" "Set IMGUI_SOURCE_DIR to a valid Dear ImGui source root.")
+if(NOT EXISTS "${VKB_SOURCE_DIR}/src/VkBootstrap.h" OR NOT EXISTS "${VKB_SOURCE_DIR}/src/VkBootstrap.cpp")
+  message(STATUS "VkBootstrap source not found at ${VKB_SOURCE_DIR}; fetching from GitHub.")
+  FetchContent_Declare(vkb_source
+    URL "${VKB_GITHUB_ARCHIVE_URL}"
+  )
+  FetchContent_GetProperties(vkb_source)
+  if(NOT vkb_source_POPULATED)
+    FetchContent_Populate(vkb_source)
+  endif()
+  set(VKB_SOURCE_DIR "${vkb_source_SOURCE_DIR}" CACHE PATH "VkBootstrap source directory" FORCE)
+endif()
 require_file("${VKB_SOURCE_DIR}/src/VkBootstrap.h" "Set VKB_SOURCE_DIR to a valid VkBootstrap source root.")
 require_file("${VKB_SOURCE_DIR}/src/VkBootstrap.cpp" "Set VKB_SOURCE_DIR to a valid VkBootstrap source root.")
 require_file("${VMA_INCLUDE_DIR}/vk_mem_alloc.h" "Set VMA_INCLUDE_DIR to a valid VMA include directory.")
@@ -245,6 +259,48 @@ add_custom_target(temporary_test_line_motion_gpu_tick_shaders DEPENDS
   "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_gpu_tick.frag.spv"
 )
 
+add_custom_command(
+  OUTPUT
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.vert.spv"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.frag.spv"
+  COMMAND ${GLSLC} -o
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.vert.spv"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.vert"
+  COMMAND ${GLSLC} -o
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.frag.spv"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.frag"
+  DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.vert"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.frag"
+  VERBATIM
+)
+
+add_custom_target(temporary_test_line_motion_result_render_shaders DEPENDS
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.vert.spv"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.frag.spv"
+)
+
+add_custom_command(
+  OUTPUT
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/v6a2_triangle_collision_runtime_test/v6a2_triangle_collision_runtime_test_result_render.vert.spv"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/v6a2_triangle_collision_runtime_test/v6a2_triangle_collision_runtime_test_result_render.frag.spv"
+  COMMAND ${GLSLC} -o
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/v6a2_triangle_collision_runtime_test/v6a2_triangle_collision_runtime_test_result_render.vert.spv"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/v6a2_triangle_collision_runtime_test/v6a2_triangle_collision_runtime_test_result_render.vert"
+  COMMAND ${GLSLC} -o
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/v6a2_triangle_collision_runtime_test/v6a2_triangle_collision_runtime_test_result_render.frag.spv"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/v6a2_triangle_collision_runtime_test/v6a2_triangle_collision_runtime_test_result_render.frag"
+  DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/v6a2_triangle_collision_runtime_test/v6a2_triangle_collision_runtime_test_result_render.vert"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/v6a2_triangle_collision_runtime_test/v6a2_triangle_collision_runtime_test_result_render.frag"
+  VERBATIM
+)
+
+add_custom_target(v6a2_triangle_collision_runtime_test_result_render_shaders DEPENDS
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/v6a2_triangle_collision_runtime_test/v6a2_triangle_collision_runtime_test_result_render.vert.spv"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/v6a2_triangle_collision_runtime_test/v6a2_triangle_collision_runtime_test_result_render.frag.spv"
+)
+
 if(BUILD_DEBUG_TOOL_SAMPLE_PLUGIN)
   add_library(temporary_test_line_motion_plugin MODULE
     src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_plugin.cpp
@@ -261,18 +317,6 @@ if(BUILD_DEBUG_TOOL_SAMPLE_PLUGIN)
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion"
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion"
   )
-
-  add_custom_command(TARGET temporary_test_line_motion_plugin POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory
-      "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion"
-    COMMAND ${GLSLC} -o
-      "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.vert.spv"
-      "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.vert"
-    COMMAND ${GLSLC} -o
-      "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.frag.spv"
-      "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.frag"
-    VERBATIM
-  )
 endif()
 
 add_executable(debugTool WIN32
@@ -284,7 +328,12 @@ target_link_libraries(debugTool PRIVATE
   kernal_all
   common_data
 )
-add_dependencies(debugTool temporary_test_line_motion_gpu_tick_shaders)
+add_dependencies(
+  debugTool
+  temporary_test_line_motion_gpu_tick_shaders
+  temporary_test_line_motion_result_render_shaders
+  v6a2_triangle_collision_runtime_test_result_render_shaders
+)
 
 target_compile_definitions(debugTool PRIVATE
   WIN32_LEAN_AND_MEAN

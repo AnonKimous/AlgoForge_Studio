@@ -41,6 +41,8 @@ class RuntimeEnvironment {
   bool Tick();
   void SetDrawCallback(DrawCallback callback);
   void SetRenderPreviewRequest(RenderPreviewRequest request);
+  void SetRenderPreviewExtent(ImVec2 extent);
+  void ClearGpuExecutors();
   void SetExecutionSymbols(RuntimeExecutionSymbols execution_symbols);
   bool HasRenderPreviewTexture() const;
   ImTextureID RenderPreviewTextureId() const;

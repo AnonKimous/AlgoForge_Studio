@@ -17,7 +17,7 @@ struct AlgorithmContainerSet;
 }
 
 namespace agent {
-struct AgentAlgorithmSupportGroup;
+class AlgorithmObject;
 struct AgentTickContext;
 struct AlgorithmPackageDebugState;
 }
@@ -25,13 +25,13 @@ struct AlgorithmPackageDebugState;
 namespace algorithm_management::job_gpu {
 
 bool Execute(
-  const agent::AgentAlgorithmSupportGroup& group,
+  const agent::AlgorithmObject& object,
   algorithm::AlgorithmContainerSet* container_set,
   const agent::AgentTickContext& context,
   std::string* out_error_message = nullptr);
 
 bool Synchronize(
-  const agent::AgentAlgorithmSupportGroup& group,
+  const agent::AlgorithmObject& object,
   algorithm::AlgorithmContainerSet* container_set,
   std::string* out_error_message = nullptr);
 
@@ -40,7 +40,7 @@ bool Synchronize(
 namespace algorithm_management::job_cpu {
 
 bool Execute(
-  const agent::AgentAlgorithmSupportGroup& group,
+  const agent::AlgorithmObject& object,
   const agent::AgentTickContext& context,
   const AgentToAlgorithmSignal& agent_to_algorithm_signal,
   algorithm::AlgorithmContainerSet* container_set,

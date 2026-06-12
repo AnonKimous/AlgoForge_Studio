@@ -68,6 +68,49 @@ struct AlgorithmInterventionPackageDebugState {
   AlgorithmToAgentSignal algorithm_to_agent_signal{};
 };
 
+class IAlgorithmPackageSupport;
+class IAlgorithmPackageDecomposer;
+class IAlgorithmtemporaryTestMainThreadExecutor;
+class IAlgorithmIntervention;
+
+class AlgorithmObject {
+ public:
+  AlgorithmObject() : shared_container_set(std::make_shared<algorithm::AlgorithmContainerSet>()) {}
+
+  algorithm::AlgorithmContainerSet* mutable_container_set() {
+    EnsureContainerSet();
+    return shared_container_set.get();
+  }
+  const algorithm::AlgorithmContainerSet* container_set() const {
+    return shared_container_set.get();
+  }
+  void SetContainerSet(std::shared_ptr<algorithm::AlgorithmContainerSet> container_set) {
+    shared_container_set = std::move(container_set);
+    EnsureContainerSet();
+  }
+
+  algorithm::AlgorithmProfile algorithm_profile{};
+  std::shared_ptr<IAlgorithmPackageSupport> reflector;
+  std::shared_ptr<IAlgorithmPackageDecomposer> decomposer;
+  std::shared_ptr<algorithm::AlgorithmReflector> algorithm_reflector;
+  std::shared_ptr<algorithm::AlgorithmContainerSet> shared_container_set;
+  std::vector<AlgorithmResourceBinding> resource_bindings;
+  std::vector<AlgorithmDescriptorValue> descriptor_values;
+  bool cpu_symbol{true};
+  bool gpu_symbol{true};
+  AlgorithmMountMode mount_mode{AlgorithmMountMode::Direct};
+  AlgorithmExecutionPreference execution_preference{AlgorithmExecutionPreference::Gpu};
+  std::shared_ptr<IAlgorithmtemporaryTestMainThreadExecutor> temporaryTest_main_thread_executor;
+  std::shared_ptr<IAlgorithmIntervention> intervention;
+
+ private:
+  void EnsureContainerSet() {
+    if (!shared_container_set) {
+      shared_container_set = std::make_shared<algorithm::AlgorithmContainerSet>();
+    }
+  }
+};
+
 class IAlgorithmPackageSupport {
  public:
   virtual ~IAlgorithmPackageSupport() = default;
@@ -200,25 +243,9 @@ class IAlgorithmIntervention {
     std::vector<AlgorithmInterventionStageSpec>* out_stage_specs) const = 0;
 };
 
-struct AgentAlgorithmSupportGroup {
-  algorithm::AlgorithmProfile algorithm_profile{};
-  std::shared_ptr<IAlgorithmPackageSupport> reflector;
-  std::shared_ptr<IAlgorithmPackageDecomposer> decomposer;
-  std::shared_ptr<algorithm::AlgorithmReflector> algorithm_reflector;
-  std::shared_ptr<algorithm::AlgorithmContainerSet> shared_container_set;
-  std::vector<AlgorithmResourceBinding> resource_bindings;
-  std::vector<AlgorithmDescriptorValue> descriptor_values;
-  bool cpu_symbol{true};
-  bool gpu_symbol{true};
-  AlgorithmMountMode mount_mode{AlgorithmMountMode::Direct};
-  AlgorithmExecutionPreference execution_preference{AlgorithmExecutionPreference::Gpu};
-  std::shared_ptr<IAlgorithmtemporaryTestMainThreadExecutor> temporaryTest_main_thread_executor;
-  std::shared_ptr<IAlgorithmIntervention> intervention;
-};
-
 struct AgentInitConfig {
   std::string agent_name;
-  std::vector<AgentAlgorithmSupportGroup> algorithm_support_groups;
+  std::vector<AlgorithmObject> algorithm_objects;
 };
 
 }  // namespace agent

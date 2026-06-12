@@ -4,6 +4,11 @@ layout(set = 0, binding = 0) readonly buffer RenderPreviewData {
   float data[];
 } render_data;
 
+layout(push_constant) uniform PreviewViewport {
+  float width;
+  float height;
+} preview_viewport;
+
 layout(location = 0) out vec2 v_uv;
 layout(location = 1) flat out uint v_kind;
 layout(location = 2) flat out vec3 v_color;
@@ -15,6 +20,14 @@ const vec2 kQuadOffsets[4] = vec2[4](
   vec2(1.0, 1.0)
 );
 
+vec4 ToPreviewClip(vec3 preview_position) {
+  vec2 ndc = vec2(
+    (preview_position.x / preview_viewport.width) * 2.0 - 1.0,
+    (preview_position.y / preview_viewport.height) * 2.0 - 1.0
+  );
+  return vec4(ndc, preview_position.z, 1.0);
+}
+
 void EmitPoint(uint record_index, float radius, vec3 color) {
   uint base_index = record_index * 6u;
   vec3 pos = vec3(
@@ -24,7 +37,7 @@ void EmitPoint(uint record_index, float radius, vec3 color) {
   );
 
   vec2 corner = kQuadOffsets[gl_VertexIndex];
-  gl_Position = vec4(pos.xy + corner * radius, pos.z, 1.0);
+  gl_Position = ToPreviewClip(vec3(pos.xy + corner * radius, pos.z));
   v_uv = corner;
   v_kind = 0u;
   v_color = color;
@@ -47,7 +60,7 @@ void EmitEdge(uint edge_index, vec3 color) {
   float length_sq = dot(delta, delta);
   vec2 tangent = length_sq > 1e-12 ? delta / sqrt(length_sq) : vec2(1.0, 0.0);
   vec2 normal = vec2(-tangent.y, tangent.x);
-  float half_width = 0.0125;
+  float half_width = 4.0;
 
   vec2 position = start.xy;
   vec2 uv = vec2(0.0, 1.0);
@@ -65,7 +78,7 @@ void EmitEdge(uint edge_index, vec3 color) {
     uv = vec2(1.0, -1.0);
   }
 
-  gl_Position = vec4(position, start.z, 1.0);
+  gl_Position = ToPreviewClip(vec3(position, start.z));
   v_uv = uv;
   v_kind = 1u;
   v_color = color;
@@ -74,12 +87,12 @@ void EmitEdge(uint edge_index, vec3 color) {
 void main() {
   uint instance_index = uint(gl_InstanceIndex);
   if (instance_index == 0u) {
-    EmitPoint(0u, 0.085, vec3(1.0, 0.42, 0.24));
+    EmitPoint(0u, 18.0, vec3(1.0, 0.42, 0.24));
     return;
   }
 
   if (instance_index < 4u) {
-    EmitPoint(instance_index, 0.055, vec3(1.0, 0.93, 0.34));
+    EmitPoint(instance_index, 12.0, vec3(1.0, 0.93, 0.34));
     return;
   }
 

@@ -30,6 +30,8 @@ class ImGuiVulkanRuntime {
   bool Tick(SDL_Window* window);
   void SetDrawCallback(DrawCallback callback);
   void SetRenderPreviewRequest(RenderPreviewRequest request);
+  void SetRenderPreviewExtent(ImVec2 extent);
+  void ClearGpuExecutors();
   bool HasRenderPreviewTexture() const;
   ImTextureID RenderPreviewTextureId() const;
   ImVec2 RenderPreviewTextureSize() const;

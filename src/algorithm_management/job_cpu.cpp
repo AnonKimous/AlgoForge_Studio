@@ -7,7 +7,7 @@
 namespace algorithm_management::job_cpu {
 
 bool Execute(
-  const agent::AgentAlgorithmSupportGroup& group,
+  const agent::AlgorithmObject& object,
   const agent::AgentTickContext& context,
   const AgentToAlgorithmSignal& agent_to_algorithm_signal,
   algorithm::AlgorithmContainerSet* container_set,
@@ -20,15 +20,15 @@ bool Execute(
     }
     return false;
   }
-  if (!group.temporaryTest_main_thread_executor) {
+  if (!object.temporaryTest_main_thread_executor) {
     if (out_error_message) {
       *out_error_message = "CPU job executor is unavailable.";
     }
     return false;
   }
-  return group.temporaryTest_main_thread_executor->temporaryTestExecuteOnMainThread(
+  return object.temporaryTest_main_thread_executor->temporaryTestExecuteOnMainThread(
     context,
-    group.algorithm_profile,
+    object.algorithm_profile,
     agent_to_algorithm_signal,
     container_set,
     out_algorithm_to_agent_signal,

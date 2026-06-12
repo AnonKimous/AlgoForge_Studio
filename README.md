@@ -16,6 +16,11 @@ This project is a layered Vulkan + SDL3 sandbox for agent-driven physics and ren
 - If a developer writes `实例` in Chinese, treat it as `agent` unless the context explicitly says otherwise.
 - This rule applies to docs, comments, UI labels, and algorithm composition notes.
 
+## Encoding Rule
+
+- The project uses UTF-8 for source files, comments, UI text, and build output.
+- Windows builds pass `/utf-8` through the compiler so source and execution text use UTF-8 consistently.
+
 ## Current Layering
 
 - `common_data` holds shared mesh, math, input, and interaction types.
@@ -52,6 +57,17 @@ This project is a layered Vulkan + SDL3 sandbox for agent-driven physics and ren
 - Build the final agent by attaching one or more algorithm support groups, solver config, and lightweight algorithm profiles to one agent object.
 - Let upper layers assemble the agent creation spec, then let `agent_management` create and retain agents for runtime stepping while each `Agent` internally ticks its attached algorithm groups.
 - The runtime does not try to validate the full graph; missing or incompatible bindings should fail at the point of use.
+
+## Coordinate Convention
+
+- The project uses a left-handed coordinate system.
+- The origin `[0,0,0]` is at the lower-left near corner.
+- `+X` points to the right.
+- `+Y` points upward.
+- `+Z` points into the screen.
+- Vulkan viewport setup in the runtime flips framebuffer coordinates to match this convention.
+- Render Preview shaders interpret `x` and `y` as preview-page pixel coordinates.
+- In Render Preview, `[0,0]` is the lower-left corner of the ImGui content region below the title bar.
 
 ## Logs
 

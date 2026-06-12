@@ -1,6 +1,7 @@
 #include "imgui_vulkan_runtime.h"
 
 #include "runtime_systems/algorithm_gpu_context.h"
+#include "runtime_systems/algorithm_gpu_executor.h"
 
 #include <algorithm>
 #include <cstring>
@@ -399,6 +400,22 @@ void ImGuiVulkanRuntime::SetRenderPreviewRequest(RenderPreviewRequest request) {
   }
 }
 
+void ImGuiVulkanRuntime::SetRenderPreviewExtent(ImVec2 extent) {
+  if (preview_renderer_) {
+    preview_renderer_->SetTargetExtent(VkExtent2D{
+      static_cast<uint32_t>(extent.x),
+      static_cast<uint32_t>(extent.y),
+    });
+  }
+}
+
+void ImGuiVulkanRuntime::ClearGpuExecutors() {
+  if (device_ != VK_NULL_HANDLE) {
+    CheckVkResult(vkDeviceWaitIdle(device_));
+  }
+  AlgorithmGpuExecutor::Instance().Clear();
+}
+
 bool ImGuiVulkanRuntime::Tick(SDL_Window* window) {
   if (!initialized_ || !window) {
     return false;
@@ -413,6 +430,7 @@ bool ImGuiVulkanRuntime::Tick(SDL_Window* window) {
   int fb_height = 0;
   SDL_GetWindowSizeInPixels(window, &fb_width, &fb_height);
   if (fb_width > 0 && fb_height > 0 && (swapchain_rebuild_ || main_window_.Width != fb_width || main_window_.Height != fb_height)) {
+    CheckVkResult(vkDeviceWaitIdle(device_));
     ImGui_ImplVulkan_SetMinImageCount(min_image_count_);
     ImGui_ImplVulkanH_CreateOrResizeWindow(
       instance_,
@@ -426,6 +444,7 @@ bool ImGuiVulkanRuntime::Tick(SDL_Window* window) {
       min_image_count_,
       0);
     main_window_.FrameIndex = 0;
+    main_window_.SemaphoreIndex = 0;
     swapchain_rebuild_ = false;
   }
 
@@ -473,6 +492,8 @@ void ImGuiVulkanRuntime::Destroy() {
   if (!initialized_ && instance_ == VK_NULL_HANDLE && device_ == VK_NULL_HANDLE) {
     return;
   }
+
+  ClearGpuExecutors();
 
   if (preview_renderer_) {
     preview_renderer_->Destroy();

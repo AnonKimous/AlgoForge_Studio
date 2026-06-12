@@ -16,7 +16,7 @@ namespace agent_management {
 namespace {
 
 struct BuiltAlgorithmMount {
-  agent::AgentAlgorithmSupportGroup group{};
+  agent::AlgorithmObject object{};
   std::shared_ptr<algorithm::AlgorithmContainerSet> container_set{};
   std::string error_message;
   bool ok{false};
@@ -39,23 +39,23 @@ BuiltAlgorithmMount _BuildAlgorithmMount(
   BuiltAlgorithmMount result{};
 
   std::string error_message;
-  agent::AgentAlgorithmSupportGroup group{};
-  if (!agent::CreateAlgorithmSupportGroupByName(algorithm_name, &group, &error_message)) {
+  agent::AlgorithmObject object{};
+  if (!agent::CreateAlgorithmObjectByName(algorithm_name, &object, &error_message)) {
     result.error_message = error_message.empty()
-      ? ("Failed to create algorithm support group for '" + algorithm_name + "'.")
+      ? ("Failed to create algorithm object for '" + algorithm_name + "'.")
       : std::move(error_message);
     return result;
   }
 
-  group.resource_bindings = resource_bindings;
-  group.descriptor_values = descriptor_values;
-  group.mount_mode = mount_mode;
-  group.execution_preference = execution_preference;
+  object.resource_bindings = resource_bindings;
+  object.descriptor_values = descriptor_values;
+  object.mount_mode = mount_mode;
+  object.execution_preference = execution_preference;
 
   std::shared_ptr<algorithm::AlgorithmContainerSet> container_set_handle;
   algorithm::AlgorithmContainerSet container_set{};
   if (!algorithm_management::CreateAlgorithmContainersFromManifestName(
-        group.algorithm_profile.container_manifest_name,
+        object.algorithm_profile.container_manifest_name,
         &container_set,
         &error_message)) {
     result.error_message = error_message.empty()
@@ -86,15 +86,15 @@ BuiltAlgorithmMount _BuildAlgorithmMount(
     container_set_handle = std::make_shared<algorithm::AlgorithmContainerSet>(std::move(container_set));
   }
 
-  if (!group.decomposer) {
+  if (!object.decomposer) {
     result.error_message = "Algorithm decomposer is unavailable for '" + algorithm_name + "'.";
     return result;
   }
 
-  if (!group.decomposer->Decompose(
-        group.algorithm_profile,
-        group.resource_bindings,
-        group.descriptor_values,
+  if (!object.decomposer->Decompose(
+        object.algorithm_profile,
+        object.resource_bindings,
+        object.descriptor_values,
         container_set_handle.get(),
         &error_message)) {
     result.error_message = error_message.empty()
@@ -103,8 +103,8 @@ BuiltAlgorithmMount _BuildAlgorithmMount(
     return result;
   }
 
-  group.shared_container_set = container_set_handle;
-  result.group = std::move(group);
+  object.shared_container_set = container_set_handle;
+  result.object = std::move(object);
   result.container_set = std::move(container_set_handle);
   result.ok = true;
   return result;
@@ -150,7 +150,7 @@ bool AgentManager::CreateAgent(AgentCreateSpec spec, size_t* out_agent_index) {
     if (!built_mount.ok) {
       return false;
     }
-    agent_config.algorithm_support_groups.push_back(std::move(built_mount.group));
+    agent_config.algorithm_objects.push_back(std::move(built_mount.object));
   }
 
   if (!agent::agent_init(agent_instance.get(), std::move(agent_config))) {
@@ -282,8 +282,8 @@ bool AgentManager::AttachAlgorithmToAgent(
   }
 
   size_t algorithm_index = 0u;
-  if (!managed_agents_[agent_index]->agent->AppendAlgorithmSupportGroup(std::move(built_mount.group), &algorithm_index)) {
-    set_error("Failed to append algorithm group to agent.");
+  if (!managed_agents_[agent_index]->agent->AppendAlgorithmObject(std::move(built_mount.object), &algorithm_index)) {
+    set_error("Failed to append algorithm object to agent.");
     return false;
   }
   if (!managed_agents_[agent_index]->agent->BeginAlgorithmAssembly(algorithm_index)) {
@@ -345,8 +345,8 @@ bool AgentManager::CollectAlgorithmReflection(
     return false;
   }
 
-  const agent::AgentAlgorithmSupportGroup* group = managed_agent->algorithm_support_group(algorithm_index);
-  if (!group) {
+  const agent::AlgorithmObject* object = managed_agent->algorithm_object(algorithm_index);
+  if (!object) {
     return false;
   }
 
@@ -365,7 +365,7 @@ bool AgentManager::CollectAlgorithmReflection(
     out_snapshot->agent_index = agent_index;
     out_snapshot->algorithm_index = algorithm_index;
     out_snapshot->agent_name = managed_agent->agent_name();
-    out_snapshot->algorithm_name = group->algorithm_profile.algorithm_name;
+    out_snapshot->algorithm_name = object->algorithm_profile.algorithm_name;
     out_snapshot->valid = true;
     for (const agent::AlgorithmReflectionValue& value : collected_snapshot.variables) {
       out_snapshot->variables.push_back(AlgorithmReflectionRecord{
@@ -392,7 +392,7 @@ bool AgentManager::CollectAlgorithmReflection(
   out_snapshot->agent_index = agent_index;
   out_snapshot->algorithm_index = algorithm_index;
   out_snapshot->agent_name = managed_agent->agent_name();
-  out_snapshot->algorithm_name = group->algorithm_profile.algorithm_name;
+  out_snapshot->algorithm_name = object->algorithm_profile.algorithm_name;
   out_snapshot->valid = runtime_snapshot->valid;
   for (const agent::AlgorithmReflectionValue& value : runtime_snapshot->variables) {
     out_snapshot->variables.push_back(AlgorithmReflectionRecord{

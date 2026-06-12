@@ -80,6 +80,14 @@ bool PreviewRenderer::Init(
   return true;
 }
 
+void PreviewRenderer::SetTargetExtent(VkExtent2D extent) {
+  if (target_.extent.width == extent.width && target_.extent.height == extent.height) {
+    return;
+  }
+  target_.extent = extent;
+  DestroyTarget();
+}
+
 void PreviewRenderer::SetRequest(RenderPreviewRequest request) {
   request_ = std::move(request);
   if (!request_.valid) {
@@ -383,6 +391,12 @@ bool PreviewRenderer::CreatePipeline() {
     pipeline_layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipeline_layout_info.setLayoutCount = 1;
     pipeline_layout_info.pSetLayouts = &pipeline_.descriptor_set_layout;
+    VkPushConstantRange push_constant_range{};
+    push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    push_constant_range.offset = 0;
+    push_constant_range.size = sizeof(PreviewViewportPushConstants);
+    pipeline_layout_info.pushConstantRangeCount = 1;
+    pipeline_layout_info.pPushConstantRanges = &push_constant_range;
     CheckVkResult(vkCreatePipelineLayout(device_, &pipeline_layout_info, nullptr, &pipeline_.pipeline_layout));
 
     VkPipelineShaderStageCreateInfo shader_stages[2]{};
@@ -565,9 +579,9 @@ bool PreviewRenderer::Record(VkCommandBuffer command_buffer) {
 
   VkViewport viewport{};
   viewport.x = 0.0f;
-  viewport.y = 0.0f;
+  viewport.y = static_cast<float>(target_.extent.height);
   viewport.width = static_cast<float>(target_.extent.width);
-  viewport.height = static_cast<float>(target_.extent.height);
+  viewport.height = -static_cast<float>(target_.extent.height);
   viewport.minDepth = 0.0f;
   viewport.maxDepth = 1.0f;
 
@@ -598,6 +612,17 @@ bool PreviewRenderer::Record(VkCommandBuffer command_buffer) {
     &pipeline_.descriptor_set,
     0,
     nullptr);
+  const PreviewViewportPushConstants push_constants{
+    static_cast<float>(target_.extent.width),
+    static_cast<float>(target_.extent.height),
+  };
+  vkCmdPushConstants(
+    command_buffer,
+    pipeline_.pipeline_layout,
+    VK_SHADER_STAGE_VERTEX_BIT,
+    0,
+    sizeof(push_constants),
+    &push_constants);
   vkCmdSetViewport(command_buffer, 0, 1, &viewport);
   vkCmdSetScissor(command_buffer, 0, 1, &scissor);
   vkCmdDraw(command_buffer, 4, instance_count, 0, 0);

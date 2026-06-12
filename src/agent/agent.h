@@ -56,33 +56,6 @@ struct AgentAlgorithmRuntimeState {
   AlgorithmReflectionSnapshot reflection_snapshot{};
 };
 
-class AlgorithmObject {
- public:
-  AlgorithmObject() : container_set_(std::make_shared<AlgorithmContainerSet>()) {}
-
-  AlgorithmContainerSet* mutable_container_set() {
-    EnsureContainerSet();
-    return container_set_.get();
-  }
-  const AlgorithmContainerSet* container_set() const {
-    return container_set_.get();
-  }
-  const std::shared_ptr<AlgorithmContainerSet>& shared_container_set() const { return container_set_; }
-  void SetContainerSet(std::shared_ptr<AlgorithmContainerSet> container_set) {
-    container_set_ = std::move(container_set);
-    EnsureContainerSet();
-  }
-
- private:
-  void EnsureContainerSet() {
-    if (!container_set_) {
-      container_set_ = std::make_shared<AlgorithmContainerSet>();
-    }
-  }
-
-  std::shared_ptr<AlgorithmContainerSet> container_set_{};
-};
-
 enum class AlgorithmAssemblyState {
   Pending,
   Assembling,
@@ -102,14 +75,13 @@ struct AgentTickResult {
   std::vector<AgentAlgorithmRuntimeState> algorithm_runtime_states;
 };
 
-bool CreateAlgorithmSupportGroupByName(
+bool CreateAlgorithmObjectByName(
   const std::string& algorithm_name,
-  AgentAlgorithmSupportGroup* out_group,
+  AlgorithmObject* out_group,
   std::string* out_error_message = nullptr);
 
 struct AlgorithmAssemblySlot {
   size_t index{0u};
-  AgentAlgorithmSupportGroup* algorithm_support_group{nullptr};
   AlgorithmObject* algorithm_object{nullptr};
   AlgorithmAssemblyState* assembly_state{nullptr};
 };
@@ -117,7 +89,7 @@ struct AlgorithmAssemblySlot {
 class Agent {
  public:
   bool Init(AgentInitConfig config);
-  bool AppendAlgorithmSupportGroup(AgentAlgorithmSupportGroup group, size_t* out_index = nullptr);
+  bool AppendAlgorithmObject(AlgorithmObject object, size_t* out_index = nullptr);
   bool RemoveAlgorithm(size_t index);
   void RefreshInterventionSignals(const AgentTickContext& context);
   bool Tick(
@@ -128,14 +100,8 @@ class Agent {
 
   bool initialized() const { return initialized_; }
   const std::string& agent_name() const { return agent_name_; }
-  size_t algorithm_count() const { return algorithm_support_groups_.size(); }
-  const std::vector<AgentAlgorithmSupportGroup>& algorithm_support_groups() const { return algorithm_support_groups_; }
-  AgentAlgorithmSupportGroup* algorithm_support_group(size_t index) {
-    return index < algorithm_support_groups_.size() ? &algorithm_support_groups_[index] : nullptr;
-  }
-  const AgentAlgorithmSupportGroup* algorithm_support_group(size_t index) const {
-    return index < algorithm_support_groups_.size() ? &algorithm_support_groups_[index] : nullptr;
-  }
+  size_t algorithm_count() const { return algorithm_objects_.size(); }
+  const std::vector<AlgorithmObject>& algorithm_objects() const { return algorithm_objects_; }
   AlgorithmObject* algorithm_object(size_t index) {
     return index < algorithm_objects_.size() ? &algorithm_objects_[index] : nullptr;
   }
@@ -150,10 +116,10 @@ class Agent {
   void MarkAlgorithmAssemblyFailed(size_t index);
   bool GetAlgorithmAssemblySlot(size_t index, AlgorithmAssemblySlot* out_slot);
   bool CollectAlgorithmReflection(size_t index, AlgorithmReflectionSnapshot* out_snapshot) const;
-  const AgentAlgorithmSupportGroup* FindAlgorithmSupportGroup(const std::string& algorithm_name) const {
-    for (const AgentAlgorithmSupportGroup& group : algorithm_support_groups_) {
-      if (group.algorithm_profile.algorithm_name == algorithm_name) {
-        return &group;
+  const AlgorithmObject* FindAlgorithmObject(const std::string& algorithm_name) const {
+    for (const AlgorithmObject& object : algorithm_objects_) {
+      if (object.algorithm_profile.algorithm_name == algorithm_name) {
+        return &object;
       }
     }
     return nullptr;
@@ -169,9 +135,8 @@ class Agent {
  private:
   bool initialized_{false};
   std::string agent_name_{};
-  std::vector<AgentAlgorithmSupportGroup> algorithm_support_groups_{};
-  std::vector<AgentAlgorithmRuntimeState> algorithm_runtime_states_{};
   std::vector<AlgorithmObject> algorithm_objects_{};
+  std::vector<AgentAlgorithmRuntimeState> algorithm_runtime_states_{};
   std::vector<AlgorithmAssemblyState> algorithm_assembly_states_{};
   std::vector<size_t> algorithm_execution_end_queue_{};
 };

@@ -14,6 +14,11 @@
 
 namespace runtime_systems {
 
+struct PreviewViewportPushConstants {
+  float width{0.0f};
+  float height{0.0f};
+};
+
 class PreviewRenderer {
  public:
   bool Init(
@@ -22,6 +27,7 @@ class PreviewRenderer {
     VkDevice device,
     VkDescriptorPool descriptor_pool,
     VmaAllocator allocator);
+  void SetTargetExtent(VkExtent2D extent);
   void SetRequest(RenderPreviewRequest request);
   bool Record(VkCommandBuffer command_buffer);
   bool HasTexture() const;

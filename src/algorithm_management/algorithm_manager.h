@@ -10,7 +10,7 @@
 #undef ALGORITHM_MANAGEMENT_LAYER_PUBLIC_FACADE_INCLUDE
 
 namespace agent {
-struct AgentAlgorithmSupportGroup;
+class AlgorithmObject;
 struct AgentTickContext;
 }
 

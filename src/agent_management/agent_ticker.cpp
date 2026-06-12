@@ -9,7 +9,7 @@ namespace agent_management {
 namespace {
 
 bool _SignalBlocksTick(
-  const agent::AgentAlgorithmSupportGroup& group,
+  const agent::AlgorithmObject& object,
   const AgentToAlgorithmSignal& signal) {
   if (signal.stop_requested || signal.pause_requested) {
     return true;
@@ -17,7 +17,7 @@ bool _SignalBlocksTick(
   if (!signal.needs_intervention) {
     return false;
   }
-  return !group.intervention || group.intervention->SupportsIntervention();
+  return !object.intervention || object.intervention->SupportsIntervention();
 }
 
 }  // namespace
@@ -51,13 +51,13 @@ void AgentTicker::Tick(
 
   std::vector<bool> allow_tick_mask(agent_binding_->algorithm_count(), true);
   for (size_t i = 0; i < agent_binding_->algorithm_count(); ++i) {
-    const agent::AgentAlgorithmSupportGroup* group = agent_binding_->algorithm_support_group(i);
+    const agent::AlgorithmObject* object = agent_binding_->algorithm_object(i);
     const agent::AgentAlgorithmRuntimeState* runtime_state = agent_binding_->algorithm_runtime_state(i);
-    if (!group || !runtime_state) {
+    if (!object || !runtime_state) {
       allow_tick_mask[i] = false;
       continue;
     }
-    if (_SignalBlocksTick(*group, runtime_state->agent_to_algorithm_signal)) {
+    if (_SignalBlocksTick(*object, runtime_state->agent_to_algorithm_signal)) {
       allow_tick_mask[i] = false;
     }
   }

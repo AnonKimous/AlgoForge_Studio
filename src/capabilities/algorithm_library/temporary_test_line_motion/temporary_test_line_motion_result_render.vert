@@ -7,13 +7,27 @@
 // - every point uses 3 floats: x, y, z
 // - the first point is read from indices [0..2]
 //
-// The position is treated as already being in clip/NDC space.
+// The position is treated as preview-page coordinates in pixels.
+// The preview page origin is the lower-left corner.
 
 layout(set = 0, binding = 0) readonly buffer ResultRenderPositions {
   float data[];
 } positions;
 
+layout(push_constant) uniform PreviewViewport {
+  float width;
+  float height;
+} preview_viewport;
+
 layout(location = 0) out vec2 v_uv;
+
+vec4 ToPreviewClip(vec3 preview_position) {
+  vec2 ndc = vec2(
+    (preview_position.x / preview_viewport.width) * 2.0 - 1.0,
+    (preview_position.y / preview_viewport.height) * 2.0 - 1.0
+  );
+  return vec4(ndc, preview_position.z, 1.0);
+}
 
 void main() {
   const vec2 quad_offsets[4] = vec2[4](
@@ -31,8 +45,7 @@ void main() {
   );
 
   vec2 corner = quad_offsets[gl_VertexIndex];
-  // Make the sample marker easy to spot even when the data is sitting at the origin.
-  vec2 radius = vec2(0.12, 0.12);
-  gl_Position = vec4(pos.xy + corner * radius, pos.z, 1.0);
+  vec2 radius = vec2(12.0, 12.0);
+  gl_Position = ToPreviewClip(vec3(pos.xy + corner * radius, pos.z));
   v_uv = corner;
 }

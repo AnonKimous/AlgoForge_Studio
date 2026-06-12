@@ -18,13 +18,13 @@ class AlgorithmGpuExecutor {
   void Clear();
 
   bool ExecuteGpuTick(
-    const agent::AgentAlgorithmSupportGroup& group,
+    const agent::AlgorithmObject& object,
     algorithm::AlgorithmContainerSet* container_set,
     const agent::AgentTickContext& context,
     std::string* out_error_message);
 
   bool SynchronizeGpuTickState(
-    const agent::AgentAlgorithmSupportGroup& group,
+    const agent::AlgorithmObject& object,
     algorithm::AlgorithmContainerSet* container_set,
     std::string* out_error_message);
 
@@ -33,13 +33,13 @@ class AlgorithmGpuExecutor {
 };
 
 bool TryExecuteGpuTick(
-  const agent::AgentAlgorithmSupportGroup& group,
+  const agent::AlgorithmObject& object,
   algorithm::AlgorithmContainerSet* container_set,
   const agent::AgentTickContext& context,
   std::string* out_error_message = nullptr);
 
 bool TrySynchronizeGpuTickState(
-  const agent::AgentAlgorithmSupportGroup& group,
+  const agent::AlgorithmObject& object,
   algorithm::AlgorithmContainerSet* container_set,
   std::string* out_error_message = nullptr);
 

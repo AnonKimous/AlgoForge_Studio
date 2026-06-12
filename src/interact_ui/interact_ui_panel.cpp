@@ -148,6 +148,11 @@ std::string _GetJsonStringField(const cJSON* object, const char* key) {
   return item->valuestring;
 }
 
+void _PopWindowToViewportOnAppear() {
+  ImGuiViewport* viewport = ImGui::GetMainViewport();
+  ImGui::SetNextWindowPos(viewport->GetWorkCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+}
+
 struct AlgorithmLibraryBrowserEntry {
   std::string name;
   std::string path;
@@ -450,14 +455,14 @@ bool _BuildRenderPreviewRequest(
 
   out_request->Clear();
 
-  const agent::AgentAlgorithmSupportGroup* group = agent.algorithm_support_group(algorithm_index);
-  if (!group || !group->intervention) {
+  const agent::AlgorithmObject* object = agent.algorithm_object(algorithm_index);
+  if (!object || !object->intervention) {
     return false;
   }
-  const std::string algorithm_name = group->algorithm_profile.algorithm_name;
+  const std::string algorithm_name = object->algorithm_profile.algorithm_name;
 
   std::vector<agent::AlgorithmInterventionStageSpec> stage_specs;
-  if (!group->intervention->GetInterventionStageSpecs(&stage_specs) || stage_specs.empty()) {
+  if (!object->intervention->GetInterventionStageSpecs(&stage_specs) || stage_specs.empty()) {
     return false;
   }
 
@@ -683,13 +688,13 @@ void InteractUiPanel::SyncCustomInterventionUiState(IInteractUiHost& host) {
 
     updated_slots.reserve(updated_slots.size() + managed_agent->algorithm_count());
     for (size_t algorithm_index = 0; algorithm_index < managed_agent->algorithm_count(); ++algorithm_index) {
-      const agent::AgentAlgorithmSupportGroup* group = managed_agent->algorithm_support_group(algorithm_index);
-      if (!group) {
+      const agent::AlgorithmObject* object = managed_agent->algorithm_object(algorithm_index);
+      if (!object) {
         continue;
       }
 
       const AgentInterventionUiBinding* binding =
-        _FindUiBinding(*ui_bindings, group->algorithm_profile.algorithm_name);
+        _FindUiBinding(*ui_bindings, object->algorithm_profile.algorithm_name);
       if (!binding || !binding->hook) {
         continue;
       }
@@ -697,7 +702,7 @@ void InteractUiPanel::SyncCustomInterventionUiState(IInteractUiHost& host) {
       ActiveCustomInterventionUiSlot slot{};
       slot.agent_index = agent_index;
       slot.algorithm_index = algorithm_index;
-      slot.algorithm_name = group->algorithm_profile.algorithm_name;
+      slot.algorithm_name = object->algorithm_profile.algorithm_name;
       slot.hook = binding->hook;
 
       for (ActiveCustomInterventionUiSlot& previous_slot : active_custom_ui_slots_) {
@@ -724,7 +729,7 @@ void InteractUiPanel::DrawCustomInterventionUi(
   IInteractUiHost& host,
   size_t agent_index,
   size_t algorithm_index,
-  const agent::AgentAlgorithmSupportGroup& group,
+  const agent::AlgorithmObject& object,
   ActiveCustomInterventionUiSlot* slot) {
   if (!slot || !slot->hook) {
     ImGui::TextUnformatted("No custom intervention UI.");
@@ -750,9 +755,9 @@ void InteractUiPanel::DrawCustomInterventionUi(
     .agent_to_algorithm_signal = runtime_state ? &runtime_state->agent_to_algorithm_signal : nullptr,
     .algorithm_to_agent_signal = runtime_state ? &runtime_state->algorithm_to_agent_signal : nullptr,
   };
-  const std::string header_label = group.algorithm_profile.algorithm_name.empty()
+  const std::string header_label = object.algorithm_profile.algorithm_name.empty()
     ? ("Algorithm " + std::to_string(algorithm_index))
-    : group.algorithm_profile.algorithm_name;
+    : object.algorithm_profile.algorithm_name;
   ImGui::PushID(static_cast<int>(algorithm_index));
   ImGui::SeparatorText(header_label.c_str());
   slot->hook->DrawUi(context, slot->state.get());
@@ -1071,13 +1076,13 @@ void InteractUiPanel::DrawAgentBindingUi(IInteractUiHost& host) {
     ImGui::SeparatorText(agent_header.c_str());
     ImGui::Text("Algorithms: %zu", managed_agent->algorithm_count());
     for (size_t algorithm_index = 0; algorithm_index < managed_agent->algorithm_count(); ++algorithm_index) {
-      const agent::AgentAlgorithmSupportGroup* group = managed_agent->algorithm_support_group(algorithm_index);
-      if (!group) {
+      const agent::AlgorithmObject* object = managed_agent->algorithm_object(algorithm_index);
+      if (!object) {
         continue;
       }
-      const std::string algorithm_name = group->algorithm_profile.algorithm_name.empty()
+      const std::string algorithm_name = object->algorithm_profile.algorithm_name.empty()
         ? ("<algorithm " + std::to_string(algorithm_index) + ">")
-        : group->algorithm_profile.algorithm_name;
+        : object->algorithm_profile.algorithm_name;
       ImGui::BulletText("#%zu %s", algorithm_index, algorithm_name.c_str());
     }
   }
@@ -1085,15 +1090,15 @@ void InteractUiPanel::DrawAgentBindingUi(IInteractUiHost& host) {
   SyncCustomInterventionUiState(host);
   for (ActiveCustomInterventionUiSlot& slot : active_custom_ui_slots_) {
     const std::shared_ptr<agent::Agent> managed_agent = agent_manager.agent(slot.agent_index);
-    const agent::AgentAlgorithmSupportGroup* group =
-      managed_agent ? managed_agent->algorithm_support_group(slot.algorithm_index) : nullptr;
-    if (!group || !slot.hook) {
+    const agent::AlgorithmObject* object =
+      managed_agent ? managed_agent->algorithm_object(slot.algorithm_index) : nullptr;
+    if (!object || !slot.hook) {
       continue;
     }
     ImGui::Spacing();
     const char* custom_title = slot.hook->title();
     ImGui::SeparatorText(custom_title ? custom_title : "Custom Intervention UI");
-    DrawCustomInterventionUi(host, slot.agent_index, slot.algorithm_index, *group, &slot);
+    DrawCustomInterventionUi(host, slot.agent_index, slot.algorithm_index, *object, &slot);
   }
 }
 
@@ -1279,13 +1284,13 @@ void InteractUiPanel::DrawAgentManagerUi(IInteractUiHost& host) {
 
       if (opened) {
         for (size_t algorithm_index = 0; algorithm_index < managed_agent->algorithm_count(); ++algorithm_index) {
-          const agent::AgentAlgorithmSupportGroup* group = managed_agent->algorithm_support_group(algorithm_index);
-          if (!group) {
+          const agent::AlgorithmObject* object = managed_agent->algorithm_object(algorithm_index);
+          if (!object) {
             continue;
           }
-          const std::string algorithm_name = group->algorithm_profile.algorithm_name.empty()
+          const std::string algorithm_name = object->algorithm_profile.algorithm_name.empty()
             ? ("<algorithm " + std::to_string(algorithm_index) + ">")
-            : group->algorithm_profile.algorithm_name;
+            : object->algorithm_profile.algorithm_name;
           const bool algorithm_selected =
             agent_index == 0u &&
             static_cast<int>(algorithm_index) == agent_composer_ui_state_.selected_algorithm_index;
@@ -1337,21 +1342,21 @@ void InteractUiPanel::DrawAgentDetailUi(IInteractUiHost& host) {
     agent_composer_ui_state_.selected_algorithm_index = selected_algorithm_index;
   }
 
-  const agent::AgentAlgorithmSupportGroup* selected_group =
+  const agent::AlgorithmObject* selected_object =
     selected_algorithm_index >= 0
-      ? selected_agent->algorithm_support_group(static_cast<size_t>(selected_algorithm_index))
+      ? selected_agent->algorithm_object(static_cast<size_t>(selected_algorithm_index))
       : nullptr;
   const agent::AgentAlgorithmRuntimeState* selected_runtime_state =
     selected_algorithm_index >= 0
       ? selected_agent->algorithm_runtime_state(static_cast<size_t>(selected_algorithm_index))
       : nullptr;
-  const std::string selected_algorithm_name = selected_group
-    ? (selected_group->algorithm_profile.algorithm_name.empty()
+  const std::string selected_algorithm_name = selected_object
+    ? (selected_object->algorithm_profile.algorithm_name.empty()
       ? ("<algorithm " + std::to_string(selected_algorithm_index) + ">")
-      : selected_group->algorithm_profile.algorithm_name)
+      : selected_object->algorithm_profile.algorithm_name)
     : "No algorithm selected";
   ImGui::Text("Current Algorithm: %s", selected_algorithm_name.c_str());
-  if (selected_group) {
+  if (selected_object) {
     const char* assembly_state_text = "failed";
     switch (selected_agent->algorithm_assembly_state(static_cast<size_t>(selected_algorithm_index))) {
       case agent::AlgorithmAssemblyState::Pending: assembly_state_text = "pending"; break;
@@ -1360,21 +1365,21 @@ void InteractUiPanel::DrawAgentDetailUi(IInteractUiHost& host) {
       case agent::AlgorithmAssemblyState::Failed: assembly_state_text = "failed"; break;
     }
     ImGui::Text("Assembly State: %s", assembly_state_text);
-    ImGui::Text("CPU Symbol: %s", selected_group->cpu_symbol ? "true" : "false");
-    ImGui::Text("GPU Symbol: %s", selected_group->gpu_symbol ? "true" : "false");
+    ImGui::Text("CPU Symbol: %s", selected_object->cpu_symbol ? "true" : "false");
+    ImGui::Text("GPU Symbol: %s", selected_object->gpu_symbol ? "true" : "false");
 
-    if (!selected_group->resource_bindings.empty()) {
+    if (!selected_object->resource_bindings.empty()) {
       ImGui::SeparatorText("Bound Resources");
-      for (const agent::AlgorithmResourceBinding& binding : selected_group->resource_bindings) {
+      for (const agent::AlgorithmResourceBinding& binding : selected_object->resource_bindings) {
         ImGui::BulletText("%s [%s] -> %s",
           binding.resource_name.c_str(),
           binding.resource_kind.c_str(),
           binding.source_path.c_str());
       }
     }
-    if (!selected_group->descriptor_values.empty()) {
+    if (!selected_object->descriptor_values.empty()) {
       ImGui::SeparatorText("Descriptor Values");
-      for (const agent::AlgorithmDescriptorValue& value : selected_group->descriptor_values) {
+      for (const agent::AlgorithmDescriptorValue& value : selected_object->descriptor_values) {
         ImGui::BulletText("%s = %.3f", value.descriptor_name.c_str(), value.scalar_value);
       }
     }
@@ -1432,14 +1437,14 @@ void InteractUiPanel::DrawAgentDetailUi(IInteractUiHost& host) {
         slot.algorithm_index != static_cast<size_t>(selected_algorithm_index)) {
       continue;
     }
-    const agent::AgentAlgorithmSupportGroup* group = selected_agent->algorithm_support_group(slot.algorithm_index);
-    if (!group || !slot.hook) {
+    const agent::AlgorithmObject* object = selected_agent->algorithm_object(slot.algorithm_index);
+    if (!object || !slot.hook) {
       continue;
     }
     ImGui::Spacing();
     const char* custom_title = slot.hook->title();
     ImGui::SeparatorText(custom_title ? custom_title : "Custom Intervention UI");
-    DrawCustomInterventionUi(host, slot.agent_index, slot.algorithm_index, *group, &slot);
+    DrawCustomInterventionUi(host, slot.agent_index, slot.algorithm_index, *object, &slot);
   }
 
   ImGui::SeparatorText("Mount New Algorithm");
@@ -1671,63 +1676,58 @@ void InteractUiPanel::DrawAgentDetailUi(IInteractUiHost& host) {
     ImGui::TextUnformatted("No drawable result-render stage.");
   }
 
-  const bool start_algorithm_clicked = ImGui::Button("Start Algorithm");
-  ImGui::SameLine();
-  const bool reset_algorithm_clicked = ImGui::Button("Reset Selected Algorithm");
-
-  if (start_algorithm_clicked) {
-    if (algorithm_name.empty()) {
-      host.ui_status_message() = "Algorithm name must not be empty.";
-    } else {
-      std::vector<agent::AlgorithmResourceBinding> resource_bindings;
-      for (const auto& resource : agent_composer_ui_state_.resource_inputs) {
-        resource_bindings.push_back(agent::AlgorithmResourceBinding{
-          .resource_name = resource.resource_name,
-          .resource_kind = resource.resource_kind,
-          .source_path = _TrimCopy(resource.resource_path.data()),
-        });
-      }
-      std::vector<agent::AlgorithmDescriptorValue> descriptor_values;
-      for (const auto& descriptor : agent_composer_ui_state_.descriptor_inputs) {
-        descriptor_values.push_back(agent::AlgorithmDescriptorValue{
-          .descriptor_name = descriptor.descriptor_name,
-          .scalar_value = descriptor.scalar_value,
-        });
-      }
-
-      size_t attached_algorithm_index = 0u;
-      std::string attach_error_message;
-      if (!host.AttachAlgorithmToAgent(
-            0u,
-            algorithm_name,
-            resource_bindings,
-            descriptor_values,
-            &attached_algorithm_index,
-            &attach_error_message,
-            agent::AlgorithmMountMode::Direct,
-            agent_composer_ui_state_.execution_preference)) {
-        host.ui_status_message() = attach_error_message.empty()
-          ? "Failed to start algorithm on built-in agent."
-          : std::move(attach_error_message);
+  const bool algorithm_running = selected_object && selected_algorithm_index >= 0;
+  const char* action_label = algorithm_running ? "Reset Algorithm" : "Start Algorithm";
+  if (ImGui::Button(action_label, ImVec2(180.0f, 0.0f))) {
+    if (!algorithm_running) {
+      if (algorithm_name.empty()) {
+        host.ui_status_message() = "Algorithm name must not be empty.";
       } else {
-        agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(attached_algorithm_index);
-        host.agent_manager().StartTicking();
-        if (preview_request.valid) {
-          host.SetRenderPreviewRequest(preview_request);
+        std::vector<agent::AlgorithmResourceBinding> resource_bindings;
+        for (const auto& resource : agent_composer_ui_state_.resource_inputs) {
+          resource_bindings.push_back(agent::AlgorithmResourceBinding{
+            .resource_name = resource.resource_name,
+            .resource_kind = resource.resource_kind,
+            .source_path = _TrimCopy(resource.resource_path.data()),
+          });
         }
-        host.ui_status_message() = "Algorithm started on built-in agent.";
+        std::vector<agent::AlgorithmDescriptorValue> descriptor_values;
+        for (const auto& descriptor : agent_composer_ui_state_.descriptor_inputs) {
+          descriptor_values.push_back(agent::AlgorithmDescriptorValue{
+            .descriptor_name = descriptor.descriptor_name,
+            .scalar_value = descriptor.scalar_value,
+          });
+        }
+
+        size_t attached_algorithm_index = 0u;
+        std::string attach_error_message;
+        if (!host.AttachAlgorithmToAgent(
+              0u,
+              algorithm_name,
+              resource_bindings,
+              descriptor_values,
+              &attached_algorithm_index,
+              &attach_error_message,
+              agent::AlgorithmMountMode::Direct,
+              agent_composer_ui_state_.execution_preference)) {
+          host.ui_status_message() = attach_error_message.empty()
+            ? "Failed to start algorithm on built-in agent."
+            : std::move(attach_error_message);
+        } else {
+          agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(attached_algorithm_index);
+          host.agent_manager().StartTicking();
+          if (preview_request.valid) {
+            host.SetRenderPreviewRequest(preview_request);
+          }
+          host.ui_status_message() = "Algorithm started on built-in agent.";
+        }
       }
-    }
-  }
-  if (reset_algorithm_clicked) {
-    if (!selected_group || selected_algorithm_index < 0) {
-      host.ui_status_message() = "No algorithm is selected to reset.";
     } else {
-      const std::string reset_algorithm_name = selected_group->algorithm_profile.algorithm_name;
-      const std::vector<agent::AlgorithmResourceBinding> reset_resource_bindings = selected_group->resource_bindings;
-      const std::vector<agent::AlgorithmDescriptorValue> reset_descriptor_values = selected_group->descriptor_values;
-      const agent::AlgorithmMountMode reset_mount_mode = selected_group->mount_mode;
-      const agent::AlgorithmExecutionPreference reset_execution_preference = selected_group->execution_preference;
+      const std::string reset_algorithm_name = selected_object->algorithm_profile.algorithm_name;
+      const std::vector<agent::AlgorithmResourceBinding> reset_resource_bindings = selected_object->resource_bindings;
+      const std::vector<agent::AlgorithmDescriptorValue> reset_descriptor_values = selected_object->descriptor_values;
+      const agent::AlgorithmMountMode reset_mount_mode = selected_object->mount_mode;
+      const agent::AlgorithmExecutionPreference reset_execution_preference = selected_object->execution_preference;
       std::string reset_error_message;
       if (!host.agent_manager().DetachAlgorithmFromAgent(
             0u,
@@ -1737,6 +1737,7 @@ void InteractUiPanel::DrawAgentDetailUi(IInteractUiHost& host) {
           ? "Failed to unload the selected algorithm."
           : std::move(reset_error_message);
       } else {
+        host.ClearGpuExecutors();
         size_t reset_attached_algorithm_index = 0u;
         if (!host.AttachAlgorithmToAgent(
               0u,
@@ -1748,6 +1749,7 @@ void InteractUiPanel::DrawAgentDetailUi(IInteractUiHost& host) {
               reset_mount_mode,
               reset_execution_preference)) {
           agent_composer_ui_state_.selected_algorithm_index = -1;
+          host.SetRenderPreviewRequest({});
           host.ui_status_message() = reset_error_message.empty()
             ? "Failed to reattach the selected algorithm."
             : std::move(reset_error_message);
@@ -1799,32 +1801,20 @@ void InteractUiPanel::DrawWindowMenu() {
 }
 
 void InteractUiPanel::DrawAlgorithmPreviewUi(IInteractUiHost& host) {
-  ImGui::SetNextWindowBgAlpha(0.0f);
-  const ImGuiWindowFlags window_flags =
-    ImGuiWindowFlags_NoDecoration |
-    ImGuiWindowFlags_NoBackground |
-    ImGuiWindowFlags_NoScrollbar |
-    ImGuiWindowFlags_NoScrollWithMouse;
-  if (!ImGui::Begin("Render Preview", nullptr, window_flags)) {
+  _PopWindowToViewportOnAppear();
+  ImGui::SetNextWindowSize(ImVec2(640.0f, 480.0f), ImGuiCond_FirstUseEver);
+  if (!ImGui::Begin("Render Preview", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
     ImGui::End();
     return;
   }
 
+  const ImVec2 preview_size = ImGui::GetContentRegionAvail();
+  host.SetRenderPreviewExtent(preview_size);
   if (host.has_render_preview_texture()) {
-    const ImVec2 texture_size = host.render_preview_texture_size();
-    const ImVec2 available_size = ImGui::GetContentRegionAvail();
-    float draw_width = texture_size.x;
-    float draw_height = texture_size.y;
-    if (available_size.x > 0.0f && available_size.y > 0.0f && texture_size.x > 0.0f && texture_size.y > 0.0f) {
-      const float scale_x = available_size.x / texture_size.x;
-      const float scale_y = available_size.y / texture_size.y;
-      const float scale = std::min(scale_x, scale_y);
-      if (scale > 0.0f) {
-        draw_width = texture_size.x * scale;
-        draw_height = texture_size.y * scale;
-      }
-    }
-    ImGui::Image(host.render_preview_texture_id(), ImVec2(draw_width, draw_height));
+    ImGui::Image(host.render_preview_texture_id(), preview_size);
+  } else {
+    ImGui::TextUnformatted("Render preview is not ready.");
+    ImGui::TextUnformatted("Load an algorithm with a drawable intervention package.");
   }
   ImGui::End();
 }

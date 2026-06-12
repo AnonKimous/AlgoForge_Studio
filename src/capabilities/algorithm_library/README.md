@@ -39,3 +39,12 @@ to their bundle names.
 
 Use the subdirectory layout above for new bundles.
 See `agents.md` in this directory for `v`/`a` naming rules.
+
+## Coordinate Convention
+
+- Algorithm shaders and preview math follow the repo-wide left-handed convention.
+- Treat `[0,0,0]` as the lower-left near corner.
+- `+X` is right, `+Y` is up, and `+Z` is into the screen.
+- Do not assume Vulkan's default framebuffer orientation; the runtime flips it for you.
+- Result-render shaders consume preview-page pixel coordinates.
+- In Render Preview, `[0,0]` maps to the lower-left corner of the content region.

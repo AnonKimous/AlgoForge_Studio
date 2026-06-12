@@ -142,7 +142,7 @@ class InteractUiPanel {
     IInteractUiHost& host,
     size_t agent_index,
     size_t algorithm_index,
-    const agent::AgentAlgorithmSupportGroup& group,
+    const agent::AlgorithmObject& object,
     ActiveCustomInterventionUiSlot* slot);
   void SyncCustomInterventionUiState(IInteractUiHost& host);
 

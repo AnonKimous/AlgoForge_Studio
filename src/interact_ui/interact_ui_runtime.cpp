@@ -4,7 +4,9 @@
 
 namespace interact_ui {
 
-InteractUiRuntime::~InteractUiRuntime() = default;
+InteractUiRuntime::~InteractUiRuntime() {
+  Destroy();
+}
 
 bool InteractUiRuntime::Init(const char* window_title, int width, int height) {
   agent_manager_.Destroy();

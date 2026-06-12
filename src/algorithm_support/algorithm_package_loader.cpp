@@ -8,13 +8,13 @@
 
 namespace algorithm_support {
 
-bool CreateAlgorithmSupportGroupFromLocation(
+bool CreateAlgorithmObjectFromLocation(
   const algorithm::AlgorithmPackageLocation& package_location,
-  agent::AgentAlgorithmSupportGroup* out_group,
+  agent::AlgorithmObject* out_group,
   std::string* out_error_message) {
   if (!out_group) {
     if (out_error_message) {
-      *out_error_message = "AgentAlgorithmSupportGroup output pointer is null.";
+      *out_error_message = "AlgorithmObject output pointer is null.";
     }
     return false;
   }
@@ -26,7 +26,7 @@ bool CreateAlgorithmSupportGroupFromLocation(
     return false;
   }
 
-  agent::AgentAlgorithmSupportGroup group{};
+  agent::AlgorithmObject group{};
   group.algorithm_profile.algorithm_name = package_location.algorithm_name;
   group.algorithm_profile.container_manifest_name = package_location.manifest_name.empty()
     ? package_location.algorithm_name
