@@ -1,0 +1,18 @@
+{
+  "algorithm_name": "temporary_test_line_motion",
+  "globalCfg": {
+    "solvePrecision": "fp32",
+    "defaultPrecision": "fp32"
+  },
+  "variableArray": {
+    "pos": {
+      "kind": "array",
+      "precision": "fp32",
+      "shape": [3],
+      "count": 1
+    }
+  },
+  "reflector": {
+    "vertex_position": ["pos"]
+  }
+}

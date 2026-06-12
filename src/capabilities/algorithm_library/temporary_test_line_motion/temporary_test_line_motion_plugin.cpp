@@ -1,6 +1,6 @@
 #define ALGORITHM_LIBRARY_PLUGIN_BUILD 1
 
-#include "capabilities/agent/agent.h"
+#include "agent/agent.h"
 #include "capabilities/algorithm_library/algorithm_plugin_api.h"
 
 #include "cJSON.h"
@@ -593,7 +593,7 @@ class TemporaryTestLineMotionMainThreadExecutor final : public agent::IAlgorithm
       *algorithm_to_agent_signal = {};
     }
     if (debug_state) {
-      debug_state->signals.push_back(codec::AdvancedAlgorithmDebugSignal{
+      debug_state->signals.push_back(algorithm_support::AdvancedAlgorithmDebugSignal{
         .name = "temporary_test_line_motion.cpu_tick",
         .payload = "Advanced pos on the main thread.",
       });

@@ -1,13 +1,13 @@
 #include "algorithm_management/job_system.h"
 
-#include "agent_management/agent_abi.h"
+#include "agent/agent_abi.h"
 
 #include <string>
 
 namespace algorithm_management::job_cpu {
 
 bool Execute(
-  const agent::AgentAlgorithmCodecGroup& group,
+  const agent::AgentAlgorithmSupportGroup& group,
   const agent::AgentTickContext& context,
   const AgentToAlgorithmSignal& agent_to_algorithm_signal,
   algorithm::AlgorithmContainerSet* container_set,

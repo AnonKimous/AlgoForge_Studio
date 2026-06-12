@@ -35,8 +35,8 @@ This rule is also enforced at compile time:
 
 ## Package Abstraction
 
-Package-level codec, decomposition, and intervention hooks are owned by
-`capabilities/agent` and `codec` now.
+Package-level support, decomposition, and intervention hooks are owned by
+`capabilities/agent` and `algorithm_support` now.
 
 - `CreateAlgorithmContainersFromManifestName` is the preferred public entry for runtime container creation.
 - `CreateAlgorithmContainersFromManifestFile` is the lower-level entry used after a manifest path is known.

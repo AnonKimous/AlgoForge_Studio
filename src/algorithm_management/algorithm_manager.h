@@ -3,13 +3,14 @@
 #include <string>
 
 #define ALGORITHM_MANAGEMENT_LAYER_PUBLIC_FACADE_INCLUDE 1
-#include "algorithm_management/algorithm_container_manifest.h"
-#include "algorithm_management/algorithm_types.h"
+#include "algorithm_support/algorithm_container_manifest.h"
+#include "algorithm_support/algorithm_package_location.h"
+#include "algorithm_support/algorithm_types.h"
 #include "algorithm_management/job_system.h"
 #undef ALGORITHM_MANAGEMENT_LAYER_PUBLIC_FACADE_INCLUDE
 
 namespace agent {
-struct AgentAlgorithmCodecGroup;
+struct AgentAlgorithmSupportGroup;
 struct AgentTickContext;
 }
 
@@ -21,6 +22,7 @@ using ::algorithm::AlgorithmContainerManifestItem;
 using ::algorithm::AlgorithmContainerSet;
 using ::algorithm::AlgorithmContainerStorageKind;
 using ::algorithm::AlgorithmStandardContainerLayout;
+using ::algorithm::AlgorithmPackageLocation;
 using ::algorithm::AlgorithmProfile;
 using ::algorithm::AlgorithmReflectionBinding;
 using ::algorithm::AlgorithmReflector;
@@ -32,6 +34,7 @@ using ::algorithm::CreateAlgorithmReflectorFromManifestFile;
 using ::algorithm::CreateAlgorithmReflectorFromManifestName;
 using ::algorithm::FindAlgorithmContainer;
 using ::algorithm::ResolveAlgorithmManifestName;
+using ::algorithm::TryResolveAlgorithmPackageLocation;
 using ::algorithm::TryCreateAlgorithmReflectorFromAlgorithmName;
 
 }  // namespace algorithm_management
@@ -46,10 +49,12 @@ using algorithm_management::AlgorithmProfile;
 using algorithm_management::AlgorithmReflectionBinding;
 using algorithm_management::AlgorithmReflector;
 using algorithm_management::AlgorithmReflectorManifestItem;
+using algorithm_management::AlgorithmPackageLocation;
 using algorithm_management::CreateAlgorithmContainersFromManifestFile;
 using algorithm_management::CreateAlgorithmContainersFromManifestName;
 using algorithm_management::CreateAlgorithmReflectorFromManifestFile;
 using algorithm_management::CreateAlgorithmReflectorFromManifestName;
 using algorithm_management::FindAlgorithmContainer;
 using algorithm_management::ResolveAlgorithmManifestName;
+using algorithm_management::TryResolveAlgorithmPackageLocation;
 using algorithm_management::TryCreateAlgorithmReflectorFromAlgorithmName;

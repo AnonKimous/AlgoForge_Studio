@@ -1,4 +1,5 @@
-#include "algorithm_container_manifest.h"
+#include "algorithm_support/algorithm_container_manifest.h"
+#include "algorithm_support/algorithm_package_location.h"
 
 #include "runtime_systems/memory_manager.h"
 
@@ -1106,6 +1107,61 @@ bool TryCreateAlgorithmReflectorFromAlgorithmName(
   }
 
   return CreateAlgorithmReflectorFromManifestFile(manifest_path.generic_string(), out_reflector, out_error_message);
+}
+
+bool TryResolveAlgorithmPackageLocation(
+  const std::string& algorithm_name,
+  AlgorithmPackageLocation* out_location,
+  std::string* out_error_message) {
+  if (!out_location) {
+    if (out_error_message) {
+      *out_error_message = "AlgorithmPackageLocation output pointer is null.";
+    }
+    return false;
+  }
+
+  out_location->Clear();
+
+  fs::path manifest_path;
+  const ManifestLookupResult lookup_result =
+    _ResolveManifestPathByName(algorithm_name, &manifest_path, out_error_message);
+  if (lookup_result == ManifestLookupResult::NotFound) {
+    if (out_error_message) {
+      out_error_message->clear();
+    }
+    return false;
+  }
+  if (lookup_result != ManifestLookupResult::Found) {
+    return false;
+  }
+
+  const std::string trimmed_name = _Trim(algorithm_name);
+  out_location->algorithm_name = trimmed_name;
+  out_location->manifest_name = trimmed_name;
+  out_location->manifest_path = manifest_path;
+  out_location->package_root = manifest_path.parent_path();
+
+  const fs::path package_root = out_location->package_root;
+  const fs::path plugin_candidates[] = {
+    package_root / "Debug" / (trimmed_name + ".dll"),
+    package_root / "Release" / (trimmed_name + ".dll"),
+    package_root / (trimmed_name + ".dll"),
+  };
+
+  std::error_code ec;
+  for (const fs::path& candidate : plugin_candidates) {
+    if (fs::exists(candidate, ec) && fs::is_regular_file(candidate, ec)) {
+      out_location->plugin_module_path = candidate;
+      out_location->has_plugin_module = true;
+      break;
+    }
+  }
+
+  out_location->valid = true;
+  if (out_error_message) {
+    out_error_message->clear();
+  }
+  return true;
 }
 
 }  // namespace algorithm

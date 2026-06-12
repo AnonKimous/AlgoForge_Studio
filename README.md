@@ -20,9 +20,9 @@ This project is a layered Vulkan + SDL3 sandbox for agent-driven physics and ren
 
 - `common_data` holds shared mesh, math, input, and interaction types.
 - `runtime_systems` owns windowing, ImGui, and Vulkan runtime support.
-- `common_data` also carries the shared packet structs used for codec and intervention payloads.
+- `common_data` also carries the shared packet structs used for algorithm support and intervention payloads.
 - `algorithm_management` owns container-manifest loading and real runtime container creation.
-- `codec` encodes and decodes compliance / intervention payloads.
+- `algorithm_support` handles the package-level support / intervention payload flow.
 - `capabilities/agent` holds the lightweight agent object and its attached algorithm metadata.
 - `capabilities/algorithm_library` is reserved for concrete algorithm package capability bundles.
 - `capabilities/sidecar` hosts optional sidecar capabilities such as mesh import/export.
@@ -49,7 +49,7 @@ This project is a layered Vulkan + SDL3 sandbox for agent-driven physics and ren
 ## Agent Composition
 
 - Write each small algorithm capability in `capabilities/algorithm_library` with its own container manifest and package hooks.
-- Build the final agent by attaching one or more algorithm codec groups, solver config, and lightweight algorithm profiles to one agent object.
+- Build the final agent by attaching one or more algorithm support groups, solver config, and lightweight algorithm profiles to one agent object.
 - Let upper layers assemble the agent creation spec, then let `agent_management` create and retain agents for runtime stepping while each `Agent` internally ticks its attached algorithm groups.
 - The runtime does not try to validate the full graph; missing or incompatible bindings should fail at the point of use.
 

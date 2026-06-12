@@ -1,4 +1,4 @@
 #pragma once
 
-#include "agent_management/agent_abi.h"
-#include "codec/codec_protocol.h"
+#include "agent/agent_abi.h"
+#include "algorithm_support/algorithm_protocol.h"

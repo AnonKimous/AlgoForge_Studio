@@ -195,7 +195,7 @@ class AlgorithmGpuExecutorImpl {
   }
 
   bool ExecuteGpuTick(
-    const agent::AgentAlgorithmCodecGroup& group,
+    const agent::AgentAlgorithmSupportGroup& group,
     algorithm::AlgorithmContainerSet* container_set,
     const agent::AgentTickContext& context,
     std::string* out_error_message) {
@@ -430,7 +430,7 @@ class AlgorithmGpuExecutorImpl {
   }
 
   bool SynchronizeGpuTickState(
-    const agent::AgentAlgorithmCodecGroup& group,
+    const agent::AgentAlgorithmSupportGroup& group,
     algorithm::AlgorithmContainerSet* container_set,
     std::string* out_error_message) {
     if (!container_set) {
@@ -1016,7 +1016,7 @@ void AlgorithmGpuExecutor::Clear() {
 }
 
 bool AlgorithmGpuExecutor::ExecuteGpuTick(
-  const agent::AgentAlgorithmCodecGroup& group,
+  const agent::AgentAlgorithmSupportGroup& group,
   algorithm::AlgorithmContainerSet* container_set,
   const agent::AgentTickContext& context,
   std::string* out_error_message) {
@@ -1024,14 +1024,14 @@ bool AlgorithmGpuExecutor::ExecuteGpuTick(
 }
 
 bool AlgorithmGpuExecutor::SynchronizeGpuTickState(
-  const agent::AgentAlgorithmCodecGroup& group,
+  const agent::AgentAlgorithmSupportGroup& group,
   algorithm::AlgorithmContainerSet* container_set,
   std::string* out_error_message) {
   return AlgorithmGpuExecutorImpl::Instance().SynchronizeGpuTickState(group, container_set, out_error_message);
 }
 
 bool TryExecuteGpuTick(
-  const agent::AgentAlgorithmCodecGroup& group,
+  const agent::AgentAlgorithmSupportGroup& group,
   algorithm::AlgorithmContainerSet* container_set,
   const agent::AgentTickContext& context,
   std::string* out_error_message) {
@@ -1039,7 +1039,7 @@ bool TryExecuteGpuTick(
 }
 
 bool TrySynchronizeGpuTickState(
-  const agent::AgentAlgorithmCodecGroup& group,
+  const agent::AgentAlgorithmSupportGroup& group,
   algorithm::AlgorithmContainerSet* container_set,
   std::string* out_error_message) {
   return AlgorithmGpuExecutor::Instance().SynchronizeGpuTickState(group, container_set, out_error_message);

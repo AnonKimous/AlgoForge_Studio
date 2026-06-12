@@ -20,9 +20,12 @@ When code and docs disagree, follow the code and update the docs.
 - `common_data` is shared in-memory data only.
 - `common_data` is the one exception to the single-facade header rule.
 - `runtime_systems` owns the SDL, ImGui, and Vulkan runtime shell.
-- `codec` owns encode/decode and reflection helpers. It is not a general file-IO layer.
+- `algorithm_support` owns package support and reflection helpers. It is not a general file-IO layer.
+- `algorithm_support` only consumes resolved algorithm package locations and performs assembly/loading; it does not search for packages.
+- `agent` may wrap algorithm support assembly for higher layers, but `agent_management` should not call algorithm support directly.
 - `algorithm_management` is a strict main-trunk layer.
 - `algorithm_management` owns container-manifest loading, manifest-name resolution, and runtime container creation helpers only.
+- `algorithm_management` also resolves algorithm package locations before higher layers assemble plugin-backed tools.
 - `kernal_all` owns the non-UI debug host backend and agent/runtime wiring.
 - `interact_ui` is the editor-facing UI surface.
 - `sdk` is the external agent/algorithm submission surface.
@@ -35,7 +38,7 @@ When code and docs disagree, follow the code and update the docs.
 
 Strict main-trunk layering path:
 
-`common_data -> codec -> algorithm_management -> agent -> agent_management -> kernal_all -> debugTool`
+`common_data -> algorithm_support -> algorithm_management -> agent -> agent_management -> kernal_all -> debugTool`
 
 Runtime shell support path:
 
@@ -54,19 +57,18 @@ Capability modules grouped under `src/capabilities`:
 Current project-library dependency graph from `CMakeLists.txt`:
 
 - `mesh_io -> common_data`
-- `codec -> common_data`
+- `algorithm_support -> common_data`
 - `algorithm_management -> common_data`
 - `runtime_systems -> common_data`
-- `agent -> common_data + algorithm_management + codec`
-- `agent -> common_data + algorithm_management + codec`
-- `agent_management -> common_data + agent`
+- `agent -> common_data + algorithm_management + algorithm_support`
+- `agent_management -> common_data + agent + algorithm_management + algorithm_support`
 - `kernal_all -> common_data + agent_management + runtime_systems`
-- `interact_ui(ui) -> common_data + agent_management + runtime_systems + codec`
+- `interact_ui(ui) -> common_data + agent_management + runtime_systems + algorithm_support`
 - `debugTool -> kernal_all + interact_ui(ui) + common_data`
 
 Important note:
 
-`codec` and `algorithm_management` are real trunk layers, but in the current
+`algorithm_support` and `algorithm_management` are real trunk layers, but in the current
 executable they still mostly provide contracts and helpers rather than a rich
 live execution pipeline.
 
@@ -80,6 +82,7 @@ src/
 ├─ algorithm_management/
 │  ├─ algorithm_manager.h
 │  ├─ algorithm_container_manifest.h/.cpp
+│  ├─ algorithm_package_location.h
 │  ├─ algorithm_types.h
 │  └─ README.md
 ├─ capabilities/
@@ -93,10 +96,10 @@ src/
 │     ├─ mesh_io.h/.cpp
 │     └─ README.md
 ├─ common_data/
-├─ codec/
-│  ├─ codec_manager.h
-│  ├─ codec_intervention.h
-│  └─ codec_protocol.h
+├─ algorithm_support/
+│  ├─ algorithm_support_manager.h
+│  ├─ algorithm_intervention.h
+│  └─ algorithm_protocol.h
 ├─ runtime_systems/
 ├─ kernal_all/
 ├─ sdk/
@@ -107,8 +110,9 @@ src/
 ## Public Interfaces
 
 - `common_data`: specific headers or `common_data/common_data.h`
-- `codec`: `codec/codec_manager.h` and `codec/codec_intervention.h`
+- `algorithm_support`: `algorithm_support/algorithm_support_manager.h` and `algorithm_support/algorithm_intervention.h`
 - `algorithm_management`: `algorithm_management/algorithm_manager.h`
+- `algorithm_management` package-location helper: `algorithm_management/algorithm_package_location.h`
 - `runtime_systems`: `runtime_systems/runtime_environment.h`
 - `kernal_all`: no public interface; it is an internal debug backend target
 - `interact_ui`: `interact_ui/interact_ui_runtime.h` and `interact_ui/interact_ui_panel.h`
@@ -124,6 +128,7 @@ It should:
 
 - load official JSON manifests
 - resolve manifest names from `capabilities/algorithm_library`
+- resolve algorithm package locations before algorithm support assembly
 - create real runtime containers from a manifest
 - cache per-manifest container templates for fast clone-and-clear reuse
 
@@ -144,7 +149,7 @@ hook contracts.
 It may aggregate:
 
 - algorithm-management container and manifest types
-- codec hook contracts
+- algorithm support hook contracts
 - decomposer-provided resource reflection contracts
 - shared interaction and common-data types
 
@@ -220,7 +225,7 @@ It should:
 3. `debugTool` binds `InteractUiPanel` to the runtime host and sets the draw callback.
 4. `RuntimeEnvironment` drives the SDL and ImGui frame loop.
 5. `InteractUiPanel::Draw` calls into the managed agent registry through `IInteractUiHost`.
-6. `AgentTicker` builds macro tick context and lets `Agent` tick its attached algorithm codec groups.
+6. `AgentTicker` builds macro tick context and lets `Agent` tick its attached algorithm support groups.
 
 ## Quick Guidance For AI Agents
 

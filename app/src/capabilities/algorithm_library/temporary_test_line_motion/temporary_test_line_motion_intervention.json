@@ -1,0 +1,45 @@
+{
+  "algorithm_name": "temporary_test_line_motion",
+  "stages": {
+    "algorithm_result_render": {
+      "stage_name": "algorithm_result_render",
+      "stage_kind": "result_render",
+      "used_algorithm_containers": {
+        "arrays": [
+          {
+            "name": "pos",
+            "kind": "array",
+            "tuple_width": 3,
+            "required": true
+          }
+        ],
+        "variables": []
+      },
+      "shader": {
+        "pipeline": "graphics",
+        "vertex": "temporary_test_line_motion_result_render.vert",
+        "fragment": "temporary_test_line_motion_result_render.frag"
+      }
+    },
+    "gpu_tick": {
+      "stage_name": "gpu_tick",
+      "stage_kind": "custom",
+      "used_algorithm_containers": {
+        "arrays": [
+          {
+            "name": "pos",
+            "kind": "array",
+            "tuple_width": 3,
+            "required": true
+          }
+        ],
+        "variables": []
+      },
+      "shader": {
+        "pipeline": "graphics",
+        "vertex": "temporary_test_line_motion_gpu_tick.vert",
+        "fragment": "temporary_test_line_motion_gpu_tick.frag"
+      }
+    }
+  }
+}

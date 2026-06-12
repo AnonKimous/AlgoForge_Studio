@@ -9,7 +9,8 @@
 #include <SDL3/SDL.h>
 #include <sstream>
 
-#include "codec/codec_protocol.h"
+#include "algorithm_support/algorithm_protocol.h"
+#include "algorithm_management/algorithm_manager.h"
 #include "cJSON.h"
 
 namespace interact_ui {
@@ -51,8 +52,11 @@ std::string _AlgorithmLibraryRootPath() {
 }
 
 std::string _ProjectDataRootPath() {
-  const std::filesystem::path base_path(SDL_GetBasePath());
-  return (base_path.parent_path().parent_path() / "data").string();
+  const std::filesystem::path base_path(SDL_GetBasePath() ? SDL_GetBasePath() : "");
+  if (base_path.empty()) {
+    return "data";
+  }
+  return (base_path.parent_path() / "data").string();
 }
 
 std::string _ResolveAlgorithmShaderPath(
@@ -364,9 +368,23 @@ bool _QueryAlgorithmRequestedBindings(
   out_resources->clear();
   out_descriptors->clear();
 
+  algorithm::AlgorithmPackageLocation package_location{};
+  std::string location_error_message;
+  if (!algorithm_management::TryResolveAlgorithmPackageLocation(
+        algorithm_name,
+        &package_location,
+        &location_error_message)) {
+    if (out_error_message) {
+      *out_error_message = location_error_message.empty()
+        ? ("Failed to resolve algorithm package location for '" + algorithm_name + "'.")
+        : std::move(location_error_message);
+    }
+    return false;
+  }
+
   std::shared_ptr<agent::IAlgorithmPackageDecomposer> decomposer;
   std::string error_message;
-  if (!codec::CreateAlgorithmPackageDecomposerByName(algorithm_name, &decomposer, &error_message) || !decomposer) {
+  if (!algorithm_support::CreateAlgorithmPackageDecomposerFromLocation(package_location, &decomposer, &error_message) || !decomposer) {
     if (out_error_message) {
       *out_error_message = error_message.empty()
         ? ("Failed to create decomposer for algorithm '" + algorithm_name + "'.")
@@ -376,7 +394,7 @@ bool _QueryAlgorithmRequestedBindings(
   }
 
   AlgorithmProfile profile{};
-  profile.algorithm_name = algorithm_name;
+  profile.algorithm_name = package_location.algorithm_name;
 
   agent::AlgorithmRequestedResources requested_resources{};
   agent::AlgorithmRequestedDescriptorBindings requested_descriptor_bindings{};
@@ -432,7 +450,7 @@ bool _BuildRenderPreviewRequest(
 
   out_request->Clear();
 
-  const agent::AgentAlgorithmCodecGroup* group = agent.algorithm_codec_group(algorithm_index);
+  const agent::AgentAlgorithmSupportGroup* group = agent.algorithm_support_group(algorithm_index);
   if (!group || !group->intervention) {
     return false;
   }
@@ -665,7 +683,7 @@ void InteractUiPanel::SyncCustomInterventionUiState(IInteractUiHost& host) {
 
     updated_slots.reserve(updated_slots.size() + managed_agent->algorithm_count());
     for (size_t algorithm_index = 0; algorithm_index < managed_agent->algorithm_count(); ++algorithm_index) {
-      const agent::AgentAlgorithmCodecGroup* group = managed_agent->algorithm_codec_group(algorithm_index);
+      const agent::AgentAlgorithmSupportGroup* group = managed_agent->algorithm_support_group(algorithm_index);
       if (!group) {
         continue;
       }
@@ -706,7 +724,7 @@ void InteractUiPanel::DrawCustomInterventionUi(
   IInteractUiHost& host,
   size_t agent_index,
   size_t algorithm_index,
-  const agent::AgentAlgorithmCodecGroup& group,
+  const agent::AgentAlgorithmSupportGroup& group,
   ActiveCustomInterventionUiSlot* slot) {
   if (!slot || !slot->hook) {
     ImGui::TextUnformatted("No custom intervention UI.");
@@ -982,7 +1000,7 @@ void InteractUiPanel::DrawAgentComposerUi(IInteractUiHost& host) {
     }
   }
 
-  if (!ImGui::Button("Attach Algorithm")) {
+  if (!ImGui::Button("Start Algorithm")) {
     return;
   }
 
@@ -1025,7 +1043,8 @@ void InteractUiPanel::DrawAgentComposerUi(IInteractUiHost& host) {
   }
 
   (void)attached_algorithm_index;
-  host.ui_status_message() = "Algorithm attached to built-in agent.";
+  host.agent_manager().StartTicking();
+  host.ui_status_message() = "Algorithm started on built-in agent.";
 }
 
 void InteractUiPanel::DrawAgentBindingUi(IInteractUiHost& host) {
@@ -1052,7 +1071,7 @@ void InteractUiPanel::DrawAgentBindingUi(IInteractUiHost& host) {
     ImGui::SeparatorText(agent_header.c_str());
     ImGui::Text("Algorithms: %zu", managed_agent->algorithm_count());
     for (size_t algorithm_index = 0; algorithm_index < managed_agent->algorithm_count(); ++algorithm_index) {
-      const agent::AgentAlgorithmCodecGroup* group = managed_agent->algorithm_codec_group(algorithm_index);
+      const agent::AgentAlgorithmSupportGroup* group = managed_agent->algorithm_support_group(algorithm_index);
       if (!group) {
         continue;
       }
@@ -1066,8 +1085,8 @@ void InteractUiPanel::DrawAgentBindingUi(IInteractUiHost& host) {
   SyncCustomInterventionUiState(host);
   for (ActiveCustomInterventionUiSlot& slot : active_custom_ui_slots_) {
     const std::shared_ptr<agent::Agent> managed_agent = agent_manager.agent(slot.agent_index);
-    const agent::AgentAlgorithmCodecGroup* group =
-      managed_agent ? managed_agent->algorithm_codec_group(slot.algorithm_index) : nullptr;
+    const agent::AgentAlgorithmSupportGroup* group =
+      managed_agent ? managed_agent->algorithm_support_group(slot.algorithm_index) : nullptr;
     if (!group || !slot.hook) {
       continue;
     }
@@ -1205,6 +1224,16 @@ void InteractUiPanel::DrawAgentManagerUi(IInteractUiHost& host) {
 
   ImGui::SeparatorText("Debug Agent");
   ImGui::Text("Built-in agent count: %zu", agent_manager.agent_count());
+  ImGui::Text("Tick State: %s", agent_manager.tick_enabled() ? "running" : "paused");
+  if (ImGui::Button("Start Tick")) {
+    agent_manager.StartTicking();
+    host.ui_status_message() = "Agent manager tick started.";
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Pause Tick")) {
+    agent_manager.PauseTicking();
+    host.ui_status_message() = "Agent manager tick paused.";
+  }
   if (!agent_manager.has_agents()) {
     ImGui::TextUnformatted("Debug agent is unavailable.");
     ImGui::End();
@@ -1250,7 +1279,7 @@ void InteractUiPanel::DrawAgentManagerUi(IInteractUiHost& host) {
 
       if (opened) {
         for (size_t algorithm_index = 0; algorithm_index < managed_agent->algorithm_count(); ++algorithm_index) {
-          const agent::AgentAlgorithmCodecGroup* group = managed_agent->algorithm_codec_group(algorithm_index);
+          const agent::AgentAlgorithmSupportGroup* group = managed_agent->algorithm_support_group(algorithm_index);
           if (!group) {
             continue;
           }
@@ -1308,9 +1337,9 @@ void InteractUiPanel::DrawAgentDetailUi(IInteractUiHost& host) {
     agent_composer_ui_state_.selected_algorithm_index = selected_algorithm_index;
   }
 
-  const agent::AgentAlgorithmCodecGroup* selected_group =
+  const agent::AgentAlgorithmSupportGroup* selected_group =
     selected_algorithm_index >= 0
-      ? selected_agent->algorithm_codec_group(static_cast<size_t>(selected_algorithm_index))
+      ? selected_agent->algorithm_support_group(static_cast<size_t>(selected_algorithm_index))
       : nullptr;
   const agent::AgentAlgorithmRuntimeState* selected_runtime_state =
     selected_algorithm_index >= 0
@@ -1403,7 +1432,7 @@ void InteractUiPanel::DrawAgentDetailUi(IInteractUiHost& host) {
         slot.algorithm_index != static_cast<size_t>(selected_algorithm_index)) {
       continue;
     }
-    const agent::AgentAlgorithmCodecGroup* group = selected_agent->algorithm_codec_group(slot.algorithm_index);
+    const agent::AgentAlgorithmSupportGroup* group = selected_agent->algorithm_support_group(slot.algorithm_index);
     if (!group || !slot.hook) {
       continue;
     }
@@ -1616,7 +1645,7 @@ void InteractUiPanel::DrawAgentDetailUi(IInteractUiHost& host) {
     }
   }
 
-  ImGui::SeparatorText("Preview And Mount");
+  ImGui::SeparatorText("Start And Reset");
   runtime_systems::RenderPreviewRequest preview_request{};
   std::string preview_error_message;
   if (selected_agent) {
@@ -1642,22 +1671,11 @@ void InteractUiPanel::DrawAgentDetailUi(IInteractUiHost& host) {
     ImGui::TextUnformatted("No drawable result-render stage.");
   }
 
-  const bool submit_preview_clicked = ImGui::Button("Submit Preview");
+  const bool start_algorithm_clicked = ImGui::Button("Start Algorithm");
   ImGui::SameLine();
-  const bool attach_algorithm_clicked = ImGui::Button("Attach Algorithm");
+  const bool reset_algorithm_clicked = ImGui::Button("Reset Selected Algorithm");
 
-  if (submit_preview_clicked) {
-    if (preview_request.valid) {
-      host.SetRenderPreviewRequest(preview_request);
-      host.ui_status_message() = "Preview submitted to the renderer.";
-    } else {
-      host.ui_status_message() = preview_error_message.empty()
-        ? "Preview request is invalid."
-        : std::move(preview_error_message);
-    }
-  }
-
-  if (attach_algorithm_clicked) {
+  if (start_algorithm_clicked) {
     if (algorithm_name.empty()) {
       host.ui_status_message() = "Algorithm name must not be empty.";
     } else {
@@ -1689,17 +1707,18 @@ void InteractUiPanel::DrawAgentDetailUi(IInteractUiHost& host) {
             agent::AlgorithmMountMode::Direct,
             agent_composer_ui_state_.execution_preference)) {
         host.ui_status_message() = attach_error_message.empty()
-          ? "Failed to attach algorithm to built-in agent."
+          ? "Failed to start algorithm on built-in agent."
           : std::move(attach_error_message);
       } else {
         agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(attached_algorithm_index);
-        host.ui_status_message() = "Algorithm attached to built-in agent.";
+        host.agent_manager().StartTicking();
+        if (preview_request.valid) {
+          host.SetRenderPreviewRequest(preview_request);
+        }
+        host.ui_status_message() = "Algorithm started on built-in agent.";
       }
     }
   }
-
-  ImGui::SameLine();
-  const bool reset_algorithm_clicked = ImGui::Button("Reset Selected Algorithm");
   if (reset_algorithm_clicked) {
     if (!selected_group || selected_algorithm_index < 0) {
       host.ui_status_message() = "No algorithm is selected to reset.";
@@ -1734,6 +1753,10 @@ void InteractUiPanel::DrawAgentDetailUi(IInteractUiHost& host) {
             : std::move(reset_error_message);
         } else {
           agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(reset_attached_algorithm_index);
+          host.agent_manager().StartTicking();
+          if (preview_request.valid) {
+            host.SetRenderPreviewRequest(preview_request);
+          }
           host.ui_status_message() = "Selected algorithm was reset.";
         }
       }

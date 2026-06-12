@@ -1,0 +1,38 @@
+{
+  "algorithm_name": "v6a2_triangle_collision_runtime_test",
+  "stages": {
+    "algorithm_result_render": {
+      "stage_name": "algorithm_result_render",
+      "stage_kind": "result_render",
+      "used_algorithm_containers": {
+        "variables": [],
+        "arrays": [
+          { "name": "a1", "kind": "array", "tuple_width": 6, "required": true }
+        ]
+      },
+      "shader": {
+        "pipeline": "graphics",
+        "vertex": "v6a2_triangle_collision_runtime_test_result_render.vert",
+        "fragment": "v6a2_triangle_collision_runtime_test_result_render.frag"
+      }
+    },
+    "runtime": {
+      "stage_name": "runtime",
+      "stage_kind": "runtime",
+      "used_algorithm_containers": {
+        "variables": [
+          { "name": "v1", "kind": "variable", "tuple_width": 1, "required": true },
+          { "name": "v2", "kind": "variable", "tuple_width": 1, "required": true },
+          { "name": "v3", "kind": "variable", "tuple_width": 1, "required": true },
+          { "name": "v4", "kind": "variable", "tuple_width": 1, "required": true },
+          { "name": "v5", "kind": "variable", "tuple_width": 1, "required": true },
+          { "name": "v6", "kind": "variable", "tuple_width": 1, "required": true }
+        ],
+        "arrays": [
+          { "name": "a1", "kind": "array", "tuple_width": 6, "required": true },
+          { "name": "a2", "kind": "array", "tuple_width": 2, "required": true }
+        ]
+      }
+    }
+  }
+}

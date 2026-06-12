@@ -1,6 +1,6 @@
 #include "agent_ticker.h"
 
-#include "capabilities/agent/agent.h"
+#include "agent/agent.h"
 
 #include <utility>
 
@@ -9,7 +9,7 @@ namespace agent_management {
 namespace {
 
 bool _SignalBlocksTick(
-  const agent::AgentAlgorithmCodecGroup& group,
+  const agent::AgentAlgorithmSupportGroup& group,
   const AgentToAlgorithmSignal& signal) {
   if (signal.stop_requested || signal.pause_requested) {
     return true;
@@ -51,7 +51,7 @@ void AgentTicker::Tick(
 
   std::vector<bool> allow_tick_mask(agent_binding_->algorithm_count(), true);
   for (size_t i = 0; i < agent_binding_->algorithm_count(); ++i) {
-    const agent::AgentAlgorithmCodecGroup* group = agent_binding_->algorithm_codec_group(i);
+    const agent::AgentAlgorithmSupportGroup* group = agent_binding_->algorithm_support_group(i);
     const agent::AgentAlgorithmRuntimeState* runtime_state = agent_binding_->algorithm_runtime_state(i);
     if (!group || !runtime_state) {
       allow_tick_mask[i] = false;

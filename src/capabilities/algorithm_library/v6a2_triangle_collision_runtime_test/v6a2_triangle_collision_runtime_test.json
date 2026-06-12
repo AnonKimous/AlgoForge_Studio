@@ -1,0 +1,51 @@
+{
+  "algorithm_name": "v6a2_triangle_collision_runtime_test",
+  "globalCfg": {
+    "solvePrecision": "fp32",
+    "defaultPrecision": "fp32"
+  },
+  "variable": {
+    "v1": {
+      "kind": "scalar",
+      "precision": "fp32"
+    },
+    "v2": {
+      "kind": "scalar",
+      "precision": "fp32"
+    },
+    "v3": {
+      "kind": "scalar",
+      "precision": "fp32"
+    },
+    "v4": {
+      "kind": "scalar",
+      "precision": "fp32"
+    },
+    "v5": {
+      "kind": "scalar",
+      "precision": "fp32"
+    },
+    "v6": {
+      "kind": "scalar",
+      "precision": "fp32"
+    }
+  },
+  "variableArray": {
+    "a1": {
+      "kind": "array",
+      "precision": "fp32",
+      "shape": [
+        6
+      ],
+      "count": 7
+    },
+    "a2": {
+      "kind": "array",
+      "precision": "fp32",
+      "shape": [
+        2
+      ],
+      "count": 1
+    }
+  }
+}

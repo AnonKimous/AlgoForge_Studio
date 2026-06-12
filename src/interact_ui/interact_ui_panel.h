@@ -1,6 +1,6 @@
 #pragma once
 
-#include "capabilities/agent/agent.h"
+#include "agent/agent.h"
 #include "common_data/common_data.h"
 #include "interact_ui/interact_ui_host.h"
 
@@ -142,7 +142,7 @@ class InteractUiPanel {
     IInteractUiHost& host,
     size_t agent_index,
     size_t algorithm_index,
-    const agent::AgentAlgorithmCodecGroup& group,
+    const agent::AgentAlgorithmSupportGroup& group,
     ActiveCustomInterventionUiSlot* slot);
   void SyncCustomInterventionUiState(IInteractUiHost& host);
 

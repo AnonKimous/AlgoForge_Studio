@@ -1,0 +1,21 @@
+{
+  "required_resources": [],
+  "descriptor_to_container": [
+    {
+      "descriptor": "v1",
+      "container": "pos",
+      "array_index": 0
+    },
+    {
+      "descriptor": "v2",
+      "container": "pos",
+      "array_index": 1
+    },
+    {
+      "descriptor": "v3",
+      "container": "pos",
+      "array_index": 2
+    }
+  ],
+  "resource_to_container": []
+}

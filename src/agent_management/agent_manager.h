@@ -1,6 +1,6 @@
 #pragma once
 
-#include "capabilities/agent/agent.h"
+#include "agent/agent.h"
 #include "common_data/common_data.h"
 
 #include <cstddef>
@@ -71,6 +71,9 @@ class AgentManager {
     std::string* out_error_message = nullptr);
   bool DestroyAgent(size_t agent_index);
   void ClearAgents();
+  void StartTicking();
+  void PauseTicking();
+  bool tick_enabled() const { return tick_enabled_; }
   bool Tick(const InputState& input, Vec2 mouse_pixel, float dt_seconds);
   bool CollectAlgorithmReflection(
     size_t agent_index,
@@ -90,6 +93,7 @@ class AgentManager {
 
   std::vector<std::shared_ptr<ManagedAgentEntry>> managed_agents_{};
   AlgorithmToAgentSignal combined_algorithm_to_agent_signal_{};
+  bool tick_enabled_{false};
 };
 
 }  // namespace agent_management

@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 
 project(debugTool LANGUAGES C CXX)
 
-set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(CMAKE_C_STANDARD 17)
@@ -111,33 +111,32 @@ add_library(common_data STATIC
 )
 target_include_directories(common_data PUBLIC ${PROJECT_INCLUDE_DIRS})
 
-add_library(algorithm_management STATIC
+add_library(algorithm_support STATIC
   src/algorithm_management/algorithm_container_manifest.cpp
+  src/algorithm_support/algorithm_support_manager.cpp
+  src/algorithm_support/algorithm_intervention.cpp
+  src/algorithm_support/algorithm_reflector.cpp
+  src/algorithm_support/algorithm_package_decomposer.cpp
+  src/algorithm_support/algorithm_plugin_loader.cpp
+  third_party/cjson/cJSON.c
+)
+target_include_directories(algorithm_support PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_compile_definitions(algorithm_support PRIVATE
+  ALGORITHM_MANAGEMENT_MANIFEST_SEARCH_ROOT="${ALGORITHM_MANAGEMENT_MANIFEST_SEARCH_ROOT}"
+)
+target_link_libraries(algorithm_support PUBLIC common_data runtime_systems)
+
+add_library(algorithm_management STATIC
   src/algorithm_management/job_cpu.cpp
   src/algorithm_management/job_gpu.cpp
-  ${SPIRV_REFLECT_SOURCE_DIR}/spirv_reflect.c
-  third_party/cjson/cJSON.c
+  src/algorithm_support/algorithm_package_loader.cpp
 )
 target_include_directories(algorithm_management PUBLIC ${PROJECT_INCLUDE_DIRS})
 target_compile_definitions(algorithm_management PRIVATE
   ALGORITHM_MANAGEMENT_LAYER_INTERNAL_BUILD=1
   ALGORITHM_MANAGEMENT_MANIFEST_SEARCH_ROOT="${ALGORITHM_MANAGEMENT_MANIFEST_SEARCH_ROOT}"
 )
-target_link_libraries(algorithm_management PUBLIC common_data Vulkan::Vulkan)
-
-add_library(codec STATIC
-  src/codec/codec_manager.cpp
-  src/codec/algorithm_plugin_loader.cpp
-  src/codec/codec_decomposer.cpp
-  src/codec/codec_reflector.cpp
-  src/codec/codec_intervention.cpp
-  src/codec/codecset_loader.cpp
-)
-target_include_directories(codec PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_compile_definitions(codec PRIVATE
-  ALGORITHM_LIBRARY_RESOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library"
-)
-target_link_libraries(codec PUBLIC common_data PRIVATE algorithm_management)
+target_link_libraries(algorithm_management PUBLIC common_data runtime_systems algorithm_support)
 
 add_library(runtime_systems STATIC
   src/runtime_systems/window/sdl_window.cpp
@@ -161,14 +160,19 @@ target_compile_definitions(runtime_systems PRIVATE RUNTIME_SYSTEMS_LAYER_INTERNA
 target_link_libraries(runtime_systems PUBLIC common_data Vulkan::Vulkan ${SDL3_LINK_LIBS})
 target_link_libraries(algorithm_management PUBLIC runtime_systems)
 
+add_library(agent STATIC
+  src/agent/agent.cpp
+)
+target_include_directories(agent PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_link_libraries(agent PUBLIC common_data algorithm_management algorithm_support)
+
 add_library(agent_management STATIC
   src/agent_management/agent_ticker.cpp
   src/agent_management/agent_manager.cpp
-  src/capabilities/agent/agent.cpp
 )
 target_include_directories(agent_management PUBLIC ${PROJECT_INCLUDE_DIRS})
 target_compile_definitions(agent_management PRIVATE AGENT_MANAGEMENT_LAYER_INTERNAL_BUILD=1)
-target_link_libraries(agent_management PUBLIC common_data algorithm_management codec)
+target_link_libraries(agent_management PUBLIC common_data agent algorithm_management)
 
 add_library(kernal_all STATIC
   src/interact_ui/interact_ui_runtime.cpp
@@ -183,13 +187,13 @@ target_include_directories(interact_ui PUBLIC ${PROJECT_INCLUDE_DIRS})
 target_compile_definitions(interact_ui PRIVATE
   PROJECT_DATA_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/data"
 )
-target_link_libraries(interact_ui PUBLIC agent_management runtime_systems codec)
+target_link_libraries(interact_ui PUBLIC agent_management runtime_systems algorithm_support)
 
 add_library(sdk STATIC
   src/sdk/sdk_kernel.cpp
 )
 target_include_directories(sdk PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(sdk PUBLIC agent_management codec)
+target_link_libraries(sdk PUBLIC agent_management algorithm_support)
 
 set(SDK_PACKAGE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/sdk")
 set(SDK_PACKAGE_INCLUDE_DIR "${SDK_PACKAGE_ROOT}/include")
@@ -250,7 +254,7 @@ if(BUILD_DEBUG_TOOL_SAMPLE_PLUGIN)
     ALGORITHM_LIBRARY_PLUGIN_BUILD=1
     ALGORITHM_LIBRARY_RESOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library"
   )
-  target_link_libraries(temporary_test_line_motion_plugin PRIVATE algorithm_management codec common_data)
+  target_link_libraries(temporary_test_line_motion_plugin PRIVATE algorithm_management algorithm_support common_data)
   set_target_properties(temporary_test_line_motion_plugin PROPERTIES
     PREFIX ""
     OUTPUT_NAME "temporary_test_line_motion"

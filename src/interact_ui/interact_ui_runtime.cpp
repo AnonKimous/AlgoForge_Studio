@@ -19,6 +19,7 @@ bool InteractUiRuntime::Init(const char* window_title, int width, int height) {
     runtime_environment_.Destroy();
     return false;
   }
+  agent_manager_.PauseTicking();
   frame_dt_ = 0.0f;
   last_frame_time_ = std::chrono::steady_clock::now();
   return true;

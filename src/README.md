@@ -16,7 +16,7 @@ separates intentionally cross-layer code into `src/capabilities`.
 ## Current Public Interfaces
 
 - `common_data`: shared value headers; `common_data/common_data.h` is an optional aggregator, not the only entry.
-- `codec`: `codec/codec_manager.h`
+- `algorithm_support`: `algorithm_support/algorithm_support_manager.h`, `algorithm_support/algorithm_protocol.h`
 - `algorithm_management`: `algorithm_management/algorithm_manager.h`
 - `runtime_systems`: `runtime_systems/runtime_environment.h`, `runtime_systems/memory_manager.h`
 - `agent_management`: `agent_management/agent_manager.h`

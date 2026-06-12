@@ -6,8 +6,6 @@
 #include "agent_management/agent_ticker.h"
 #undef AGENT_MANAGEMENT_LAYER_PUBLIC_FACADE_INCLUDE
 
-#include "codec/codec_protocol.h"
-
 #include <memory>
 #include <chrono>
 #include <unordered_map>
@@ -18,7 +16,7 @@ namespace agent_management {
 namespace {
 
 struct BuiltAlgorithmMount {
-  agent::AgentAlgorithmCodecGroup group{};
+  agent::AgentAlgorithmSupportGroup group{};
   std::shared_ptr<algorithm::AlgorithmContainerSet> container_set{};
   std::string error_message;
   bool ok{false};
@@ -41,15 +39,14 @@ BuiltAlgorithmMount _BuildAlgorithmMount(
   BuiltAlgorithmMount result{};
 
   std::string error_message;
-  agent::AgentAlgorithmCodecGroup group{};
-  if (!codec::CreateAlgorithmCodecGroupByName(algorithm_name, &group, &error_message)) {
+  agent::AgentAlgorithmSupportGroup group{};
+  if (!agent::CreateAlgorithmSupportGroupByName(algorithm_name, &group, &error_message)) {
     result.error_message = error_message.empty()
-      ? ("Failed to create algorithm codec group for '" + algorithm_name + "'.")
+      ? ("Failed to create algorithm support group for '" + algorithm_name + "'.")
       : std::move(error_message);
     return result;
   }
 
-  group.algorithm_profile.algorithm_name = algorithm_name;
   group.resource_bindings = resource_bindings;
   group.descriptor_values = descriptor_values;
   group.mount_mode = mount_mode;
@@ -153,7 +150,7 @@ bool AgentManager::CreateAgent(AgentCreateSpec spec, size_t* out_agent_index) {
     if (!built_mount.ok) {
       return false;
     }
-    agent_config.algorithm_codec_groups.push_back(std::move(built_mount.group));
+    agent_config.algorithm_support_groups.push_back(std::move(built_mount.group));
   }
 
   if (!agent::agent_init(agent_instance.get(), std::move(agent_config))) {
@@ -192,10 +189,22 @@ void AgentManager::ClearAgents() {
   }
   managed_agents_.clear();
   combined_algorithm_to_agent_signal_ = {};
+  tick_enabled_ = false;
+}
+
+void AgentManager::StartTicking() {
+  tick_enabled_ = true;
+}
+
+void AgentManager::PauseTicking() {
+  tick_enabled_ = false;
 }
 
 bool AgentManager::Tick(const InputState& input, Vec2 mouse_pixel, float dt_seconds) {
   combined_algorithm_to_agent_signal_ = {};
+  if (!tick_enabled_) {
+    return true;
+  }
   const auto now = std::chrono::steady_clock::now();
   for (std::shared_ptr<ManagedAgentEntry>& managed_agent : managed_agents_) {
     if (!managed_agent) {
@@ -273,7 +282,7 @@ bool AgentManager::AttachAlgorithmToAgent(
   }
 
   size_t algorithm_index = 0u;
-  if (!managed_agents_[agent_index]->agent->AppendAlgorithmCodecGroup(std::move(built_mount.group), &algorithm_index)) {
+  if (!managed_agents_[agent_index]->agent->AppendAlgorithmSupportGroup(std::move(built_mount.group), &algorithm_index)) {
     set_error("Failed to append algorithm group to agent.");
     return false;
   }
@@ -336,7 +345,7 @@ bool AgentManager::CollectAlgorithmReflection(
     return false;
   }
 
-  const agent::AgentAlgorithmCodecGroup* group = managed_agent->algorithm_codec_group(algorithm_index);
+  const agent::AgentAlgorithmSupportGroup* group = managed_agent->algorithm_support_group(algorithm_index);
   if (!group) {
     return false;
   }

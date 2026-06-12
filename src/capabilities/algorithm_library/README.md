@@ -38,3 +38,4 @@ to their bundle names.
 ## Compatibility
 
 Use the subdirectory layout above for new bundles.
+See `agents.md` in this directory for `v`/`a` naming rules.

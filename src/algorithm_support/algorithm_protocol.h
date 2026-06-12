@@ -1,0 +1,130 @@
+#pragma once
+
+#include "algorithm_support/algorithm_data.h"
+
+#include <memory>
+#include <string>
+
+namespace algorithm {
+class AlgorithmReflector;
+struct AlgorithmPackageLocation;
+}  // namespace algorithm
+
+namespace agent {
+class IAlgorithmPackageSupport;
+class IAlgorithmPackageDecomposer;
+class IAlgorithmIntervention;
+class IAlgorithmtemporaryTestMainThreadExecutor;
+struct AgentAlgorithmSupportGroup;
+}  // namespace agent
+
+namespace algorithm_support {
+
+inline constexpr uint32_t kAlgorithmPluginApiVersion = 3u;
+
+struct AlgorithmPluginRequest {
+  uint32_t api_version{kAlgorithmPluginApiVersion};
+  const char* algorithm_name{};
+  const char* algorithm_library_root{};
+  const char* algorithm_folder{};
+};
+
+struct AlgorithmPluginBundle {
+  uint32_t api_version{kAlgorithmPluginApiVersion};
+  bool cpu_symbol{true};
+  bool gpu_symbol{true};
+
+  agent::IAlgorithmPackageSupport* reflector{nullptr};
+  void (*destroy_reflector)(agent::IAlgorithmPackageSupport*){nullptr};
+
+  agent::IAlgorithmPackageDecomposer* decomposer{nullptr};
+  void (*destroy_decomposer)(agent::IAlgorithmPackageDecomposer*){nullptr};
+
+  agent::IAlgorithmIntervention* intervention{nullptr};
+  void (*destroy_intervention)(agent::IAlgorithmIntervention*){nullptr};
+
+  agent::IAlgorithmtemporaryTestMainThreadExecutor* temporary_test_executor{nullptr};
+  void (*destroy_temporary_test_executor)(agent::IAlgorithmtemporaryTestMainThreadExecutor*){nullptr};
+
+  void Clear() {
+    api_version = kAlgorithmPluginApiVersion;
+    cpu_symbol = true;
+    gpu_symbol = true;
+    reflector = nullptr;
+    destroy_reflector = nullptr;
+    decomposer = nullptr;
+    destroy_decomposer = nullptr;
+    intervention = nullptr;
+    destroy_intervention = nullptr;
+    temporary_test_executor = nullptr;
+    destroy_temporary_test_executor = nullptr;
+  }
+};
+
+using AlgorithmPluginCreateBundleFn = bool (*)(
+  const AlgorithmPluginRequest* request,
+  AlgorithmPluginBundle* out_bundle);
+
+using AlgorithmPluginCreateRuntimeReflectorFn = bool (*)(
+  const AlgorithmPluginRequest* request,
+  algorithm::AlgorithmReflector* out_reflector);
+
+struct AlgorithmPluginComponents {
+  bool cpu_symbol{true};
+  bool gpu_symbol{true};
+
+  std::shared_ptr<algorithm::AlgorithmReflector> runtime_reflector{};
+
+  std::shared_ptr<agent::IAlgorithmPackageSupport> reflector{};
+  std::shared_ptr<agent::IAlgorithmPackageDecomposer> decomposer{};
+  std::shared_ptr<agent::IAlgorithmIntervention> intervention{};
+  std::shared_ptr<agent::IAlgorithmtemporaryTestMainThreadExecutor> temporary_test_executor{};
+};
+
+bool TryLoadAlgorithmPluginComponents(
+  const algorithm::AlgorithmPackageLocation& package_location,
+  AlgorithmPluginComponents* out_components,
+  std::string* out_error_message = nullptr);
+
+bool CreateAlgorithmPackageReflectorByName(
+  const std::string& algorithm_name,
+  std::shared_ptr<agent::IAlgorithmPackageSupport>* out_reflector,
+  std::string* out_error_message = nullptr);
+
+bool CreateAlgorithmPackageDecomposerFromLocation(
+  const algorithm::AlgorithmPackageLocation& package_location,
+  std::shared_ptr<agent::IAlgorithmPackageDecomposer>* out_decomposer,
+  std::string* out_error_message = nullptr);
+
+bool CreateAlgorithmInterventionByName(
+  const std::string& algorithm_name,
+  std::shared_ptr<agent::IAlgorithmIntervention>* out_intervention,
+  std::string* out_error_message = nullptr);
+
+bool CreateAlgorithmSupportGroupFromLocation(
+  const algorithm::AlgorithmPackageLocation& package_location,
+  agent::AgentAlgorithmSupportGroup* out_group,
+  std::string* out_error_message = nullptr);
+
+}  // namespace algorithm_support
+
+namespace algorithm_library_plugin = algorithm_support;
+
+#if defined(ALGORITHM_LIBRARY_PLUGIN_BUILD)
+#define ALGORITHM_LIBRARY_PLUGIN_API __declspec(dllexport)
+#else
+#define ALGORITHM_LIBRARY_PLUGIN_API __declspec(dllimport)
+#endif
+
+extern "C" {
+
+ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateBundle(
+  const algorithm_support::AlgorithmPluginRequest* request,
+  algorithm_support::AlgorithmPluginBundle* out_bundle);
+
+ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateRuntimeReflector(
+  const algorithm_support::AlgorithmPluginRequest* request,
+  algorithm::AlgorithmReflector* out_reflector);
+
+}
+
