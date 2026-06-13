@@ -2,8 +2,7 @@
 #include "algorithm_support/algorithm_protocol.h"
 #include "algorithm_support/algorithm_package_location.h"
 
-#include "agent/agent.h"
-#include "agent/agent_abi.h"
+#include "algorithm_management/algorithm_abi.h"
 #include "algorithm_management/algorithm_manager.h"
 #include "cJSON.h"
 

@@ -186,28 +186,29 @@ add_library(agent_management STATIC
 )
 target_include_directories(agent_management PUBLIC ${PROJECT_INCLUDE_DIRS})
 target_compile_definitions(agent_management PRIVATE AGENT_MANAGEMENT_LAYER_INTERNAL_BUILD=1)
-target_link_libraries(agent_management PUBLIC common_data agent algorithm_management)
+target_link_libraries(agent_management PUBLIC common_data agent)
 
-add_library(kernal_all STATIC
-  src/interact_ui/interact_ui_runtime.cpp
+add_library(debug_tool_backend STATIC
+  src/debug_tool/debug_tool_backend_runtime.cpp
 )
-target_include_directories(kernal_all PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(kernal_all PUBLIC common_data agent_management runtime_systems)
+target_include_directories(debug_tool_backend PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_link_libraries(debug_tool_backend PUBLIC common_data agent_management runtime_systems algorithm_management algorithm_support)
 
-add_library(interact_ui STATIC
-  src/interact_ui/interact_ui_panel.cpp
+add_library(debug_tool_frontend STATIC
+  src/debug_tool/debug_tool_frontend_panel.cpp
 )
-target_include_directories(interact_ui PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_compile_definitions(interact_ui PRIVATE
+target_include_directories(debug_tool_frontend PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_compile_definitions(debug_tool_frontend PRIVATE
   PROJECT_DATA_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/data"
 )
-target_link_libraries(interact_ui PUBLIC agent_management runtime_systems algorithm_support)
+target_link_libraries(debug_tool_frontend PUBLIC runtime_systems)
 
 add_library(sdk STATIC
   src/sdk/sdk_kernel.cpp
+  src/sdk/sdk_decomposer.cpp
 )
 target_include_directories(sdk PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(sdk PUBLIC agent_management algorithm_support)
+target_link_libraries(sdk PUBLIC agent_management)
 
 set(SDK_PACKAGE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/sdk")
 set(SDK_PACKAGE_INCLUDE_DIR "${SDK_PACKAGE_ROOT}/include")
@@ -223,8 +224,6 @@ add_custom_command(TARGET sdk POST_BUILD
   VERBATIM
 )
 
-option(BUILD_DEBUG_TOOL_SAMPLE_PLUGIN "Build the temporary sample algorithm plugin." OFF)
-
 set(SHADER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
 set(SHADER_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/shaders)
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/data)
@@ -238,101 +237,14 @@ add_custom_command(
   VERBATIM
 )
 
-add_custom_command(
-  OUTPUT
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_gpu_tick.vert.spv
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_gpu_tick.frag.spv
-  COMMAND ${GLSLC} -o
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_gpu_tick.vert.spv"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_gpu_tick.vert"
-  COMMAND ${GLSLC} -o
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_gpu_tick.frag.spv"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_gpu_tick.frag"
-  DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_gpu_tick.vert"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_gpu_tick.frag"
-  VERBATIM
-)
-
-add_custom_target(temporary_test_line_motion_gpu_tick_shaders DEPENDS
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_gpu_tick.vert.spv"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_gpu_tick.frag.spv"
-)
-
-add_custom_command(
-  OUTPUT
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.vert.spv"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.frag.spv"
-  COMMAND ${GLSLC} -o
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.vert.spv"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.vert"
-  COMMAND ${GLSLC} -o
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.frag.spv"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.frag"
-  DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.vert"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.frag"
-  VERBATIM
-)
-
-add_custom_target(temporary_test_line_motion_result_render_shaders DEPENDS
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.vert.spv"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_result_render.frag.spv"
-)
-
-add_custom_command(
-  OUTPUT
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/v6a2_triangle_collision_runtime_test/v6a2_triangle_collision_runtime_test_result_render.vert.spv"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/v6a2_triangle_collision_runtime_test/v6a2_triangle_collision_runtime_test_result_render.frag.spv"
-  COMMAND ${GLSLC} -o
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/v6a2_triangle_collision_runtime_test/v6a2_triangle_collision_runtime_test_result_render.vert.spv"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/v6a2_triangle_collision_runtime_test/v6a2_triangle_collision_runtime_test_result_render.vert"
-  COMMAND ${GLSLC} -o
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/v6a2_triangle_collision_runtime_test/v6a2_triangle_collision_runtime_test_result_render.frag.spv"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/v6a2_triangle_collision_runtime_test/v6a2_triangle_collision_runtime_test_result_render.frag"
-  DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/v6a2_triangle_collision_runtime_test/v6a2_triangle_collision_runtime_test_result_render.vert"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/v6a2_triangle_collision_runtime_test/v6a2_triangle_collision_runtime_test_result_render.frag"
-  VERBATIM
-)
-
-add_custom_target(v6a2_triangle_collision_runtime_test_result_render_shaders DEPENDS
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/v6a2_triangle_collision_runtime_test/v6a2_triangle_collision_runtime_test_result_render.vert.spv"
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/v6a2_triangle_collision_runtime_test/v6a2_triangle_collision_runtime_test_result_render.frag.spv"
-)
-
-if(BUILD_DEBUG_TOOL_SAMPLE_PLUGIN)
-  add_library(temporary_test_line_motion_plugin MODULE
-    src/capabilities/algorithm_library/temporary_test_line_motion/temporary_test_line_motion_plugin.cpp
-  )
-  target_include_directories(temporary_test_line_motion_plugin PUBLIC ${PROJECT_INCLUDE_DIRS})
-  target_compile_definitions(temporary_test_line_motion_plugin PRIVATE
-    ALGORITHM_LIBRARY_PLUGIN_BUILD=1
-    ALGORITHM_LIBRARY_RESOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library"
-  )
-  target_link_libraries(temporary_test_line_motion_plugin PRIVATE algorithm_management algorithm_support common_data)
-  set_target_properties(temporary_test_line_motion_plugin PROPERTIES
-    PREFIX ""
-    OUTPUT_NAME "temporary_test_line_motion"
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion"
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library/temporary_test_line_motion"
-  )
-endif()
-
 add_executable(debugTool WIN32
   src/debug_tool/main.cpp
 )
 
 target_link_libraries(debugTool PRIVATE
-  interact_ui
-  kernal_all
+  debug_tool_frontend
+  debug_tool_backend
   common_data
-)
-add_dependencies(
-  debugTool
-  temporary_test_line_motion_gpu_tick_shaders
-  temporary_test_line_motion_result_render_shaders
-  v6a2_triangle_collision_runtime_test_result_render_shaders
 )
 
 target_compile_definitions(debugTool PRIVATE

@@ -5,11 +5,13 @@ This project is a layered Vulkan + SDL3 sandbox for agent-driven physics and ren
 ## Runtime Model
 
 - `debugTool` is the debug executable.
-- `interact_ui` is the editor UI surface.
-- `kernal_all` is the non-UI debug host backend.
-- `sdk` is the external agent/algorithm submission surface.
+- `debug_tool_backend` is the non-UI debug host backend.
+- `debug_tool_frontend` is the editor-facing debug tool surface.
+- `debugTool` links the backend and frontend targets together.
+- `sdk` is the external agent/algorithm submission surface and reaches algorithm assembly through `agent_management` and `agent`; it does not touch `algorithm_management` internals directly.
 - An `agent` is the unit that carries algorithm packages, solver metadata, and intervention state.
 - The current default workflow is: choose resource descriptors -> keep the draft prefilled -> create an agent -> run immediately.
+- Algorithm packages are built by the dedicated batch tool `check_sdk.bat`; they are not compiled as part of the `debugTool` build.
 
 ## Terminology Rule
 
@@ -27,18 +29,19 @@ This project is a layered Vulkan + SDL3 sandbox for agent-driven physics and ren
 - `runtime_systems` owns windowing, ImGui, and Vulkan runtime support.
 - `common_data` also carries the shared packet structs used for algorithm support and intervention payloads.
 - `algorithm_management` owns container-manifest loading and real runtime container creation.
-- `algorithm_support` handles the package-level support / intervention payload flow.
-- `capabilities/agent` holds the lightweight agent object and its attached algorithm metadata.
+- `algorithm_support` still contains package-level support / intervention payload helpers, but its public entrypoints are now re-exported through `algorithm_management`.
+- `agent` sits above `algorithm_management` and owns the runtime agent object, including mount and submit entry points.
 - `capabilities/algorithm_library` is reserved for concrete algorithm package capability bundles.
 - `capabilities/sidecar` hosts optional sidecar capabilities such as mesh import/export.
-- `agent_management` owns the runtime path for creating agents, keeping all created agents, and ticking them.
-- `interact_ui` provides the manual agent composer and live debug UI panel without keeping a mesh resident in app state.
+- `agent_management` owns agent creation orchestration, mount/unmount, descriptor forwarding, and ticking. It does not create containers itself.
+- `debug_tool_frontend` provides the manual agent composer and live debug panel without keeping a mesh resident in app state.
 - `debugTool` is the executable entry point for interactive debugging.
+- `sdk` talks directly to `agent_management`, then flows into `agent`, `algorithm_management`, and `runtime_systems` through the normal layer chain. It does not depend on the debug tool frontend.
 - `sdk` exposes the external agent/algorithm submission entry points.
 
 ## Execution Workflow
 
-- The interact UI and debug tool create agents from resource descriptors and algorithm bindings.
+- The debug tool frontend and SDK create agents from resource descriptors and algorithm bindings.
 - The project does not yet have a formal algorithm execution engine.
 - Current algorithm execution is still a temporary bring-up path: the main thread temporarily executes algorithm work through explicitly marked `temporaryTest` hooks.
 - Physics owns the evolving algorithm-side state.
@@ -55,7 +58,7 @@ This project is a layered Vulkan + SDL3 sandbox for agent-driven physics and ren
 
 - Write each small algorithm capability in `capabilities/algorithm_library` with its own container manifest and package hooks.
 - Build the final agent by attaching one or more algorithm support groups, solver config, and lightweight algorithm profiles to one agent object.
-- Let upper layers assemble the agent creation spec, then let `agent_management` create and retain agents for runtime stepping while each `Agent` internally ticks its attached algorithm groups.
+- Let upper layers assemble the agent creation spec, then let `agent_management` create and retain agents for runtime stepping while each `Agent` handles algorithm mount and submit work for its attached groups.
 - The runtime does not try to validate the full graph; missing or incompatible bindings should fail at the point of use.
 
 ## Coordinate Convention

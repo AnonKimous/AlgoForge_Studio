@@ -1,5 +1,6 @@
 #pragma once
 
+#include "algorithm_management/algorithm_abi.h"
 #include "algorithm_support/algorithm_data.h"
 
 #include <memory>
@@ -9,14 +10,6 @@ namespace algorithm {
 class AlgorithmReflector;
 struct AlgorithmPackageLocation;
 }  // namespace algorithm
-
-namespace agent {
-class IAlgorithmPackageSupport;
-class IAlgorithmPackageDecomposer;
-class IAlgorithmIntervention;
-class IAlgorithmtemporaryTestMainThreadExecutor;
-class AlgorithmObject;
-}  // namespace agent
 
 namespace algorithm_support {
 

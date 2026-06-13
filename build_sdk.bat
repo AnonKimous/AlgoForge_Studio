@@ -9,7 +9,7 @@ set "PATH="
 set "Path=%ORIG_PATH%"
 
 pushd "%ROOT%"
-"%CMAKE%" -S "%ROOT%" -B "%ROOT%\build" --fresh -DBUILD_DEBUG_TOOL_SAMPLE_PLUGIN=OFF
+"%CMAKE%" -S "%ROOT%" -B "%ROOT%\build" --fresh
 if errorlevel 1 (
   set "EXITCODE=%ERRORLEVEL%"
   popd

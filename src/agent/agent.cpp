@@ -1,7 +1,6 @@
 #include "agent/agent.h"
 
 #include "algorithm_management/algorithm_manager.h"
-#include "algorithm_support/algorithm_protocol.h"
 
 #include <algorithm>
 #include <utility>
@@ -76,6 +75,106 @@ bool _SignalBlocksTick(
   return !object.intervention || object.intervention->SupportsIntervention();
 }
 
+struct BuiltAlgorithmMount {
+  AlgorithmObject object{};
+  std::shared_ptr<algorithm::AlgorithmContainerSet> container_set{};
+  std::string error_message;
+  bool ok{false};
+};
+
+std::string _StandardLayoutKey(const algorithm::AlgorithmContainerSet& container_set) {
+  if (container_set.standard_layout.enabled()) {
+    return container_set.standard_layout.layout_name;
+  }
+  return container_set.algorithm_name;
+}
+
+BuiltAlgorithmMount _BuildAlgorithmMount(
+  const std::string& algorithm_name,
+  const std::vector<AlgorithmResourceBinding>& resource_bindings,
+  const std::vector<AlgorithmDescriptorValue>& descriptor_values,
+  AlgorithmMountMode mount_mode,
+  AlgorithmExecutionPreference execution_preference,
+  std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>* standard_shared_container_sets) {
+  BuiltAlgorithmMount result{};
+
+  std::string error_message;
+  AlgorithmObject object{};
+  if (!CreateAlgorithmObjectByName(algorithm_name, &object, &error_message)) {
+    result.error_message = error_message.empty()
+      ? ("Failed to create algorithm object for '" + algorithm_name + "'.")
+      : std::move(error_message);
+    return result;
+  }
+
+  object.resource_bindings = resource_bindings;
+  object.descriptor_values = descriptor_values;
+  object.mount_mode = mount_mode;
+  object.execution_preference = execution_preference;
+
+  std::shared_ptr<algorithm::AlgorithmContainerSet> container_set_handle;
+  algorithm::AlgorithmContainerSet container_set{};
+  if (!algorithm_management::CreateAlgorithmContainersFromManifestName(
+        object.algorithm_profile.container_manifest_name,
+        &container_set,
+        &error_message)) {
+    result.error_message = error_message.empty()
+      ? ("Failed to create containers for '" + algorithm_name + "'.")
+      : std::move(error_message);
+    return result;
+  }
+
+  const bool use_shared_standard_container =
+    mount_mode == AlgorithmMountMode::StandardContainer &&
+    container_set.standard_layout.enabled() &&
+    standard_shared_container_sets;
+  const bool cache_shared_standard_container = use_shared_standard_container;
+  std::string shared_key;
+
+  if (use_shared_standard_container) {
+    shared_key = _StandardLayoutKey(container_set);
+    if (!shared_key.empty()) {
+      auto found = standard_shared_container_sets->find(shared_key);
+      if (found != standard_shared_container_sets->end() && found->second) {
+        container_set_handle = found->second;
+      } else {
+        container_set_handle = std::make_shared<algorithm::AlgorithmContainerSet>(std::move(container_set));
+      }
+    }
+  }
+
+  if (!container_set_handle) {
+    container_set_handle = std::make_shared<algorithm::AlgorithmContainerSet>(std::move(container_set));
+  }
+
+  if (!object.decomposer) {
+    result.error_message = "Algorithm decomposer is unavailable for '" + algorithm_name + "'.";
+    return result;
+  }
+
+  if (!object.decomposer->Decompose(
+        object.algorithm_profile,
+        object.resource_bindings,
+        object.descriptor_values,
+        container_set_handle.get(),
+        &error_message)) {
+    result.error_message = error_message.empty()
+      ? ("Failed to decompose algorithm inputs for '" + algorithm_name + "'.")
+      : std::move(error_message);
+    return result;
+  }
+
+  if (cache_shared_standard_container && !shared_key.empty()) {
+    (*standard_shared_container_sets)[shared_key] = container_set_handle;
+  }
+
+  object.shared_container_set = container_set_handle;
+  result.object = std::move(object);
+  result.container_set = std::move(container_set_handle);
+  result.ok = true;
+  return result;
+}
+
 }  // namespace
 
 bool CreateAlgorithmObjectByName(
@@ -103,7 +202,7 @@ bool CreateAlgorithmObjectByName(
     return false;
   }
 
-  return algorithm_support::CreateAlgorithmObjectFromLocation(package_location, out_group, out_error_message);
+  return algorithm_management::CreateAlgorithmObjectFromLocation(package_location, out_group, out_error_message);
 }
 
 bool Agent::Init(AgentInitConfig config) {
@@ -111,6 +210,7 @@ bool Agent::Init(AgentInitConfig config) {
   algorithm_objects_ = std::move(config.algorithm_objects);
   algorithm_runtime_states_.clear();
   algorithm_assembly_states_.clear();
+  standard_shared_container_sets_.clear();
   algorithm_runtime_states_.reserve(algorithm_objects_.size());
   algorithm_assembly_states_.reserve(algorithm_objects_.size());
   for (const AlgorithmObject& object : algorithm_objects_) {
@@ -120,6 +220,68 @@ bool Agent::Init(AgentInitConfig config) {
     algorithm_assembly_states_.push_back(AlgorithmAssemblyState::Pending);
   }
   initialized_ = true;
+  return true;
+}
+
+bool Agent::MountAlgorithm(
+  const std::string& algorithm_name,
+  const std::vector<AlgorithmResourceBinding>& resource_bindings,
+  const std::vector<AlgorithmDescriptorValue>& descriptor_values,
+  size_t* out_index,
+  std::string* out_error_message,
+  AlgorithmMountMode mount_mode,
+  AlgorithmExecutionPreference execution_preference) {
+  auto set_error = [&](const std::string& message) {
+    if (out_error_message) {
+      *out_error_message = message;
+    }
+  };
+
+  if (!initialized_) {
+    set_error("Agent is not initialized.");
+    return false;
+  }
+
+  BuiltAlgorithmMount built_mount = _BuildAlgorithmMount(
+    algorithm_name,
+    resource_bindings,
+    descriptor_values,
+    mount_mode,
+    execution_preference,
+    &standard_shared_container_sets_);
+  if (!built_mount.ok) {
+    set_error(built_mount.error_message);
+    return false;
+  }
+
+  size_t algorithm_index = 0u;
+  if (!AppendAlgorithmObject(std::move(built_mount.object), &algorithm_index)) {
+    set_error("Failed to append algorithm object to agent.");
+    return false;
+  }
+  if (!BeginAlgorithmAssembly(algorithm_index)) {
+    MarkAlgorithmAssemblyFailed(algorithm_index);
+    RemoveAlgorithm(algorithm_index);
+    set_error("Failed to begin algorithm assembly.");
+    return false;
+  }
+
+  AlgorithmObject* mounted_algorithm_object = algorithm_object(algorithm_index);
+  if (!mounted_algorithm_object) {
+    MarkAlgorithmAssemblyFailed(algorithm_index);
+    RemoveAlgorithm(algorithm_index);
+    set_error("Failed to access algorithm object.");
+    return false;
+  }
+  mounted_algorithm_object->SetContainerSet(std::move(built_mount.container_set));
+  MarkAlgorithmAssemblyReady(algorithm_index);
+
+  if (out_index) {
+    *out_index = algorithm_index;
+  }
+  if (out_error_message) {
+    out_error_message->clear();
+  }
   return true;
 }
 
@@ -169,11 +331,14 @@ void Agent::RefreshInterventionSignals(const AgentTickContext& context) {
   }
 }
 
-bool Agent::Tick(
+bool Agent::SubmitAlgorithm(
   const AgentTickContext& context,
   const std::vector<bool>& allow_tick_mask,
   AgentTickResult* out_result) {
   if (!out_result) {
+    return false;
+  }
+  if (!initialized_) {
     return false;
   }
 
@@ -311,6 +476,13 @@ bool Agent::Tick(
   return true;
 }
 
+bool Agent::Tick(
+  const AgentTickContext& context,
+  const std::vector<bool>& allow_tick_mask,
+  AgentTickResult* out_result) {
+  return SubmitAlgorithm(context, allow_tick_mask, out_result);
+}
+
 bool Agent::BeginAlgorithmAssembly(size_t index) {
   if (index >= algorithm_assembly_states_.size()) {
     return false;
@@ -363,6 +535,7 @@ void Agent::Destroy() {
   algorithm_runtime_states_.clear();
   algorithm_assembly_states_.clear();
   algorithm_execution_end_queue_.clear();
+  standard_shared_container_sets_.clear();
 }
 
 }  // namespace agent

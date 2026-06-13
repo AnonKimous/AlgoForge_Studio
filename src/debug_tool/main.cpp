@@ -1,5 +1,5 @@
-#include "interact_ui/interact_ui_runtime.h"
-#include "interact_ui/interact_ui_panel.h"
+#include "debug_tool/debug_tool_backend_runtime.h"
+#include "debug_tool/debug_tool_frontend_panel.h"
 
 #include <SDL3/SDL_main.h>
 
@@ -11,10 +11,10 @@ int main(int argc, char** argv) {
     (void)argc;
     (void)argv;
 
-    InteractUiRuntime runtime;
-    InteractUiPanel ui_panel;
+    DebugToolBackendRuntime runtime;
+    DebugToolFrontendPanel ui_panel;
     if (!runtime.Init("debugTool", 1280, 720)) {
-      throw std::runtime_error("InteractUiRuntime init failed");
+      throw std::runtime_error("DebugToolBackendRuntime init failed");
     }
     runtime.runtime_environment().SetDrawCallback([&]() {
       ui_panel.Draw(runtime);

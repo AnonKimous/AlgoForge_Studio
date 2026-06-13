@@ -4,10 +4,9 @@ setlocal EnableExtensions
 set "ROOT=%~dp0"
 set "ROOT=%ROOT:~0,-1%"
 set "CMAKE=D:\Program Files\CMake\bin\cmake.exe"
-set "VCVARS64=C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
-set "GLSLC=D:\VulkanSDK\1.4.341.1\Bin\glslc.exe"
 set "SDK_LIB=%ROOT%\sdk\sdk.lib"
 set "SDK_HEADER=%ROOT%\sdk\include\sdk_kernel.h"
+set "CORE_BUILD_DEBUG=%ROOT%\build\Debug"
 set "ALGO_BUILD=%ROOT%\build_algorithms"
 set "APP_DIR=%ROOT%\app"
 set "APP_LIBRARY_DIR=%APP_DIR%\src\capabilities\algorithm_library"
@@ -25,14 +24,34 @@ if not exist "%SDK_HEADER%" (
   exit /b 1
 )
 
+if not exist "%CORE_BUILD_DEBUG%\algorithm_support.lib" (
+  echo Core library is missing: "%CORE_BUILD_DEBUG%\algorithm_support.lib"
+  exit /b 1
+)
+
+if not exist "%CORE_BUILD_DEBUG%\algorithm_management.lib" (
+  echo Core library is missing: "%CORE_BUILD_DEBUG%\algorithm_management.lib"
+  exit /b 1
+)
+
+if not exist "%CORE_BUILD_DEBUG%\common_data.lib" (
+  echo Core library is missing: "%CORE_BUILD_DEBUG%\common_data.lib"
+  exit /b 1
+)
+
+if not exist "%CORE_BUILD_DEBUG%\runtime_systems.lib" (
+  echo Core library is missing: "%CORE_BUILD_DEBUG%\runtime_systems.lib"
+  exit /b 1
+)
+
 pushd "%ROOT%"
-"%CMAKE%" -S "%ROOT%" -B "%ALGO_BUILD%" --fresh -DBUILD_DEBUG_TOOL_SAMPLE_PLUGIN=ON
+"%CMAKE%" -S "%ROOT%\src\capabilities\algorithm_library" -B "%ALGO_BUILD%" --fresh -DBUILD_ALGORITHM_SAMPLE_PLUGIN=ON -DCORE_BUILD_DIR="%ROOT%\build"
 if errorlevel 1 (
   set "EXITCODE=%ERRORLEVEL%"
   popd
   exit /b %EXITCODE%
 )
-"%CMAKE%" --build "%ALGO_BUILD%" --config Debug --target temporary_test_line_motion_plugin -j 2
+"%CMAKE%" --build "%ALGO_BUILD%" --config Debug --target algorithm_packages -j 2
 if errorlevel 1 (
   set "EXITCODE=%ERRORLEVEL%"
   popd
@@ -49,43 +68,10 @@ if not exist "%APP_LIBRARY_DIR%\v6a2_triangle_collision_runtime_test" mkdir "%AP
 if exist "%ROOT%\src\capabilities\algorithm_library\v6a2_triangle_collision_runtime_test\*.json" copy /Y "%ROOT%\src\capabilities\algorithm_library\v6a2_triangle_collision_runtime_test\*.json" "%APP_LIBRARY_DIR%\v6a2_triangle_collision_runtime_test\" >nul
 if exist "%ROOT%\src\capabilities\algorithm_library\v6a2_triangle_collision_runtime_test\*.vert" copy /Y "%ROOT%\src\capabilities\algorithm_library\v6a2_triangle_collision_runtime_test\*.vert" "%APP_LIBRARY_DIR%\v6a2_triangle_collision_runtime_test\" >nul
 if exist "%ROOT%\src\capabilities\algorithm_library\v6a2_triangle_collision_runtime_test\*.frag" copy /Y "%ROOT%\src\capabilities\algorithm_library\v6a2_triangle_collision_runtime_test\*.frag" "%APP_LIBRARY_DIR%\v6a2_triangle_collision_runtime_test\" >nul
-call "%VCVARS64%" >nul
-if errorlevel 1 (
-  set "EXITCODE=%ERRORLEVEL%"
-  popd
-  exit /b %EXITCODE%
-)
-"%GLSLC%" -o "%APP_LIBRARY_DIR%\v6a2_triangle_collision_runtime_test\v6a2_triangle_collision_runtime_test_result_render.vert.spv" "%APP_LIBRARY_DIR%\v6a2_triangle_collision_runtime_test\v6a2_triangle_collision_runtime_test_result_render.vert"
-if errorlevel 1 (
-  set "EXITCODE=%ERRORLEVEL%"
-  popd
-  exit /b %EXITCODE%
-)
-"%GLSLC%" -o "%APP_LIBRARY_DIR%\v6a2_triangle_collision_runtime_test\v6a2_triangle_collision_runtime_test_result_render.frag.spv" "%APP_LIBRARY_DIR%\v6a2_triangle_collision_runtime_test\v6a2_triangle_collision_runtime_test_result_render.frag"
-if errorlevel 1 (
-  set "EXITCODE=%ERRORLEVEL%"
-  popd
-  exit /b %EXITCODE%
-)
-cl /nologo /std:c++20 /EHsc /MDd /Zi /D _DEBUG /D ALGORITHM_LIBRARY_PLUGIN_BUILD=1 /D ALGORITHM_LIBRARY_RESOURCE_ROOT="%ROOT%\src\capabilities\algorithm_library" ^
-  /I"%ROOT%\src" /I"%ROOT%\third_party\cjson" /I"%ROOT%\third_party\SDL-main\include" /I"%ROOT%\third_party\eigen" ^
-  /I"%ROOT%\third_party\VulkanMemoryAllocator-3.3.0\include" /I"%ROOT%\third_party\SPIRV-Reflect-vulkan-sdk-1.4.350.0" ^
-  /I"%ROOT%\third_party\vkb\src" /I"%ROOT%\third_party\imgui-1.92.8-docking" /I"%ROOT%\third_party\imgui-1.92.8-docking\backends" ^
-  /Fo"%ALGO_BUILD%\v6a2_triangle_collision_runtime_test_plugin.obj" /c "%ROOT%\src\capabilities\algorithm_library\v6a2_triangle_collision_runtime_test\v6a2_triangle_collision_runtime_test_plugin.cpp"
-if errorlevel 1 (
-  set "EXITCODE=%ERRORLEVEL%"
-  popd
-  exit /b %EXITCODE%
-)
-link /nologo /DLL /OUT:"%APP_LIBRARY_DIR%\v6a2_triangle_collision_runtime_test\v6a2_triangle_collision_runtime_test.dll" ^
-  /IMPLIB:"%APP_LIBRARY_DIR%\v6a2_triangle_collision_runtime_test\v6a2_triangle_collision_runtime_test.lib" ^
-  /PDB:"%APP_LIBRARY_DIR%\v6a2_triangle_collision_runtime_test\v6a2_triangle_collision_runtime_test.pdb" ^
-  "%ALGO_BUILD%\v6a2_triangle_collision_runtime_test_plugin.obj" /LIBPATH:"%ALGO_BUILD%\Debug" /LIBPATH:"D:\VulkanSDK\1.4.341.1\Lib" algorithm_support.lib algorithm_management.lib common_data.lib runtime_systems.lib vulkan-1.lib SDL3.lib
-if errorlevel 1 (
-  set "EXITCODE=%ERRORLEVEL%"
-  popd
-  exit /b %EXITCODE%
-)
+if exist "%ROOT%\src\capabilities\algorithm_library\v6a2_triangle_collision_runtime_test\Debug\*.dll" copy /Y "%ROOT%\src\capabilities\algorithm_library\v6a2_triangle_collision_runtime_test\Debug\*.dll" "%APP_LIBRARY_DIR%\v6a2_triangle_collision_runtime_test\" >nul
+if exist "%ROOT%\src\capabilities\algorithm_library\v6a2_triangle_collision_runtime_test\Release\*.dll" copy /Y "%ROOT%\src\capabilities\algorithm_library\v6a2_triangle_collision_runtime_test\Release\*.dll" "%APP_LIBRARY_DIR%\v6a2_triangle_collision_runtime_test\" >nul
+if exist "%ROOT%\src\capabilities\algorithm_library\v6a2_triangle_collision_runtime_test\Debug\*.pdb" copy /Y "%ROOT%\src\capabilities\algorithm_library\v6a2_triangle_collision_runtime_test\Debug\*.pdb" "%APP_LIBRARY_DIR%\v6a2_triangle_collision_runtime_test\" >nul
+if exist "%ROOT%\src\capabilities\algorithm_library\v6a2_triangle_collision_runtime_test\Release\*.pdb" copy /Y "%ROOT%\src\capabilities\algorithm_library\v6a2_triangle_collision_runtime_test\Release\*.pdb" "%APP_LIBRARY_DIR%\v6a2_triangle_collision_runtime_test\" >nul
 set "EXITCODE=%ERRORLEVEL%"
 if not errorlevel 1 (
   if exist "%ROOT%\src\capabilities\algorithm_library\algorithm_catalog.json" copy /Y "%ROOT%\src\capabilities\algorithm_library\algorithm_catalog.json" "%APP_LIBRARY_DIR%\" >nul

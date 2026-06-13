@@ -1,5 +1,5 @@
 #include "algorithm_support/algorithm_protocol.h"
-#include "agent/agent_abi.h"
+#include "algorithm_management/algorithm_abi.h"
 
 #include "algorithm_support/algorithm_container_manifest.h"
 #include "algorithm_support/algorithm_package_location.h"
@@ -390,7 +390,7 @@ class AlgorithmLibrarySchemaDecomposer final : public agent::IAlgorithmPackageDe
     }
 
     for (const temporaryTestDecomposerDescriptorEntry& entry : schema_.descriptor_entries) {
-      AlgorithmContainer* container = FindAlgorithmContainer(container_set, entry.container_name);
+      algorithm::AlgorithmContainer* container = FindAlgorithmContainer(container_set, entry.container_name);
       if (!container) {
         _SetErrorMessage(
           out_error_message,
@@ -398,7 +398,7 @@ class AlgorithmLibrarySchemaDecomposer final : public agent::IAlgorithmPackageDe
             algorithm_profile.algorithm_name + "'.");
         return false;
       }
-      if (container->storage_kind != AlgorithmContainerStorageKind::Array) {
+      if (container->storage_kind != algorithm::AlgorithmContainerStorageKind::Array) {
         _SetErrorMessage(
           out_error_message,
           "Target container '" + entry.container_name + "' is not an array for '" +

@@ -20,33 +20,57 @@ When code and docs disagree, follow the code and update the docs.
 - `common_data` is shared in-memory data only.
 - `common_data` is the one exception to the single-facade header rule.
 - `runtime_systems` owns the SDL, ImGui, and Vulkan runtime shell.
-- `algorithm_support` owns package support and reflection helpers. It is not a general file-IO layer.
+- `algorithm_support` contains package support and reflection helpers, but its public entrypoints are surfaced through `algorithm_management`.
 - `algorithm_support` only consumes resolved algorithm package locations and performs assembly/loading; it does not search for packages.
-- `agent` may wrap algorithm support assembly for higher layers, but `agent_management` should not call algorithm support directly.
+- `agent` and `debug_tool_backend` should reach algorithm loading through `algorithm_management`, not by including `algorithm_support` directly.
 - `algorithm_management` is a strict main-trunk layer.
 - `algorithm_management` owns container-manifest loading, manifest-name resolution, and runtime container creation helpers only.
 - `algorithm_management` also resolves algorithm package locations before higher layers assemble plugin-backed tools.
-- `kernal_all` owns the non-UI debug host backend and agent/runtime wiring.
-- `interact_ui` is the editor-facing UI surface.
-- `sdk` is the external agent/algorithm submission surface.
+- `debug_tool_backend` owns the non-UI debug host backend and agent/runtime wiring.
+- `debug_tool_frontend` is the editor-facing debug surface.
+- `sdk` is the external agent/algorithm submission surface and depends on `agent_management`.
 - `debugTool` owns startup wiring for the debug executable only.
 - Modules under `src/capabilities` are capability modules, not strict main-trunk hops.
 - Capability modules may aggregate lower-level contracts, but they must not introduce upward dependencies into strict trunk layers.
 - Optional capabilities must be linked explicitly by any consumer.
+- `capabilities/algorithm_library` is built through the dedicated batch tool `check_sdk.bat`, not through the `debugTool` solution.
 
 ## Current Module Graph
 
-Strict main-trunk layering path:
+Compile dependency graph:
 
-`common_data -> algorithm_support -> algorithm_management -> agent -> agent_management -> kernal_all -> debugTool`
+```mermaid
+graph LR
+  mesh_io --> common_data
+  runtime_systems --> common_data
+  algorithm_support --> common_data
+  algorithm_management --> common_data
+  algorithm_management --> runtime_systems
+  algorithm_management --> algorithm_support
+  agent --> common_data
+  agent --> algorithm_management
+  agent --> algorithm_support
+  agent_management --> common_data
+  agent_management --> agent
+  debug_tool_backend --> common_data
+  debug_tool_backend --> agent_management
+  debug_tool_backend --> runtime_systems
+  debug_tool_backend --> algorithm_management
+  debug_tool_backend --> algorithm_support
+  debug_tool_frontend --> runtime_systems
+  sdk --> agent_management
+  debugTool --> common_data
+  debugTool --> debug_tool_backend
+  debugTool --> debug_tool_frontend
+```
 
 Runtime shell support path:
 
-`common_data -> runtime_systems -> kernal_all -> debugTool`
+`debug_tool_backend -> runtime_systems -> common_data`
 
 UI path:
 
-`common_data -> agent_management -> interact_ui(ui) -> debugTool`
+`debug_tool_frontend -> runtime_systems -> common_data`
 
 Capability modules grouped under `src/capabilities`:
 
@@ -58,19 +82,19 @@ Current project-library dependency graph from `CMakeLists.txt`:
 
 - `mesh_io -> common_data`
 - `algorithm_support -> common_data`
-- `algorithm_management -> common_data`
+- `algorithm_management -> common_data + runtime_systems + algorithm_support`
 - `runtime_systems -> common_data`
 - `agent -> common_data + algorithm_management + algorithm_support`
-- `agent_management -> common_data + agent + algorithm_management + algorithm_support`
-- `kernal_all -> common_data + agent_management + runtime_systems`
-- `interact_ui(ui) -> common_data + agent_management + runtime_systems + algorithm_support`
-- `debugTool -> kernal_all + interact_ui(ui) + common_data`
+- `agent_management -> common_data + agent`
+- `debug_tool_backend -> common_data + agent_management + runtime_systems + algorithm_management + algorithm_support`
+- `debug_tool_frontend -> runtime_systems`
+- `sdk -> agent_management`
+- `debugTool -> debug_tool_backend + debug_tool_frontend + common_data`
 
 Important note:
 
-`algorithm_support` and `algorithm_management` are real trunk layers, but in the current
-executable they still mostly provide contracts and helpers rather than a rich
-live execution pipeline.
+`algorithm_support` still exists as a helper bundle, but the public loading path is
+carried through `algorithm_management`.
 
 `capabilities/agent` is intentionally different: it is consumed by trunk code,
 but it is a capability carrier rather than one strict hop in the layering path.
@@ -101,9 +125,7 @@ src/
 │  ├─ algorithm_intervention.h
 │  └─ algorithm_protocol.h
 ├─ runtime_systems/
-├─ kernal_all/
 ├─ sdk/
-├─ interact_ui/
 └─ debug_tool/
 ```
 
@@ -114,8 +136,8 @@ src/
 - `algorithm_management`: `algorithm_management/algorithm_manager.h`
 - `algorithm_management` package-location helper: `algorithm_management/algorithm_package_location.h`
 - `runtime_systems`: `runtime_systems/runtime_environment.h`
-- `kernal_all`: no public interface; it is an internal debug backend target
-- `interact_ui`: `interact_ui/interact_ui_runtime.h` and `interact_ui/interact_ui_panel.h`
+- `debug_tool_backend`: no public interface; it is an internal debug backend target
+- `debug_tool`: `debug_tool/debug_tool_host.h`, `debug_tool/debug_tool_backend_runtime.h`, and `debug_tool/debug_tool_frontend_panel.h`
 - `sdk`: `sdk/sdk_kernel.h` and `sdk/sdk_decomposer.h`
 
 ## Module Roles
@@ -180,7 +202,7 @@ Current sidecar:
 
 - `mesh_io`: OBJ mesh import/export on top of `common_data::Mesh`
 
-### `kernal_all`
+### `debug_tool_backend`
 
 Debug backend layer for the executable. It owns:
 
@@ -194,14 +216,14 @@ It should not:
 - render editor widgets directly
 - become the SDK surface
 
-### `interact_ui`
+### `debug_tool_frontend`
 
 This layer is split into:
 
-- interaction host runtime backend: `InteractUiRuntime` compiled into `kernal_all`
-- editor-facing UI surface: `InteractUiPanel`
+- debug host runtime backend: `DebugToolBackendRuntime` compiled into `debug_tool_backend`
+- editor-facing frontend surface: `DebugToolFrontendPanel`
 
-`InteractUiPanel` owns:
+`DebugToolFrontendPanel` owns:
 
 - editor-facing panels
 - custom intervention UI integration
@@ -221,10 +243,10 @@ It should:
 ## Current Runtime Flow
 
 1. `main.cpp` builds a default triangle mesh.
-2. `InteractUiRuntime::Init` initializes `RuntimeEnvironment`.
-3. `debugTool` binds `InteractUiPanel` to the runtime host and sets the draw callback.
+2. `DebugToolBackendRuntime::Init` initializes `RuntimeEnvironment`.
+3. `debugTool` binds `DebugToolFrontendPanel` to the runtime host and sets the draw callback.
 4. `RuntimeEnvironment` drives the SDL and ImGui frame loop.
-5. `InteractUiPanel::Draw` calls into the managed agent registry through `IInteractUiHost`.
+5. `DebugToolFrontendPanel::Draw` calls into the managed agent registry through `IDebugToolHost`.
 6. `AgentTicker` builds macro tick context and lets `Agent` tick its attached algorithm support groups.
 
 ## Quick Guidance For AI Agents
@@ -238,6 +260,6 @@ When changing code:
 5. Keep manifest loading and runtime container creation helpers in `algorithm_management`.
 6. Keep cross-layer package hooks in `capabilities/agent`.
 7. Keep optional adapters in `capabilities/sidecar`.
-8. Keep runtime binding in `kernal_all`.
-9. Keep interaction-host behavior in `interact_ui` runtime backend and editor behavior in `interact_ui` panel.
+8. Keep runtime binding in `debug_tool_backend`.
+9. Keep debug-host behavior in `debug_tool_backend` and editor behavior in `debug_tool_frontend`.
 10. Do not claim a full execution pipeline exists unless you also implement it.

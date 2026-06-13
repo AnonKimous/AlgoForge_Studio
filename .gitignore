@@ -5,6 +5,18 @@ out/
 bin/
 lib/
 sdk/
+app/**/*.dll
+app/**/*.pdb
+app/**/*.lib
+app/**/*.exp
+app/**/*.ilk
+app/**/*.obj
+app/**/*.exe
+app/**/*.spv
+app/**/*.vert
+app/**/*.frag
+app/**/Debug/
+app/**/Release/
 
 # CMake
 CMakeFiles/

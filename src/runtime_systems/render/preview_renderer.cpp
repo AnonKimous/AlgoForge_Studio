@@ -81,11 +81,38 @@ bool PreviewRenderer::Init(
 }
 
 void PreviewRenderer::SetTargetExtent(VkExtent2D extent) {
-  if (target_.extent.width == extent.width && target_.extent.height == extent.height) {
+  if (extent.width == 0u || extent.height == 0u) {
     return;
   }
-  target_.extent = extent;
+  if (requested_extent_.width == extent.width && requested_extent_.height == extent.height) {
+    return;
+  }
+  requested_extent_ = extent;
+  target_extent_dirty_ = true;
+}
+
+void PreviewRenderer::ApplyTargetExtent() {
+  if (!target_extent_dirty_) {
+    return;
+  }
+  if (requested_extent_.width == 0u || requested_extent_.height == 0u) {
+    target_extent_dirty_ = false;
+    return;
+  }
+  if (device_ == VK_NULL_HANDLE) {
+    return;
+  }
+
+  if (target_.extent.width == requested_extent_.width && target_.extent.height == requested_extent_.height) {
+    target_extent_dirty_ = false;
+    return;
+  }
+
+  CheckVkResult(vkDeviceWaitIdle(device_));
+  target_.extent = requested_extent_;
   DestroyTarget();
+  target_.extent = requested_extent_;
+  target_extent_dirty_ = false;
 }
 
 void PreviewRenderer::SetRequest(RenderPreviewRequest request) {

@@ -28,6 +28,7 @@ class PreviewRenderer {
     VkDescriptorPool descriptor_pool,
     VmaAllocator allocator);
   void SetTargetExtent(VkExtent2D extent);
+  void ApplyTargetExtent();
   void SetRequest(RenderPreviewRequest request);
   bool Record(VkCommandBuffer command_buffer);
   bool HasTexture() const;
@@ -92,6 +93,8 @@ class PreviewRenderer {
   RenderPreviewRequest request_{};
   PreviewTargetResource target_{};
   PreviewPipelineResource pipeline_{};
+  VkExtent2D requested_extent_{1024u, 1024u};
+  bool target_extent_dirty_{false};
 };
 
 }  // namespace runtime_systems

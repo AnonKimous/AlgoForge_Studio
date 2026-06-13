@@ -1,0 +1,86 @@
+{
+  "algorithm_name": "sample_algorithm",
+  "container": {
+    "globalCfg": {
+      "solvePrecision": "fp32",
+      "defaultPrecision": "fp32"
+    },
+    "variable": 3,
+    "variableArray": 4
+  },
+  "decomposer": {
+    "required_resources": {
+      "mesh": 2,
+      "obj": ["name1", "name2"]
+    },
+    "descriptor_to_container": [
+      {
+        "name": "triangleVelocity",
+        "mapping": {
+          "v1": "v1",
+          "a1": "a4"
+        }
+      },
+      {
+        "name": "force",
+        "mapping": {
+          "v2": "v2",
+          "v3": "v3"
+        }
+      }
+    ],
+    "resource_to_container": [
+      {
+        "name": "meshName",
+        "mapping": {
+          "vertex": "a1",
+          "frag": "a2",
+          "normal": "a3"
+        }
+      }
+    ],
+    "functions": [
+      "GetRequestedResources",
+      "GetRequestedDescriptorBindings",
+      "Decompose"
+    ]
+  },
+  "reflector": {
+    "vertex_position": ["a1"],
+    "vertex_normal": ["a3"],
+    "functions": [
+      "CreateRuntimeReflector",
+      "ReflectContainers",
+      "ReflectMetadata"
+    ]
+  },
+  "intervention": {
+    "stages": {
+      "runtime": {
+        "stage_name": "runtime",
+        "stage_kind": "runtime",
+        "side": "cpu",
+        "functions": [
+          "FillAgentToAlgorithmSignal",
+          "GetInterventionStageSpecs",
+          "temporaryTestExecuteOnMainThread"
+        ]
+      },
+      "algorithm_result_render": {
+        "stage_name": "algorithm_result_render",
+        "stage_kind": "result_render",
+        "side": "gpu",
+        "functions": [
+          "FillAgentToAlgorithmSignal",
+          "GetInterventionStageSpecs",
+          "ApplyResultRender"
+        ],
+        "shader": {
+          "pipeline": "graphics",
+          "vertex": "sample_algorithm_result_render.vert",
+          "fragment": "sample_algorithm_result_render.frag"
+        }
+      }
+    }
+  }
+}

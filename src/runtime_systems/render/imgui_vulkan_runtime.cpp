@@ -448,6 +448,10 @@ bool ImGuiVulkanRuntime::Tick(SDL_Window* window) {
     swapchain_rebuild_ = false;
   }
 
+  if (preview_renderer_) {
+    preview_renderer_->ApplyTargetExtent();
+  }
+
   ImGui_ImplVulkan_NewFrame();
   ImGui_ImplSDL3_NewFrame();
   ImGui::NewFrame();
@@ -493,7 +497,11 @@ void ImGuiVulkanRuntime::Destroy() {
     return;
   }
 
-  ClearGpuExecutors();
+  try {
+    ClearGpuExecutors();
+  } catch (...) {
+    // Shutdown should keep going even if the device was already lost.
+  }
 
   if (preview_renderer_) {
     preview_renderer_->Destroy();

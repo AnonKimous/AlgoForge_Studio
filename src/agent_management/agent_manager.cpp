@@ -1,121 +1,18 @@
 #include "agent_manager.h"
 
-#include "algorithm_management/algorithm_manager.h"
-
 #define AGENT_MANAGEMENT_LAYER_PUBLIC_FACADE_INCLUDE 1
 #include "agent_management/agent_ticker.h"
 #undef AGENT_MANAGEMENT_LAYER_PUBLIC_FACADE_INCLUDE
 
 #include <memory>
 #include <chrono>
-#include <unordered_map>
 #include <utility>
 
 namespace agent_management {
 
-namespace {
-
-struct BuiltAlgorithmMount {
-  agent::AlgorithmObject object{};
-  std::shared_ptr<algorithm::AlgorithmContainerSet> container_set{};
-  std::string error_message;
-  bool ok{false};
-};
-
-std::string _StandardLayoutKey(const algorithm::AlgorithmContainerSet& container_set) {
-  if (container_set.standard_layout.enabled()) {
-    return container_set.standard_layout.layout_name;
-  }
-  return container_set.algorithm_name;
-}
-
-BuiltAlgorithmMount _BuildAlgorithmMount(
-  const std::string& algorithm_name,
-  const std::vector<agent::AlgorithmResourceBinding>& resource_bindings,
-  const std::vector<agent::AlgorithmDescriptorValue>& descriptor_values,
-  agent::AlgorithmMountMode mount_mode,
-  agent::AlgorithmExecutionPreference execution_preference,
-  std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>* standard_shared_container_sets) {
-  BuiltAlgorithmMount result{};
-
-  std::string error_message;
-  agent::AlgorithmObject object{};
-  if (!agent::CreateAlgorithmObjectByName(algorithm_name, &object, &error_message)) {
-    result.error_message = error_message.empty()
-      ? ("Failed to create algorithm object for '" + algorithm_name + "'.")
-      : std::move(error_message);
-    return result;
-  }
-
-  object.resource_bindings = resource_bindings;
-  object.descriptor_values = descriptor_values;
-  object.mount_mode = mount_mode;
-  object.execution_preference = execution_preference;
-
-  std::shared_ptr<algorithm::AlgorithmContainerSet> container_set_handle;
-  algorithm::AlgorithmContainerSet container_set{};
-  if (!algorithm_management::CreateAlgorithmContainersFromManifestName(
-        object.algorithm_profile.container_manifest_name,
-        &container_set,
-        &error_message)) {
-    result.error_message = error_message.empty()
-      ? ("Failed to create containers for '" + algorithm_name + "'.")
-      : std::move(error_message);
-    return result;
-  }
-
-  const bool use_shared_standard_container =
-    mount_mode == agent::AlgorithmMountMode::StandardContainer &&
-    container_set.standard_layout.enabled() &&
-    standard_shared_container_sets;
-
-  if (use_shared_standard_container) {
-    const std::string shared_key = _StandardLayoutKey(container_set);
-    if (!shared_key.empty()) {
-      auto found = standard_shared_container_sets->find(shared_key);
-      if (found != standard_shared_container_sets->end() && found->second) {
-        container_set_handle = found->second;
-      } else {
-        container_set_handle = std::make_shared<algorithm::AlgorithmContainerSet>(std::move(container_set));
-        (*standard_shared_container_sets)[shared_key] = container_set_handle;
-      }
-    }
-  }
-
-  if (!container_set_handle) {
-    container_set_handle = std::make_shared<algorithm::AlgorithmContainerSet>(std::move(container_set));
-  }
-
-  if (!object.decomposer) {
-    result.error_message = "Algorithm decomposer is unavailable for '" + algorithm_name + "'.";
-    return result;
-  }
-
-  if (!object.decomposer->Decompose(
-        object.algorithm_profile,
-        object.resource_bindings,
-        object.descriptor_values,
-        container_set_handle.get(),
-        &error_message)) {
-    result.error_message = error_message.empty()
-      ? ("Failed to decompose algorithm inputs for '" + algorithm_name + "'.")
-      : std::move(error_message);
-    return result;
-  }
-
-  object.shared_container_set = container_set_handle;
-  result.object = std::move(object);
-  result.container_set = std::move(container_set_handle);
-  result.ok = true;
-  return result;
-}
-
-}  // namespace
-
 struct AgentManager::ManagedAgentEntry {
   std::shared_ptr<agent::Agent> agent{};
   AgentTicker ticker{};
-  std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>> standard_shared_container_sets{};
   uint32_t limit_fps_flag{120u};
   bool one_shot_tick_consumed{false};
   std::chrono::steady_clock::time_point last_tick_time{};
@@ -138,29 +35,26 @@ bool AgentManager::CreateAgent(AgentCreateSpec spec, size_t* out_agent_index) {
   auto agent_instance = std::make_shared<agent::Agent>();
   agent::AgentInitConfig agent_config{};
   agent_config.agent_name = std::move(spec.agent_name);
-  std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>> standard_shared_container_sets;
+  if (!agent_instance->Init(std::move(agent_config))) {
+    return false;
+  }
   for (const AgentCreateSpec::AlgorithmMountSpec& mount_spec : spec.algorithm_mount_specs) {
-    BuiltAlgorithmMount built_mount = _BuildAlgorithmMount(
-      mount_spec.algorithm_name,
-      mount_spec.resource_bindings,
-      mount_spec.descriptor_values,
-      mount_spec.mount_mode,
-      agent::AlgorithmExecutionPreference::Gpu,
-      &standard_shared_container_sets);
-    if (!built_mount.ok) {
+    if (!agent_instance->MountAlgorithm(
+          mount_spec.algorithm_name,
+          mount_spec.resource_bindings,
+          mount_spec.descriptor_values,
+          nullptr,
+          nullptr,
+          mount_spec.mount_mode,
+          agent::AlgorithmExecutionPreference::Gpu)) {
+      agent_instance->Destroy();
       return false;
     }
-    agent_config.algorithm_objects.push_back(std::move(built_mount.object));
-  }
-
-  if (!agent::agent_init(agent_instance.get(), std::move(agent_config))) {
-    return false;
   }
 
   auto managed_agent = std::make_shared<ManagedAgentEntry>();
   managed_agent->agent = std::move(agent_instance);
   managed_agent->ticker.Init(managed_agent->agent);
-  managed_agent->standard_shared_container_sets = std::move(standard_shared_container_sets);
   managed_agent->limit_fps_flag = spec.limit_fps_flag;
   managed_agent->ResetTickBudget();
 
@@ -176,6 +70,9 @@ bool AgentManager::DestroyAgent(size_t agent_index) {
     return false;
   }
 
+  if (managed_agents_[agent_index] && managed_agents_[agent_index]->agent) {
+    managed_agents_[agent_index]->agent->Destroy();
+  }
   managed_agents_[agent_index]->ticker.Destroy();
   managed_agents_.erase(managed_agents_.begin() + static_cast<std::ptrdiff_t>(agent_index));
   return true;
@@ -184,6 +81,9 @@ bool AgentManager::DestroyAgent(size_t agent_index) {
 void AgentManager::ClearAgents() {
   for (std::shared_ptr<ManagedAgentEntry>& managed_agent : managed_agents_) {
     if (managed_agent) {
+      if (managed_agent->agent) {
+        managed_agent->agent->Destroy();
+      }
       managed_agent->ticker.Destroy();
     }
   }
@@ -269,37 +169,20 @@ bool AgentManager::AttachAlgorithmToAgent(
     return false;
   }
 
-  BuiltAlgorithmMount built_mount = _BuildAlgorithmMount(
+  size_t algorithm_index = 0u;
+  if (!managed_agents_[agent_index]->agent->MountAlgorithm(
     algorithm_name,
     resource_bindings,
     descriptor_values,
+    &algorithm_index,
+    out_error_message,
     mount_mode,
-    execution_preference,
-    &managed_agents_[agent_index]->standard_shared_container_sets);
-  if (!built_mount.ok) {
-    set_error(built_mount.error_message);
+    execution_preference)) {
+    if (out_error_message && out_error_message->empty()) {
+      set_error("Failed to mount algorithm.");
+    }
     return false;
   }
-
-  size_t algorithm_index = 0u;
-  if (!managed_agents_[agent_index]->agent->AppendAlgorithmObject(std::move(built_mount.object), &algorithm_index)) {
-    set_error("Failed to append algorithm object to agent.");
-    return false;
-  }
-  if (!managed_agents_[agent_index]->agent->BeginAlgorithmAssembly(algorithm_index)) {
-    managed_agents_[agent_index]->agent->MarkAlgorithmAssemblyFailed(algorithm_index);
-    set_error("Failed to begin algorithm assembly.");
-    return false;
-  }
-
-  agent::AlgorithmObject* algorithm_object = managed_agents_[agent_index]->agent->algorithm_object(algorithm_index);
-  if (!algorithm_object) {
-    managed_agents_[agent_index]->agent->MarkAlgorithmAssemblyFailed(algorithm_index);
-    set_error("Failed to access algorithm object.");
-    return false;
-  }
-  algorithm_object->SetContainerSet(std::move(built_mount.container_set));
-  managed_agents_[agent_index]->agent->MarkAlgorithmAssemblyReady(algorithm_index);
   managed_agents_[agent_index]->ResetTickBudget();
 
   if (out_algorithm_index) {

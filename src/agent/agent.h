@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -26,72 +27,29 @@ struct AlgorithmProfileReflection {
   bool valid{false};
 };
 
-struct AlgorithmReflectionValue {
-  std::string reflection_object_name;
-  std::string container_name;
-  std::string filter_name;
-  algorithm::AlgorithmContainerStorageKind storage_kind{algorithm::AlgorithmContainerStorageKind::Array};
-  std::vector<std::byte> bytes;
-};
-
-struct AlgorithmReflectionSnapshot {
-  std::string algorithm_name;
-  std::vector<AlgorithmReflectionValue> variables;
-  std::vector<AlgorithmReflectionValue> variable_arrays;
-  bool valid{false};
-
-  void Clear() {
-    algorithm_name.clear();
-    variables.clear();
-    variable_arrays.clear();
-    valid = false;
-  }
-};
-
-struct AgentAlgorithmRuntimeState {
-  std::string algorithm_name;
-  AgentToAlgorithmSignal agent_to_algorithm_signal{};
-  AlgorithmToAgentSignal algorithm_to_agent_signal{};
-  AlgorithmPackageDebugState debug_state{};
-  AlgorithmReflectionSnapshot reflection_snapshot{};
-};
-
-enum class AlgorithmAssemblyState {
-  Pending,
-  Assembling,
-  Ready,
-  Failed,
-};
-
-struct AgentTickContext {
-  const InputState* input{nullptr};
-  Vec2 mouse_pixel{};
-  float dt_seconds{0.0f};
-  const InteractionInterventionRequest* intervention_request{nullptr};
-};
-
-struct AgentTickResult {
-  AlgorithmToAgentSignal algorithm_to_agent_signal{};
-  std::vector<AgentAlgorithmRuntimeState> algorithm_runtime_states;
-};
-
 bool CreateAlgorithmObjectByName(
   const std::string& algorithm_name,
   AlgorithmObject* out_group,
   std::string* out_error_message = nullptr);
 
-struct AlgorithmAssemblySlot {
-  size_t index{0u};
-  AlgorithmObject* algorithm_object{nullptr};
-  AlgorithmAssemblyState* assembly_state{nullptr};
-};
-
 class Agent {
  public:
   bool Init(AgentInitConfig config);
+  bool MountAlgorithm(
+    const std::string& algorithm_name,
+    const std::vector<AlgorithmResourceBinding>& resource_bindings,
+    const std::vector<AlgorithmDescriptorValue>& descriptor_values,
+    size_t* out_index = nullptr,
+    std::string* out_error_message = nullptr,
+    AlgorithmMountMode mount_mode = AlgorithmMountMode::Direct,
+    AlgorithmExecutionPreference execution_preference = AlgorithmExecutionPreference::Gpu);
   bool AppendAlgorithmObject(AlgorithmObject object, size_t* out_index = nullptr);
   bool RemoveAlgorithm(size_t index);
   void RefreshInterventionSignals(const AgentTickContext& context);
+  bool SubmitAlgorithm(
+    const AgentTickContext& context,
+    const std::vector<bool>& allow_tick_mask,
+    AgentTickResult* out_result);
   bool Tick(
     const AgentTickContext& context,
     const std::vector<bool>& allow_tick_mask,
@@ -139,17 +97,7 @@ class Agent {
   std::vector<AgentAlgorithmRuntimeState> algorithm_runtime_states_{};
   std::vector<AlgorithmAssemblyState> algorithm_assembly_states_{};
   std::vector<size_t> algorithm_execution_end_queue_{};
+  std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>> standard_shared_container_sets_{};
 };
-
-inline bool agent_init(Agent* agent_instance, AgentInitConfig config) {
-  if (!agent_instance) return false;
-  return agent_instance->Init(std::move(config));
-}
-
-inline void agent_destroy(Agent* agent_instance) {
-  if (agent_instance) {
-    agent_instance->Destroy();
-  }
-}
 
 }  // namespace agent

@@ -8,19 +8,9 @@
 #error "Do not include algorithm_management/job_system.h directly. Use algorithm_management/algorithm_manager.h."
 #endif
 
-#include "common_data/interaction/interaction_signals.h"
+#include "algorithm_management/algorithm_abi.h"
 
 #include <string>
-
-namespace algorithm {
-struct AlgorithmContainerSet;
-}
-
-namespace agent {
-class AlgorithmObject;
-struct AgentTickContext;
-struct AlgorithmPackageDebugState;
-}
 
 namespace algorithm_management::job_gpu {
 

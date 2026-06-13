@@ -2,6 +2,8 @@
 
 This directory stores concrete algorithm bundle assets.
 
+The directory is built by the dedicated batch tool `check_sdk.bat`, so it can be compiled independently from the `debugTool` solution.
+
 ## Layout
 
 Each algorithm lives in its own subdirectory named after the algorithm:

@@ -4,15 +4,11 @@
 
 #define ALGORITHM_MANAGEMENT_LAYER_PUBLIC_FACADE_INCLUDE 1
 #include "algorithm_support/algorithm_container_manifest.h"
+#include "algorithm_support/algorithm_protocol.h"
 #include "algorithm_support/algorithm_package_location.h"
 #include "algorithm_support/algorithm_types.h"
 #include "algorithm_management/job_system.h"
 #undef ALGORITHM_MANAGEMENT_LAYER_PUBLIC_FACADE_INCLUDE
-
-namespace agent {
-class AlgorithmObject;
-struct AgentTickContext;
-}
 
 namespace algorithm_management {
 
@@ -36,6 +32,10 @@ using ::algorithm::FindAlgorithmContainer;
 using ::algorithm::ResolveAlgorithmManifestName;
 using ::algorithm::TryResolveAlgorithmPackageLocation;
 using ::algorithm::TryCreateAlgorithmReflectorFromAlgorithmName;
+using ::algorithm_support::CreateAlgorithmObjectFromLocation;
+using ::algorithm_support::CreateAlgorithmPackageDecomposerFromLocation;
+using ::algorithm_support::CreateAlgorithmPackageReflectorByName;
+using ::algorithm_support::CreateAlgorithmInterventionByName;
 
 }  // namespace algorithm_management
 
@@ -55,6 +55,10 @@ using algorithm_management::CreateAlgorithmContainersFromManifestName;
 using algorithm_management::CreateAlgorithmReflectorFromManifestFile;
 using algorithm_management::CreateAlgorithmReflectorFromManifestName;
 using algorithm_management::FindAlgorithmContainer;
+using algorithm_management::CreateAlgorithmObjectFromLocation;
+using algorithm_management::CreateAlgorithmPackageDecomposerFromLocation;
+using algorithm_management::CreateAlgorithmPackageReflectorByName;
+using algorithm_management::CreateAlgorithmInterventionByName;
 using algorithm_management::ResolveAlgorithmManifestName;
 using algorithm_management::TryResolveAlgorithmPackageLocation;
 using algorithm_management::TryCreateAlgorithmReflectorFromAlgorithmName;

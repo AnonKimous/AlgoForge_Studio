@@ -12,7 +12,7 @@ This note records the earlier runtime/UI cleanup pass.
 
 - `runtime_systems` owns the backend runtime support.
 - `agent_execute` owns the manual agent composer and runtime backend.
-- `interact_ui` sits above the execution backend and renders the editor surface.
+- `debug_tool_frontend` sits above the execution backend and renders the editor surface.
 - The UI defaults to a shared agent preset and starts the work on creation.
 
 ## Validation

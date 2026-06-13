@@ -1,8 +1,7 @@
 #pragma once
 
-#include "agent/agent.h"
 #include "common_data/common_data.h"
-#include "interact_ui/interact_ui_host.h"
+#include "debug_tool/debug_tool_host.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -13,14 +12,19 @@
 #include <utility>
 #include <vector>
 
-namespace interact_ui {
+namespace debug_tool_frontend {
+
+using debug_tool::IDebugToolHost;
 
 struct AgentInterventionUiContext {
-  const agent::Agent* agent{nullptr};
+  size_t agent_index{0u};
+  size_t algorithm_index{0u};
+  const debug_tool::AgentRuntimeSummary* agent_summary{nullptr};
+  const debug_tool::AlgorithmRuntimeSummary* algorithm_summary{nullptr};
   const InputState* input{nullptr};
   Vec2 mouse_pixel{};
   float dt_seconds{0.0f};
-  AgentToAlgorithmSignal* agent_to_algorithm_signal{nullptr};
+  const AgentToAlgorithmSignal* agent_to_algorithm_signal{nullptr};
   const AlgorithmToAgentSignal* algorithm_to_agent_signal{nullptr};
 };
 
@@ -45,19 +49,9 @@ struct AgentInterventionUiBinding {
   std::shared_ptr<IAlgorithmInterventionPackageUi> hook{};
 };
 
-struct AlgorithmCatalogEntry {
-  std::string algorithm_name;
-  std::string display_name;
-  std::string folder_name;
-  std::string container_manifest_name;
-  std::string decomposer_name;
-  std::string reflector_name;
-  std::string intervention_name;
-};
-
-class InteractUiPanel {
+class DebugToolFrontendPanel {
  public:
-  void Draw(IInteractUiHost& host);
+  void Draw(IDebugToolHost& host);
   void Destroy();
   void RegisterAgentUiBindings(size_t agent_index, std::vector<AgentInterventionUiBinding> ui_bindings);
 
@@ -90,8 +84,8 @@ class InteractUiPanel {
       uint32_t array_index{0u};
       float scalar_value{0.0f};
     };
-    agent::AlgorithmExecutionPreference execution_preference{agent::AlgorithmExecutionPreference::Gpu};
-    std::vector<interact_ui::AlgorithmCatalogEntry> algorithm_catalog_entries;
+    debug_tool::AlgorithmExecutionPreference execution_preference{debug_tool::AlgorithmExecutionPreference::Gpu};
+    std::vector<debug_tool::AlgorithmCatalogEntry> algorithm_catalog_entries;
     int selected_algorithm_catalog_index{-1};
     int selected_agent_index{-1};
     int selected_algorithm_index{-1};
@@ -128,23 +122,25 @@ class InteractUiPanel {
     std::vector<AgentInterventionUiBinding> bindings{};
   };
 
-  void DrawInteractUi(IInteractUiHost& host);
+  void DrawDebugToolFrontend(IDebugToolHost& host);
   void DrawWindowMenu();
-  void DrawAgentComposerUi(IInteractUiHost& host);
-  void DrawAgentBindingUi(IInteractUiHost& host);
-  void DrawAgentManagerUi(IInteractUiHost& host);
-  void DrawAgentDetailUi(IInteractUiHost& host);
-  void DrawFileBrowserUi(IInteractUiHost& host);
-  void DrawAlgorithmPreviewUi(IInteractUiHost& host);
+  void DrawAgentComposerUi(IDebugToolHost& host);
+  void DrawAgentBindingUi(IDebugToolHost& host);
+  void DrawAgentManagerUi(IDebugToolHost& host);
+  void DrawAgentDetailUi(IDebugToolHost& host);
+  void DrawFileBrowserUi(IDebugToolHost& host);
+  void DrawAlgorithmPreviewUi(IDebugToolHost& host);
   void InitializeAgentComposerDefaults();
   void InitializeFileBrowserDefaults();
   void DrawCustomInterventionUi(
-    IInteractUiHost& host,
+    IDebugToolHost& host,
     size_t agent_index,
     size_t algorithm_index,
-    const agent::AlgorithmObject& object,
+    const debug_tool::AgentRuntimeSummary& agent_summary,
+    const debug_tool::AlgorithmRuntimeSummary& algorithm_summary,
     ActiveCustomInterventionUiSlot* slot);
-  void SyncCustomInterventionUiState(IInteractUiHost& host);
+  void SyncCustomInterventionUiState(IDebugToolHost& host);
+  void InitializeAlgorithmCatalog(IDebugToolHost& host);
 
   AgentComposerUiState agent_composer_ui_state_{};
   FileBrowserUiState file_browser_ui_state_{};
@@ -160,10 +156,10 @@ class InteractUiPanel {
   std::vector<ActiveCustomInterventionUiSlot> active_custom_ui_slots_{};
 };
 
-}  // namespace interact_ui
+}  // namespace debug_tool_frontend
 
-using interact_ui::AgentInterventionUiBinding;
-using interact_ui::AgentInterventionUiContext;
-using interact_ui::IAlgorithmInterventionPackageUi;
-using interact_ui::IAlgorithmInterventionPackageUiState;
-using interact_ui::InteractUiPanel;
+using debug_tool_frontend::AgentInterventionUiBinding;
+using debug_tool_frontend::AgentInterventionUiContext;
+using debug_tool_frontend::IAlgorithmInterventionPackageUi;
+using debug_tool_frontend::IAlgorithmInterventionPackageUiState;
+using debug_tool_frontend::DebugToolFrontendPanel;
