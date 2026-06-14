@@ -58,6 +58,13 @@ enum class AlgorithmExecutionPreference {
   Gpu = 1,
 };
 
+enum class AlgorithmExecutionPhase {
+  Body = 0,
+  PreExecution = 1,
+  PostExecution = 2,
+  ResultRender = 3,
+};
+
 struct AlgorithmReflectionValue {
   std::string reflection_object_name;
   std::string container_name;
@@ -93,6 +100,7 @@ struct AgentTickContext {
   const InputState* input{nullptr};
   Vec2 mouse_pixel{};
   float dt_seconds{0.0f};
+  AlgorithmExecutionPhase execution_phase{AlgorithmExecutionPhase::Body};
   const InteractionInterventionRequest* intervention_request{nullptr};
 };
 
@@ -117,7 +125,6 @@ struct AgentTickResult {
 };
 
 class IAlgorithmPackageSupport;
-class IAlgorithmPackageDecomposer;
 class IAlgorithmtemporaryTestMainThreadExecutor;
 class IAlgorithmIntervention;
 class AlgorithmObject;
@@ -146,7 +153,6 @@ class AlgorithmObject {
 
   algorithm::AlgorithmProfile algorithm_profile{};
   std::shared_ptr<IAlgorithmPackageSupport> reflector;
-  std::shared_ptr<IAlgorithmPackageDecomposer> decomposer;
   std::shared_ptr<algorithm::AlgorithmReflector> algorithm_reflector;
   std::shared_ptr<algorithm::AlgorithmContainerSet> shared_container_set;
   std::vector<AlgorithmResourceBinding> resource_bindings;
@@ -204,41 +210,6 @@ class IAlgorithmPackageSupport {
   }
 };
 
-class IAlgorithmPackageDecomposer {
- public:
-  virtual ~IAlgorithmPackageDecomposer() = default;
-
-  virtual bool GetRequestedResources(
-    const algorithm::AlgorithmProfile& algorithm_profile,
-    AlgorithmRequestedResources* out_requested_resources) const {
-    (void)algorithm_profile;
-    (void)out_requested_resources;
-    return false;
-  }
-
-  virtual bool GetRequestedDescriptorBindings(
-    const algorithm::AlgorithmProfile& algorithm_profile,
-    AlgorithmRequestedDescriptorBindings* out_requested_descriptor_bindings) const {
-    (void)algorithm_profile;
-    (void)out_requested_descriptor_bindings;
-    return false;
-  }
-
-  virtual bool Decompose(
-    const algorithm::AlgorithmProfile& algorithm_profile,
-    const std::vector<AlgorithmResourceBinding>& resource_bindings,
-    const std::vector<AlgorithmDescriptorValue>& descriptor_values,
-    algorithm::AlgorithmContainerSet* container_set,
-    std::string* out_error_message = nullptr) const {
-    (void)algorithm_profile;
-    (void)resource_bindings;
-    (void)descriptor_values;
-    (void)container_set;
-    (void)out_error_message;
-    return true;
-  }
-};
-
 class ISimpleAlgorithmPackageSupport : public IAlgorithmPackageSupport {
  public:
   ~ISimpleAlgorithmPackageSupport() override = default;
@@ -265,9 +236,9 @@ class IAlgorithmtemporaryTestMainThreadExecutor {
 
 enum class AlgorithmInterventionStageKind {
   ResultRender = 0,
-  FillSignal = 1,
-  ResourceRefill = 2,
-  Runtime = 3,
+  PreExecution = 1,
+  InExecution = 2,
+  PostExecution = 3,
   Custom = 4,
 };
 
@@ -287,6 +258,7 @@ struct AlgorithmInterventionShaderSpec {
 struct AlgorithmInterventionStageSpec {
   std::string stage_name;
   AlgorithmInterventionStageKind stage_kind{AlgorithmInterventionStageKind::Custom};
+  std::vector<std::string> functions;
   std::vector<AlgorithmInterventionContainerBinding> used_algorithm_containers;
   AlgorithmInterventionShaderSpec shader;
 };
@@ -313,6 +285,7 @@ using algorithm_management::AgentTickResult;
 using algorithm_management::AlgorithmAssemblySlot;
 using algorithm_management::AlgorithmAssemblyState;
 using algorithm_management::AlgorithmDescriptorValue;
+using algorithm_management::AlgorithmExecutionPhase;
 using algorithm_management::AlgorithmExecutionPreference;
 using algorithm_management::AlgorithmInterventionContainerBinding;
 using algorithm_management::AlgorithmInterventionPackageDebugState;
@@ -328,7 +301,6 @@ using algorithm_management::AlgorithmRequestedDescriptorBindings;
 using algorithm_management::AlgorithmRequestedResources;
 using algorithm_management::AlgorithmResourceBinding;
 using algorithm_management::IAlgorithmIntervention;
-using algorithm_management::IAlgorithmPackageDecomposer;
 using algorithm_management::IAlgorithmPackageSupport;
 using algorithm_management::IAlgorithmtemporaryTestMainThreadExecutor;
 using algorithm_management::IComplexAlgorithmPackageSupport;

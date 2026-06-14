@@ -1,0 +1,126 @@
+{
+  "algorithm_name": "v6a2_triangle_collision_runtime_test",
+  "globalCfg": {
+    "solvePrecision": "fp32",
+    "defaultPrecision": "fp32"
+  },
+  "container": {
+    "variable": 6,
+    "variableArray": 2
+  },
+  "decomposer": {
+    "mesh": {
+      "vertex": "a1",
+      "edge": "a2",
+      "norman": "a3"
+    },
+    "description": [
+      {
+        "name": "volecity",
+        "bindings": [
+          {
+            "from": ["v1", "v2", "v3"],
+            "to": {
+              "container": "a4",
+              "indices": [1, 2, 3]
+            }
+          }
+        ]
+      },
+      {
+        "name": "force",
+        "bindings": [
+          {
+            "from": ["v4", "v5", "v6"],
+            "to": ["v1", "v2", "v3"]
+          }
+        ]
+      },
+      {
+        "name": "tranform",
+        "bindings": [
+          {
+            "from": ["a5"],
+            "to": ["v4", "v5", "v6"]
+          }
+        ]
+      }
+    ]
+  },
+  "reflector": {
+    "name": "volocityABS",
+    "functionName": "fun",
+    "items": [
+      {
+        "name": "volocityABS",
+        "varity": ["v1", "v2", "v3"],
+        "array": ["a1"],
+        "reflectFun": "fun",
+        "output": {
+          "v": {
+            "name": "volocityABS"
+          }
+        }
+      },
+      {
+        "name": "borderABS",
+        "varity": ["v4", "v5", "v6"],
+        "array": ["a2"],
+        "reflectFun": "fun",
+        "output": {
+          "a": {
+            "name": "borderABS"
+          }
+        }
+      }
+    ]
+  },
+  "intervention": {
+    "stages": {
+      "preTick": {
+        "stage_name": "preTick",
+        "stage_kind": "preTick"
+      },
+      "afterTick": {
+        "stage_name": "afterTick",
+        "stage_kind": "afterTick",
+        "used_algorithm_containers": {
+          "variables": [],
+          "arrays": [
+            {
+              "name": "a1",
+              "kind": "array",
+              "tuple_width": 6,
+              "required": true
+            }
+          ]
+        },
+        "shader": {
+          "pipeline": "graphics",
+          "vertex": "v6a2_triangle_collision_runtime_test_result_render.vert",
+          "fragment": "v6a2_triangle_collision_runtime_test_result_render.frag"
+        }
+      },
+      "resultRender": {
+        "stage_name": "resultRender",
+        "stage_kind": "resultRender",
+        "used_algorithm_containers": {
+          "variables": [],
+          "arrays": [
+            {
+              "name": "a1",
+              "kind": "array",
+              "tuple_width": 6,
+              "required": true
+            }
+          ]
+        },
+        "shader": {
+          "pipeline": "graphics",
+          "vertex": "v6a2_triangle_collision_runtime_test_result_render.vert",
+          "fragment": "v6a2_triangle_collision_runtime_test_result_render.frag"
+        }
+      }
+    }
+  }
+}

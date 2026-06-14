@@ -252,6 +252,7 @@ bool DebugToolBackendRuntime::Tick() {
   frame_dt_ = std::chrono::duration<float>(now - last_frame_time_).count();
   last_frame_time_ = now;
 
+  agent_manager_.Tick(runtime_environment_.input(), runtime_environment_.MousePosition(), frame_dt_);
   return runtime_environment_.Tick();
 }
 
@@ -416,54 +417,31 @@ bool DebugToolBackendRuntime::QueryAlgorithmRequestedBindings(
   out_resources->clear();
   out_descriptors->clear();
 
-  algorithm::AlgorithmPackageLocation package_location{};
-  std::string location_error_message;
-  if (!algorithm_management::TryResolveAlgorithmPackageLocation(
+  algorithm_management::AlgorithmRequestedResources requested_resources{};
+  algorithm_management::AlgorithmRequestedDescriptorBindings requested_descriptor_bindings{};
+  std::string reflection_error_message;
+  if (!algorithm_management::QueryAlgorithmRequestedBindings(
         algorithm_name,
-        &package_location,
-        &location_error_message)) {
+        &requested_resources,
+        &requested_descriptor_bindings,
+        &reflection_error_message)) {
     if (out_error_message) {
-      *out_error_message = location_error_message.empty()
-        ? ("Failed to resolve algorithm package location for '" + algorithm_name + "'.")
-        : std::move(location_error_message);
+      *out_error_message = reflection_error_message.empty()
+        ? ("Failed to query requested bindings for '" + algorithm_name + "'.")
+        : std::move(reflection_error_message);
     }
     return false;
   }
 
-  std::shared_ptr<agent::IAlgorithmPackageDecomposer> decomposer;
-  std::string error_message;
-  if (!algorithm_management::CreateAlgorithmPackageDecomposerFromLocation(package_location, &decomposer, &error_message) || !decomposer) {
-    if (out_error_message) {
-      *out_error_message = error_message.empty()
-        ? ("Failed to create decomposer for algorithm '" + algorithm_name + "'.")
-        : std::move(error_message);
-    }
-    return false;
-  }
-
-  AlgorithmProfile profile{};
-  profile.algorithm_name = package_location.algorithm_name;
-
-  agent::AlgorithmRequestedResources requested_resources{};
-  agent::AlgorithmRequestedDescriptorBindings requested_descriptor_bindings{};
-  const bool resources_ok = decomposer->GetRequestedResources(profile, &requested_resources);
-  const bool descriptors_ok = decomposer->GetRequestedDescriptorBindings(profile, &requested_descriptor_bindings);
-  if (!resources_ok && !descriptors_ok) {
-    if (out_error_message) {
-      *out_error_message = "Algorithm decomposer did not expose requested resources or descriptors for '" +
-        algorithm_name + "'.";
-    }
-    return false;
-  }
-
-  for (const agent::AlgorithmRequestedResources::RequiredResource& resource : requested_resources.required_resources) {
+  for (const algorithm_management::AlgorithmRequestedResources::RequiredResource& resource :
+       requested_resources.required_resources) {
     out_resources->push_back(debug_tool::RequestedResourceEntry{
       .resource_name = resource.resource_name,
       .resource_kind = resource.resource_kind,
       .required = resource.required,
     });
   }
-  for (const agent::AlgorithmRequestedDescriptorBindings::DescriptorSlot& descriptor :
+  for (const algorithm_management::AlgorithmRequestedDescriptorBindings::DescriptorSlot& descriptor :
        requested_descriptor_bindings.descriptor_slots) {
     out_descriptors->push_back(debug_tool::RequestedDescriptorEntry{
       .descriptor_name = descriptor.descriptor_name,

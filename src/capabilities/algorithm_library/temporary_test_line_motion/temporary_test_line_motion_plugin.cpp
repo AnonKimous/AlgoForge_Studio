@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cstring>
 #include <fstream>
+#include <initializer_list>
 #include <sstream>
 #include <string_view>
 
@@ -16,18 +17,26 @@ namespace {
 struct TemporaryTestResourceEntry {
   std::string resource_name;
   std::string resource_kind;
+  std::string container_name;
   bool required{true};
 };
 
-struct TemporaryTestDescriptorEntry {
-  std::string descriptor_name;
-  std::string container_name;
-  uint32_t array_index{0u};
+struct TemporaryTestDescriptionBinding {
+  std::string name;
+  std::vector<std::string> from_names;
+  std::string target_container_name;
+  std::vector<uint32_t> target_indices;
+  std::vector<std::string> target_container_names;
+};
+
+struct TemporaryTestDescriptionEntry {
+  std::string name;
+  std::vector<TemporaryTestDescriptionBinding> bindings;
 };
 
 struct TemporaryTestSchema {
   std::vector<TemporaryTestResourceEntry> required_resources;
-  std::vector<TemporaryTestDescriptorEntry> descriptor_entries;
+  std::vector<TemporaryTestDescriptionEntry> description_entries;
   bool valid{false};
   std::string error_message;
 };
@@ -57,6 +66,68 @@ std::string _GetStringField(const cJSON* object, const char* key) {
     return {};
   }
   return item->valuestring;
+}
+
+std::vector<std::string> _GetStringList(const cJSON* item) {
+  std::vector<std::string> values;
+  if (!item) {
+    return values;
+  }
+  if (cJSON_IsString(item) && item->valuestring) {
+    values.push_back(item->valuestring);
+    return values;
+  }
+  if (!cJSON_IsArray(item)) {
+    return values;
+  }
+  const int count = cJSON_GetArraySize(item);
+  values.reserve(count > 0 ? static_cast<size_t>(count) : 0u);
+  for (int i = 0; i < count; ++i) {
+    const cJSON* entry = cJSON_GetArrayItem(item, i);
+    if (!entry || !cJSON_IsString(entry) || !entry->valuestring) {
+      continue;
+    }
+    values.emplace_back(entry->valuestring);
+  }
+  return values;
+}
+
+std::vector<std::string> _GetStringListField(
+  const cJSON* object,
+  std::initializer_list<const char*> keys) {
+  if (!object || !cJSON_IsObject(object)) {
+    return {};
+  }
+
+  for (const char* key : keys) {
+    if (!key) {
+      continue;
+    }
+    const cJSON* item = cJSON_GetObjectItemCaseSensitive(object, key);
+    std::vector<std::string> values = _GetStringList(item);
+    if (!values.empty()) {
+      return values;
+    }
+  }
+
+  return {};
+}
+
+std::vector<uint32_t> _GetUintList(const cJSON* item) {
+  std::vector<uint32_t> values;
+  if (!item || !cJSON_IsArray(item)) {
+    return values;
+  }
+  const int count = cJSON_GetArraySize(item);
+  values.reserve(count > 0 ? static_cast<size_t>(count) : 0u);
+  for (int i = 0; i < count; ++i) {
+    const cJSON* entry = cJSON_GetArrayItem(item, i);
+    if (!entry || !cJSON_IsNumber(entry) || entry->valuedouble < 0.0) {
+      continue;
+    }
+    values.push_back(static_cast<uint32_t>(entry->valuedouble));
+  }
+  return values;
 }
 
 uint32_t _GetUintField(const cJSON* object, const char* key, uint32_t fallback = 0u) {
@@ -95,6 +166,34 @@ bool _GetBoolField(const cJSON* object, const char* key, bool fallback = false) 
   return fallback;
 }
 
+bool _WriteFloatValue(
+  algorithm::AlgorithmContainer* container,
+  float value) {
+  if (!container) {
+    return false;
+  }
+  if (container->bytes.size() < sizeof(float)) {
+    return false;
+  }
+  std::memcpy(container->bytes.data(), &value, sizeof(float));
+  return true;
+}
+
+bool _WriteFloatValueAtIndex(
+  algorithm::AlgorithmContainer* container,
+  uint32_t index,
+  float value) {
+  if (!container) {
+    return false;
+  }
+  const size_t byte_offset = static_cast<size_t>(index) * static_cast<size_t>(container->element_stride);
+  if (container->bytes.size() < byte_offset + sizeof(float)) {
+    return false;
+  }
+  std::memcpy(container->bytes.data() + byte_offset, &value, sizeof(float));
+  return true;
+}
+
 std::string _BuildPath(
   const algorithm_library_plugin::AlgorithmPluginRequest& request,
   const std::string& suffix) {
@@ -114,16 +213,16 @@ bool _ParseInterventionStageKind(
   }
 
   const std::string kind = !stage_kind_text.empty() ? stage_kind_text : stage_name;
-  if (kind == "result_render" || kind == "algorithm_result_render") {
+  if (kind == "resultRender") {
     *out_stage_kind = agent::AlgorithmInterventionStageKind::ResultRender;
     return true;
   }
-  if (kind == "fill_signal" || kind == "signal_fill") {
-    *out_stage_kind = agent::AlgorithmInterventionStageKind::FillSignal;
+  if (kind == "preTick") {
+    *out_stage_kind = agent::AlgorithmInterventionStageKind::PreExecution;
     return true;
   }
-  if (kind == "resource_refill" || kind == "resource_rebind") {
-    *out_stage_kind = agent::AlgorithmInterventionStageKind::ResourceRefill;
+  if (kind == "afterTick") {
+    *out_stage_kind = agent::AlgorithmInterventionStageKind::PostExecution;
     return true;
   }
 
@@ -133,7 +232,7 @@ bool _ParseInterventionStageKind(
 
 TemporaryTestInterventionSchema _LoadInterventionSchema(const algorithm_library_plugin::AlgorithmPluginRequest& request) {
   TemporaryTestInterventionSchema schema{};
-  const std::string path = _BuildPath(request, "_intervention.json");
+  const std::string path = _BuildPath(request, "_package.json");
   const std::string json_text = _ReadTextFile(path);
   if (json_text.empty()) {
     schema.error_message = "Failed to read intervention JSON file: " + path;
@@ -146,9 +245,16 @@ TemporaryTestInterventionSchema _LoadInterventionSchema(const algorithm_library_
     return schema;
   }
 
-  const cJSON* stages = cJSON_GetObjectItemCaseSensitive(root, "stages");
+  const cJSON* intervention = cJSON_GetObjectItemCaseSensitive(root, "intervention");
+  if (!intervention || !cJSON_IsObject(intervention)) {
+    schema.error_message = "Package JSON file " + path + " is missing an 'intervention' object.";
+    cJSON_Delete(root);
+    return schema;
+  }
+
+  const cJSON* stages = cJSON_GetObjectItemCaseSensitive(intervention, "stages");
   if (!stages || !cJSON_IsObject(stages)) {
-    schema.error_message = "Intervention JSON file " + path + " is missing a 'stages' object.";
+    schema.error_message = "Intervention section in package JSON file " + path + " is missing a 'stages' object.";
     cJSON_Delete(root);
     return schema;
   }
@@ -249,7 +355,7 @@ TemporaryTestInterventionSchema _LoadInterventionSchema(const algorithm_library_
 
 TemporaryTestSchema _LoadSchema(const algorithm_library_plugin::AlgorithmPluginRequest& request) {
   TemporaryTestSchema schema{};
-  const std::string path = _BuildPath(request, "_decomposer.json");
+  const std::string path = _BuildPath(request, "_package.json");
   const std::string json_text = _ReadTextFile(path);
   if (json_text.empty()) {
     schema.error_message = "Failed to read decomposer JSON file: " + path;
@@ -262,54 +368,94 @@ TemporaryTestSchema _LoadSchema(const algorithm_library_plugin::AlgorithmPluginR
     return schema;
   }
 
-  const cJSON* required_resources = cJSON_GetObjectItemCaseSensitive(root, "required_resources");
-  if (required_resources && cJSON_IsArray(required_resources)) {
-    const int resource_count = cJSON_GetArraySize(required_resources);
-    schema.required_resources.reserve(resource_count > 0 ? static_cast<size_t>(resource_count) : 0u);
-    for (int i = 0; i < resource_count; ++i) {
-      const cJSON* item = cJSON_GetArrayItem(required_resources, i);
-      if (!item || !cJSON_IsObject(item)) {
-        continue;
-      }
-      TemporaryTestResourceEntry entry{};
-      entry.resource_name = _GetStringField(item, "name");
-      entry.resource_kind = _GetStringField(item, "kind");
-      entry.required = _GetBoolField(item, "required", true);
-      if (entry.resource_name.empty() || entry.resource_kind.empty()) {
-        schema.error_message = "Invalid required_resources entry in " + path + ".";
+  const cJSON* decomposer = cJSON_GetObjectItemCaseSensitive(root, "decomposer");
+  if (!decomposer || !cJSON_IsObject(decomposer)) {
+    schema.error_message = "Package JSON file " + path + " is missing a 'decomposer' object.";
+    cJSON_Delete(root);
+    return schema;
+  }
+
+  const cJSON* resources = cJSON_GetObjectItemCaseSensitive(decomposer, "res");
+  if (!resources || !cJSON_IsObject(resources)) {
+    schema.error_message = "Package JSON file " + path + " is missing a 'res' object.";
+    cJSON_Delete(root);
+    return schema;
+  }
+  for (const cJSON* resource_group = resources->child; resource_group; resource_group = resource_group->next) {
+    if (!resource_group->string || !cJSON_IsObject(resource_group)) {
+      schema.error_message = "Invalid resource group in " + path + ".";
+      cJSON_Delete(root);
+      return schema;
+    }
+
+    const std::string resource_kind = resource_group->string;
+    for (const cJSON* resource_item = resource_group->child; resource_item; resource_item = resource_item->next) {
+      if (!resource_item->string || !cJSON_IsString(resource_item) || !resource_item->valuestring) {
+        schema.error_message = "Invalid resource binding in " + path + ".";
         cJSON_Delete(root);
         return schema;
       }
+
+      TemporaryTestResourceEntry entry{};
+      entry.resource_kind = resource_kind;
+      entry.resource_name = resource_item->string;
+      entry.container_name = resource_item->valuestring;
+      entry.required = true;
       schema.required_resources.push_back(std::move(entry));
     }
   }
 
-  const cJSON* descriptor_entries = cJSON_GetObjectItemCaseSensitive(root, "descriptor_to_container");
-  if (descriptor_entries && cJSON_IsArray(descriptor_entries)) {
-    const int descriptor_count = cJSON_GetArraySize(descriptor_entries);
-    schema.descriptor_entries.reserve(descriptor_count > 0 ? static_cast<size_t>(descriptor_count) : 0u);
-    for (int i = 0; i < descriptor_count; ++i) {
-      const cJSON* item = cJSON_GetArrayItem(descriptor_entries, i);
-      if (!item || !cJSON_IsObject(item)) {
-        continue;
-      }
-      TemporaryTestDescriptorEntry entry{};
-      entry.descriptor_name = _GetStringField(item, "descriptor");
-      entry.container_name = _GetStringField(item, "container");
-      entry.array_index = _GetUintField(item, "array_index");
-      if (entry.descriptor_name.empty() || entry.container_name.empty()) {
-        schema.error_message = "Invalid descriptor_to_container entry in " + path + ".";
-        cJSON_Delete(root);
-        return schema;
-      }
-      schema.descriptor_entries.push_back(std::move(entry));
+  const cJSON* description_entries = cJSON_GetObjectItemCaseSensitive(decomposer, "description");
+  if (!description_entries || !cJSON_IsArray(description_entries)) {
+    schema.error_message = "Package JSON file " + path + " is missing a 'description' array.";
+    cJSON_Delete(root);
+    return schema;
+  }
+
+  const int descriptor_count = cJSON_GetArraySize(description_entries);
+  schema.description_entries.reserve(descriptor_count > 0 ? static_cast<size_t>(descriptor_count) : 0u);
+  for (int i = 0; i < descriptor_count; ++i) {
+    const cJSON* item = cJSON_GetArrayItem(description_entries, i);
+    if (!item || !cJSON_IsObject(item)) {
+      schema.error_message = "Invalid description entry in " + path + ".";
+      cJSON_Delete(root);
+      return schema;
     }
+
+    TemporaryTestDescriptionEntry entry{};
+    entry.name = _GetStringField(item, "name");
+    TemporaryTestDescriptionBinding binding{};
+    binding.name = entry.name;
+    binding.from_names = _GetStringListField(item, {"from"});
+    const cJSON* to_item = cJSON_GetObjectItemCaseSensitive(item, "to");
+    if (to_item && cJSON_IsObject(to_item)) {
+      binding.target_container_name = _GetStringField(to_item, "container");
+      binding.target_indices = _GetUintList(cJSON_GetObjectItemCaseSensitive(to_item, "indices"));
+    } else {
+      binding.target_container_names = _GetStringList(to_item);
+    }
+
+    if (binding.from_names.empty()) {
+      schema.error_message = "Description entry is missing source names in " + path + ".";
+      cJSON_Delete(root);
+      return schema;
+    }
+    if (binding.target_container_name.empty() &&
+        binding.target_container_names.empty() &&
+        binding.target_indices.empty()) {
+      schema.error_message = "Description entry is missing targets in " + path + ".";
+      cJSON_Delete(root);
+      return schema;
+    }
+
+    entry.bindings.push_back(std::move(binding));
+    schema.description_entries.push_back(std::move(entry));
   }
 
   cJSON_Delete(root);
-  schema.valid = !schema.descriptor_entries.empty();
+  schema.valid = !schema.required_resources.empty() && !schema.description_entries.empty();
   if (!schema.valid && schema.error_message.empty()) {
-    schema.error_message = path + " does not contain descriptor_to_container entries.";
+    schema.error_message = path + " does not contain res or description entries.";
   }
   return schema;
 }
@@ -336,14 +482,14 @@ const agent::AlgorithmResourceBinding* _FindResourceBinding(
   return nullptr;
 }
 
-class TemporaryTestLineMotionDecomposer final : public agent::IAlgorithmPackageDecomposer {
+class TemporaryTestLineMotionDecomposer final {
  public:
   explicit TemporaryTestLineMotionDecomposer(TemporaryTestSchema schema)
     : schema_(std::move(schema)) {}
 
   bool GetRequestedResources(
     const algorithm::AlgorithmProfile& algorithm_profile,
-    agent::AlgorithmRequestedResources* out_requested_resources) const override {
+    agent::AlgorithmRequestedResources* out_requested_resources) const {
     if (!out_requested_resources) {
       return false;
     }
@@ -366,7 +512,7 @@ class TemporaryTestLineMotionDecomposer final : public agent::IAlgorithmPackageD
 
   bool GetRequestedDescriptorBindings(
     const algorithm::AlgorithmProfile& algorithm_profile,
-    agent::AlgorithmRequestedDescriptorBindings* out_requested_descriptor_bindings) const override {
+    agent::AlgorithmRequestedDescriptorBindings* out_requested_descriptor_bindings) const {
     if (!out_requested_descriptor_bindings) {
       return false;
     }
@@ -375,14 +521,43 @@ class TemporaryTestLineMotionDecomposer final : public agent::IAlgorithmPackageD
     if (!schema_.valid) {
       return false;
     }
-    out_requested_descriptor_bindings->descriptor_slots.reserve(schema_.descriptor_entries.size());
-    for (const TemporaryTestDescriptorEntry& entry : schema_.descriptor_entries) {
-      out_requested_descriptor_bindings->descriptor_slots.push_back(
-        agent::AlgorithmRequestedDescriptorBindings::DescriptorSlot{
-          .descriptor_name = entry.descriptor_name,
-          .container_name = entry.container_name,
-          .array_index = entry.array_index,
-        });
+    for (const TemporaryTestDescriptionEntry& entry : schema_.description_entries) {
+      for (const TemporaryTestDescriptionBinding& binding : entry.bindings) {
+        if (!binding.target_container_names.empty()) {
+          if (binding.from_names.size() != binding.target_container_names.size() &&
+              binding.from_names.size() != 1u) {
+            return false;
+          }
+          for (size_t i = 0; i < binding.target_container_names.size(); ++i) {
+            const size_t from_index = binding.from_names.size() == 1u ? 0u : i;
+            out_requested_descriptor_bindings->descriptor_slots.push_back(
+              agent::AlgorithmRequestedDescriptorBindings::DescriptorSlot{
+                .descriptor_name = binding.from_names[from_index],
+                .container_name = binding.target_container_names[i],
+                .array_index = 0u,
+              });
+          }
+          continue;
+        }
+
+        if (binding.from_names.size() != binding.target_indices.size() &&
+            binding.from_names.size() != 1u) {
+          return false;
+        }
+        for (size_t i = 0; i < binding.target_indices.size(); ++i) {
+          const uint32_t target_index = binding.target_indices[i];
+          if (target_index == 0u) {
+            return false;
+          }
+          const size_t from_index = binding.from_names.size() == 1u ? 0u : i;
+          out_requested_descriptor_bindings->descriptor_slots.push_back(
+            agent::AlgorithmRequestedDescriptorBindings::DescriptorSlot{
+              .descriptor_name = binding.from_names[from_index],
+              .container_name = binding.target_container_name,
+              .array_index = target_index - 1u,
+            });
+        }
+      }
     }
     out_requested_descriptor_bindings->valid = true;
     return true;
@@ -393,7 +568,7 @@ class TemporaryTestLineMotionDecomposer final : public agent::IAlgorithmPackageD
     const std::vector<agent::AlgorithmResourceBinding>& resource_bindings,
     const std::vector<agent::AlgorithmDescriptorValue>& descriptor_values,
     algorithm::AlgorithmContainerSet* container_set,
-    std::string* out_error_message) const override {
+    std::string* out_error_message) const {
     if (!container_set) {
       if (out_error_message) {
         *out_error_message = "AlgorithmContainerSet output pointer is null.";
@@ -438,69 +613,106 @@ class TemporaryTestLineMotionDecomposer final : public agent::IAlgorithmPackageD
       }
     }
 
-    uint32_t tuple_width = 0u;
-    for (const TemporaryTestDescriptorEntry& entry : schema_.descriptor_entries) {
-      tuple_width = std::max(tuple_width, entry.array_index + 1u);
-    }
-    if (tuple_width == 0u) {
-      if (out_error_message) {
-        *out_error_message = "No descriptor-to-container mapping available for '" +
-          algorithm_profile.algorithm_name + "'.";
-      }
-      return false;
-    }
+    for (const TemporaryTestDescriptionEntry& entry : schema_.description_entries) {
+      for (const TemporaryTestDescriptionBinding& binding : entry.bindings) {
+        if (!binding.target_container_names.empty()) {
+          if (binding.from_names.size() != binding.target_container_names.size() &&
+              binding.from_names.size() != 1u) {
+            if (out_error_message) {
+              *out_error_message = "Description entry '" + entry.name + "' has mismatched source and target counts for '" +
+                algorithm_profile.algorithm_name + "'.";
+            }
+            return false;
+          }
+          for (size_t i = 0; i < binding.target_container_names.size(); ++i) {
+            const size_t from_index = binding.from_names.size() == 1u ? 0u : i;
+            const agent::AlgorithmDescriptorValue* value = _FindDescriptorValue(descriptor_values, binding.from_names[from_index]);
+            if (!value) {
+              if (out_error_message) {
+                *out_error_message = "Missing descriptor value '" + binding.from_names[from_index] + "' for '" +
+                  algorithm_profile.algorithm_name + "'.";
+              }
+              return false;
+            }
 
-    std::vector<float> tuple_values(tuple_width, 0.0f);
-    for (const TemporaryTestDescriptorEntry& entry : schema_.descriptor_entries) {
-      const agent::AlgorithmDescriptorValue* value = _FindDescriptorValue(descriptor_values, entry.descriptor_name);
-      if (!value) {
-        if (out_error_message) {
-          *out_error_message = "Missing descriptor value '" + entry.descriptor_name + "' for '" +
-            algorithm_profile.algorithm_name + "'.";
+            AlgorithmContainer* container = FindAlgorithmContainer(container_set, binding.target_container_names[i]);
+            if (!container) {
+              if (out_error_message) {
+                *out_error_message = "Missing target container '" + binding.target_container_names[i] + "' for '" +
+                  algorithm_profile.algorithm_name + "'.";
+              }
+              return false;
+            }
+            if (!_WriteFloatValue(container, value->scalar_value)) {
+              if (out_error_message) {
+                *out_error_message = "Failed to write descriptor value into container '" + binding.target_container_names[i] + "' for '" +
+                  algorithm_profile.algorithm_name + "'.";
+              }
+              return false;
+            }
+          }
+          continue;
         }
-        return false;
-      }
-      if (entry.array_index >= tuple_values.size()) {
-        if (out_error_message) {
-          *out_error_message = "Unsupported descriptor mapping '" + entry.descriptor_name + "' for container '" +
-            entry.container_name + "'.";
-        }
-        return false;
-      }
-      tuple_values[entry.array_index] = value->scalar_value;
-    }
 
-    for (const TemporaryTestDescriptorEntry& entry : schema_.descriptor_entries) {
-      AlgorithmContainer* container = FindAlgorithmContainer(container_set, entry.container_name);
-      if (!container) {
-        if (out_error_message) {
-          *out_error_message = "Missing target container '" + entry.container_name + "' for '" +
-            algorithm_profile.algorithm_name + "'.";
+        if (binding.target_container_name.empty() || binding.target_indices.empty()) {
+          if (out_error_message) {
+            *out_error_message = "Description entry '" + entry.name + "' is missing a target container for '" +
+              algorithm_profile.algorithm_name + "'.";
+          }
+          return false;
         }
-        return false;
-      }
-      if (container->storage_kind != AlgorithmContainerStorageKind::Array) {
-        if (out_error_message) {
-          *out_error_message = "Target container '" + entry.container_name + "' is not an array for '" +
-            algorithm_profile.algorithm_name + "'.";
+        if (binding.from_names.size() != binding.target_indices.size() &&
+            binding.from_names.size() != 1u) {
+          if (out_error_message) {
+            *out_error_message = "Description entry '" + entry.name + "' has mismatched source and target counts for '" +
+              algorithm_profile.algorithm_name + "'.";
+          }
+          return false;
         }
-        return false;
-      }
-      if (container->element_stride < sizeof(float) * tuple_width) {
-        if (out_error_message) {
-          *out_error_message = "Target container '" + entry.container_name + "' has insufficient element stride for '" +
-            algorithm_profile.algorithm_name + "'.";
+
+        AlgorithmContainer* container = FindAlgorithmContainer(container_set, binding.target_container_name);
+        if (!container) {
+          if (out_error_message) {
+            *out_error_message = "Missing target container '" + binding.target_container_name + "' for '" +
+              algorithm_profile.algorithm_name + "'.";
+          }
+          return false;
         }
-        return false;
-      }
-      if (container->bytes.size() < sizeof(float) * tuple_width) {
-        if (out_error_message) {
-          *out_error_message = "Target container '" + entry.container_name + "' has insufficient storage for '" +
-            algorithm_profile.algorithm_name + "'.";
+        if (container->storage_kind != AlgorithmContainerStorageKind::Array) {
+          if (out_error_message) {
+            *out_error_message = "Target container '" + binding.target_container_name + "' is not an array for '" +
+              algorithm_profile.algorithm_name + "'.";
+          }
+          return false;
         }
-        return false;
+
+        for (size_t i = 0; i < binding.target_indices.size(); ++i) {
+          const uint32_t target_index = binding.target_indices[i];
+          if (target_index == 0u) {
+            if (out_error_message) {
+              *out_error_message = "Description entry '" + entry.name + "' uses an invalid target index for '" +
+                algorithm_profile.algorithm_name + "'.";
+            }
+            return false;
+          }
+          const size_t from_index = binding.from_names.size() == 1u ? 0u : i;
+          const agent::AlgorithmDescriptorValue* value = _FindDescriptorValue(descriptor_values, binding.from_names[from_index]);
+          if (!value) {
+            if (out_error_message) {
+              *out_error_message = "Missing descriptor value '" + binding.from_names[from_index] + "' for '" +
+                algorithm_profile.algorithm_name + "'.";
+            }
+            return false;
+          }
+          if (!_WriteFloatValueAtIndex(container, target_index - 1u, value->scalar_value)) {
+            if (out_error_message) {
+              *out_error_message = "Failed to write descriptor value into container '" + binding.target_container_name + "' for '" +
+                algorithm_profile.algorithm_name + "'.";
+            }
+            return false;
+          }
+        }
       }
-      std::memcpy(container->bytes.data(), tuple_values.data(), sizeof(float) * tuple_width);
     }
 
     return true;
@@ -583,7 +795,7 @@ class TemporaryTestLineMotionMainThreadExecutor final : public agent::IAlgorithm
       return false;
     }
 
-    algorithm::AlgorithmContainer* container = algorithm::FindAlgorithmContainer(algorithm_container_set, "pos");
+    algorithm::AlgorithmContainer* container = algorithm::FindAlgorithmContainer(algorithm_container_set, "a1");
     if (!container) {
       return false;
     }
@@ -594,17 +806,13 @@ class TemporaryTestLineMotionMainThreadExecutor final : public agent::IAlgorithm
     }
     if (debug_state) {
       debug_state->signals.push_back(algorithm_support::AdvancedAlgorithmDebugSignal{
-        .name = "temporary_test_line_motion.cpu_tick",
-        .payload = "Advanced pos on the main thread.",
+        .name = "temporary_test_line_motion.body",
+        .payload = "Advanced a1 on the main thread.",
       });
     }
     return true;
   }
 };
-
-void _DestroyDecomposer(agent::IAlgorithmPackageDecomposer* decomposer) {
-  delete decomposer;
-}
 
 void _DestroyIntervention(agent::IAlgorithmIntervention* intervention) {
   delete intervention;
@@ -627,18 +835,11 @@ extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateBundle(
   out_bundle->cpu_symbol = true;
   out_bundle->gpu_symbol = true;
 
-  const TemporaryTestSchema schema = _LoadSchema(*request);
-  if (!schema.valid) {
-    return false;
-  }
-
   const TemporaryTestInterventionSchema intervention_schema = _LoadInterventionSchema(*request);
   if (!intervention_schema.valid) {
     return false;
   }
 
-  out_bundle->decomposer = new TemporaryTestLineMotionDecomposer(schema);
-  out_bundle->destroy_decomposer = &_DestroyDecomposer;
   out_bundle->intervention = new TemporaryTestLineMotionIntervention(intervention_schema);
   out_bundle->destroy_intervention = &_DestroyIntervention;
   out_bundle->temporary_test_executor = new TemporaryTestLineMotionMainThreadExecutor();
@@ -653,8 +854,13 @@ extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateRuntimeReflec
     return false;
   }
 
-  return algorithm_management::TryCreateAlgorithmReflectorFromAlgorithmName(
-    request->algorithm_name ? request->algorithm_name : "",
-    out_reflector,
-    nullptr);
+  std::shared_ptr<algorithm::AlgorithmReflector> runtime_reflector{};
+  if (!algorithm_management::CreateAlgorithmPackageRuntimeReflectorByName(
+        request->algorithm_name ? request->algorithm_name : "",
+        &runtime_reflector,
+        nullptr)) {
+    return false;
+  }
+  *out_reflector = *runtime_reflector;
+  return true;
 }

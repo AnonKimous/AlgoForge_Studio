@@ -4,19 +4,19 @@
       "name": "temporary_test_line_motion",
       "display_name": "temporary_test_line_motion",
       "folder": "temporary_test_line_motion",
-      "container_manifest": "temporary_test_line_motion.json",
-      "decomposer": "temporary_test_line_motion_decomposer.json",
-      "reflector": "",
-      "intervention": ""
+      "container_manifest": "temporary_test_line_motion_package.json",
+      "decomposer": "temporary_test_line_motion_package.json",
+      "reflector": "temporary_test_line_motion_package.json",
+      "intervention": "temporary_test_line_motion_package.json"
     },
     {
       "name": "v6a2_triangle_collision_runtime_test",
       "display_name": "v6a2_triangle_collision_runtime_test",
       "folder": "v6a2_triangle_collision_runtime_test",
-      "container_manifest": "v6a2_triangle_collision_runtime_test.json",
-      "decomposer": "v6a2_triangle_collision_runtime_test_decomposer.json",
-      "reflector": "",
-      "intervention": "v6a2_triangle_collision_runtime_test_intervention.json"
+      "container_manifest": "v6a2_triangle_collision_runtime_test_package.json",
+      "decomposer": "v6a2_triangle_collision_runtime_test_package.json",
+      "reflector": "v6a2_triangle_collision_runtime_test_package.json",
+      "intervention": "v6a2_triangle_collision_runtime_test_package.json"
     }
   ]
 }

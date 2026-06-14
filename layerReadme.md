@@ -172,7 +172,7 @@ It may aggregate:
 
 - algorithm-management container and manifest types
 - algorithm support hook contracts
-- decomposer-provided resource reflection contracts
+- package-provided submission requirements contracts
 - shared interaction and common-data types
 
 It should not:

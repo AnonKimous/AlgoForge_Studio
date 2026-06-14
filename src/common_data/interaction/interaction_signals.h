@@ -5,6 +5,9 @@
 
 namespace common_data {
 
+inline constexpr uint32_t kInterventionControlStopAndEditBit = 0x80000000u;
+inline constexpr uint32_t kInterventionControlContinueAfterPostProcessBit = 0x40000000u;
+
 enum class InteractionInterventionMode {
   Displacement = 0,
   Velocity = 1,
@@ -26,6 +29,7 @@ struct InteractionInterventionRequest {
   std::string target_module_name{"physics_agent"};
   uint32_t target_buffer_id{0u};
   bool lock_required{false};
+  uint32_t control_bits{0u};
 };
 
 struct AgentToAlgorithmSignal {
@@ -33,6 +37,7 @@ struct AgentToAlgorithmSignal {
   bool pause_requested{false};
   bool stop_requested{false};
   bool reflection_collection_requested{false};
+  uint32_t control_bits{0u};
 };
 
 struct AlgorithmToAgentSignal {
@@ -41,11 +46,14 @@ struct AlgorithmToAgentSignal {
   bool stop_requested{false};
   bool intervention_needed{false};
   bool reflection_collection_requested{false};
+  uint32_t control_bits{0u};
 };
 
 }  // namespace common_data
 
 using common_data::AgentToAlgorithmSignal;
 using common_data::AlgorithmToAgentSignal;
+using common_data::kInterventionControlContinueAfterPostProcessBit;
+using common_data::kInterventionControlStopAndEditBit;
 using common_data::InteractionInterventionMode;
 using common_data::InteractionInterventionRequest;

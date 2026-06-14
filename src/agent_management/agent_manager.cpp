@@ -145,6 +145,7 @@ bool AgentManager::Tick(const InputState& input, Vec2 mouse_pixel, float dt_seco
     combined_algorithm_to_agent_signal_.reflection_collection_requested =
       combined_algorithm_to_agent_signal_.reflection_collection_requested ||
       signal.reflection_collection_requested;
+    combined_algorithm_to_agent_signal_.control_bits |= signal.control_bits;
   }
   return true;
 }

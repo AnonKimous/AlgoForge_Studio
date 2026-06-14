@@ -23,7 +23,7 @@ separates intentionally cross-layer code into `src/capabilities`.
 - `runtime_systems`: `runtime_systems/runtime_environment.h`, `runtime_systems/memory_manager.h`
 - `agent_management`: `agent_management/agent_manager.h`
 - `debug_tool`: `debug_tool/debug_tool_host.h` for the host interface, `debug_tool/debug_tool_backend_runtime.h` for the backend runtime, and `debug_tool/debug_tool_frontend_panel.h` for the frontend panel
-- `sdk`: `sdk/sdk_kernel.h` for the external agent/algorithm submission surface and `sdk/sdk_decomposer.h` for the decomposer helper surface
+- `sdk`: `sdk/sdk_kernel.h` for the external agent/algorithm submission surface and `sdk/sdk_decomposer.h` for the submission requirements helper surface
 
 ## Debug-Only Hooks
 

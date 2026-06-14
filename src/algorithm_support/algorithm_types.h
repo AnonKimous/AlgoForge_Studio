@@ -16,10 +16,6 @@ struct AlgorithmProfile {
   std::string container_manifest_name;
 };
 
-inline std::string ResolveAlgorithmManifestName(const AlgorithmProfile& profile) {
-  return profile.container_manifest_name.empty() ? profile.algorithm_name : profile.container_manifest_name;
-}
-
 struct AlgorithmReflectionBinding {
   std::vector<std::string> container_names;
   std::string reflection_object_name;
@@ -94,6 +90,7 @@ struct AlgorithmContainer {
   AlgorithmContainerStorageKind storage_kind{AlgorithmContainerStorageKind::Array};
   uint32_t element_count{};
   uint32_t element_stride{};
+  bool hidden{false};
   std::pmr::vector<std::byte> bytes;
 };
 
@@ -103,6 +100,7 @@ struct AlgorithmContainerSet {
   std::vector<AlgorithmContainer> arrays;
   std::vector<AlgorithmContainer> temporary_registers;
   std::vector<AlgorithmContainer> temporary_caches;
+  std::vector<AlgorithmContainer> hidden_containers;
 };
 
 inline AlgorithmContainer* FindAlgorithmContainer(
@@ -131,6 +129,25 @@ inline const AlgorithmContainer* FindAlgorithmContainer(
     if (container.name == name) return &container;
   }
   for (const AlgorithmContainer& container : container_set.temporary_caches) {
+    if (container.name == name) return &container;
+  }
+  return nullptr;
+}
+
+inline AlgorithmContainer* FindAlgorithmHiddenContainer(
+  AlgorithmContainerSet* container_set,
+  const std::string& name) {
+  if (!container_set) return nullptr;
+  for (AlgorithmContainer& container : container_set->hidden_containers) {
+    if (container.name == name) return &container;
+  }
+  return nullptr;
+}
+
+inline const AlgorithmContainer* FindAlgorithmHiddenContainer(
+  const AlgorithmContainerSet& container_set,
+  const std::string& name) {
+  for (const AlgorithmContainer& container : container_set.hidden_containers) {
     if (container.name == name) return &container;
   }
   return nullptr;

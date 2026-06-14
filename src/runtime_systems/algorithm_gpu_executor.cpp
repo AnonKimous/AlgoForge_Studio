@@ -60,6 +60,11 @@ struct GpuPipelineResource {
   std::string shader_key;
 };
 
+struct AlgorithmViewportPushConstants {
+  float width{0.0f};
+  float height{0.0f};
+};
+
 std::string _MakeVkErrorMessage(const char* prefix, VkResult err) {
   return std::string(prefix) + " failed: VkResult=" + std::to_string(static_cast<int>(err));
 }
@@ -151,7 +156,8 @@ std::string _ExecutionStateKey(
 }
 
 bool _StageLooksLikeGpuTick(const agent::AlgorithmInterventionStageSpec& stage) {
-  return stage.stage_name == "gpu_tick";
+  return stage.stage_kind == agent::AlgorithmInterventionStageKind::PostExecution &&
+    (stage.stage_name == "afterTick" || stage.stage_name == "aftertick");
 }
 
 [[noreturn]] void _ThrowGpuTickError(std::string message, std::string* out_error_message = nullptr) {
@@ -204,16 +210,18 @@ class AlgorithmGpuExecutorImpl {
       _ThrowGpuTickError("AlgorithmContainerSet pointer is null.", out_error_message);
     }
     if (!object.intervention) {
-      _ThrowGpuTickError(
-        "GPU tick is unavailable because the algorithm has no intervention package.",
-        out_error_message);
+      if (out_error_message) {
+        out_error_message->clear();
+      }
+      return true;
     }
 
     std::vector<agent::AlgorithmInterventionStageSpec> stage_specs;
     if (!object.intervention->GetInterventionStageSpecs(&stage_specs) || stage_specs.empty()) {
-      _ThrowGpuTickError(
-        "GPU tick is unavailable because no intervention stages were exposed.",
-        out_error_message);
+      if (out_error_message) {
+        out_error_message->clear();
+      }
+      return true;
     }
 
     const agent::AlgorithmInterventionStageSpec* gpu_stage = nullptr;
@@ -224,9 +232,10 @@ class AlgorithmGpuExecutorImpl {
       }
     }
     if (!gpu_stage) {
-      _ThrowGpuTickError(
-        "GPU tick stage was not found in the intervention package.",
-        out_error_message);
+      if (out_error_message) {
+        out_error_message->clear();
+      }
+      return true;
     }
     if (gpu_stage->shader.vertex_shader_path.empty() || gpu_stage->shader.fragment_shader_path.empty()) {
       _ThrowGpuTickError("GPU tick stage is missing shader paths.", out_error_message);
@@ -437,16 +446,18 @@ class AlgorithmGpuExecutorImpl {
       _ThrowGpuTickError("AlgorithmContainerSet pointer is null.", out_error_message);
     }
     if (!object.intervention) {
-      _ThrowGpuTickError(
-        "GPU tick synchronization is unavailable because the algorithm has no intervention package.",
-        out_error_message);
+      if (out_error_message) {
+        out_error_message->clear();
+      }
+      return true;
     }
 
     std::vector<agent::AlgorithmInterventionStageSpec> stage_specs;
     if (!object.intervention->GetInterventionStageSpecs(&stage_specs) || stage_specs.empty()) {
-      _ThrowGpuTickError(
-        "GPU tick synchronization is unavailable because no intervention stages were exposed.",
-        out_error_message);
+      if (out_error_message) {
+        out_error_message->clear();
+      }
+      return true;
     }
 
     const agent::AlgorithmInterventionStageSpec* gpu_stage = nullptr;
@@ -457,9 +468,10 @@ class AlgorithmGpuExecutorImpl {
       }
     }
     if (!gpu_stage) {
-      _ThrowGpuTickError(
-        "GPU tick synchronization failed because the gpu_tick stage was not found.",
-        out_error_message);
+      if (out_error_message) {
+        out_error_message->clear();
+      }
+      return true;
     }
 
     const std::string shader_key =
@@ -815,9 +827,9 @@ class AlgorithmGpuExecutorImpl {
 
     std::vector<VkDescriptorSetLayoutBinding> bindings;
     bindings.reserve(stage.used_algorithm_containers.size());
-      for (uint32_t i = 0; i < pipeline.binding_count; ++i) {
-        VkDescriptorSetLayoutBinding binding{};
-        binding.binding = i;
+    for (uint32_t i = 0; i < pipeline.binding_count; ++i) {
+      VkDescriptorSetLayoutBinding binding{};
+      binding.binding = i;
       binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
       binding.descriptorCount = 1;
       binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
@@ -834,6 +846,12 @@ class AlgorithmGpuExecutorImpl {
     pipeline_layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipeline_layout_info.setLayoutCount = 1;
     pipeline_layout_info.pSetLayouts = &pipeline.descriptor_set_layout;
+    VkPushConstantRange push_constant_range{};
+    push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    push_constant_range.offset = 0u;
+    push_constant_range.size = sizeof(AlgorithmViewportPushConstants);
+    pipeline_layout_info.pushConstantRangeCount = 1;
+    pipeline_layout_info.pPushConstantRanges = &push_constant_range;
     _CheckVkResult(vkCreatePipelineLayout(context_.device, &pipeline_layout_info, nullptr, &pipeline.pipeline_layout));
 
     VkPipelineShaderStageCreateInfo shader_stages[2]{};
@@ -974,6 +992,17 @@ class AlgorithmGpuExecutorImpl {
       &descriptor_set,
       0,
       nullptr);
+    const AlgorithmViewportPushConstants push_constants{
+      static_cast<float>(offscreen_target_.extent.width),
+      static_cast<float>(offscreen_target_.extent.height),
+    };
+    vkCmdPushConstants(
+      command_resources_.command_buffer,
+      pipeline.pipeline_layout,
+      VK_SHADER_STAGE_VERTEX_BIT,
+      0,
+      sizeof(push_constants),
+      &push_constants);
     vkCmdSetViewport(command_resources_.command_buffer, 0, 1, &viewport);
     vkCmdSetScissor(command_resources_.command_buffer, 0, 1, &scissor);
     // GPU tick uses the same quad-friendly triangle-strip path as the preview

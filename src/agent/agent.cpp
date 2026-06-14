@@ -112,48 +112,31 @@ BuiltAlgorithmMount _BuildAlgorithmMount(
   object.mount_mode = mount_mode;
   object.execution_preference = execution_preference;
 
-  std::shared_ptr<algorithm::AlgorithmContainerSet> container_set_handle;
-  algorithm::AlgorithmContainerSet container_set{};
-  if (!algorithm_management::CreateAlgorithmContainersFromManifestName(
-        object.algorithm_profile.container_manifest_name,
-        &container_set,
-        &error_message)) {
-    result.error_message = error_message.empty()
-      ? ("Failed to create containers for '" + algorithm_name + "'.")
-      : std::move(error_message);
+  std::shared_ptr<algorithm::AlgorithmContainerSet> container_set_handle = object.shared_container_set;
+  if (!container_set_handle) {
+    result.error_message = "Algorithm containers are unavailable for '" + algorithm_name + "'.";
     return result;
   }
 
   const bool use_shared_standard_container =
     mount_mode == AlgorithmMountMode::StandardContainer &&
-    container_set.standard_layout.enabled() &&
+    container_set_handle->standard_layout.enabled() &&
     standard_shared_container_sets;
   const bool cache_shared_standard_container = use_shared_standard_container;
   std::string shared_key;
 
   if (use_shared_standard_container) {
-    shared_key = _StandardLayoutKey(container_set);
+    shared_key = _StandardLayoutKey(*container_set_handle);
     if (!shared_key.empty()) {
       auto found = standard_shared_container_sets->find(shared_key);
       if (found != standard_shared_container_sets->end() && found->second) {
         container_set_handle = found->second;
-      } else {
-        container_set_handle = std::make_shared<algorithm::AlgorithmContainerSet>(std::move(container_set));
       }
     }
   }
 
-  if (!container_set_handle) {
-    container_set_handle = std::make_shared<algorithm::AlgorithmContainerSet>(std::move(container_set));
-  }
-
-  if (!object.decomposer) {
-    result.error_message = "Algorithm decomposer is unavailable for '" + algorithm_name + "'.";
-    return result;
-  }
-
-  if (!object.decomposer->Decompose(
-        object.algorithm_profile,
+  if (!algorithm_management::DecomposeAlgorithmObject(
+        object,
         object.resource_bindings,
         object.descriptor_values,
         container_set_handle.get(),
@@ -365,35 +348,38 @@ bool Agent::SubmitAlgorithm(
     const bool is_ready =
       i < algorithm_assembly_states_.size() && algorithm_assembly_states_[i] == AlgorithmAssemblyState::Ready;
     if (allow_tick && is_ready) {
-      const bool allow_gpu_execution =
-        object.gpu_symbol &&
-        object.execution_preference == AlgorithmExecutionPreference::Gpu;
-      const bool allow_cpu_execution =
-        object.cpu_symbol &&
-        object.execution_preference == AlgorithmExecutionPreference::Cpu;
+      runtime_state.algorithm_to_agent_signal.intervention_needed =
+        runtime_state.agent_to_algorithm_signal.needs_intervention &&
+        object.intervention &&
+        object.intervention->SupportsIntervention();
+      runtime_state.algorithm_to_agent_signal.control_bits = runtime_state.agent_to_algorithm_signal.control_bits;
       bool gpu_tick_executed = false;
-      if (allow_gpu_execution) {
-        std::string gpu_error_message;
-        gpu_tick_executed = algorithm_management::job_gpu::Execute(
-          object,
-          algorithm_objects_[i].mutable_container_set(),
-          context,
-          &gpu_error_message);
-        if (!gpu_tick_executed && !gpu_error_message.empty()) {
+      if (object.execution_preference == AlgorithmExecutionPreference::Gpu) {
+        if (!object.gpu_symbol) {
           runtime_state.algorithm_to_agent_signal.stop_requested = true;
+        } else {
+          std::string gpu_error_message;
+          gpu_tick_executed = algorithm_management::job_gpu::Execute(
+            object,
+            algorithm_objects_[i].mutable_container_set(),
+            context,
+            &gpu_error_message);
+          if (!gpu_tick_executed) {
+            runtime_state.algorithm_to_agent_signal.stop_requested = true;
+          } else {
+            algorithm_execution_end_queue_.push_back(i);
+          }
         }
-        if (gpu_tick_executed) {
-          algorithm_execution_end_queue_.push_back(i);
-        }
-      }
-      if (allow_cpu_execution && !gpu_tick_executed && object.temporaryTest_main_thread_executor) {
-        if (!algorithm_management::job_cpu::Execute(
-              object,
-              context,
-              runtime_state.agent_to_algorithm_signal,
-              algorithm_objects_[i].mutable_container_set(),
-              &runtime_state.algorithm_to_agent_signal,
-              &runtime_state.debug_state)) {
+      } else {
+        if (!object.cpu_symbol || !object.temporaryTest_main_thread_executor) {
+          runtime_state.algorithm_to_agent_signal.stop_requested = true;
+        } else if (!algorithm_management::job_cpu::Execute(
+                     object,
+                     context,
+                     runtime_state.agent_to_algorithm_signal,
+                     algorithm_objects_[i].mutable_container_set(),
+                     &runtime_state.algorithm_to_agent_signal,
+                     &runtime_state.debug_state)) {
           runtime_state.algorithm_to_agent_signal.stop_requested = true;
         }
       }
@@ -429,6 +415,9 @@ bool Agent::SubmitAlgorithm(
           runtime_state.algorithm_to_agent_signal.reflection_collection_requested = true;
         }
       }
+      runtime_state.algorithm_to_agent_signal.intervention_applied =
+        runtime_state.algorithm_to_agent_signal.intervention_applied ||
+        runtime_state.algorithm_to_agent_signal.intervention_needed;
     } else if (is_ready) {
       runtime_state.algorithm_to_agent_signal.pause_requested =
         runtime_state.agent_to_algorithm_signal.pause_requested;
@@ -439,6 +428,7 @@ bool Agent::SubmitAlgorithm(
         runtime_state.agent_to_algorithm_signal.needs_intervention;
       runtime_state.algorithm_to_agent_signal.reflection_collection_requested =
         runtime_state.agent_to_algorithm_signal.reflection_collection_requested;
+      runtime_state.algorithm_to_agent_signal.control_bits = runtime_state.agent_to_algorithm_signal.control_bits;
     } else {
       runtime_state.agent_to_algorithm_signal = {};
       runtime_state.algorithm_to_agent_signal = {};
@@ -459,6 +449,7 @@ bool Agent::SubmitAlgorithm(
     out_result->algorithm_to_agent_signal.reflection_collection_requested =
       out_result->algorithm_to_agent_signal.reflection_collection_requested ||
       runtime_state.algorithm_to_agent_signal.reflection_collection_requested;
+    out_result->algorithm_to_agent_signal.control_bits |= runtime_state.algorithm_to_agent_signal.control_bits;
 
     updated_runtime_states[i] = std::move(runtime_state);
   };

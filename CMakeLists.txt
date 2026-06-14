@@ -23,53 +23,122 @@ include(FetchContent)
 
 set(DEPS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party" CACHE PATH "Root path for third-party sources")
 
-set(SDL3_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/SDL-main/include" CACHE PATH "SDL3 include directory")
-set(SDL3_LIBRARY_DEBUG "D:/VulkanSDK/1.4.341.1/Lib/SDL3.lib" CACHE FILEPATH "SDL3 debug import/static library")
-set(SDL3_LIBRARY_RELEASE "D:/VulkanSDK/1.4.341.1/Lib/SDL3.lib" CACHE FILEPATH "SDL3 release import/static library")
-set(SDL3_DLL_DEBUG "D:/VulkanSDK/1.4.341.1/Bin/SDL3d.dll" CACHE FILEPATH "SDL3 debug runtime DLL")
-set(SDL3_DLL_RELEASE "D:/VulkanSDK/1.4.341.1/Bin/SDL3.dll" CACHE FILEPATH "SDL3 release runtime DLL")
+function(resolve_existing_path out_var relative_file)
+  foreach(candidate IN LISTS ARGN)
+    if(EXISTS "${candidate}/${relative_file}")
+      set(${out_var} "${candidate}" PARENT_SCOPE)
+      return()
+    endif()
+  endforeach()
+  set(${out_var} "" PARENT_SCOPE)
+endfunction()
 
-set(EIGEN_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/eigen" CACHE PATH "Eigen include directory")
-set(IMGUI_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui-1.92.8-docking" CACHE PATH "Dear ImGui source directory")
-set(VKB_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/vkb" CACHE PATH "VkBootstrap source directory")
+function(resolve_existing_file out_var)
+  foreach(candidate IN LISTS ARGN)
+    if(EXISTS "${candidate}")
+      set(${out_var} "${candidate}" PARENT_SCOPE)
+      return()
+    endif()
+  endforeach()
+  set(${out_var} "" PARENT_SCOPE)
+endfunction()
+
+set(SDL3_INCLUDE_DIR "" CACHE PATH "SDL3 include directory")
+set(SDL3_LIBRARY_DEBUG "" CACHE FILEPATH "SDL3 debug import/static library")
+set(SDL3_LIBRARY_RELEASE "" CACHE FILEPATH "SDL3 release import/static library")
+set(SDL3_DLL_DEBUG "" CACHE FILEPATH "SDL3 debug runtime DLL")
+set(SDL3_DLL_RELEASE "" CACHE FILEPATH "SDL3 release runtime DLL")
+
+set(EIGEN_INCLUDE_DIR "" CACHE PATH "Eigen include directory")
+set(IMGUI_SOURCE_DIR "" CACHE PATH "Dear ImGui source directory")
+set(VKB_SOURCE_DIR "" CACHE PATH "VkBootstrap source directory")
 set(VKB_GITHUB_ARCHIVE_URL "https://github.com/charles-lunarg/vk-bootstrap/archive/refs/heads/main.zip" CACHE STRING "VkBootstrap GitHub archive URL")
-set(VMA_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/VulkanMemoryAllocator-3.3.0/include" CACHE PATH "VMA include directory")
-set(SPIRV_REFLECT_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/SPIRV-Reflect-vulkan-sdk-1.4.350.0" CACHE PATH "SPIRV-Reflect source directory")
+set(VMA_INCLUDE_DIR "" CACHE PATH "VMA include directory")
+set(SPIRV_REFLECT_SOURCE_DIR "" CACHE PATH "SPIRV-Reflect source directory")
+set(CJSON_SOURCE_DIR "" CACHE PATH "cJSON source directory")
 
-function(require_file path hint)
-  if(NOT EXISTS "${path}")
-    message(FATAL_ERROR "Missing required dependency file: ${path}\nHint: ${hint}")
-  endif()
-endfunction()
+resolve_existing_path(_SDL3_INCLUDE_DIR SDL3/SDL.h
+  "${CMAKE_CURRENT_SOURCE_DIR}/third_party/SDL-main/include"
+  "D:/VulkanSDK/1.4.341.1/Include"
+  "D:/VulkanSDK/1.4.328.1/Include"
+)
+if(_SDL3_INCLUDE_DIR)
+  set(SDL3_INCLUDE_DIR "${_SDL3_INCLUDE_DIR}" CACHE PATH "SDL3 include directory" FORCE)
+  resolve_existing_file(_SDL3_LIBRARY_DEBUG
+    "D:/VulkanSDK/1.4.341.1/Lib/SDL3.lib"
+    "D:/VulkanSDK/1.4.328.1/Lib/SDL3.lib"
+  )
+  resolve_existing_file(_SDL3_LIBRARY_RELEASE
+    "D:/VulkanSDK/1.4.341.1/Lib/SDL3.lib"
+    "D:/VulkanSDK/1.4.328.1/Lib/SDL3.lib"
+  )
+  resolve_existing_file(_SDL3_DLL_DEBUG
+    "D:/VulkanSDK/1.4.341.1/Bin/SDL3d.dll"
+    "D:/VulkanSDK/1.4.328.1/Bin/SDL3d.dll"
+  )
+  resolve_existing_file(_SDL3_DLL_RELEASE
+    "D:/VulkanSDK/1.4.341.1/Bin/SDL3.dll"
+    "D:/VulkanSDK/1.4.328.1/Bin/SDL3.dll"
+  )
+  set(SDL3_LIBRARY_DEBUG "${_SDL3_LIBRARY_DEBUG}" CACHE FILEPATH "SDL3 debug import/static library" FORCE)
+  set(SDL3_LIBRARY_RELEASE "${_SDL3_LIBRARY_RELEASE}" CACHE FILEPATH "SDL3 release import/static library" FORCE)
+  set(SDL3_DLL_DEBUG "${_SDL3_DLL_DEBUG}" CACHE FILEPATH "SDL3 debug runtime DLL" FORCE)
+  set(SDL3_DLL_RELEASE "${_SDL3_DLL_RELEASE}" CACHE FILEPATH "SDL3 release runtime DLL" FORCE)
+  set(SDL3_LINK_LIBS
+    debug "${SDL3_LIBRARY_DEBUG}"
+    optimized "${SDL3_LIBRARY_RELEASE}"
+  )
+else()
+  message(STATUS "SDL3 not found locally; fetching SDL3 from GitHub.")
+  FetchContent_Declare(sdl3_source
+    URL "https://github.com/libsdl-org/SDL/archive/refs/heads/main.zip"
+  )
+  FetchContent_MakeAvailable(sdl3_source)
+  set(SDL3_INCLUDE_DIR "${sdl3_source_SOURCE_DIR}/include" CACHE PATH "SDL3 include directory" FORCE)
+  set(SDL3_LINK_LIBS SDL3::SDL3)
+endif()
 
-function(require_sdl3_artifacts)
-  if(CMAKE_CONFIGURATION_TYPES)
-    return()
-  endif()
+resolve_existing_path(_EIGEN_INCLUDE_DIR Eigen/Dense
+  "${CMAKE_CURRENT_SOURCE_DIR}/third_party/eigen"
+  "D:/aaamyprj/physBased-render/build/_deps/eigen-src"
+  "D:/tools/eigen-3.4.0"
+  "D:/relyingResourse/vcpkg-master/vcpkg-master/installed/x64-windows/include/eigen3"
+  "D:/relyingResourse/vcpkg-master/vcpkg-master/installed/x64-windows/include"
+)
+if(_EIGEN_INCLUDE_DIR)
+  set(EIGEN_INCLUDE_DIR "${_EIGEN_INCLUDE_DIR}" CACHE PATH "Eigen include directory" FORCE)
+else()
+  message(STATUS "Eigen not found locally; fetching Eigen from GitLab.")
+  FetchContent_Declare(eigen_source
+    URL "https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.zip"
+  )
+  FetchContent_MakeAvailable(eigen_source)
+  set(EIGEN_INCLUDE_DIR "${eigen_source_SOURCE_DIR}" CACHE PATH "Eigen include directory" FORCE)
+endif()
 
-  if(NOT CMAKE_BUILD_TYPE)
-    message(FATAL_ERROR "CMAKE_BUILD_TYPE must be set for single-config generators.")
-  endif()
+resolve_existing_path(_IMGUI_SOURCE_DIR imgui.h
+  "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui-1.92.8-docking"
+  "D:/aaamyprj/physBased-render/build/_deps/imgui-src"
+)
+if(_IMGUI_SOURCE_DIR)
+  set(IMGUI_SOURCE_DIR "${_IMGUI_SOURCE_DIR}" CACHE PATH "Dear ImGui source directory" FORCE)
+else()
+  message(STATUS "ImGui not found locally; fetching ImGui from GitHub.")
+  FetchContent_Declare(imgui_source
+    URL "https://github.com/ocornut/imgui/archive/refs/heads/docking.zip"
+  )
+  FetchContent_Populate(imgui_source)
+  set(IMGUI_SOURCE_DIR "${imgui_source_SOURCE_DIR}" CACHE PATH "Dear ImGui source directory" FORCE)
+endif()
 
-  if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    require_file("${SDL3_LIBRARY_DEBUG}" "Provide the SDL3 Debug library for Debug builds.")
-    require_file("${SDL3_DLL_DEBUG}" "Provide the SDL3 Debug runtime DLL for Debug builds.")
-  elseif(CMAKE_BUILD_TYPE STREQUAL "Release" OR
-         CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo" OR
-         CMAKE_BUILD_TYPE STREQUAL "MinSizeRel")
-    require_file("${SDL3_LIBRARY_RELEASE}" "Provide the SDL3 Release library for non-Debug builds.")
-    require_file("${SDL3_DLL_RELEASE}" "Provide the SDL3 Release runtime DLL for non-Debug builds.")
-  else()
-    message(FATAL_ERROR "Unsupported CMAKE_BUILD_TYPE: ${CMAKE_BUILD_TYPE}")
-  endif()
-endfunction()
-
-require_file("${SDL3_INCLUDE_DIR}/SDL3/SDL.h" "Set SDL3_INCLUDE_DIR or prepare dependencies under ${DEPS_ROOT}.")
-require_sdl3_artifacts()
-require_file("${EIGEN_INCLUDE_DIR}/Eigen/Dense" "Set EIGEN_INCLUDE_DIR to a valid Eigen root.")
-require_file("${IMGUI_SOURCE_DIR}/imgui.h" "Set IMGUI_SOURCE_DIR to a valid Dear ImGui source root.")
-if(NOT EXISTS "${VKB_SOURCE_DIR}/src/VkBootstrap.h" OR NOT EXISTS "${VKB_SOURCE_DIR}/src/VkBootstrap.cpp")
-  message(STATUS "VkBootstrap source not found at ${VKB_SOURCE_DIR}; fetching from GitHub.")
+resolve_existing_path(_VKB_SOURCE_DIR src/VkBootstrap.h
+  "${CMAKE_CURRENT_SOURCE_DIR}/third_party/vkb"
+  "D:/aaamyprj/physBased-render/build/_deps/vk_bootstrap-src"
+)
+if(_VKB_SOURCE_DIR)
+  set(VKB_SOURCE_DIR "${_VKB_SOURCE_DIR}" CACHE PATH "VkBootstrap source directory" FORCE)
+else()
+  message(STATUS "VkBootstrap not found locally; fetching from GitHub.")
   FetchContent_Declare(vkb_source
     URL "${VKB_GITHUB_ARCHIVE_URL}"
   )
@@ -79,11 +148,53 @@ if(NOT EXISTS "${VKB_SOURCE_DIR}/src/VkBootstrap.h" OR NOT EXISTS "${VKB_SOURCE_
   endif()
   set(VKB_SOURCE_DIR "${vkb_source_SOURCE_DIR}" CACHE PATH "VkBootstrap source directory" FORCE)
 endif()
-require_file("${VKB_SOURCE_DIR}/src/VkBootstrap.h" "Set VKB_SOURCE_DIR to a valid VkBootstrap source root.")
-require_file("${VKB_SOURCE_DIR}/src/VkBootstrap.cpp" "Set VKB_SOURCE_DIR to a valid VkBootstrap source root.")
-require_file("${VMA_INCLUDE_DIR}/vk_mem_alloc.h" "Set VMA_INCLUDE_DIR to a valid VMA include directory.")
-require_file("${SPIRV_REFLECT_SOURCE_DIR}/spirv_reflect.h" "Set SPIRV_REFLECT_SOURCE_DIR to a valid SPIRV-Reflect source root.")
-require_file("${SPIRV_REFLECT_SOURCE_DIR}/spirv_reflect.c" "Set SPIRV_REFLECT_SOURCE_DIR to a valid SPIRV-Reflect source root.")
+
+resolve_existing_path(_VMA_INCLUDE_DIR vk_mem_alloc.h
+  "${CMAKE_CURRENT_SOURCE_DIR}/third_party/VulkanMemoryAllocator-3.3.0/include"
+  "D:/VulkanSDK/1.4.341.1/Include/vma"
+  "D:/aaamyprj/physBased-render/build/_deps/vma-src/include"
+)
+if(_VMA_INCLUDE_DIR)
+  set(VMA_INCLUDE_DIR "${_VMA_INCLUDE_DIR}" CACHE PATH "VMA include directory" FORCE)
+else()
+  message(STATUS "VMA not found locally; fetching VMA from GitHub.")
+  FetchContent_Declare(vma_source
+    URL "https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator/archive/refs/tags/v3.3.0.zip"
+  )
+  FetchContent_Populate(vma_source)
+  set(VMA_INCLUDE_DIR "${vma_source_SOURCE_DIR}/include" CACHE PATH "VMA include directory" FORCE)
+endif()
+
+resolve_existing_path(_SPIRV_REFLECT_SOURCE_DIR spirv_reflect.h
+  "${CMAKE_CURRENT_SOURCE_DIR}/third_party/SPIRV-Reflect-vulkan-sdk-1.4.350.0"
+  "D:/VulkanSDK/1.4.341.1/Source/SPIRV-Reflect"
+  "D:/aaamyprj/physBased-render/build/_deps/spirv_reflect-src"
+)
+if(_SPIRV_REFLECT_SOURCE_DIR)
+  set(SPIRV_REFLECT_SOURCE_DIR "${_SPIRV_REFLECT_SOURCE_DIR}" CACHE PATH "SPIRV-Reflect source directory" FORCE)
+else()
+  message(STATUS "SPIRV-Reflect not found locally; fetching SPIRV-Reflect from GitHub.")
+  FetchContent_Declare(spirv_reflect_source
+    URL "https://github.com/KhronosGroup/SPIRV-Reflect/archive/refs/heads/vulkan-sdk-1.4.350.0.zip"
+  )
+  FetchContent_Populate(spirv_reflect_source)
+  set(SPIRV_REFLECT_SOURCE_DIR "${spirv_reflect_source_SOURCE_DIR}" CACHE PATH "SPIRV-Reflect source directory" FORCE)
+endif()
+
+resolve_existing_path(_CJSON_SOURCE_DIR cJSON.c
+  "${CMAKE_CURRENT_SOURCE_DIR}/third_party/cjson"
+  "D:/relyingResourse/vcpkg-master/vcpkg-master/buildtrees/cjson/src/v1.7.18-66cc8df541.clean"
+)
+if(_CJSON_SOURCE_DIR)
+  set(CJSON_SOURCE_DIR "${_CJSON_SOURCE_DIR}" CACHE PATH "cJSON source directory" FORCE)
+else()
+  message(STATUS "cJSON not found locally; fetching cJSON from GitHub.")
+  FetchContent_Declare(cjson_source
+    URL "https://github.com/DaveGamble/cJSON/archive/refs/tags/v1.7.18.zip"
+  )
+  FetchContent_Populate(cjson_source)
+  set(CJSON_SOURCE_DIR "${cjson_source_SOURCE_DIR}" CACHE PATH "cJSON source directory" FORCE)
+endif()
 
 set(CMAKE_HELPER_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated_cmake")
 file(MAKE_DIRECTORY "${CMAKE_HELPER_DIR}")
@@ -102,7 +213,7 @@ file(WRITE "${VKB_COMPAT_INCLUDE_DIR}/vkb/VkBootstrap.h" "#pragma once\n#include
 
 set(PROJECT_INCLUDE_DIRS
   ${CMAKE_CURRENT_SOURCE_DIR}/src
-  ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cjson
+  ${CJSON_SOURCE_DIR}
   ${SDL3_INCLUDE_DIR}
   ${EIGEN_INCLUDE_DIR}
   ${VMA_INCLUDE_DIR}
@@ -113,10 +224,12 @@ set(PROJECT_INCLUDE_DIRS
   ${IMGUI_SOURCE_DIR}/backends
 )
 
-set(SDL3_LINK_LIBS
-  debug "${SDL3_LIBRARY_DEBUG}"
-  optimized "${SDL3_LIBRARY_RELEASE}"
-)
+if(NOT SDL3_LINK_LIBS)
+  set(SDL3_LINK_LIBS
+    debug "${SDL3_LIBRARY_DEBUG}"
+    optimized "${SDL3_LIBRARY_RELEASE}"
+  )
+endif()
 
 file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library" ALGORITHM_MANAGEMENT_MANIFEST_SEARCH_ROOT)
 
@@ -126,13 +239,12 @@ add_library(common_data STATIC
 target_include_directories(common_data PUBLIC ${PROJECT_INCLUDE_DIRS})
 
 add_library(algorithm_support STATIC
-  src/algorithm_management/algorithm_container_manifest.cpp
+  src/algorithm_support/algorithm_package_location.cpp
   src/algorithm_support/algorithm_support_manager.cpp
   src/algorithm_support/algorithm_intervention.cpp
-  src/algorithm_support/algorithm_reflector.cpp
   src/algorithm_support/algorithm_package_decomposer.cpp
   src/algorithm_support/algorithm_plugin_loader.cpp
-  third_party/cjson/cJSON.c
+  ${CJSON_SOURCE_DIR}/cJSON.c
 )
 target_include_directories(algorithm_support PUBLIC ${PROJECT_INCLUDE_DIRS})
 target_compile_definitions(algorithm_support PRIVATE
@@ -218,6 +330,9 @@ add_custom_command(TARGET sdk POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
     "${CMAKE_CURRENT_SOURCE_DIR}/src/sdk/sdk_kernel.h"
     "${SDK_PACKAGE_INCLUDE_DIR}/sdk_kernel.h"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/sdk/sdk_decomposer.h"
+    "${SDK_PACKAGE_INCLUDE_DIR}/sdk_decomposer.h"
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
     "$<TARGET_FILE:sdk>"
     "${SDK_PACKAGE_ROOT}/$<TARGET_FILE_NAME:sdk>"

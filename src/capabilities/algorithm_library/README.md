@@ -14,19 +14,31 @@ src/capabilities/algorithm_library/<algorithm_name>/
 
 Each algorithm directory may contain:
 
-- `<algorithm_name>.json`
-  - container manifest
-- `<algorithm_name>_decomposer.json`
-  - resource and descriptor requests used by the UI and decomposer
-- `<algorithm_name>_reflector.json`
-  - runtime reflector data
-- `<algorithm_name>_intervention.json`
-  - intervention hooks and metadata
+- `<algorithm_name>_package.json`
+  - unified bundle manifest containing container, decomposer, reflector, and intervention sections
+- intervention stage names use `preTick` and `afterTick`; `resultRender` stays separate
+- intervention stages are wrapper stages around the algorithm body, not the body itself
+- `resultRender` stages may carry GPU `shader` entries together with array bindings
+- GPU bundles may also attach the same render shader to `afterTick` so execution and preview share one submission
+- `resultRender` may stay in the package for CPU-side render code
 - `<algorithm_name>.dll`
   - optional algorithm plugin module exporting the bundle entrypoints
 
-The reflector and intervention files are optional. Some algorithms only provide
-the container manifest and decomposer description.
+The unified package manifest is the preferred format. Legacy split container,
+decomposer, and reflector files are no longer used for new bundles.
+Intervention stage names use `preTick` and `afterTick`; `resultRender` stays
+separate. Intervention control uses a reserved one-byte signal slot.
+
+Reflector entries live inside the package manifest:
+
+- `reflector.name`
+  - human-readable group name
+- `reflector.functionName`
+  - shared reflector function label for the group
+- `reflector.items[]`
+  - each item may declare `input`/`output` with `varity`/`array`
+  - if `reflectFun` is `direct`, each item may also declare flat `from` and `to`
+  - `output.v.name` or `output.a.name` names the reflected object
 
 The plugin module is also optional. If it exists, the host tries to load it
 first.
@@ -48,5 +60,7 @@ See `agents.md` in this directory for `v`/`a` naming rules.
 - Treat `[0,0,0]` as the lower-left near corner.
 - `+X` is right, `+Y` is up, and `+Z` is into the screen.
 - Do not assume Vulkan's default framebuffer orientation; the runtime flips it for you.
+- GPU tick shaders receive viewport width/height push constants and interpret algorithm-space positions as lower-left origin pixel coordinates before converting to clip space.
 - Result-render shaders consume preview-page pixel coordinates.
 - In Render Preview, `[0,0]` maps to the lower-left corner of the content region.
+- GPU-side render work is attached to `afterTick` by default and runs before the preview render pass.

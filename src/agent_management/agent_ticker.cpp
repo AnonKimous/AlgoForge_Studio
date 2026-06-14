@@ -11,13 +11,15 @@ namespace {
 bool _SignalBlocksTick(
   const agent::AlgorithmObject& object,
   const AgentToAlgorithmSignal& signal) {
+  if ((signal.control_bits & kInterventionControlStopAndEditBit) != 0u) {
+    return true;
+  }
   if (signal.stop_requested || signal.pause_requested) {
     return true;
   }
-  if (!signal.needs_intervention) {
-    return false;
-  }
-  return !object.intervention || object.intervention->SupportsIntervention();
+  (void)object;
+  (void)signal;
+  return false;
 }
 
 }  // namespace
@@ -26,6 +28,7 @@ void AgentTicker::Init(std::shared_ptr<agent::Agent> agent) {
   agent_binding_ = std::move(agent);
   algorithm_to_agent_signal_ = {};
   intervention_request_ = {};
+  intervention_request_.enabled = true;
 }
 
 void AgentTicker::ApplyInterventionRequest(const InteractionInterventionRequest& request) {

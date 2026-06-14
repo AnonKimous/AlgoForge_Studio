@@ -532,7 +532,7 @@ void DebugToolFrontendPanel::DrawAgentComposerUi(IDebugToolHost& host) {
 
   ImGui::SeparatorText("Requested Resources");
   if (agent_composer_ui_state_.resource_inputs.empty()) {
-    ImGui::TextUnformatted("No requested resources exposed by the decomposer.");
+    ImGui::TextUnformatted("No requested resources exposed by the algorithm package.");
   } else {
     const auto& dropped_files = host.input().dropped_files;
     std::vector<bool> drop_consumed(dropped_files.size(), false);
@@ -615,7 +615,7 @@ void DebugToolFrontendPanel::DrawAgentComposerUi(IDebugToolHost& host) {
 
   ImGui::SeparatorText("Requested Descriptors");
   if (agent_composer_ui_state_.descriptor_inputs.empty()) {
-    ImGui::TextUnformatted("No requested descriptors exposed by the decomposer.");
+    ImGui::TextUnformatted("No requested descriptors exposed by the algorithm package.");
   } else {
     for (size_t i = 0; i < agent_composer_ui_state_.descriptor_inputs.size(); ++i) {
       auto& descriptor = agent_composer_ui_state_.descriptor_inputs[i];
@@ -1211,7 +1211,7 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
 
   ImGui::SeparatorText("Requested Resources");
   if (agent_composer_ui_state_.resource_inputs.empty()) {
-    ImGui::TextUnformatted("No requested resources exposed by the decomposer.");
+    ImGui::TextUnformatted("No requested resources exposed by the algorithm package.");
   } else {
     const auto& dropped_files = host.input().dropped_files;
     std::vector<bool> drop_consumed(dropped_files.size(), false);
@@ -1281,7 +1281,7 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
 
   ImGui::SeparatorText("Requested Descriptors");
   if (agent_composer_ui_state_.descriptor_inputs.empty()) {
-    ImGui::TextUnformatted("No requested descriptors exposed by the decomposer.");
+    ImGui::TextUnformatted("No requested descriptors exposed by the algorithm package.");
   } else {
     for (size_t i = 0; i < agent_composer_ui_state_.descriptor_inputs.size(); ++i) {
       auto& descriptor = agent_composer_ui_state_.descriptor_inputs[i];
@@ -1470,8 +1470,6 @@ void DebugToolFrontendPanel::DrawAlgorithmPreviewUi(IDebugToolHost& host) {
 }
 
 void DebugToolFrontendPanel::DrawDebugToolFrontend(IDebugToolHost& host) {
-  host.TickManagedAgents();
-
   DrawWindowMenu();
 
   if (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_DockingEnable) {

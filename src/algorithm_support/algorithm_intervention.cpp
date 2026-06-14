@@ -122,7 +122,7 @@ std::string _AlgorithmNameFromLocation(const algorithm::AlgorithmPackageLocation
   return package_location.manifest_name;
 }
 
-std::filesystem::path _BuildInterventionJsonPath(const algorithm::AlgorithmPackageLocation& package_location) {
+std::filesystem::path _BuildPackageJsonPath(const algorithm::AlgorithmPackageLocation& package_location) {
   const std::string algorithm_name = _AlgorithmNameFromLocation(package_location);
   if (algorithm_name.empty()) {
     return {};
@@ -136,7 +136,7 @@ std::filesystem::path _BuildInterventionJsonPath(const algorithm::AlgorithmPacka
     return {};
   }
 
-  return package_root / (algorithm_name + "_intervention.json");
+  return package_root / (algorithm_name + "_package.json");
 }
 
 bool _ParseInterventionStageKind(
@@ -148,20 +148,16 @@ bool _ParseInterventionStageKind(
   }
 
   const std::string kind = !stage_kind_text.empty() ? stage_kind_text : stage_name;
-  if (kind == "result_render" || kind == "algorithm_result_render") {
+  if (kind == "resultRender") {
     *out_stage_kind = agent::AlgorithmInterventionStageKind::ResultRender;
     return true;
   }
-  if (kind == "fill_signal" || kind == "signal_fill") {
-    *out_stage_kind = agent::AlgorithmInterventionStageKind::FillSignal;
+  if (kind == "preTick") {
+    *out_stage_kind = agent::AlgorithmInterventionStageKind::PreExecution;
     return true;
   }
-  if (kind == "resource_refill" || kind == "resource_rebind") {
-    *out_stage_kind = agent::AlgorithmInterventionStageKind::ResourceRefill;
-    return true;
-  }
-  if (kind == "runtime") {
-    *out_stage_kind = agent::AlgorithmInterventionStageKind::Runtime;
+  if (kind == "afterTick") {
+    *out_stage_kind = agent::AlgorithmInterventionStageKind::PostExecution;
     return true;
   }
 
@@ -171,27 +167,34 @@ bool _ParseInterventionStageKind(
 
 _InterventionSchema _LoadInterventionSchema(const algorithm::AlgorithmPackageLocation& package_location) {
   _InterventionSchema schema{};
-  const std::filesystem::path path = _BuildInterventionJsonPath(package_location);
+  const std::filesystem::path path = _BuildPackageJsonPath(package_location);
   if (path.empty()) {
-    schema.error_message = "Failed to resolve intervention JSON file.";
+    schema.error_message = "Failed to resolve package JSON file.";
     return schema;
   }
 
   const std::string json_text = _ReadTextFile(path.string());
   if (json_text.empty()) {
-    schema.error_message = "Failed to read intervention JSON file: " + path.string();
+    schema.error_message = "Failed to read package JSON file: " + path.string();
     return schema;
   }
 
   cJSON* root = cJSON_Parse(json_text.c_str());
   if (!root) {
-    schema.error_message = "Failed to parse intervention JSON file: " + path.string();
+    schema.error_message = "Failed to parse package JSON file: " + path.string();
     return schema;
   }
 
-  const cJSON* stages = cJSON_GetObjectItemCaseSensitive(root, "stages");
+  const cJSON* intervention = cJSON_GetObjectItemCaseSensitive(root, "intervention");
+  if (!intervention || !cJSON_IsObject(intervention)) {
+    schema.error_message = "Package JSON file " + path.string() + " is missing an 'intervention' object.";
+    cJSON_Delete(root);
+    return schema;
+  }
+
+  const cJSON* stages = cJSON_GetObjectItemCaseSensitive(intervention, "stages");
   if (!stages || !cJSON_IsObject(stages)) {
-    schema.error_message = "Intervention JSON file " + path.string() + " is missing a 'stages' object.";
+    schema.error_message = "Intervention section in package JSON file " + path.string() + " is missing a 'stages' object.";
     cJSON_Delete(root);
     return schema;
   }
@@ -210,7 +213,7 @@ _InterventionSchema _LoadInterventionSchema(const algorithm::AlgorithmPackageLoc
 
     const std::string stage_kind_text = _GetStringField(stage_item, "stage_kind");
     if (!_ParseInterventionStageKind(stage_spec.stage_name, stage_kind_text, &stage_spec.stage_kind)) {
-      schema.error_message = "Invalid stage kind in intervention JSON file: " + path.string();
+      schema.error_message = "Invalid stage kind in package JSON file: " + path.string();
       cJSON_Delete(root);
       return schema;
     }
@@ -220,7 +223,7 @@ _InterventionSchema _LoadInterventionSchema(const algorithm::AlgorithmPackageLoc
       const cJSON* arrays = cJSON_GetObjectItemCaseSensitive(used_containers, "arrays");
       if (arrays && cJSON_IsArray(arrays)) {
         const int container_count = cJSON_GetArraySize(arrays);
-        stage_spec.used_algorithm_containers.reserve(container_count > 0 ? static_cast<size_t>(container_count) : 0u);
+        stage_spec.used_algorithm_containers.reserve(stage_spec.used_algorithm_containers.size() + (container_count > 0 ? static_cast<size_t>(container_count) : 0u));
         for (int i = 0; i < container_count; ++i) {
           const cJSON* item = cJSON_GetArrayItem(arrays, i);
           if (!item) {
@@ -250,11 +253,23 @@ _InterventionSchema _LoadInterventionSchema(const algorithm::AlgorithmPackageLoc
           }
 
           if (binding.container_name.empty()) {
-            schema.error_message = "Invalid array container binding in intervention JSON file: " + path.string();
+            schema.error_message = "Invalid array container binding in package JSON file: " + path.string();
             cJSON_Delete(root);
             return schema;
           }
           stage_spec.used_algorithm_containers.push_back(std::move(binding));
+        }
+      }
+    }
+
+    const cJSON* functions = cJSON_GetObjectItemCaseSensitive(stage_item, "functions");
+    if (functions && cJSON_IsArray(functions)) {
+      const int function_count = cJSON_GetArraySize(functions);
+      stage_spec.functions.reserve(function_count > 0 ? static_cast<size_t>(function_count) : 0u);
+      for (int i = 0; i < function_count; ++i) {
+        const cJSON* function_item = cJSON_GetArrayItem(functions, i);
+        if (function_item && cJSON_IsString(function_item) && function_item->valuestring) {
+          stage_spec.functions.emplace_back(function_item->valuestring);
         }
       }
     }
@@ -269,13 +284,13 @@ _InterventionSchema _LoadInterventionSchema(const algorithm::AlgorithmPackageLoc
     if (stage_spec.stage_kind == agent::AlgorithmInterventionStageKind::ResultRender) {
       if (stage_spec.used_algorithm_containers.empty()) {
         schema.error_message =
-          "Result-render stage in intervention JSON file must bind at least one array container: " + path.string();
+          "Result-render stage in package JSON file must bind at least one array container: " + path.string();
         cJSON_Delete(root);
         return schema;
       }
       if (stage_spec.shader.vertex_shader_path.empty() || stage_spec.shader.fragment_shader_path.empty()) {
         schema.error_message =
-          "Result-render stage in intervention JSON file is missing shader paths: " + path.string();
+          "Result-render stage in package JSON file is missing shader paths: " + path.string();
         cJSON_Delete(root);
         return schema;
       }
@@ -310,6 +325,7 @@ class JsonAlgorithmIntervention final : public agent::IAlgorithmIntervention {
 
     *out_signal = {};
     out_signal->needs_intervention = context.intervention_request && context.intervention_request->enabled;
+    out_signal->control_bits = context.intervention_request ? context.intervention_request->control_bits : 0u;
   }
 
   bool GetInterventionStageSpecs(

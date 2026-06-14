@@ -125,12 +125,6 @@ bool TryLoadAlgorithmPluginComponents(
   out_components->cpu_symbol = bundle.cpu_symbol;
   out_components->gpu_symbol = bundle.gpu_symbol;
 
-  if (bundle.reflector && bundle.destroy_reflector) {
-    out_components->reflector = _WrapPluginObject(bundle.reflector, bundle.destroy_reflector, module_guard);
-  }
-  if (bundle.decomposer && bundle.destroy_decomposer) {
-    out_components->decomposer = _WrapPluginObject(bundle.decomposer, bundle.destroy_decomposer, module_guard);
-  }
   if (bundle.intervention && bundle.destroy_intervention) {
     out_components->intervention = _WrapPluginObject(
       bundle.intervention,

@@ -27,12 +27,6 @@ struct AlgorithmPluginBundle {
   bool cpu_symbol{true};
   bool gpu_symbol{true};
 
-  agent::IAlgorithmPackageSupport* reflector{nullptr};
-  void (*destroy_reflector)(agent::IAlgorithmPackageSupport*){nullptr};
-
-  agent::IAlgorithmPackageDecomposer* decomposer{nullptr};
-  void (*destroy_decomposer)(agent::IAlgorithmPackageDecomposer*){nullptr};
-
   agent::IAlgorithmIntervention* intervention{nullptr};
   void (*destroy_intervention)(agent::IAlgorithmIntervention*){nullptr};
 
@@ -43,10 +37,6 @@ struct AlgorithmPluginBundle {
     api_version = kAlgorithmPluginApiVersion;
     cpu_symbol = true;
     gpu_symbol = true;
-    reflector = nullptr;
-    destroy_reflector = nullptr;
-    decomposer = nullptr;
-    destroy_decomposer = nullptr;
     intervention = nullptr;
     destroy_intervention = nullptr;
     temporary_test_executor = nullptr;
@@ -67,9 +57,6 @@ struct AlgorithmPluginComponents {
   bool gpu_symbol{true};
 
   std::shared_ptr<algorithm::AlgorithmReflector> runtime_reflector{};
-
-  std::shared_ptr<agent::IAlgorithmPackageSupport> reflector{};
-  std::shared_ptr<agent::IAlgorithmPackageDecomposer> decomposer{};
   std::shared_ptr<agent::IAlgorithmIntervention> intervention{};
   std::shared_ptr<agent::IAlgorithmtemporaryTestMainThreadExecutor> temporary_test_executor{};
 };
@@ -79,14 +66,27 @@ bool TryLoadAlgorithmPluginComponents(
   AlgorithmPluginComponents* out_components,
   std::string* out_error_message = nullptr);
 
-bool CreateAlgorithmPackageReflectorByName(
+bool CreateAlgorithmPackageRuntimeReflectorByName(
   const std::string& algorithm_name,
-  std::shared_ptr<agent::IAlgorithmPackageSupport>* out_reflector,
+  std::shared_ptr<algorithm::AlgorithmReflector>* out_reflector,
   std::string* out_error_message = nullptr);
 
-bool CreateAlgorithmPackageDecomposerFromLocation(
+bool CreateAlgorithmPackageContainerSetFromLocation(
   const algorithm::AlgorithmPackageLocation& package_location,
-  std::shared_ptr<agent::IAlgorithmPackageDecomposer>* out_decomposer,
+  std::shared_ptr<algorithm::AlgorithmContainerSet>* out_container_set,
+  std::string* out_error_message = nullptr);
+
+bool QueryAlgorithmPackageRequestedBindingsFromLocation(
+  const algorithm::AlgorithmPackageLocation& package_location,
+  algorithm_management::AlgorithmRequestedResources* out_requested_resources,
+  algorithm_management::AlgorithmRequestedDescriptorBindings* out_requested_descriptor_bindings,
+  std::string* out_error_message = nullptr);
+
+bool DecomposeAlgorithmPackageFromLocation(
+  const algorithm::AlgorithmPackageLocation& package_location,
+  const std::vector<algorithm_management::AlgorithmResourceBinding>& resource_bindings,
+  const std::vector<algorithm_management::AlgorithmDescriptorValue>& descriptor_values,
+  algorithm::AlgorithmContainerSet* container_set,
   std::string* out_error_message = nullptr);
 
 bool CreateAlgorithmInterventionByName(

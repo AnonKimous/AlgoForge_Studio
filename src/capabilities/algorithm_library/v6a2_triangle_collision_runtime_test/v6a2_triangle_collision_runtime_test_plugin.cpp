@@ -16,7 +16,26 @@
 
 namespace {
 
+struct V6A2DecomposerMeshBinding {
+  std::string resource_name;
+  std::string container_name;
+};
+
+struct V6A2DecomposerDescriptionBinding {
+  std::vector<std::string> from_names;
+  std::string target_container_name;
+  std::vector<uint32_t> target_indices;
+  std::vector<std::string> target_container_names;
+};
+
+struct V6A2DecomposerDescriptionEntry {
+  std::string name;
+  std::vector<V6A2DecomposerDescriptionBinding> bindings;
+};
+
 struct V6A2DecomposerSchema {
+  std::vector<V6A2DecomposerMeshBinding> mesh_bindings;
+  std::vector<V6A2DecomposerDescriptionEntry> description_entries;
   bool valid{false};
   std::string error_message;
 };
@@ -91,6 +110,85 @@ std::string _BuildPath(
   return root + "/" + folder + "/" + folder + suffix;
 }
 
+std::vector<std::string> _GetStringList(const cJSON* item) {
+  std::vector<std::string> values;
+  if (!item) {
+    return values;
+  }
+
+  if (cJSON_IsString(item) && item->valuestring) {
+    values.push_back(item->valuestring);
+    return values;
+  }
+
+  if (!cJSON_IsArray(item)) {
+    return values;
+  }
+
+  const int count = cJSON_GetArraySize(item);
+  values.reserve(count > 0 ? static_cast<size_t>(count) : 0u);
+  for (int i = 0; i < count; ++i) {
+    const cJSON* entry = cJSON_GetArrayItem(item, i);
+    if (!entry || !cJSON_IsString(entry) || !entry->valuestring) {
+      continue;
+    }
+    values.emplace_back(entry->valuestring);
+  }
+  return values;
+}
+
+std::vector<uint32_t> _GetUintList(const cJSON* item) {
+  std::vector<uint32_t> values;
+  if (!item || !cJSON_IsArray(item)) {
+    return values;
+  }
+
+  const int count = cJSON_GetArraySize(item);
+  values.reserve(count > 0 ? static_cast<size_t>(count) : 0u);
+  for (int i = 0; i < count; ++i) {
+    const cJSON* entry = cJSON_GetArrayItem(item, i);
+    if (!entry || !cJSON_IsNumber(entry) || entry->valuedouble < 0.0) {
+      continue;
+    }
+    values.push_back(static_cast<uint32_t>(entry->valuedouble));
+  }
+  return values;
+}
+
+bool _WriteFloatAtIndex(AlgorithmContainer* container, uint32_t index, float value) {
+  if (!container) {
+    return false;
+  }
+  const size_t byte_offset = static_cast<size_t>(index) * static_cast<size_t>(container->element_stride);
+  if (container->bytes.size() < byte_offset + sizeof(float)) {
+    return false;
+  }
+  std::memcpy(container->bytes.data() + byte_offset, &value, sizeof(float));
+  return true;
+}
+
+const agent::AlgorithmDescriptorValue* _FindDescriptorValue(
+  const std::vector<agent::AlgorithmDescriptorValue>& descriptor_values,
+  std::string_view descriptor_name) {
+  for (const agent::AlgorithmDescriptorValue& value : descriptor_values) {
+    if (value.descriptor_name == descriptor_name) {
+      return &value;
+    }
+  }
+  return nullptr;
+}
+
+const agent::AlgorithmResourceBinding* _FindResourceBinding(
+  const std::vector<agent::AlgorithmResourceBinding>& resource_bindings,
+  std::string_view resource_name) {
+  for (const agent::AlgorithmResourceBinding& binding : resource_bindings) {
+    if (binding.resource_name == resource_name) {
+      return &binding;
+    }
+  }
+  return nullptr;
+}
+
 bool _ParseInterventionStageKind(
   const std::string& stage_name,
   const std::string& stage_kind_text,
@@ -100,20 +198,16 @@ bool _ParseInterventionStageKind(
   }
 
   const std::string kind = !stage_kind_text.empty() ? stage_kind_text : stage_name;
-  if (kind == "result_render" || kind == "algorithm_result_render") {
+  if (kind == "resultRender") {
     *out_stage_kind = agent::AlgorithmInterventionStageKind::ResultRender;
     return true;
   }
-  if (kind == "fill_signal" || kind == "signal_fill") {
-    *out_stage_kind = agent::AlgorithmInterventionStageKind::FillSignal;
+  if (kind == "preTick") {
+    *out_stage_kind = agent::AlgorithmInterventionStageKind::PreExecution;
     return true;
   }
-  if (kind == "resource_refill" || kind == "resource_rebind") {
-    *out_stage_kind = agent::AlgorithmInterventionStageKind::ResourceRefill;
-    return true;
-  }
-  if (kind == "runtime" || kind == "algorithm_runtime") {
-    *out_stage_kind = agent::AlgorithmInterventionStageKind::Runtime;
+  if (kind == "afterTick") {
+    *out_stage_kind = agent::AlgorithmInterventionStageKind::PostExecution;
     return true;
   }
 
@@ -379,22 +473,29 @@ void _LoadContainerBindings(
 
 V6A2InterventionSchema _LoadInterventionSchema(const algorithm_support::AlgorithmPluginRequest& request) {
   V6A2InterventionSchema schema{};
-  const std::string path = _BuildPath(request, "_intervention.json");
+  const std::string path = _BuildPath(request, "_package.json");
   const std::string json_text = _ReadTextFile(path);
   if (json_text.empty()) {
-    schema.error_message = "Failed to read intervention JSON file: " + path;
+    schema.error_message = "Failed to read package JSON file: " + path;
     return schema;
   }
 
   cJSON* root = cJSON_Parse(json_text.c_str());
   if (!root) {
-    schema.error_message = "Failed to parse intervention JSON file: " + path;
+    schema.error_message = "Failed to parse package JSON file: " + path;
     return schema;
   }
 
-  const cJSON* stages = cJSON_GetObjectItemCaseSensitive(root, "stages");
+  const cJSON* intervention = cJSON_GetObjectItemCaseSensitive(root, "intervention");
+  if (!intervention || !cJSON_IsObject(intervention)) {
+    schema.error_message = "Package JSON file " + path + " is missing an 'intervention' object.";
+    cJSON_Delete(root);
+    return schema;
+  }
+
+  const cJSON* stages = cJSON_GetObjectItemCaseSensitive(intervention, "stages");
   if (!stages || !cJSON_IsObject(stages)) {
-    schema.error_message = "Intervention JSON file " + path + " is missing a 'stages' object.";
+    schema.error_message = "Intervention section in package JSON file " + path + " is missing a 'stages' object.";
     cJSON_Delete(root);
     return schema;
   }
@@ -413,7 +514,7 @@ V6A2InterventionSchema _LoadInterventionSchema(const algorithm_support::Algorith
 
     const std::string stage_kind_text = _GetStringField(stage_item, "stage_kind");
     if (!_ParseInterventionStageKind(stage_spec.stage_name, stage_kind_text, &stage_spec.stage_kind)) {
-      schema.error_message = "Invalid stage kind in intervention JSON file: " + path;
+      schema.error_message = "Invalid stage kind in package JSON file: " + path;
       cJSON_Delete(root);
       return schema;
     }
@@ -452,18 +553,18 @@ V6A2InterventionSchema _LoadInterventionSchema(const algorithm_support::Algorith
 
     if (stage_spec.stage_kind == agent::AlgorithmInterventionStageKind::ResultRender) {
       if (stage_spec.used_algorithm_containers.empty()) {
-        schema.error_message = "Result-render stage in intervention JSON file must bind at least one container: " + path;
+        schema.error_message = "Result-render stage in package JSON file must bind at least one container: " + path;
         cJSON_Delete(root);
         return schema;
       }
       if (stage_spec.shader.vertex_shader_path.empty() || stage_spec.shader.fragment_shader_path.empty()) {
-        schema.error_message = "Result-render stage in intervention JSON file is missing shader paths: " + path;
+        schema.error_message = "Result-render stage in package JSON file is missing shader paths: " + path;
         cJSON_Delete(root);
         return schema;
       }
-    } else if (stage_spec.stage_kind == agent::AlgorithmInterventionStageKind::Runtime) {
+    } else if (stage_spec.stage_kind == agent::AlgorithmInterventionStageKind::PostExecution) {
       if (stage_spec.used_algorithm_containers.empty()) {
-        schema.error_message = "Runtime stage in intervention JSON file must bind containers: " + path;
+        schema.error_message = "Post-execution stage in package JSON file must bind containers: " + path;
         cJSON_Delete(root);
         return schema;
       }
@@ -482,16 +583,16 @@ V6A2InterventionSchema _LoadInterventionSchema(const algorithm_support::Algorith
 
 V6A2DecomposerSchema _LoadDecomposerSchema(const algorithm_support::AlgorithmPluginRequest& request) {
   V6A2DecomposerSchema schema{};
-  const std::string path = _BuildPath(request, "_decomposer.json");
+  const std::string path = _BuildPath(request, "_package.json");
   const std::string json_text = _ReadTextFile(path);
   if (json_text.empty()) {
-    schema.error_message = "Failed to read decomposer JSON file: " + path;
+    schema.error_message = "Failed to read package JSON file: " + path;
     return schema;
   }
 
   cJSON* root = cJSON_Parse(json_text.c_str());
   if (!root) {
-    schema.error_message = "Failed to parse decomposer JSON file: " + path;
+    schema.error_message = "Failed to parse package JSON file: " + path;
     return schema;
   }
 
@@ -507,8 +608,109 @@ V6A2DecomposerSchema _LoadDecomposerSchema(const algorithm_support::AlgorithmPlu
     return schema;
   }
 
+  const cJSON* mesh = cJSON_GetObjectItemCaseSensitive(root, "mesh");
+  if (!mesh || !cJSON_IsObject(mesh)) {
+    schema.error_message = "Decomposer JSON file is missing mesh bindings: " + path;
+    cJSON_Delete(root);
+    return schema;
+  }
+
+  for (const cJSON* child = mesh->child; child; child = child->next) {
+    if (!child->string || !*child->string || !cJSON_IsString(child) || !child->valuestring) {
+      schema.error_message = "Invalid mesh binding in decomposer JSON file: " + path;
+      cJSON_Delete(root);
+      return schema;
+    }
+    schema.mesh_bindings.push_back(V6A2DecomposerMeshBinding{
+      .resource_name = child->string,
+      .container_name = child->valuestring,
+    });
+  }
+
+  const cJSON* description = cJSON_GetObjectItemCaseSensitive(root, "description");
+  if (!description || !cJSON_IsArray(description)) {
+    schema.error_message = "Decomposer JSON file is missing description entries: " + path;
+    cJSON_Delete(root);
+    return schema;
+  }
+
+  const int description_count = cJSON_GetArraySize(description);
+  schema.description_entries.reserve(description_count > 0 ? static_cast<size_t>(description_count) : 0u);
+  for (int i = 0; i < description_count; ++i) {
+    const cJSON* entry_item = cJSON_GetArrayItem(description, i);
+    if (!entry_item || !cJSON_IsObject(entry_item)) {
+      schema.error_message = "Invalid description entry in decomposer JSON file: " + path;
+      cJSON_Delete(root);
+      return schema;
+    }
+
+    V6A2DecomposerDescriptionEntry entry{};
+    entry.name = _GetStringField(entry_item, "name");
+    if (entry.name.empty()) {
+      schema.error_message = "Description entry is missing name: " + path;
+      cJSON_Delete(root);
+      return schema;
+    }
+
+    const cJSON* bindings = cJSON_GetObjectItemCaseSensitive(entry_item, "bindings");
+    if (!bindings || !cJSON_IsArray(bindings)) {
+      schema.error_message = "Description entry is missing bindings: " + path;
+      cJSON_Delete(root);
+      return schema;
+    }
+
+    const int binding_count = cJSON_GetArraySize(bindings);
+    entry.bindings.reserve(binding_count > 0 ? static_cast<size_t>(binding_count) : 0u);
+    for (int j = 0; j < binding_count; ++j) {
+      const cJSON* binding_item = cJSON_GetArrayItem(bindings, j);
+      if (!binding_item || !cJSON_IsObject(binding_item)) {
+        schema.error_message = "Invalid description binding in decomposer JSON file: " + path;
+        cJSON_Delete(root);
+        return schema;
+      }
+
+      V6A2DecomposerDescriptionBinding binding{};
+      const cJSON* from_item = cJSON_GetObjectItemCaseSensitive(binding_item, "from");
+      binding.from_names = _GetStringList(from_item);
+      if (binding.from_names.empty()) {
+        schema.error_message = "Description binding is missing from names: " + path;
+        cJSON_Delete(root);
+        return schema;
+      }
+
+      const cJSON* to_item = cJSON_GetObjectItemCaseSensitive(binding_item, "to");
+      if (cJSON_IsArray(to_item)) {
+        binding.target_container_names = _GetStringList(to_item);
+        if (binding.target_container_names.empty()) {
+          schema.error_message = "Description binding has empty to list: " + path;
+          cJSON_Delete(root);
+          return schema;
+        }
+      } else if (cJSON_IsObject(to_item)) {
+        binding.target_container_name = _GetStringField(to_item, "container");
+        binding.target_indices = _GetUintList(cJSON_GetObjectItemCaseSensitive(to_item, "indices"));
+        if (binding.target_container_name.empty() || binding.target_indices.empty()) {
+          schema.error_message = "Description binding has invalid indexed target: " + path;
+          cJSON_Delete(root);
+          return schema;
+        }
+      } else {
+        schema.error_message = "Description binding is missing to mapping: " + path;
+        cJSON_Delete(root);
+        return schema;
+      }
+
+      entry.bindings.push_back(std::move(binding));
+    }
+
+    schema.description_entries.push_back(std::move(entry));
+  }
+
   cJSON_Delete(root);
-  schema.valid = true;
+  schema.valid = !schema.mesh_bindings.empty() && !schema.description_entries.empty();
+  if (!schema.valid) {
+    schema.error_message = "Decomposer JSON file does not contain mesh and description entries: " + path;
+  }
   return schema;
 }
 
@@ -623,34 +825,85 @@ void _SeedDefaults(
   _WriteVec2(triangle_velocity, tri_velocity);
 }
 
-class V6A2TriangleCollisionDecomposer final : public agent::IAlgorithmPackageDecomposer {
+class V6A2TriangleCollisionDecomposer final {
  public:
   bool GetRequestedResources(
     const algorithm::AlgorithmProfile& algorithm_profile,
-    agent::AlgorithmRequestedResources* out_requested_resources) const override {
+    agent::AlgorithmRequestedResources* out_requested_resources) const {
     if (!out_requested_resources) {
       return false;
     }
     out_requested_resources->algorithm_name = algorithm_profile.algorithm_name;
     out_requested_resources->required_resources.clear();
-    out_requested_resources->required_resources.push_back(agent::AlgorithmRequestedResources::RequiredResource{
-      .resource_name = "mesh",
-      .resource_kind = "mesh",
-      .required = true,
-    });
-    out_requested_resources->valid = true;
+    if (!schema_.valid) {
+      return false;
+    }
+    out_requested_resources->required_resources.reserve(schema_.mesh_bindings.size());
+    for (const V6A2DecomposerMeshBinding& binding : schema_.mesh_bindings) {
+      out_requested_resources->required_resources.push_back(agent::AlgorithmRequestedResources::RequiredResource{
+        .resource_name = binding.resource_name,
+        .resource_kind = "mesh",
+        .required = true,
+      });
+    }
+    out_requested_resources->valid = !out_requested_resources->required_resources.empty();
     return true;
   }
 
   bool GetRequestedDescriptorBindings(
     const algorithm::AlgorithmProfile& algorithm_profile,
-    agent::AlgorithmRequestedDescriptorBindings* out_requested_descriptor_bindings) const override {
+    agent::AlgorithmRequestedDescriptorBindings* out_requested_descriptor_bindings) const {
     if (!out_requested_descriptor_bindings) {
       return false;
     }
     out_requested_descriptor_bindings->algorithm_name = algorithm_profile.algorithm_name;
     out_requested_descriptor_bindings->descriptor_slots.clear();
-    out_requested_descriptor_bindings->valid = true;
+    if (!schema_.valid) {
+      return false;
+    }
+
+    for (const V6A2DecomposerDescriptionEntry& entry : schema_.description_entries) {
+      for (const V6A2DecomposerDescriptionBinding& binding : entry.bindings) {
+        if (!binding.target_container_names.empty()) {
+          if (binding.from_names.size() != binding.target_container_names.size() &&
+              binding.from_names.size() != 1u) {
+            return false;
+          }
+
+          for (size_t i = 0; i < binding.target_container_names.size(); ++i) {
+            const size_t from_index = binding.from_names.size() == 1u ? 0u : i;
+            out_requested_descriptor_bindings->descriptor_slots.push_back(
+              agent::AlgorithmRequestedDescriptorBindings::DescriptorSlot{
+                .descriptor_name = binding.from_names[from_index],
+                .container_name = binding.target_container_names[i],
+                .array_index = 0u,
+              });
+          }
+          continue;
+        }
+
+        if (binding.from_names.size() != binding.target_indices.size() &&
+            binding.from_names.size() != 1u) {
+          return false;
+        }
+
+        for (size_t i = 0; i < binding.target_indices.size(); ++i) {
+          const uint32_t target_index = binding.target_indices[i];
+          if (target_index == 0u) {
+            return false;
+          }
+
+          const size_t from_index = binding.from_names.size() == 1u ? 0u : i;
+          out_requested_descriptor_bindings->descriptor_slots.push_back(
+            agent::AlgorithmRequestedDescriptorBindings::DescriptorSlot{
+              .descriptor_name = binding.from_names[from_index],
+              .container_name = binding.target_container_name,
+              .array_index = target_index - 1u,
+            });
+        }
+      }
+    }
+    out_requested_descriptor_bindings->valid = !out_requested_descriptor_bindings->descriptor_slots.empty();
     return true;
   }
 
@@ -659,8 +912,7 @@ class V6A2TriangleCollisionDecomposer final : public agent::IAlgorithmPackageDec
     const std::vector<agent::AlgorithmResourceBinding>& resource_bindings,
     const std::vector<agent::AlgorithmDescriptorValue>& descriptor_values,
     algorithm::AlgorithmContainerSet* container_set,
-    std::string* out_error_message = nullptr) const override {
-    (void)descriptor_values;
+    std::string* out_error_message = nullptr) const {
     if (!container_set) {
       if (out_error_message) {
         *out_error_message = "AlgorithmContainerSet output pointer is null.";
@@ -668,62 +920,142 @@ class V6A2TriangleCollisionDecomposer final : public agent::IAlgorithmPackageDec
       return false;
     }
 
-    const agent::AlgorithmResourceBinding* mesh_binding = nullptr;
-    for (const agent::AlgorithmResourceBinding& binding : resource_bindings) {
-      if (binding.resource_name == "mesh") {
-        mesh_binding = &binding;
-        break;
-      }
-    }
-    if (!mesh_binding) {
+    if (!schema_.valid) {
       if (out_error_message) {
-        *out_error_message = "Missing required mesh resource binding for '" + algorithm_profile.algorithm_name + "'.";
-      }
-      return false;
-    }
-    if (mesh_binding->source_path.empty()) {
-      if (out_error_message) {
-        *out_error_message = "Required mesh resource has no source path for '" + algorithm_profile.algorithm_name + "'.";
+        *out_error_message = schema_.error_message;
       }
       return false;
     }
 
-    std::array<Vec3, 3> triangle_vertices{};
-    // Load the first triangle directly from the mesh resource here.
-    if (!_LoadFirstTriangleFromMeshFile(mesh_binding->source_path, &triangle_vertices, out_error_message)) {
-      return false;
+    for (const V6A2DecomposerMeshBinding& binding : schema_.mesh_bindings) {
+      const agent::AlgorithmResourceBinding* resource_binding =
+        _FindResourceBinding(resource_bindings, binding.resource_name);
+      if (!resource_binding) {
+        _SetErrorMessage(
+          out_error_message,
+          "Missing required resource binding '" + binding.resource_name + "' for '" +
+            algorithm_profile.algorithm_name + "'.");
+        return false;
+      }
+      if (resource_binding->source_path.empty()) {
+        _SetErrorMessage(
+          out_error_message,
+          "Required resource '" + binding.resource_name + "' has no source path for '" +
+            algorithm_profile.algorithm_name + "'.");
+        return false;
+      }
+      std::ifstream file(resource_binding->source_path, std::ios::binary);
+      if (!file) {
+        _SetErrorMessage(
+          out_error_message,
+          "Required resource file '" + resource_binding->source_path + "' could not be opened for '" +
+            algorithm_profile.algorithm_name + "'.");
+        return false;
+      }
     }
 
-    AlgorithmContainer* render_data = FindAlgorithmContainer(container_set, "a1");
-    AlgorithmContainer* triangle_velocity = FindAlgorithmContainer(container_set, "a2");
-    if (!render_data || !triangle_velocity) {
-      if (out_error_message) {
-        *out_error_message = "Missing required runtime containers for '" + algorithm_profile.algorithm_name + "'.";
-      }
-      return false;
-    }
-    if (render_data->storage_kind != AlgorithmContainerStorageKind::Array ||
-        triangle_velocity->storage_kind != AlgorithmContainerStorageKind::Array) {
-      if (out_error_message) {
-        *out_error_message = "Runtime containers are not arrays for '" + algorithm_profile.algorithm_name + "'.";
-      }
-      return false;
-    }
+    for (const V6A2DecomposerDescriptionEntry& entry : schema_.description_entries) {
+      for (const V6A2DecomposerDescriptionBinding& binding : entry.bindings) {
+        if (!binding.target_container_names.empty()) {
+          const size_t from_count = binding.from_names.size();
+          const size_t target_count = binding.target_container_names.size();
+          if (from_count != target_count && from_count != 1u) {
+            _SetErrorMessage(
+              out_error_message,
+              "Description entry '" + entry.name + "' has mismatched from/to list sizes for '" +
+                algorithm_profile.algorithm_name + "'.");
+            return false;
+          }
 
-    const Vec2 point_pos{0.0f, 0.15f};
-    if (!_WritePackedRenderData(render_data, point_pos, triangle_vertices)) {
-      if (out_error_message) {
-        *out_error_message = "Failed to seed render data for '" + algorithm_profile.algorithm_name + "'.";
-      }
-      return false;
-    }
+          for (size_t i = 0; i < target_count; ++i) {
+            const size_t from_index = from_count == 1u ? 0u : i;
+            const agent::AlgorithmDescriptorValue* value =
+              _FindDescriptorValue(descriptor_values, binding.from_names[from_index]);
+            if (!value) {
+              _SetErrorMessage(
+                out_error_message,
+                "Missing descriptor value '" + binding.from_names[from_index] + "' for '" +
+                  algorithm_profile.algorithm_name + "'.");
+              return false;
+            }
 
-    const Vec2 tri_velocity{0.0f, 0.0f};
-    if (!_WriteVec2(triangle_velocity, tri_velocity)) {
-      if (out_error_message) {
-        *out_error_message = "Failed to seed triangle velocity for '" + algorithm_profile.algorithm_name + "'.";
+            algorithm::AlgorithmContainer* container =
+              FindAlgorithmContainer(container_set, binding.target_container_names[i]);
+            if (!container) {
+              _SetErrorMessage(
+                out_error_message,
+                "Missing target container '" + binding.target_container_names[i] + "' for '" +
+                  algorithm_profile.algorithm_name + "'.");
+              return false;
+            }
+
+            if (!_WriteFloatAtIndex(container, 0u, value->scalar_value)) {
+              _SetErrorMessage(
+                out_error_message,
+                "Failed to write descriptor value into container '" + binding.target_container_names[i] + "' for '" +
+                  algorithm_profile.algorithm_name + "'.");
+              return false;
+            }
+          }
+          continue;
+        }
+
+        const size_t from_count = binding.from_names.size();
+        const size_t index_count = binding.target_indices.size();
+        if (from_count != index_count && from_count != 1u) {
+          _SetErrorMessage(
+            out_error_message,
+            "Description entry '" + entry.name + "' has mismatched source count and index count for '" +
+              algorithm_profile.algorithm_name + "'.");
+          return false;
+        }
+
+        algorithm::AlgorithmContainer* container = FindAlgorithmContainer(container_set, binding.target_container_name);
+        if (!container) {
+          _SetErrorMessage(
+            out_error_message,
+            "Missing target container '" + binding.target_container_name + "' for '" +
+              algorithm_profile.algorithm_name + "'.");
+          return false;
+        }
+        if (container->storage_kind != AlgorithmContainerStorageKind::Array) {
+          _SetErrorMessage(
+            out_error_message,
+            "Target container '" + binding.target_container_name + "' is not an array for '" +
+              algorithm_profile.algorithm_name + "'.");
+          return false;
+        }
+
+        for (size_t i = 0; i < index_count; ++i) {
+          const uint32_t target_index = binding.target_indices[i];
+          if (target_index == 0u) {
+            _SetErrorMessage(
+              out_error_message,
+              "Description entry '" + entry.name + "' uses an invalid container index for '" +
+                algorithm_profile.algorithm_name + "'.");
+            return false;
+          }
+
+          const size_t from_index = from_count == 1u ? 0u : i;
+          const agent::AlgorithmDescriptorValue* value =
+            _FindDescriptorValue(descriptor_values, binding.from_names[from_index]);
+          if (!value) {
+            _SetErrorMessage(
+              out_error_message,
+              "Missing descriptor value '" + binding.from_names[from_index] + "' for '" +
+                algorithm_profile.algorithm_name + "'.");
+            return false;
+          }
+
+          if (!_WriteFloatAtIndex(container, target_index - 1u, value->scalar_value)) {
+            _SetErrorMessage(
+              out_error_message,
+              "Failed to write descriptor value into container '" + binding.target_container_name + "' for '" +
+                algorithm_profile.algorithm_name + "'.");
+            return false;
+          }
+        }
       }
-      return false;
     }
 
     return true;
@@ -877,19 +1209,15 @@ class V6A2TriangleCollisionMainThreadExecutor final : public agent::IAlgorithmte
     }
     if (debug_state) {
       debug_state->signals.push_back(algorithm_support::AdvancedAlgorithmDebugSignal{
-        .name = "v6a2_triangle_collision_runtime_test.runtime",
+        .name = "v6a2_triangle_collision_runtime_test.body",
         .payload = inside_triangle
           ? "Collision detected: vertex stopped and triangle absorbed the vertex velocity."
-          : "Runtime tick advanced without collision.",
+          : "Algorithm body advanced without collision.",
       });
     }
     return true;
   }
 };
-
-void _DestroyDecomposer(agent::IAlgorithmPackageDecomposer* decomposer) {
-  delete decomposer;
-}
 
 void _DestroyIntervention(agent::IAlgorithmIntervention* intervention) {
   delete intervention;
@@ -910,18 +1238,11 @@ extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateBundle(
 
   out_bundle->Clear();
 
-  const V6A2DecomposerSchema decomposer_schema = _LoadDecomposerSchema(*request);
-  if (!decomposer_schema.valid) {
-    return false;
-  }
-
   const V6A2InterventionSchema intervention_schema = _LoadInterventionSchema(*request);
   if (!intervention_schema.valid) {
     return false;
   }
 
-  out_bundle->decomposer = new V6A2TriangleCollisionDecomposer();
-  out_bundle->destroy_decomposer = &_DestroyDecomposer;
   out_bundle->intervention = new V6A2TriangleCollisionIntervention(intervention_schema);
   out_bundle->destroy_intervention = &_DestroyIntervention;
   out_bundle->temporary_test_executor = new V6A2TriangleCollisionMainThreadExecutor();
@@ -936,8 +1257,13 @@ extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateRuntimeReflec
     return false;
   }
 
-  return algorithm_management::TryCreateAlgorithmReflectorFromAlgorithmName(
-    request->algorithm_name ? request->algorithm_name : "",
-    out_reflector,
-    nullptr);
+  std::shared_ptr<algorithm::AlgorithmReflector> runtime_reflector{};
+  if (!algorithm_management::CreateAlgorithmPackageRuntimeReflectorByName(
+        request->algorithm_name ? request->algorithm_name : "",
+        &runtime_reflector,
+        nullptr)) {
+    return false;
+  }
+  *out_reflector = *runtime_reflector;
+  return true;
 }
