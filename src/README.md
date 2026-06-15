@@ -18,8 +18,8 @@ separates intentionally cross-layer code into `src/capabilities`.
 
 - `common_data`: shared value headers; `common_data/common_data.h` is an optional aggregator, not the only entry.
 - `agent`: `agent/agent.h`
-- `algorithm_support`: helper headers only; the main public loading entrypoints are re-exported through `algorithm_management/algorithm_manager.h`
-- `algorithm_management`: `algorithm_management/algorithm_manager.h`
+- `algorithm_support`: internal implementation source group for package loading, plugin loading, support helpers, and intervention payload code
+- `algorithm_management`: `algorithm_management/algorithm_manager.h` is the single public entrypoint
 - `runtime_systems`: `runtime_systems/runtime_environment.h`, `runtime_systems/memory_manager.h`
 - `agent_management`: `agent_management/agent_manager.h`
 - `debug_tool`: `debug_tool/debug_tool_host.h` for the host interface, `debug_tool/debug_tool_backend_runtime.h` for the backend runtime, and `debug_tool/debug_tool_frontend_panel.h` for the frontend panel

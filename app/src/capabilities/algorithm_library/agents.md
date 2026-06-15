@@ -12,12 +12,9 @@ Use `v` for variables and `a` for arrays.
 
 ## Example
 
-- `v6a2_triangle_collision_runtime_test`
-  - `v1` and `v2`: external vertex position
-  - `v3` and `v4`: external vertex velocity
-  - `v5` and `v6`: runtime control and collision state
-  - `a1`: triangle vertex buffer
-  - `a2`: triangle velocity buffer
+- `simple_point_motion_demo`
+  - `v1`, `v2`, `v3`: initial point position
+  - `a1`: moving point buffer
 
 ## Bundle Rules
 
@@ -33,6 +30,7 @@ Use one unified package file per algorithm bundle:
 - `<algorithm_name>_package.json`
 - The file contains `container`, `decomposer`, `reflector`, and `intervention` sections.
 - The same package file can be used by the host, SDK, and debug tool.
+- GPU tick shaders receive viewport width/height push constants and interpret algorithm-space positions as lower-left origin pixel coordinates before converting to clip space.
 
 Use `cjson` style comments in the package file examples:
 
@@ -44,7 +42,7 @@ Use `cjson` style comments in the package file examples:
 
 ```cjson
 {
-  "algorithm_name": "v6a2_triangle_collision_runtime_test", // bundle name
+  "algorithm_name": "simple_point_motion_demo", // bundle name
   "globalCfg": {
     "solvePrecision": "fp32", // global precision for the package
     "defaultPrecision": "fp32"
@@ -86,7 +84,7 @@ Use `cjson` style comments in the package file examples:
     ]
   },
   "reflector": {
-    "name": "volocityABS", // human-readable group name
+    "name": "positionABS", // human-readable group name
     "functionName": "fun", // shared reflector function label
     "inputs": [
       "v1",
@@ -97,35 +95,65 @@ Use `cjson` style comments in the package file examples:
       "a2"
     ],
     "items": [
-      // reflection item
+      // direct reflection item
       {
-        "name": "volocityABS",
-        "input": {
-          "varity": ["v1", "v2", "v3"], // source variables
-          "array": ["a1"] // source arrays
-        },
-        "output": {
-          "v": {
-            "name": "volocityABS" // output variable name
-          }
-        },
-        "reflectFun": "fun" // reflector function label
+        "name": "positionABS",
+        "from": ["v1", "v2", "v3"],
+        "to": ["position_x", "position_y", "position_z"],
+        "reflectFun": "direct"
       },
       // reflection item
       {
-        "name": "borderABS",
-        "input": {
-          "varity": ["v4"],
-          "array": ["a2"]
-        },
-        "output": {
-          "a": {
-            "name": "borderABS"
-          }
-        },
-        "reflectFun": "fun"
+        "name": "positionABS",
+        "from": ["a1"],
+        "to": ["positionABS"],
+        "reflectFun": "direct"
       }
     ]
+  },
+  "intervention": {
+    "stages": {
+      "preTick": {
+        "stage_name": "preTick", // pre-execution stage
+        "stage_kind": "preTick"
+      },
+      "afterTick": {
+        "stage_name": "afterTick", // post-execution stage
+        "stage_kind": "afterTick",
+        "used_algorithm_containers": {
+          "arrays": [
+            {
+              "name": "a1",
+              "kind": "array",
+              "tuple_width": 6,
+              "required": true
+            }
+          ],
+          "variables": []
+        },
+        "shader": {
+          "pipeline": "graphics",
+          "vertex": "simple_point_motion_demo_result_render.vert",
+          "fragment": "simple_point_motion_demo_result_render.frag"
+        }
+      },
+      "resultRender": {
+        "stage_name": "resultRender", // preview stage
+        "stage_kind": "resultRender",
+        "functions": [
+          "ApplyResultRender"
+        ],
+        "shader": {
+          "pipeline": "graphics",
+          "vertex": "simple_point_motion_demo_result_render.vert",
+          "fragment": "simple_point_motion_demo_result_render.frag"
+        }
+      }
+    },
+    "controlSignal": {
+      "byte": 0, // one-byte signal slot reserved for intervention
+      "notes": "Any non-zero value means intervention is requested."
+    }
   }
 }
 ```

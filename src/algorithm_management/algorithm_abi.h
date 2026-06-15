@@ -88,11 +88,11 @@ struct AlgorithmReflectionSnapshot {
 };
 
 struct AlgorithmPackageDebugState {
-  std::vector<algorithm_support::AdvancedAlgorithmDebugSignal> signals;
+  std::vector<AdvancedAlgorithmDebugSignal> signals;
 };
 
 struct AlgorithmInterventionPackageDebugState {
-  std::vector<algorithm_support::AdvancedAlgorithmDebugSignal> signals;
+  std::vector<AdvancedAlgorithmDebugSignal> signals;
   AlgorithmToAgentSignal algorithm_to_agent_signal{};
 };
 
@@ -182,16 +182,16 @@ class IAlgorithmPackageSupport {
   virtual ~IAlgorithmPackageSupport() = default;
 
   virtual bool BuildAlgorithmProfile(
-    const algorithm_support::VolumeDescriptor& volume,
+    const VolumeDescriptor& volume,
     algorithm::AlgorithmProfile* out_profile) const = 0;
 
-  virtual bool BuildMeshCoderOutput(const Mesh& mesh, algorithm_support::MeshCoderOutput* out_output) const {
+  virtual bool BuildMeshCoderOutput(const Mesh& mesh, MeshCoderOutput* out_output) const {
     (void)mesh;
     (void)out_output;
     return false;
   }
 
-  virtual bool ReflectMeshCommon(const Mesh& mesh, algorithm_support::MeshCommonReflection* out_reflection) const {
+  virtual bool ReflectMeshCommon(const Mesh& mesh, MeshCommonReflection* out_reflection) const {
     (void)mesh;
     (void)out_reflection;
     return false;
@@ -201,7 +201,7 @@ class IAlgorithmPackageSupport {
     const Mesh& mesh,
     float mass,
     Vec3 driving_dir,
-    algorithm_support::VolumeDescriptor* out_volume) const {
+    VolumeDescriptor* out_volume) const {
     (void)mesh;
     (void)mass;
     (void)driving_dir;

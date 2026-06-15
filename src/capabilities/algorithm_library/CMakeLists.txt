@@ -59,8 +59,6 @@ set(PROJECT_INCLUDE_DIRS
 )
 
 set(ALGORITHM_LIBRARY_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
-file(MAKE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/temporary_test_line_motion")
-file(MAKE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/v6a2_triangle_collision_runtime_test")
 
 option(BUILD_ALGORITHM_SAMPLE_PLUGIN "Build the temporary sample algorithm plugin." OFF)
 set(CORE_BUILD_DIR "${REPO_ROOT}/build" CACHE PATH "Core build directory containing the base libraries for algorithm plugins")
@@ -85,87 +83,12 @@ set(CORE_DEBUG_DIR "${CORE_BUILD_DIR}/Debug")
 set(CORE_RELEASE_DIR "${CORE_BUILD_DIR}/Release")
 
 if(BUILD_ALGORITHM_SAMPLE_PLUGIN)
-  require_core_library("${CORE_DEBUG_DIR}/algorithm_support.lib" "Build the root project before building the sample algorithm plugin.")
   require_core_library("${CORE_DEBUG_DIR}/algorithm_management.lib" "Build the root project before building the sample algorithm plugin.")
   require_core_library("${CORE_DEBUG_DIR}/common_data.lib" "Build the root project before building the sample algorithm plugin.")
   require_core_library("${CORE_DEBUG_DIR}/runtime_systems.lib" "Build the root project before building the sample algorithm plugin.")
 endif()
 
-add_custom_command(
-  OUTPUT
-    "${CMAKE_CURRENT_SOURCE_DIR}/temporary_test_line_motion/temporary_test_line_motion_gpu_tick.vert.spv"
-    "${CMAKE_CURRENT_SOURCE_DIR}/temporary_test_line_motion/temporary_test_line_motion_gpu_tick.frag.spv"
-  COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_SOURCE_DIR}/temporary_test_line_motion"
-  COMMAND ${GLSLC} -o
-    "${CMAKE_CURRENT_SOURCE_DIR}/temporary_test_line_motion/temporary_test_line_motion_gpu_tick.vert.spv"
-    "${CMAKE_CURRENT_SOURCE_DIR}/temporary_test_line_motion/temporary_test_line_motion_gpu_tick.vert"
-  COMMAND ${GLSLC} -o
-    "${CMAKE_CURRENT_SOURCE_DIR}/temporary_test_line_motion/temporary_test_line_motion_gpu_tick.frag.spv"
-    "${CMAKE_CURRENT_SOURCE_DIR}/temporary_test_line_motion/temporary_test_line_motion_gpu_tick.frag"
-  DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/temporary_test_line_motion/temporary_test_line_motion_gpu_tick.vert"
-    "${CMAKE_CURRENT_SOURCE_DIR}/temporary_test_line_motion/temporary_test_line_motion_gpu_tick.frag"
-  VERBATIM
-)
-
-add_custom_target(temporary_test_line_motion_gpu_tick_shaders DEPENDS
-  "${CMAKE_CURRENT_SOURCE_DIR}/temporary_test_line_motion/temporary_test_line_motion_gpu_tick.vert.spv"
-  "${CMAKE_CURRENT_SOURCE_DIR}/temporary_test_line_motion/temporary_test_line_motion_gpu_tick.frag.spv"
-)
-
-add_custom_command(
-  OUTPUT
-    "${CMAKE_CURRENT_SOURCE_DIR}/temporary_test_line_motion/temporary_test_line_motion_result_render.vert.spv"
-    "${CMAKE_CURRENT_SOURCE_DIR}/temporary_test_line_motion/temporary_test_line_motion_result_render.frag.spv"
-  COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_SOURCE_DIR}/temporary_test_line_motion"
-  COMMAND ${GLSLC} -o
-    "${CMAKE_CURRENT_SOURCE_DIR}/temporary_test_line_motion/temporary_test_line_motion_result_render.vert.spv"
-    "${CMAKE_CURRENT_SOURCE_DIR}/temporary_test_line_motion/temporary_test_line_motion_result_render.vert"
-  COMMAND ${GLSLC} -o
-    "${CMAKE_CURRENT_SOURCE_DIR}/temporary_test_line_motion/temporary_test_line_motion_result_render.frag.spv"
-    "${CMAKE_CURRENT_SOURCE_DIR}/temporary_test_line_motion/temporary_test_line_motion_result_render.frag"
-  DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/temporary_test_line_motion/temporary_test_line_motion_result_render.vert"
-    "${CMAKE_CURRENT_SOURCE_DIR}/temporary_test_line_motion/temporary_test_line_motion_result_render.frag"
-  VERBATIM
-)
-
-add_custom_target(temporary_test_line_motion_result_render_shaders DEPENDS
-  "${CMAKE_CURRENT_SOURCE_DIR}/temporary_test_line_motion/temporary_test_line_motion_result_render.vert.spv"
-  "${CMAKE_CURRENT_SOURCE_DIR}/temporary_test_line_motion/temporary_test_line_motion_result_render.frag.spv"
-)
-
-add_custom_command(
-  OUTPUT
-    "${CMAKE_CURRENT_SOURCE_DIR}/v6a2_triangle_collision_runtime_test/v6a2_triangle_collision_runtime_test_result_render.vert.spv"
-    "${CMAKE_CURRENT_SOURCE_DIR}/v6a2_triangle_collision_runtime_test/v6a2_triangle_collision_runtime_test_result_render.frag.spv"
-  COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_SOURCE_DIR}/v6a2_triangle_collision_runtime_test"
-  COMMAND ${GLSLC} -o
-    "${CMAKE_CURRENT_SOURCE_DIR}/v6a2_triangle_collision_runtime_test/v6a2_triangle_collision_runtime_test_result_render.vert.spv"
-    "${CMAKE_CURRENT_SOURCE_DIR}/v6a2_triangle_collision_runtime_test/v6a2_triangle_collision_runtime_test_result_render.vert"
-  COMMAND ${GLSLC} -o
-    "${CMAKE_CURRENT_SOURCE_DIR}/v6a2_triangle_collision_runtime_test/v6a2_triangle_collision_runtime_test_result_render.frag.spv"
-    "${CMAKE_CURRENT_SOURCE_DIR}/v6a2_triangle_collision_runtime_test/v6a2_triangle_collision_runtime_test_result_render.frag"
-  DEPENDS
-    "${CMAKE_CURRENT_SOURCE_DIR}/v6a2_triangle_collision_runtime_test/v6a2_triangle_collision_runtime_test_result_render.vert"
-    "${CMAKE_CURRENT_SOURCE_DIR}/v6a2_triangle_collision_runtime_test/v6a2_triangle_collision_runtime_test_result_render.frag"
-  VERBATIM
-)
-
-add_custom_target(v6a2_triangle_collision_runtime_test_result_render_shaders DEPENDS
-  "${CMAKE_CURRENT_SOURCE_DIR}/v6a2_triangle_collision_runtime_test/v6a2_triangle_collision_runtime_test_result_render.vert.spv"
-  "${CMAKE_CURRENT_SOURCE_DIR}/v6a2_triangle_collision_runtime_test/v6a2_triangle_collision_runtime_test_result_render.frag.spv"
-)
-
-add_custom_target(algorithm_packages)
-add_dependencies(algorithm_packages
-  temporary_test_line_motion_gpu_tick_shaders
-  temporary_test_line_motion_result_render_shaders
-  v6a2_triangle_collision_runtime_test_result_render_shaders
-)
-
 if(BUILD_ALGORITHM_SAMPLE_PLUGIN)
-  import_core_static_library(algorithm_support_core algorithm_support.lib)
   import_core_static_library(algorithm_management_core algorithm_management.lib)
   import_core_static_library(common_data_core common_data.lib)
   import_core_static_library(runtime_systems_core runtime_systems.lib)
@@ -179,53 +102,94 @@ if(BUILD_ALGORITHM_SAMPLE_PLUGIN)
     MAP_IMPORTED_CONFIG_RELWITHDEBINFO Release
     MAP_IMPORTED_CONFIG_MINSIZEREL Release
   )
+endif()
 
-  add_library(temporary_test_line_motion_plugin MODULE
-    temporary_test_line_motion/temporary_test_line_motion_plugin.cpp
-  )
-  target_include_directories(temporary_test_line_motion_plugin PUBLIC ${PROJECT_INCLUDE_DIRS})
-  target_compile_definitions(temporary_test_line_motion_plugin PRIVATE
-    ALGORITHM_LIBRARY_PLUGIN_BUILD=1
-    ALGORITHM_LIBRARY_RESOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}"
-  )
-  target_link_libraries(temporary_test_line_motion_plugin PRIVATE
-    algorithm_management_core
-    algorithm_support_core
-    common_data_core
-    runtime_systems_core
-    Vulkan::Vulkan
-    SDL3::SDL3
-  )
-  set_target_properties(temporary_test_line_motion_plugin PROPERTIES
-    PREFIX ""
-    OUTPUT_NAME "temporary_test_line_motion"
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/temporary_test_line_motion"
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/temporary_test_line_motion"
-    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/temporary_test_line_motion"
-    PDB_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/temporary_test_line_motion"
-  )
-  add_dependencies(algorithm_packages temporary_test_line_motion_plugin)
+add_custom_target(algorithm_packages)
+set_property(GLOBAL PROPERTY ALGORITHM_PACKAGE_TARGETS "")
 
-  add_library(v6a2_triangle_collision_runtime_test_plugin MODULE
-    v6a2_triangle_collision_runtime_test/v6a2_triangle_collision_runtime_test_plugin.cpp
+function(register_algorithm_package package_manifest)
+  get_filename_component(algorithm_dir "${package_manifest}" DIRECTORY)
+  get_filename_component(algorithm_name "${algorithm_dir}" NAME)
+  string(MAKE_C_IDENTIFIER "${algorithm_name}" algorithm_target_name)
+
+  file(GLOB CONFIGURE_DEPENDS algorithm_shader_sources
+    "${algorithm_dir}/*.vert"
+    "${algorithm_dir}/*.frag"
   )
-  target_include_directories(v6a2_triangle_collision_runtime_test_plugin PUBLIC ${PROJECT_INCLUDE_DIRS})
-  target_compile_definitions(v6a2_triangle_collision_runtime_test_plugin PRIVATE
-    ALGORITHM_LIBRARY_PLUGIN_BUILD=1
-    ALGORITHM_LIBRARY_RESOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}"
+  list(SORT algorithm_shader_sources)
+  if(NOT algorithm_shader_sources)
+    message(FATAL_ERROR "No shader sources found in ${algorithm_dir}")
+  endif()
+
+  set(algorithm_shader_outputs)
+  foreach(shader_source IN LISTS algorithm_shader_sources)
+    add_custom_command(
+      OUTPUT "${shader_source}.spv"
+      COMMAND ${GLSLC} -o "${shader_source}.spv" "${shader_source}"
+      DEPENDS "${shader_source}"
+      VERBATIM
+    )
+    list(APPEND algorithm_shader_outputs "${shader_source}.spv")
+  endforeach()
+
+  set(shader_target "${algorithm_target_name}_shaders")
+  add_custom_target("${shader_target}" DEPENDS ${algorithm_shader_outputs})
+
+  file(GLOB CONFIGURE_DEPENDS plugin_sources
+    "${algorithm_dir}/*_plugin.cpp"
   )
-  target_link_libraries(v6a2_triangle_collision_runtime_test_plugin PRIVATE
-    algorithm_management_core
-    algorithm_support_core
-    common_data_core
-  )
-  set_target_properties(v6a2_triangle_collision_runtime_test_plugin PROPERTIES
-    PREFIX ""
-    OUTPUT_NAME "v6a2_triangle_collision_runtime_test"
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/v6a2_triangle_collision_runtime_test"
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/v6a2_triangle_collision_runtime_test"
-    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/v6a2_triangle_collision_runtime_test"
-    PDB_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/v6a2_triangle_collision_runtime_test"
-  )
-  add_dependencies(algorithm_packages v6a2_triangle_collision_runtime_test_plugin)
+  list(SORT plugin_sources)
+  list(LENGTH plugin_sources plugin_source_count)
+  if(plugin_source_count GREATER 1)
+    message(FATAL_ERROR "Multiple plugin sources found in ${algorithm_dir}. Keep one plugin source per algorithm folder.")
+  endif()
+
+  if(plugin_source_count EQUAL 1)
+    list(GET plugin_sources 0 plugin_source)
+    if(BUILD_ALGORITHM_SAMPLE_PLUGIN)
+      add_library("${algorithm_target_name}_plugin" MODULE "${plugin_source}")
+      target_include_directories("${algorithm_target_name}_plugin" PUBLIC ${PROJECT_INCLUDE_DIRS})
+      target_compile_definitions("${algorithm_target_name}_plugin" PRIVATE
+        ALGORITHM_LIBRARY_PLUGIN_BUILD=1
+        ALGORITHM_LIBRARY_RESOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}"
+      )
+      target_link_libraries("${algorithm_target_name}_plugin" PRIVATE
+        algorithm_management_core
+        common_data_core
+        runtime_systems_core
+        Vulkan::Vulkan
+        SDL3::SDL3
+      )
+      set_target_properties("${algorithm_target_name}_plugin" PROPERTIES
+        PREFIX ""
+        OUTPUT_NAME "${algorithm_name}"
+        RUNTIME_OUTPUT_DIRECTORY "${algorithm_dir}"
+        LIBRARY_OUTPUT_DIRECTORY "${algorithm_dir}"
+        ARCHIVE_OUTPUT_DIRECTORY "${algorithm_dir}"
+        PDB_OUTPUT_DIRECTORY "${algorithm_dir}"
+      )
+      add_dependencies("${algorithm_target_name}_plugin" "${shader_target}")
+    endif()
+  endif()
+
+  set(package_target "${algorithm_target_name}_package")
+  add_custom_target("${package_target}" DEPENDS "${shader_target}")
+  if(TARGET "${algorithm_target_name}_plugin")
+    add_dependencies("${package_target}" "${algorithm_target_name}_plugin")
+  endif()
+
+  set_property(GLOBAL APPEND PROPERTY ALGORITHM_PACKAGE_TARGETS "${package_target}")
+endfunction()
+
+file(GLOB CONFIGURE_DEPENDS ALGORITHM_PACKAGE_MANIFESTS
+  "${CMAKE_CURRENT_SOURCE_DIR}/*/*_package.json"
+)
+list(SORT ALGORITHM_PACKAGE_MANIFESTS)
+foreach(package_manifest IN LISTS ALGORITHM_PACKAGE_MANIFESTS)
+  register_algorithm_package("${package_manifest}")
+endforeach()
+
+get_property(ALGORITHM_PACKAGE_TARGETS GLOBAL PROPERTY ALGORITHM_PACKAGE_TARGETS)
+if(ALGORITHM_PACKAGE_TARGETS)
+  add_dependencies(algorithm_packages ${ALGORITHM_PACKAGE_TARGETS})
 endif()

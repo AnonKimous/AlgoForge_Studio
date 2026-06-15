@@ -12,12 +12,9 @@ Use `v` for variables and `a` for arrays.
 
 ## Example
 
-- `v6a2_triangle_collision_runtime_test`
-  - `v1` and `v2`: external vertex position
-  - `v3` and `v4`: external vertex velocity
-  - `v5` and `v6`: runtime control and collision state
-  - `a1`: triangle vertex buffer
-  - `a2`: triangle velocity buffer
+- `simple_point_motion_demo`
+  - `v1`, `v2`, `v3`: initial point position
+  - `a1`: moving point buffer
 
 ## Bundle Rules
 
@@ -45,7 +42,7 @@ Use `cjson` style comments in the package file examples:
 
 ```cjson
 {
-  "algorithm_name": "v6a2_triangle_collision_runtime_test", // bundle name
+  "algorithm_name": "simple_point_motion_demo", // bundle name
   "globalCfg": {
     "solvePrecision": "fp32", // global precision for the package
     "defaultPrecision": "fp32"
@@ -87,7 +84,7 @@ Use `cjson` style comments in the package file examples:
     ]
   },
   "reflector": {
-    "name": "volocityABS", // human-readable group name
+    "name": "positionABS", // human-readable group name
     "functionName": "fun", // shared reflector function label
     "inputs": [
       "v1",
@@ -107,31 +104,10 @@ Use `cjson` style comments in the package file examples:
       },
       // reflection item
       {
-        "name": "volocityABS",
-        "input": {
-          "varity": ["v1", "v2", "v3"], // source variables
-          "array": ["a1"] // source arrays
-        },
-        "output": {
-          "v": {
-            "name": "volocityABS" // output variable name
-          }
-        },
-        "reflectFun": "fun" // reflector function label
-      },
-      // reflection item
-      {
-        "name": "borderABS",
-        "input": {
-          "varity": ["v4"],
-          "array": ["a2"]
-        },
-        "output": {
-          "a": {
-            "name": "borderABS"
-          }
-        },
-        "reflectFun": "fun"
+        "name": "positionABS",
+        "from": ["a1"],
+        "to": ["positionABS"],
+        "reflectFun": "direct"
       }
     ]
   },
@@ -157,8 +133,8 @@ Use `cjson` style comments in the package file examples:
         },
         "shader": {
           "pipeline": "graphics",
-          "vertex": "sample_algorithm_resultRender.vert",
-          "fragment": "sample_algorithm_resultRender.frag"
+          "vertex": "simple_point_motion_demo_result_render.vert",
+          "fragment": "simple_point_motion_demo_result_render.frag"
         }
       },
       "resultRender": {
@@ -169,8 +145,8 @@ Use `cjson` style comments in the package file examples:
         ],
         "shader": {
           "pipeline": "graphics",
-          "vertex": "sample_algorithm_resultRender.vert",
-          "fragment": "sample_algorithm_resultRender.frag"
+          "vertex": "simple_point_motion_demo_result_render.vert",
+          "fragment": "simple_point_motion_demo_result_render.frag"
         }
       }
     },

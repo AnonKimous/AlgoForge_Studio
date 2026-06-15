@@ -140,6 +140,12 @@ class IDebugToolHost {
     std::vector<RequestedResourceEntry>* out_resources,
     std::vector<RequestedDescriptorEntry>* out_descriptors,
     std::string* out_error_message = nullptr) const = 0;
+  virtual bool LoadAlgorithmPackageDefaultBindings(
+    const std::string& algorithm_name,
+    std::vector<AlgorithmResourceBinding>* out_resource_bindings,
+    std::vector<AlgorithmDescriptorValue>* out_descriptor_values,
+    bool* out_has_default_file = nullptr,
+    std::string* out_error_message = nullptr) const = 0;
   virtual bool BuildRenderPreviewRequest(
     size_t agent_index,
     size_t algorithm_index,
@@ -150,6 +156,7 @@ class IDebugToolHost {
   virtual Vec2 mouse_position() const = 0;
   virtual float frame_dt_seconds() const = 0;
   virtual bool has_render_preview_texture() const = 0;
+  virtual std::string render_preview_debug_summary() const = 0;
   virtual ImTextureID render_preview_texture_id() const = 0;
   virtual ImVec2 render_preview_texture_size() const = 0;
   virtual void SetRenderPreviewExtent(ImVec2 extent) = 0;

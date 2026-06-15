@@ -8,6 +8,7 @@ set "SDK_LIB=%ROOT%\sdk\sdk.lib"
 set "SDK_HEADER=%ROOT%\sdk\include\sdk_kernel.h"
 set "CORE_BUILD_DEBUG=%ROOT%\build\Debug"
 set "ALGO_BUILD=%ROOT%\build_algorithms"
+set "SRC_LIBRARY_DIR=%ROOT%\src\capabilities\algorithm_library"
 set "APP_DIR=%ROOT%\app"
 set "APP_LIBRARY_DIR=%APP_DIR%\src\capabilities\algorithm_library"
 set "ORIG_PATH=%Path%"
@@ -21,11 +22,6 @@ if not exist "%SDK_LIB%" (
 
 if not exist "%SDK_HEADER%" (
   echo SDK public header is missing: "%SDK_HEADER%"
-  exit /b 1
-)
-
-if not exist "%CORE_BUILD_DEBUG%\algorithm_support.lib" (
-  echo Core library is missing: "%CORE_BUILD_DEBUG%\algorithm_support.lib"
   exit /b 1
 )
 
@@ -57,25 +53,47 @@ if errorlevel 1 (
   popd
   exit /b %EXITCODE%
 )
-if not exist "%APP_LIBRARY_DIR%\temporary_test_line_motion" mkdir "%APP_LIBRARY_DIR%\temporary_test_line_motion"
-if exist "%ROOT%\src\capabilities\algorithm_library\temporary_test_line_motion\*.json" copy /Y "%ROOT%\src\capabilities\algorithm_library\temporary_test_line_motion\*.json" "%APP_LIBRARY_DIR%\temporary_test_line_motion\" >nul
-if exist "%ROOT%\src\capabilities\algorithm_library\temporary_test_line_motion\*.vert" copy /Y "%ROOT%\src\capabilities\algorithm_library\temporary_test_line_motion\*.vert" "%APP_LIBRARY_DIR%\temporary_test_line_motion\" >nul
-if exist "%ROOT%\src\capabilities\algorithm_library\temporary_test_line_motion\*.frag" copy /Y "%ROOT%\src\capabilities\algorithm_library\temporary_test_line_motion\*.frag" "%APP_LIBRARY_DIR%\temporary_test_line_motion\" >nul
-if exist "%ROOT%\src\capabilities\algorithm_library\temporary_test_line_motion\*.spv" copy /Y "%ROOT%\src\capabilities\algorithm_library\temporary_test_line_motion\*.spv" "%APP_LIBRARY_DIR%\temporary_test_line_motion\" >nul
-if exist "%ROOT%\src\capabilities\algorithm_library\temporary_test_line_motion\Debug\*.dll" copy /Y "%ROOT%\src\capabilities\algorithm_library\temporary_test_line_motion\Debug\*.dll" "%APP_LIBRARY_DIR%\temporary_test_line_motion\" >nul
-if exist "%ROOT%\src\capabilities\algorithm_library\temporary_test_line_motion\Release\*.dll" copy /Y "%ROOT%\src\capabilities\algorithm_library\temporary_test_line_motion\Release\*.dll" "%APP_LIBRARY_DIR%\temporary_test_line_motion\" >nul
-if not exist "%APP_LIBRARY_DIR%\v6a2_triangle_collision_runtime_test" mkdir "%APP_LIBRARY_DIR%\v6a2_triangle_collision_runtime_test"
-if exist "%ROOT%\src\capabilities\algorithm_library\v6a2_triangle_collision_runtime_test\*.json" copy /Y "%ROOT%\src\capabilities\algorithm_library\v6a2_triangle_collision_runtime_test\*.json" "%APP_LIBRARY_DIR%\v6a2_triangle_collision_runtime_test\" >nul
-if exist "%ROOT%\src\capabilities\algorithm_library\v6a2_triangle_collision_runtime_test\*.vert" copy /Y "%ROOT%\src\capabilities\algorithm_library\v6a2_triangle_collision_runtime_test\*.vert" "%APP_LIBRARY_DIR%\v6a2_triangle_collision_runtime_test\" >nul
-if exist "%ROOT%\src\capabilities\algorithm_library\v6a2_triangle_collision_runtime_test\*.frag" copy /Y "%ROOT%\src\capabilities\algorithm_library\v6a2_triangle_collision_runtime_test\*.frag" "%APP_LIBRARY_DIR%\v6a2_triangle_collision_runtime_test\" >nul
-if exist "%ROOT%\src\capabilities\algorithm_library\v6a2_triangle_collision_runtime_test\Debug\*.dll" copy /Y "%ROOT%\src\capabilities\algorithm_library\v6a2_triangle_collision_runtime_test\Debug\*.dll" "%APP_LIBRARY_DIR%\v6a2_triangle_collision_runtime_test\" >nul
-if exist "%ROOT%\src\capabilities\algorithm_library\v6a2_triangle_collision_runtime_test\Release\*.dll" copy /Y "%ROOT%\src\capabilities\algorithm_library\v6a2_triangle_collision_runtime_test\Release\*.dll" "%APP_LIBRARY_DIR%\v6a2_triangle_collision_runtime_test\" >nul
-if exist "%ROOT%\src\capabilities\algorithm_library\v6a2_triangle_collision_runtime_test\Debug\*.pdb" copy /Y "%ROOT%\src\capabilities\algorithm_library\v6a2_triangle_collision_runtime_test\Debug\*.pdb" "%APP_LIBRARY_DIR%\v6a2_triangle_collision_runtime_test\" >nul
-if exist "%ROOT%\src\capabilities\algorithm_library\v6a2_triangle_collision_runtime_test\Release\*.pdb" copy /Y "%ROOT%\src\capabilities\algorithm_library\v6a2_triangle_collision_runtime_test\Release\*.pdb" "%APP_LIBRARY_DIR%\v6a2_triangle_collision_runtime_test\" >nul
-set "EXITCODE=%ERRORLEVEL%"
+set "EXITCODE=0"
+if not exist "%APP_LIBRARY_DIR%" mkdir "%APP_LIBRARY_DIR%"
+if errorlevel 1 set "EXITCODE=1"
+for /d %%D in ("%SRC_LIBRARY_DIR%\*") do (
+  call :SyncAlgorithmFolder "%%~fD"
+  if errorlevel 1 set "EXITCODE=1"
+)
+if not "%EXITCODE%"=="0" goto :cleanup
 if not errorlevel 1 (
   if exist "%ROOT%\src\capabilities\algorithm_library\algorithm_catalog.json" copy /Y "%ROOT%\src\capabilities\algorithm_library\algorithm_catalog.json" "%APP_LIBRARY_DIR%\" >nul
   if exist "%ROOT%\src\capabilities\algorithm_library\agents.md" copy /Y "%ROOT%\src\capabilities\algorithm_library\agents.md" "%APP_LIBRARY_DIR%\" >nul
 )
+:cleanup
 popd
 exit /b %EXITCODE%
+
+:SyncAlgorithmFolder
+setlocal EnableExtensions
+set "SOURCE_DIR=%~1"
+for %%I in ("%SOURCE_DIR%") do set "ALG_NAME=%%~nxI"
+set "DEST_DIR=%APP_LIBRARY_DIR%\%ALG_NAME%"
+if not exist "%DEST_DIR%" mkdir "%DEST_DIR%"
+if errorlevel 1 exit /b 1
+
+for %%E in (json vert frag spv) do (
+  if exist "%SOURCE_DIR%\*.%%E" (
+    copy /Y "%SOURCE_DIR%\*.%%E" "%DEST_DIR%\" >nul
+    if errorlevel 1 exit /b 1
+  )
+)
+
+for %%C in (Debug Release) do (
+  if exist "%SOURCE_DIR%\%%C\*.dll" (
+    copy /Y "%SOURCE_DIR%\%%C\*.dll" "%DEST_DIR%\" >nul
+    if errorlevel 1 exit /b 1
+  )
+  if exist "%SOURCE_DIR%\%%C\*.pdb" (
+    copy /Y "%SOURCE_DIR%\%%C\*.pdb" "%DEST_DIR%\" >nul
+    if errorlevel 1 exit /b 1
+  )
+)
+
+endlocal
+exit /b 0

@@ -3,11 +3,18 @@
 #include "algorithm_management/algorithm_manager.h"
 
 #include <algorithm>
+#include <cassert>
 #include <utility>
 
 namespace agent {
 
 namespace {
+
+#ifndef NDEBUG
+#define DEBUG_TOOL_ASSERT(condition, message) assert((condition) && (message))
+#else
+#define DEBUG_TOOL_ASSERT(condition, message) ((void)0)
+#endif
 
 void _CollectDebugState(
   const AlgorithmObject& object,
@@ -243,21 +250,34 @@ bool Agent::MountAlgorithm(
     return false;
   }
   if (!BeginAlgorithmAssembly(algorithm_index)) {
+    DEBUG_TOOL_ASSERT(false, "Failed to begin algorithm assembly.");
     MarkAlgorithmAssemblyFailed(algorithm_index);
-    RemoveAlgorithm(algorithm_index);
     set_error("Failed to begin algorithm assembly.");
     return false;
   }
 
   AlgorithmObject* mounted_algorithm_object = algorithm_object(algorithm_index);
   if (!mounted_algorithm_object) {
+    DEBUG_TOOL_ASSERT(false, "Failed to access algorithm object.");
     MarkAlgorithmAssemblyFailed(algorithm_index);
-    RemoveAlgorithm(algorithm_index);
     set_error("Failed to access algorithm object.");
     return false;
   }
   mounted_algorithm_object->SetContainerSet(std::move(built_mount.container_set));
   MarkAlgorithmAssemblyReady(algorithm_index);
+
+  AgentAlgorithmRuntimeState* runtime_state = algorithm_runtime_state(algorithm_index);
+  if (runtime_state) {
+    AlgorithmReflectionSnapshot reflection_snapshot{};
+    if (CollectAlgorithmReflection(algorithm_index, &reflection_snapshot)) {
+      runtime_state->reflection_snapshot = std::move(reflection_snapshot);
+    }
+    if (mounted_algorithm_object->algorithm_reflector) {
+      DEBUG_TOOL_ASSERT(
+        runtime_state->reflection_snapshot.valid,
+        "Mounted algorithm reflector did not produce a valid reflection snapshot.");
+    }
+  }
 
   if (out_index) {
     *out_index = algorithm_index;
@@ -356,6 +376,7 @@ bool Agent::SubmitAlgorithm(
       bool gpu_tick_executed = false;
       if (object.execution_preference == AlgorithmExecutionPreference::Gpu) {
         if (!object.gpu_symbol) {
+          DEBUG_TOOL_ASSERT(false, "Ready GPU algorithm is missing a GPU symbol.");
           runtime_state.algorithm_to_agent_signal.stop_requested = true;
         } else {
           std::string gpu_error_message;
@@ -365,6 +386,7 @@ bool Agent::SubmitAlgorithm(
             context,
             &gpu_error_message);
           if (!gpu_tick_executed) {
+            DEBUG_TOOL_ASSERT(false, "GPU algorithm execution failed.");
             runtime_state.algorithm_to_agent_signal.stop_requested = true;
           } else {
             algorithm_execution_end_queue_.push_back(i);
@@ -372,6 +394,7 @@ bool Agent::SubmitAlgorithm(
         }
       } else {
         if (!object.cpu_symbol || !object.temporaryTest_main_thread_executor) {
+          DEBUG_TOOL_ASSERT(false, "Ready CPU algorithm is missing its main-thread executor.");
           runtime_state.algorithm_to_agent_signal.stop_requested = true;
         } else if (!algorithm_management::job_cpu::Execute(
                      object,
@@ -380,21 +403,22 @@ bool Agent::SubmitAlgorithm(
                      algorithm_objects_[i].mutable_container_set(),
                      &runtime_state.algorithm_to_agent_signal,
                      &runtime_state.debug_state)) {
+          DEBUG_TOOL_ASSERT(false, "CPU algorithm execution failed.");
           runtime_state.algorithm_to_agent_signal.stop_requested = true;
         }
       }
+      const bool has_runtime_reflector = object.algorithm_reflector && !object.algorithm_reflector->empty();
       const bool needs_gpu_state_sync =
         gpu_tick_executed &&
-        algorithm_objects_[i].container_set() &&
-        (
-          (object.algorithm_reflector && !object.algorithm_reflector->empty()) ||
-          runtime_state.agent_to_algorithm_signal.reflection_collection_requested);
+        has_runtime_reflector &&
+        algorithm_objects_[i].container_set();
       if (needs_gpu_state_sync) {
         std::string gpu_sync_error_message;
         if (!algorithm_management::job_gpu::Synchronize(
               object,
               algorithm_objects_[i].mutable_container_set(),
               &gpu_sync_error_message)) {
+          DEBUG_TOOL_ASSERT(false, "GPU synchronization failed.");
           runtime_state.algorithm_to_agent_signal.stop_requested = true;
         }
       }
@@ -404,16 +428,22 @@ bool Agent::SubmitAlgorithm(
         runtime_state.debug_state.signals.end(),
         collected_debug_state.signals.begin(),
         collected_debug_state.signals.end());
-      const bool has_runtime_reflector = object.algorithm_reflector && !object.algorithm_reflector->empty();
-      if (has_runtime_reflector && algorithm_objects_[i].container_set() &&
-          _CollectReflectionSnapshot(object, *algorithm_objects_[i].container_set(), &runtime_state.reflection_snapshot)) {
-        runtime_state.algorithm_to_agent_signal.reflection_collection_requested = true;
-      } else if (runtime_state.agent_to_algorithm_signal.reflection_collection_requested) {
-        runtime_state.algorithm_to_agent_signal.reflection_collection_requested = true;
-        if (algorithm_objects_[i].container_set() &&
-            _CollectReflectionSnapshot(object, *algorithm_objects_[i].container_set(), &runtime_state.reflection_snapshot)) {
+      if (has_runtime_reflector) {
+        if (!algorithm_objects_[i].container_set()) {
+          DEBUG_TOOL_ASSERT(false, "Runtime reflection snapshot requires a container set.");
+          runtime_state.algorithm_to_agent_signal.stop_requested = true;
+        } else if (!_CollectReflectionSnapshot(
+                     object,
+                     *algorithm_objects_[i].container_set(),
+                     &runtime_state.reflection_snapshot)) {
+          DEBUG_TOOL_ASSERT(false, "Runtime reflection snapshot could not be collected.");
+          runtime_state.algorithm_to_agent_signal.stop_requested = true;
+        } else {
           runtime_state.algorithm_to_agent_signal.reflection_collection_requested = true;
         }
+      } else if (runtime_state.agent_to_algorithm_signal.reflection_collection_requested) {
+        DEBUG_TOOL_ASSERT(false, "Reflection was requested but the algorithm has no runtime reflector.");
+        runtime_state.algorithm_to_agent_signal.stop_requested = true;
       }
       runtime_state.algorithm_to_agent_signal.intervention_applied =
         runtime_state.algorithm_to_agent_signal.intervention_applied ||

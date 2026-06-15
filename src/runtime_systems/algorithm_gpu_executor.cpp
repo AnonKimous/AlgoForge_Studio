@@ -9,6 +9,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <stdexcept>
 #include <unordered_map>
 #include <utility>
@@ -73,6 +74,20 @@ void _CheckVkResult(VkResult err) {
   if (err != VK_SUCCESS) {
     throw std::runtime_error(_MakeVkErrorMessage("Vulkan call", err));
   }
+}
+
+VkDeviceSize _GrowBufferSize(VkDeviceSize current_size, VkDeviceSize required_size) {
+  const VkDeviceSize minimum_size = std::max(required_size, static_cast<VkDeviceSize>(1u));
+  if (current_size == 0u) {
+    return minimum_size;
+  }
+
+  const VkDeviceSize half = std::max(current_size / 2u, static_cast<VkDeviceSize>(1u));
+  if (current_size > std::numeric_limits<VkDeviceSize>::max() - half) {
+    return minimum_size;
+  }
+
+  return std::max(minimum_size, current_size + half);
 }
 
 std::vector<std::byte> _ReadBinaryFile(const std::string& path) {
@@ -315,9 +330,10 @@ class AlgorithmGpuExecutorImpl {
         GpuBufferPairResource& buffer_pair = working_state.buffers[buffer_index];
         const VkDeviceSize required_size = static_cast<VkDeviceSize>(container->bytes.size());
 
-        if (buffer_pair.input.buffer == VK_NULL_HANDLE || buffer_pair.input.size_bytes != required_size) {
+        if (buffer_pair.input.buffer == VK_NULL_HANDLE || buffer_pair.input.size_bytes < required_size) {
+          const VkDeviceSize grow_size = _GrowBufferSize(buffer_pair.input.size_bytes, required_size);
           _DestroyBuffer(buffer_pair.input);
-          if (!_CreateStorageBuffer(required_size, &buffer_pair.input)) {
+          if (!_CreateStorageBuffer(grow_size, &buffer_pair.input)) {
             _ThrowGpuTickError(
               "Failed to create GPU buffer for '" + binding.container_name + "'.",
               out_error_message);
@@ -329,9 +345,10 @@ class AlgorithmGpuExecutorImpl {
             0u,
             buffer_pair.input.size_bytes));
         }
-        if (buffer_pair.output.buffer == VK_NULL_HANDLE || buffer_pair.output.size_bytes != required_size) {
+        if (buffer_pair.output.buffer == VK_NULL_HANDLE || buffer_pair.output.size_bytes < required_size) {
+          const VkDeviceSize grow_size = _GrowBufferSize(buffer_pair.output.size_bytes, required_size);
           _DestroyBuffer(buffer_pair.output);
-          if (!_CreateStorageBuffer(required_size, &buffer_pair.output)) {
+          if (!_CreateStorageBuffer(grow_size, &buffer_pair.output)) {
             _ThrowGpuTickError(
               "Failed to create GPU output buffer for '" + binding.container_name + "'.",
               out_error_message);

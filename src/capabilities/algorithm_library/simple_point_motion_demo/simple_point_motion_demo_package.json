@@ -1,0 +1,84 @@
+{
+  "algorithm_name": "simple_point_motion_demo",
+  "globalCfg": {
+    "solvePrecision": "fp32",
+    "defaultPrecision": "fp32"
+  },
+  "container": {
+    "variable": 3,
+    "variableArray": {
+      "a1": {
+        "shape": [3, 3, 3],
+        "count": 1
+      }
+    }
+  },
+  "decomposer": {
+    "res": {
+      "buffer": {}
+    },
+    "description": [
+      {
+        "name": "point_position",
+        "from": ["start_x", "start_y", "start_z"],
+        "to": ["v1", "v2", "v3"]
+      }
+    ]
+  },
+  "reflector": {
+    "name": "positionABS",
+    "functionName": "direct",
+    "items": [
+      {
+        "name": "positionABS",
+        "from": ["a1"],
+        "to": ["positionABS"],
+        "reflectFun": "direct"
+      }
+    ]
+  },
+  "intervention": {
+    "stages": {
+      "afterTick": {
+        "stage_name": "afterTick",
+        "stage_kind": "afterTick",
+        "used_algorithm_containers": {
+          "arrays": [
+            {
+              "name": "a1",
+              "kind": "array",
+              "tuple_width": 3,
+              "required": true
+            }
+          ],
+          "variables": []
+        },
+        "shader": {
+          "pipeline": "graphics",
+          "vertex": "simple_point_motion_demo_gpu_tick.vert",
+          "fragment": "simple_point_motion_demo_gpu_tick.frag"
+        }
+      },
+      "resultRender": {
+        "stage_name": "resultRender",
+        "stage_kind": "resultRender",
+        "used_algorithm_containers": {
+          "arrays": [
+            {
+              "name": "a1",
+              "kind": "array",
+              "tuple_width": 3,
+              "required": true
+            }
+          ],
+          "variables": []
+        },
+        "shader": {
+          "pipeline": "graphics",
+          "vertex": "simple_point_motion_demo_result_render.vert",
+          "fragment": "simple_point_motion_demo_result_render.frag"
+        }
+      }
+    }
+  }
+}

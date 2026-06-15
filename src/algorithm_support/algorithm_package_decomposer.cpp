@@ -114,6 +114,87 @@ std::vector<uint32_t> _GetPackageUintList(const cJSON* item) {
   return values;
 }
 
+bool _ParsePackageDecomposerBinding(
+  const cJSON* binding_item,
+  const std::string& package_path,
+  PackageDecomposerDescriptionBinding* out_binding,
+  std::string* out_error_message) {
+  if (!binding_item || !cJSON_IsObject(binding_item) || !out_binding) {
+    _SetErrorMessage(out_error_message, "Invalid description binding in package JSON: " + package_path);
+    return false;
+  }
+
+  out_binding->from_names = _GetPackageStringList(cJSON_GetObjectItemCaseSensitive(binding_item, "from"));
+  const cJSON* to_item = cJSON_GetObjectItemCaseSensitive(binding_item, "to");
+  if (to_item && cJSON_IsObject(to_item)) {
+    out_binding->target_container_name = _GetPackageStringField(to_item, "container");
+    out_binding->target_indices = _GetPackageUintList(cJSON_GetObjectItemCaseSensitive(to_item, "indices"));
+  } else {
+    out_binding->target_container_names = _GetPackageStringList(to_item);
+  }
+
+  if (out_binding->from_names.empty()) {
+    _SetErrorMessage(out_error_message, "Description binding is missing source names: " + package_path);
+    return false;
+  }
+  if (out_binding->target_container_name.empty() &&
+      out_binding->target_container_names.empty() &&
+      out_binding->target_indices.empty()) {
+    _SetErrorMessage(out_error_message, "Description binding is missing targets: " + package_path);
+    return false;
+  }
+  return true;
+}
+
+bool _ParsePackageDecomposerDescriptionEntry(
+  const cJSON* entry_item,
+  const std::string& package_path,
+  PackageDecomposerDescriptionEntry* out_entry,
+  std::string* out_error_message) {
+  if (!entry_item || !cJSON_IsObject(entry_item) || !out_entry) {
+    _SetErrorMessage(out_error_message, "Invalid description entry in package JSON: " + package_path);
+    return false;
+  }
+
+  out_entry->name = _GetPackageStringField(entry_item, "name");
+  if (out_entry->name.empty()) {
+    _SetErrorMessage(out_error_message, "Description entry is missing a name: " + package_path);
+    return false;
+  }
+
+  PackageDecomposerDescriptionBinding binding{};
+  if (!_ParsePackageDecomposerBinding(entry_item, package_path, &binding, out_error_message)) {
+    return false;
+  }
+  out_entry->bindings.push_back(std::move(binding));
+  return true;
+}
+
+bool _ParsePackageDecomposerResourceGroup(
+  const cJSON* group_item,
+  const std::string& resource_kind,
+  const std::string& package_path,
+  PackageDecomposerSchema* out_schema,
+  std::string* out_error_message) {
+  if (!group_item || !cJSON_IsObject(group_item) || !out_schema) {
+    _SetErrorMessage(out_error_message, "Invalid resource group in package JSON: " + package_path);
+    return false;
+  }
+
+  for (const cJSON* child = group_item->child; child; child = child->next) {
+    if (!child->string || !*child->string || !cJSON_IsString(child) || !child->valuestring) {
+      _SetErrorMessage(out_error_message, "Invalid resource binding in package JSON: " + package_path);
+      return false;
+    }
+    out_schema->mesh_bindings.push_back(PackageDecomposerMeshBinding{
+      .resource_kind = resource_kind,
+      .resource_name = child->string,
+      .container_name = child->valuestring,
+    });
+  }
+  return true;
+}
+
 std::filesystem::path _BuildPackageJsonPath(const algorithm::AlgorithmPackageLocation& package_location) {
   const std::string algorithm_name = package_location.algorithm_name.empty()
     ? package_location.manifest_name
@@ -156,31 +237,36 @@ PackageDecomposerSchema _LoadPackageDecomposerSchema(
 
   const cJSON* decomposer = cJSON_GetObjectItemCaseSensitive(root, "decomposer");
   if (!decomposer || !cJSON_IsObject(decomposer)) {
+    schema.error_message = "Decomposer JSON file is missing a 'decomposer' object: " + package_json_path.generic_string();
     cJSON_Delete(root);
-    schema.valid = true;
     return schema;
   }
 
   const cJSON* res = cJSON_GetObjectItemCaseSensitive(decomposer, "res");
-  if (res && cJSON_IsObject(res)) {
-    for (const cJSON* kind_item = res->child; kind_item; kind_item = kind_item->next) {
-      if (!kind_item->string || !*kind_item->string || !cJSON_IsObject(kind_item)) {
-        schema.error_message = "Invalid resource group in package JSON: " + package_json_path.generic_string();
-        cJSON_Delete(root);
-        return schema;
-      }
-      for (const cJSON* child = kind_item->child; child; child = child->next) {
-        if (!child->string || !*child->string || !cJSON_IsString(child) || !child->valuestring) {
-          schema.error_message = "Invalid resource binding in package JSON: " + package_json_path.generic_string();
-          cJSON_Delete(root);
-          return schema;
-        }
-        schema.mesh_bindings.push_back(PackageDecomposerMeshBinding{
-          .resource_kind = kind_item->string,
-          .resource_name = child->string,
-          .container_name = child->valuestring,
-        });
-      }
+  if (!res || !cJSON_IsObject(res)) {
+    schema.error_message = "Decomposer JSON file is missing a 'res' object: " + package_json_path.generic_string();
+    cJSON_Delete(root);
+    return schema;
+  }
+  for (const cJSON* kind_item = res->child; kind_item; kind_item = kind_item->next) {
+    if (!kind_item->string || !*kind_item->string) {
+      schema.error_message = "Invalid resource group in package JSON: " + package_json_path.generic_string();
+      cJSON_Delete(root);
+      return schema;
+    }
+    if (!cJSON_IsObject(kind_item)) {
+      schema.error_message = "Invalid resource group payload in package JSON: " + package_json_path.generic_string();
+      cJSON_Delete(root);
+      return schema;
+    }
+    if (!_ParsePackageDecomposerResourceGroup(
+          kind_item,
+          kind_item->string,
+          package_json_path.generic_string(),
+          &schema,
+          &schema.error_message)) {
+      cJSON_Delete(root);
+      return schema;
     }
   }
 
@@ -190,39 +276,15 @@ PackageDecomposerSchema _LoadPackageDecomposerSchema(
     schema.description_entries.reserve(description_count > 0 ? static_cast<size_t>(description_count) : 0u);
     for (int i = 0; i < description_count; ++i) {
       const cJSON* entry_item = cJSON_GetArrayItem(description, i);
-      if (!entry_item || !cJSON_IsObject(entry_item)) {
-        schema.error_message = "Invalid description entry in package JSON: " + package_json_path.generic_string();
-        cJSON_Delete(root);
-        return schema;
-      }
-
       PackageDecomposerDescriptionEntry entry{};
-      entry.name = _GetPackageStringField(entry_item, "name");
-      PackageDecomposerDescriptionBinding binding{};
-      binding.from_names = _GetPackageStringList(cJSON_GetObjectItemCaseSensitive(entry_item, "from"));
-      const cJSON* to_item = cJSON_GetObjectItemCaseSensitive(entry_item, "to");
-      if (to_item && cJSON_IsObject(to_item)) {
-        binding.target_container_name = _GetPackageStringField(to_item, "container");
-        binding.target_indices = _GetPackageUintList(cJSON_GetObjectItemCaseSensitive(to_item, "indices"));
-      } else {
-        binding.target_container_names = _GetPackageStringList(to_item);
-      }
-
-      if (binding.from_names.empty()) {
-        schema.error_message = "Description entry is missing source names: " + package_json_path.generic_string();
+      if (!_ParsePackageDecomposerDescriptionEntry(
+            entry_item,
+            package_json_path.generic_string(),
+            &entry,
+            &schema.error_message)) {
         cJSON_Delete(root);
         return schema;
       }
-      if (binding.target_container_name.empty() &&
-          binding.target_container_names.empty() &&
-          binding.target_indices.empty()) {
-        schema.error_message = "Description entry is missing targets: " + package_json_path.generic_string();
-        cJSON_Delete(root);
-        return schema;
-      }
-
-      entry.bindings.push_back(std::move(binding));
-
       schema.description_entries.push_back(std::move(entry));
     }
   }

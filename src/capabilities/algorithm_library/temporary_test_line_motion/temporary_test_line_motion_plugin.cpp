@@ -805,7 +805,7 @@ class TemporaryTestLineMotionMainThreadExecutor final : public agent::IAlgorithm
       *algorithm_to_agent_signal = {};
     }
     if (debug_state) {
-      debug_state->signals.push_back(algorithm_support::AdvancedAlgorithmDebugSignal{
+      debug_state->signals.push_back(algorithm_management::AdvancedAlgorithmDebugSignal{
         .name = "temporary_test_line_motion.body",
         .payload = "Advanced a1 on the main thread.",
       });

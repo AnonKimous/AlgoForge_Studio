@@ -1,0 +1,308 @@
+{
+  "algorithm_name": "v6a6_pbd_ball_collision_demo",
+  "globalCfg": {
+    "solvePrecision": "fp32",
+    "defaultPrecision": "fp32"
+  },
+  "container": {
+    "variable": {
+      "boundary_left": {
+        "count": 1
+      },
+      "boundary_right": {
+        "count": 1
+      },
+      "boundary_bottom": {
+        "count": 1
+      },
+      "boundary_top": {
+        "count": 1
+      },
+      "ball_radius": {
+        "count": 1
+      },
+      "collision_count": {
+        "count": 1
+      }
+    },
+    "variableArray": {
+      "ball_pos_x": {
+        "count": 37
+      },
+      "ball_pos_y": {
+        "count": 37
+      },
+      "ball_vel_x": {
+        "count": 37
+      },
+      "ball_vel_y": {
+        "count": 37
+      },
+      "bvh_x": {
+        "count": 145
+      },
+      "bvh_y": {
+        "count": 145
+      }
+    }
+  },
+  "decomposer": {
+    "res": {},
+    "description": [
+      {
+        "name": "boundary_left",
+        "from": ["boundary_left"],
+        "to": ["boundary_left"]
+      },
+      {
+        "name": "boundary_right",
+        "from": ["boundary_right"],
+        "to": ["boundary_right"]
+      },
+      {
+        "name": "boundary_bottom",
+        "from": ["boundary_bottom"],
+        "to": ["boundary_bottom"]
+      },
+      {
+        "name": "boundary_top",
+        "from": ["boundary_top"],
+        "to": ["boundary_top"]
+      },
+      {
+        "name": "ball_radius",
+        "from": ["ball_radius"],
+        "to": ["ball_radius"]
+      },
+      {
+        "name": "collision_count",
+        "from": ["collision_count"],
+        "to": ["collision_count"]
+      },
+      {
+        "name": "boundary_left_bvh",
+        "from": ["boundary_left"],
+        "to": {
+          "container": "bvh_x",
+          "indices": [1]
+        }
+      },
+      {
+        "name": "boundary_right_bvh",
+        "from": ["boundary_right"],
+        "to": {
+          "container": "bvh_x",
+          "indices": [2]
+        }
+      },
+      {
+        "name": "boundary_bottom_bvh",
+        "from": ["boundary_bottom"],
+        "to": {
+          "container": "bvh_y",
+          "indices": [1]
+        }
+      },
+      {
+        "name": "boundary_top_bvh",
+        "from": ["boundary_top"],
+        "to": {
+          "container": "bvh_y",
+          "indices": [2]
+        }
+      },
+      {
+        "name": "ball_radius_bvh_x",
+        "from": ["ball_radius"],
+        "to": {
+          "container": "bvh_x",
+          "indices": [3]
+        }
+      },
+      {
+        "name": "ball_radius_bvh_y",
+        "from": ["ball_radius"],
+        "to": {
+          "container": "bvh_y",
+          "indices": [3]
+        }
+      },
+      {
+        "name": "collision_count_bvh_x",
+        "from": ["collision_count"],
+        "to": {
+          "container": "bvh_x",
+          "indices": [4]
+        }
+      },
+      {
+        "name": "collision_count_bvh_y",
+        "from": ["collision_count"],
+        "to": {
+          "container": "bvh_y",
+          "indices": [4]
+        }
+      }
+    ]
+  },
+  "reflector": {
+    "name": "collision_state",
+    "functionName": "direct",
+    "items": [
+      {
+        "name": "boundary_left",
+        "from": ["boundary_left"],
+        "to": ["boundary_left"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "boundary_right",
+        "from": ["boundary_right"],
+        "to": ["boundary_right"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "boundary_bottom",
+        "from": ["boundary_bottom"],
+        "to": ["boundary_bottom"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "boundary_top",
+        "from": ["boundary_top"],
+        "to": ["boundary_top"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "ball_radius",
+        "from": ["ball_radius"],
+        "to": ["ball_radius"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "collision_count",
+        "from": ["collision_count"],
+        "to": ["collision_count"],
+        "reflectFun": "direct"
+      }
+    ]
+  },
+  "intervention": {
+    "stages": {
+      "preTick": {
+        "stage_name": "preTick",
+        "stage_kind": "preTick",
+        "functions": [
+          "InitializeCollisionState"
+        ]
+      },
+      "afterTick": {
+        "stage_name": "afterTick",
+        "stage_kind": "afterTick",
+        "functions": [
+          "BuildBvh",
+          "SolvePbdCollisionStep"
+        ],
+        "used_algorithm_containers": {
+          "arrays": [
+            {
+              "name": "ball_pos_x",
+              "kind": "array",
+              "tuple_width": 1,
+              "required": true
+            },
+            {
+              "name": "ball_pos_y",
+              "kind": "array",
+              "tuple_width": 1,
+              "required": true
+            },
+            {
+              "name": "ball_vel_x",
+              "kind": "array",
+              "tuple_width": 1,
+              "required": true
+            },
+            {
+              "name": "ball_vel_y",
+              "kind": "array",
+              "tuple_width": 1,
+              "required": true
+            },
+            {
+              "name": "bvh_x",
+              "kind": "array",
+              "tuple_width": 1,
+              "required": true
+            },
+            {
+              "name": "bvh_y",
+              "kind": "array",
+              "tuple_width": 1,
+              "required": true
+            }
+          ],
+          "variables": []
+        },
+        "shader": {
+          "pipeline": "graphics",
+          "vertex": "v6a6_pbd_ball_collision_demo_after_tick.vert",
+          "fragment": "v6a6_pbd_ball_collision_demo_after_tick.frag"
+        }
+      },
+      "resultRender": {
+        "stage_name": "resultRender",
+        "stage_kind": "resultRender",
+        "functions": [
+          "RenderBoundaryAndBalls"
+        ],
+        "used_algorithm_containers": {
+          "arrays": [
+            {
+              "name": "ball_pos_x",
+              "kind": "array",
+              "tuple_width": 1,
+              "required": true
+            },
+            {
+              "name": "ball_pos_y",
+              "kind": "array",
+              "tuple_width": 1,
+              "required": true
+            },
+            {
+              "name": "ball_vel_x",
+              "kind": "array",
+              "tuple_width": 1,
+              "required": true
+            },
+            {
+              "name": "ball_vel_y",
+              "kind": "array",
+              "tuple_width": 1,
+              "required": true
+            },
+            {
+              "name": "bvh_x",
+              "kind": "array",
+              "tuple_width": 1,
+              "required": true
+            },
+            {
+              "name": "bvh_y",
+              "kind": "array",
+              "tuple_width": 1,
+              "required": true
+            }
+          ],
+          "variables": []
+        },
+        "shader": {
+          "pipeline": "graphics",
+          "vertex": "v6a6_pbd_ball_collision_demo_result_render.vert",
+          "fragment": "v6a6_pbd_ball_collision_demo_result_render.frag"
+        }
+      }
+    }
+  }
+}

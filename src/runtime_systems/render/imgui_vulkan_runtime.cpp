@@ -4,6 +4,7 @@
 #include "runtime_systems/algorithm_gpu_executor.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cstring>
 #include <cstdint>
 #include <memory>
@@ -16,6 +17,12 @@
 namespace runtime_systems {
 
 namespace {
+
+#ifndef NDEBUG
+#define DEBUG_TOOL_ASSERT(condition, message) assert((condition) && (message))
+#else
+#define DEBUG_TOOL_ASSERT(condition, message) ((void)0)
+#endif
 
 std::string VkErrorMessage(const char* prefix, VkResult err) {
   return std::string(prefix) + " failed: VkResult=" + std::to_string(static_cast<int>(err));
@@ -261,7 +268,10 @@ bool ImGuiVulkanRuntime::FrameRender(ImDrawData* draw_data) {
   CheckVkResult(vkBeginCommandBuffer(fd->CommandBuffer, &begin_info));
 
   if (preview_renderer_) {
-    preview_renderer_->Record(fd->CommandBuffer);
+    if (preview_renderer_->HasRequest()) {
+      const bool preview_recorded = preview_renderer_->Record(fd->CommandBuffer);
+      DEBUG_TOOL_ASSERT(preview_recorded, "Preview request was accepted but could not be rendered.");
+    }
   }
 
   VkRenderPassBeginInfo render_pass_begin_info{};
@@ -367,6 +377,15 @@ bool ImGuiVulkanRuntime::Init(SDL_Window* window, const char* app_name) {
     Destroy();
     return false;
   }
+  if (has_pending_render_preview_request_) {
+    preview_renderer_->SetRequest(pending_render_preview_request_);
+    DEBUG_TOOL_ASSERT(
+      !pending_render_preview_request_.valid || preview_renderer_->HasRequest(),
+      "Pending render preview request was not accepted during runtime initialization.");
+    if (pending_render_preview_request_.valid && preview_renderer_->HasRequest()) {
+      has_pending_render_preview_request_ = false;
+    }
+  }
 
   initialized_ = true;
   return true;
@@ -374,6 +393,13 @@ bool ImGuiVulkanRuntime::Init(SDL_Window* window, const char* app_name) {
 
 bool ImGuiVulkanRuntime::HasRenderPreviewTexture() const {
   return preview_renderer_ ? preview_renderer_->HasTexture() : false;
+}
+
+std::string ImGuiVulkanRuntime::RenderPreviewDebugSummary() const {
+  if (!preview_renderer_) {
+    return "preview_renderer=uninitialized";
+  }
+  return preview_renderer_->DebugSummary();
 }
 
 ImTextureID ImGuiVulkanRuntime::RenderPreviewTextureId() const {
@@ -395,8 +421,22 @@ void ImGuiVulkanRuntime::SetDrawCallback(DrawCallback callback) {
 }
 
 void ImGuiVulkanRuntime::SetRenderPreviewRequest(RenderPreviewRequest request) {
-  if (preview_renderer_) {
-    preview_renderer_->SetRequest(std::move(request));
+  pending_render_preview_request_ = request;
+  has_pending_render_preview_request_ = request.valid;
+
+  if (!preview_renderer_) {
+    DEBUG_TOOL_ASSERT(
+      !request.valid,
+      "A valid render preview request arrived before the preview renderer was initialized.");
+    return;
+  }
+
+  preview_renderer_->SetRequest(std::move(request));
+  DEBUG_TOOL_ASSERT(
+    !pending_render_preview_request_.valid || preview_renderer_->HasRequest(),
+    "Render preview request was not accepted by the preview renderer.");
+  if (preview_renderer_->HasRequest()) {
+    has_pending_render_preview_request_ = false;
   }
 }
 

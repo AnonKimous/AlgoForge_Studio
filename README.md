@@ -28,8 +28,8 @@ This project is a layered Vulkan + SDL3 sandbox for agent-driven physics and ren
 - `common_data` holds shared mesh, math, input, and interaction types.
 - `runtime_systems` owns windowing, ImGui, and Vulkan runtime support.
 - `common_data` also carries the shared packet structs used for algorithm support and intervention payloads.
-- `algorithm_management` owns container-manifest loading and real runtime container creation.
-- `algorithm_support` still contains package-level support / intervention payload helpers, but its public entrypoints are now re-exported through `algorithm_management`.
+- `algorithm_management` owns container-manifest loading, runtime container creation, plugin loading, and the support/intervention helpers that used to live in `algorithm_support`.
+- `algorithm_support` is now an internal source group under the `algorithm_management` build target; external code should include `algorithm_management/algorithm_manager.h`.
 - `agent` sits above `algorithm_management` and owns the runtime agent object, including mount and submit entry points.
 - `capabilities/algorithm_library` is reserved for concrete algorithm package capability bundles.
 - `capabilities/sidecar` hosts optional sidecar capabilities such as mesh import/export.

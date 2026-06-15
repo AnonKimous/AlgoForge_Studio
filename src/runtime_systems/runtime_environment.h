@@ -45,6 +45,7 @@ class RuntimeEnvironment {
   void ClearGpuExecutors();
   void SetExecutionSymbols(RuntimeExecutionSymbols execution_symbols);
   bool HasRenderPreviewTexture() const;
+  std::string RenderPreviewDebugSummary() const;
   ImTextureID RenderPreviewTextureId() const;
   ImVec2 RenderPreviewTextureSize() const;
   void Destroy();

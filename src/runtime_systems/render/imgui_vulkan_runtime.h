@@ -33,6 +33,7 @@ class ImGuiVulkanRuntime {
   void SetRenderPreviewExtent(ImVec2 extent);
   void ClearGpuExecutors();
   bool HasRenderPreviewTexture() const;
+  std::string RenderPreviewDebugSummary() const;
   ImTextureID RenderPreviewTextureId() const;
   ImVec2 RenderPreviewTextureSize() const;
   void Destroy();
@@ -65,6 +66,8 @@ class ImGuiVulkanRuntime {
   bool vulkan_backend_initialized_{false};
   DrawCallback draw_callback_{};
   std::unique_ptr<PreviewRenderer> preview_renderer_{};
+  RenderPreviewRequest pending_render_preview_request_{};
+  bool has_pending_render_preview_request_{false};
 };
 
 }  // namespace runtime_systems

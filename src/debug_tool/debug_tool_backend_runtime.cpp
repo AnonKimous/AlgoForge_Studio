@@ -4,6 +4,7 @@
 #include "cJSON.h"
 
 #include <algorithm>
+#include <cassert>
 #include <chrono>
 #include <cctype>
 #include <cstring>
@@ -14,6 +15,12 @@
 namespace debug_tool_backend {
 
 namespace {
+
+#ifndef NDEBUG
+#define DEBUG_TOOL_ASSERT(condition, message) assert((condition) && (message))
+#else
+#define DEBUG_TOOL_ASSERT(condition, message) ((void)0)
+#endif
 
 std::string _AlgorithmCatalogPath() {
   const std::filesystem::path candidates[] = {
@@ -288,7 +295,7 @@ bool DebugToolBackendRuntime::AttachAlgorithmToAgent(
   std::string* out_error_message,
   debug_tool::AlgorithmMountMode mount_mode,
   debug_tool::AlgorithmExecutionPreference execution_preference) {
-  return agent_manager_.AttachAlgorithmToAgent(
+  const bool attached = agent_manager_.AttachAlgorithmToAgent(
     agent_index,
     algorithm_name,
     _ToAgentResourceBindings(resource_bindings),
@@ -297,6 +304,10 @@ bool DebugToolBackendRuntime::AttachAlgorithmToAgent(
     out_error_message,
     static_cast<agent::AlgorithmMountMode>(static_cast<int>(mount_mode)),
     static_cast<agent::AlgorithmExecutionPreference>(static_cast<int>(execution_preference)));
+  if (!attached) {
+    DEBUG_TOOL_ASSERT(false, "Failed to attach algorithm to the built-in agent.");
+  }
+  return attached;
 }
 
 bool DebugToolBackendRuntime::GetAgentSummary(
@@ -435,6 +446,24 @@ bool DebugToolBackendRuntime::QueryAlgorithmRequestedBindings(
 
   for (const algorithm_management::AlgorithmRequestedResources::RequiredResource& resource :
        requested_resources.required_resources) {
+    if (resource.resource_name.empty()) {
+      DEBUG_TOOL_ASSERT(false, "Requested resource entry is missing a resource name.");
+      if (out_error_message) {
+        *out_error_message =
+          "Backend returned an unreadable requested resource entry without a resource name for '" +
+          algorithm_name + "'.";
+      }
+      return false;
+    }
+    if (resource.resource_kind.empty()) {
+      DEBUG_TOOL_ASSERT(false, "Requested resource entry is missing a resource kind.");
+      if (out_error_message) {
+        *out_error_message =
+          "Backend returned an unreadable requested resource entry without a resource kind for '" +
+          algorithm_name + "'.";
+      }
+      return false;
+    }
     out_resources->push_back(debug_tool::RequestedResourceEntry{
       .resource_name = resource.resource_name,
       .resource_kind = resource.resource_kind,
@@ -443,6 +472,24 @@ bool DebugToolBackendRuntime::QueryAlgorithmRequestedBindings(
   }
   for (const algorithm_management::AlgorithmRequestedDescriptorBindings::DescriptorSlot& descriptor :
        requested_descriptor_bindings.descriptor_slots) {
+    if (descriptor.descriptor_name.empty()) {
+      DEBUG_TOOL_ASSERT(false, "Requested descriptor entry is missing a descriptor name.");
+      if (out_error_message) {
+        *out_error_message =
+          "Backend returned an unreadable requested descriptor entry without a descriptor name for '" +
+          algorithm_name + "'.";
+      }
+      return false;
+    }
+    if (descriptor.container_name.empty()) {
+      DEBUG_TOOL_ASSERT(false, "Requested descriptor entry is missing a container name.");
+      if (out_error_message) {
+        *out_error_message =
+          "Backend returned an unreadable requested descriptor entry without a container name for '" +
+          algorithm_name + "'.";
+      }
+      return false;
+    }
     out_descriptors->push_back(debug_tool::RequestedDescriptorEntry{
       .descriptor_name = descriptor.descriptor_name,
       .container_name = descriptor.container_name,
@@ -456,12 +503,82 @@ bool DebugToolBackendRuntime::QueryAlgorithmRequestedBindings(
   return true;
 }
 
+bool DebugToolBackendRuntime::LoadAlgorithmPackageDefaultBindings(
+  const std::string& algorithm_name,
+  std::vector<debug_tool::AlgorithmResourceBinding>* out_resource_bindings,
+  std::vector<debug_tool::AlgorithmDescriptorValue>* out_descriptor_values,
+  bool* out_has_default_file,
+  std::string* out_error_message) const {
+  if (!out_resource_bindings || !out_descriptor_values) {
+    if (out_error_message) {
+      *out_error_message = "Default binding output pointers are null.";
+    }
+    return false;
+  }
+
+  out_resource_bindings->clear();
+  out_descriptor_values->clear();
+  if (out_has_default_file) {
+    *out_has_default_file = false;
+  }
+
+  std::vector<algorithm_management::AlgorithmResourceBinding> package_resource_bindings;
+  std::vector<algorithm_management::AlgorithmDescriptorValue> package_descriptor_values;
+  bool has_default_file = false;
+  std::string default_error_message;
+  if (!algorithm_management::LoadAlgorithmPackageDefaultBindings(
+        algorithm_name,
+        &package_resource_bindings,
+        &package_descriptor_values,
+        &has_default_file,
+        &default_error_message)) {
+    if (out_error_message) {
+      *out_error_message = default_error_message.empty()
+        ? ("Failed to load default bindings for '" + algorithm_name + "'.")
+        : std::move(default_error_message);
+    }
+    return false;
+  }
+
+  if (!has_default_file) {
+    if (out_error_message) {
+      out_error_message->clear();
+    }
+    return true;
+  }
+
+  out_resource_bindings->reserve(package_resource_bindings.size());
+  for (const algorithm_management::AlgorithmResourceBinding& binding : package_resource_bindings) {
+    out_resource_bindings->push_back(debug_tool::AlgorithmResourceBinding{
+      .resource_name = binding.resource_name,
+      .resource_kind = binding.resource_kind,
+      .source_path = binding.source_path,
+      .required = true,
+    });
+  }
+  out_descriptor_values->reserve(package_descriptor_values.size());
+  for (const algorithm_management::AlgorithmDescriptorValue& value : package_descriptor_values) {
+    out_descriptor_values->push_back(debug_tool::AlgorithmDescriptorValue{
+      .descriptor_name = value.descriptor_name,
+      .scalar_value = value.scalar_value,
+    });
+  }
+  if (out_has_default_file) {
+    *out_has_default_file = true;
+  }
+  if (out_error_message) {
+    out_error_message->clear();
+  }
+  return true;
+}
+
 bool DebugToolBackendRuntime::BuildRenderPreviewRequest(
   size_t agent_index,
   size_t algorithm_index,
   runtime_systems::RenderPreviewRequest* out_request,
   std::string* out_error_message) const {
   if (!out_request) {
+    DEBUG_TOOL_ASSERT(false, "Preview request output pointer is null.");
     if (out_error_message) {
       *out_error_message = "Preview request output pointer is null.";
     }
@@ -472,6 +589,7 @@ bool DebugToolBackendRuntime::BuildRenderPreviewRequest(
 
   const std::shared_ptr<agent::Agent> managed_agent = agent_manager_.agent(agent_index);
   if (!managed_agent) {
+    DEBUG_TOOL_ASSERT(false, "Managed agent is unavailable.");
     if (out_error_message) {
       *out_error_message = "Managed agent is unavailable.";
     }
@@ -480,12 +598,14 @@ bool DebugToolBackendRuntime::BuildRenderPreviewRequest(
 
   const agent::AlgorithmObject* object = managed_agent->algorithm_object(algorithm_index);
   if (!object || !object->intervention) {
+    DEBUG_TOOL_ASSERT(false, "Algorithm has no intervention for preview rendering.");
     return false;
   }
   const std::string algorithm_name = object->algorithm_profile.algorithm_name;
 
   std::vector<agent::AlgorithmInterventionStageSpec> stage_specs;
   if (!object->intervention->GetInterventionStageSpecs(&stage_specs) || stage_specs.empty()) {
+    DEBUG_TOOL_ASSERT(false, "Algorithm intervention did not expose any stages.");
     return false;
   }
 
@@ -497,9 +617,11 @@ bool DebugToolBackendRuntime::BuildRenderPreviewRequest(
     }
   }
   if (!result_stage) {
+    DEBUG_TOOL_ASSERT(false, "Algorithm intervention did not expose a result-render stage.");
     return false;
   }
   if (result_stage->shader.vertex_shader_path.empty() || result_stage->shader.fragment_shader_path.empty()) {
+    DEBUG_TOOL_ASSERT(false, "Result-render stage is missing shader paths.");
     if (out_error_message) {
       *out_error_message = "Result-render stage is missing shader paths.";
     }
@@ -508,6 +630,7 @@ bool DebugToolBackendRuntime::BuildRenderPreviewRequest(
 
   const AlgorithmContainerSet* container_set = object->container_set();
   if (!container_set) {
+    DEBUG_TOOL_ASSERT(false, "Algorithm container set is unavailable for preview rendering.");
     if (out_error_message) {
       *out_error_message = "Algorithm container set is unavailable.";
     }
@@ -530,6 +653,7 @@ bool DebugToolBackendRuntime::BuildRenderPreviewRequest(
   for (const agent::AlgorithmInterventionContainerBinding& binding : result_stage->used_algorithm_containers) {
     const AlgorithmContainer* container = FindAlgorithmContainer(*container_set, binding.container_name);
     if (!container) {
+      DEBUG_TOOL_ASSERT(false, "Required preview container is missing.");
       if (binding.required) {
         if (out_error_message) {
           *out_error_message = "Missing preview container: " + binding.container_name;
@@ -540,6 +664,7 @@ bool DebugToolBackendRuntime::BuildRenderPreviewRequest(
       continue;
     }
     if (container->storage_kind != AlgorithmContainerStorageKind::Array) {
+      DEBUG_TOOL_ASSERT(false, "Preview container is not an array.");
       if (out_error_message) {
         *out_error_message = "Preview container is not an array: " + binding.container_name;
       }
@@ -554,6 +679,7 @@ bool DebugToolBackendRuntime::BuildRenderPreviewRequest(
     const bool has_reflected_bytes = reflected_value && !reflected_value->bytes.empty();
     const bool has_container_bytes = !container->bytes.empty();
     if (container->element_stride == 0u || (!has_reflected_bytes && !has_container_bytes)) {
+      DEBUG_TOOL_ASSERT(false, "Preview container has no drawable data.");
       if (binding.required) {
         if (out_error_message) {
           *out_error_message = "Preview container has no data: " + binding.container_name;
@@ -584,6 +710,7 @@ bool DebugToolBackendRuntime::BuildRenderPreviewRequest(
   }
 
   if (out_request->storage_buffers.empty()) {
+    DEBUG_TOOL_ASSERT(false, "Result-render stage did not expose any usable array container.");
     if (out_error_message) {
       *out_error_message = "Result-render stage does not expose any usable array container.";
     }
@@ -593,8 +720,19 @@ bool DebugToolBackendRuntime::BuildRenderPreviewRequest(
 
   out_request->instance_count = instance_count;
   out_request->valid = out_request->instance_count > 0u;
-  if (!out_request->valid && out_error_message) {
-    *out_error_message = "Preview request has no drawable instances.";
+  if (!out_request->valid) {
+    DEBUG_TOOL_ASSERT(false, "Preview request has no drawable instances.");
+    if (out_error_message) {
+      *out_error_message = "Preview request has no drawable instances.";
+    }
+  }
+  if (out_request->valid) {
+    DEBUG_TOOL_ASSERT(
+      !out_request->storage_buffers.empty(),
+      "Preview request must contain at least one storage buffer.");
+    DEBUG_TOOL_ASSERT(
+      !out_request->stage_name.empty(),
+      "Preview request must contain a stage name.");
   }
   return out_request->valid;
 }

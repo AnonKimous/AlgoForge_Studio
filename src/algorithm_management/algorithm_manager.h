@@ -1,11 +1,16 @@
 #pragma once
 
+#include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 #define ALGORITHM_MANAGEMENT_LAYER_PUBLIC_FACADE_INCLUDE 1
+#include "algorithm_support/algorithm_intervention.h"
 #include "algorithm_support/algorithm_container_manifest.h"
 #include "algorithm_support/algorithm_protocol.h"
 #include "algorithm_support/algorithm_package_location.h"
+#include "algorithm_support/algorithm_support_manager.h"
 #include "algorithm_support/algorithm_types.h"
 #include "algorithm_management/job_system.h"
 #undef ALGORITHM_MANAGEMENT_LAYER_PUBLIC_FACADE_INCLUDE
@@ -57,6 +62,26 @@ inline bool CreateAlgorithmObjectFromLocation(
     out_error_message);
 }
 
+inline bool CreateAlgorithmPackageContainerSetFromLocation(
+  const ::algorithm::AlgorithmPackageLocation& package_location,
+  std::shared_ptr<::algorithm::AlgorithmContainerSet>* out_container_set,
+  std::string* out_error_message = nullptr) {
+  return algorithm_support::CreateAlgorithmPackageContainerSetFromLocation(
+    package_location,
+    out_container_set,
+    out_error_message);
+}
+
+inline bool TryLoadAlgorithmPluginComponents(
+  const ::algorithm::AlgorithmPackageLocation& package_location,
+  AlgorithmPluginComponents* out_components,
+  std::string* out_error_message = nullptr) {
+  return algorithm_support::TryLoadAlgorithmPluginComponents(
+    package_location,
+    out_components,
+    out_error_message);
+}
+
 inline bool QueryAlgorithmRequestedBindings(
   const std::string& algorithm_name,
   AlgorithmRequestedResources* out_requested_resources,
@@ -97,6 +122,47 @@ inline bool QueryAlgorithmRequestedBindings(
     out_error_message);
 }
 
+inline bool LoadAlgorithmPackageDefaultBindings(
+  const std::string& algorithm_name,
+  std::vector<AlgorithmResourceBinding>* out_resource_bindings,
+  std::vector<AlgorithmDescriptorValue>* out_descriptor_values,
+  bool* out_has_default_file = nullptr,
+  std::string* out_error_message = nullptr) {
+  if (!out_resource_bindings || !out_descriptor_values) {
+    if (out_error_message) {
+      *out_error_message = "Default binding output pointers are null.";
+    }
+    return false;
+  }
+
+  out_resource_bindings->clear();
+  out_descriptor_values->clear();
+  if (out_has_default_file) {
+    *out_has_default_file = false;
+  }
+
+  ::algorithm::AlgorithmPackageLocation package_location{};
+  std::string location_error_message;
+  if (!TryResolveAlgorithmPackageLocation(
+        algorithm_name,
+        &package_location,
+        &location_error_message)) {
+    if (out_error_message) {
+      *out_error_message = location_error_message.empty()
+        ? ("Failed to resolve algorithm package location for '" + algorithm_name + "'.")
+        : std::move(location_error_message);
+    }
+    return false;
+  }
+
+  return algorithm_support::LoadAlgorithmPackageDefaultBindingsFromLocation(
+    package_location,
+    out_resource_bindings,
+    out_descriptor_values,
+    out_has_default_file,
+    out_error_message);
+}
+
 inline bool DecomposeAlgorithmObject(
   const ::agent::AlgorithmObject& algorithm_object,
   const std::vector<AlgorithmResourceBinding>& resource_bindings,
@@ -123,6 +189,28 @@ inline bool DecomposeAlgorithmObject(
     descriptor_values,
     container_set,
     out_error_message);
+}
+
+inline IoBufferPacket BuildAlgorithmInterventionPacket(
+  const AlgorithmInterventionDescriptor& descriptor) {
+  return algorithm_support::BuildAlgorithmInterventionPacket(descriptor);
+}
+
+inline bool DecodeAlgorithmInterventionPacket(
+  const IoBufferPacket& packet,
+  DecodedAlgorithmIntervention* decoded) {
+  return algorithm_support::DecodeAlgorithmInterventionPacket(packet, decoded);
+}
+
+inline IoBufferPacket BuildAlgorithmInterventionPacket(
+  const InteractionInterventionRequest& request) {
+  return algorithm_support::BuildAlgorithmInterventionPacket(request);
+}
+
+inline bool DecodeAlgorithmInterventionPacket(
+  const IoBufferPacket& packet,
+  InteractionInterventionRequest* request) {
+  return algorithm_support::DecodeAlgorithmInterventionPacket(packet, request);
 }
 
 }  // namespace algorithm_management

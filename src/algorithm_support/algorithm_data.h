@@ -54,3 +54,12 @@ struct VolumeDescriptor {
 
 }  // namespace algorithm_support
 
+namespace algorithm_management {
+using algorithm_support::AdvancedAlgorithmDebugSignal;
+using algorithm_support::ExplicitPointReflection;
+using algorithm_support::ImpactModelCoderOutput;
+using algorithm_support::ImpactModelSource;
+using algorithm_support::MeshCoderOutput;
+using algorithm_support::MeshCommonReflection;
+using algorithm_support::VolumeDescriptor;
+}  // namespace algorithm_management

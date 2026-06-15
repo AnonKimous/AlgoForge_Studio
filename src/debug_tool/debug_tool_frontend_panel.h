@@ -132,6 +132,7 @@ class DebugToolFrontendPanel {
   void DrawAlgorithmPreviewUi(IDebugToolHost& host);
   void InitializeAgentComposerDefaults();
   void InitializeFileBrowserDefaults();
+  bool RefreshAlgorithmComposerBindings(IDebugToolHost& host, const std::string& algorithm_name);
   void DrawCustomInterventionUi(
     IDebugToolHost& host,
     size_t agent_index,

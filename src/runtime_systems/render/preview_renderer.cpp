@@ -1,9 +1,12 @@
 #include "preview_renderer.h"
 
 #include <algorithm>
+#include <cassert>
 #include <filesystem>
 #include <fstream>
 #include <cstring>
+#include <limits>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -20,6 +23,20 @@ std::string MakeVkErrorMessage(const char* prefix, VkResult err) {
 
 std::vector<VkDynamicState> DynamicStates() {
   return {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+}
+
+VkDeviceSize GrowBufferSize(VkDeviceSize current_size, VkDeviceSize required_size) {
+  const VkDeviceSize minimum_size = std::max(required_size, static_cast<VkDeviceSize>(1u));
+  if (current_size == 0u) {
+    return minimum_size;
+  }
+
+  const VkDeviceSize half = std::max(current_size / 2u, static_cast<VkDeviceSize>(1u));
+  if (current_size > std::numeric_limits<VkDeviceSize>::max() - half) {
+    return minimum_size;
+  }
+
+  return std::max(minimum_size, current_size + half);
 }
 
 }  // namespace
@@ -116,6 +133,14 @@ void PreviewRenderer::ApplyTargetExtent() {
 }
 
 void PreviewRenderer::SetRequest(RenderPreviewRequest request) {
+#ifndef NDEBUG
+  if (request.valid) {
+    assert(!request.stage_name.empty() && "Render preview request is missing a stage name.");
+    assert(!request.vertex_shader_path.empty() && "Render preview request is missing a vertex shader path.");
+    assert(!request.fragment_shader_path.empty() && "Render preview request is missing a fragment shader path.");
+    assert(!request.storage_buffers.empty() && "Render preview request is missing storage buffers.");
+  }
+#endif
   request_ = std::move(request);
   if (!request_.valid) {
     DestroyPipeline();
@@ -123,8 +148,31 @@ void PreviewRenderer::SetRequest(RenderPreviewRequest request) {
   }
 }
 
+bool PreviewRenderer::HasRequest() const {
+  return request_.valid;
+}
+
 bool PreviewRenderer::HasTexture() const {
   return target_.descriptor_set != VK_NULL_HANDLE;
+}
+
+std::string PreviewRenderer::DebugSummary() const {
+  std::ostringstream stream;
+  stream
+    << "request=" << (request_.valid ? "valid" : "none")
+    << " stage=" << (request_.stage_name.empty() ? "<empty>" : request_.stage_name)
+    << " buffers=" << request_.storage_buffers.size()
+    << " instances=" << request_.instance_count
+    << " pipeline=" << (pipeline_.valid ? "ready" : "not_ready")
+    << " target=" << (HasTexture() ? "ready" : "not_ready")
+    << " extent=" << target_.extent.width << "x" << target_.extent.height;
+  if (!request_.vertex_shader_path.empty()) {
+    stream << " vs=" << request_.vertex_shader_path;
+  }
+  if (!request_.fragment_shader_path.empty()) {
+    stream << " fs=" << request_.fragment_shader_path;
+  }
+  return stream.str();
 }
 
 VkDescriptorSet PreviewRenderer::PreviewTextureDescriptorSet() const {
@@ -144,6 +192,7 @@ bool PreviewRenderer::UploadBuffer(
 
   const VkDeviceSize required_size = static_cast<VkDeviceSize>(source_buffer.bytes.size());
   if (buffer_resource->buffer == VK_NULL_HANDLE || buffer_resource->size_bytes < required_size) {
+    const VkDeviceSize grow_size = GrowBufferSize(buffer_resource->size_bytes, required_size);
     if (buffer_resource->buffer != VK_NULL_HANDLE) {
       vmaDestroyBuffer(allocator_, buffer_resource->buffer, buffer_resource->allocation);
       buffer_resource->buffer = VK_NULL_HANDLE;
@@ -154,7 +203,7 @@ bool PreviewRenderer::UploadBuffer(
 
     VkBufferCreateInfo buffer_info{};
     buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    buffer_info.size = std::max<VkDeviceSize>(required_size, 1u);
+    buffer_info.size = grow_size;
     buffer_info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
     buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
@@ -250,12 +299,31 @@ bool PreviewRenderer::CreateTarget() {
     subpass.colorAttachmentCount = 1;
     subpass.pColorAttachments = &color_attachment;
 
+    VkSubpassDependency dependencies[2]{};
+    dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+    dependencies[0].dstSubpass = 0;
+    dependencies[0].srcStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+    dependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependencies[0].srcAccessMask = 0;
+    dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    dependencies[0].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+
+    dependencies[1].srcSubpass = 0;
+    dependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
+    dependencies[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependencies[1].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    dependencies[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    dependencies[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    dependencies[1].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+
     VkRenderPassCreateInfo render_pass_info{};
     render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
     render_pass_info.attachmentCount = 1;
     render_pass_info.pAttachments = &attachment;
     render_pass_info.subpassCount = 1;
     render_pass_info.pSubpasses = &subpass;
+    render_pass_info.dependencyCount = 2;
+    render_pass_info.pDependencies = dependencies;
     CheckVkResult(vkCreateRenderPass(device_, &render_pass_info, nullptr, &target_.render_pass));
 
     VkFramebufferCreateInfo framebuffer_info{};
@@ -542,6 +610,10 @@ bool PreviewRenderer::Record(VkCommandBuffer command_buffer) {
   if (!request_.valid) {
     return false;
   }
+#ifndef NDEBUG
+  assert(!request_.stage_name.empty() && "Preview renderer received an invalid stage name.");
+  assert(!request_.storage_buffers.empty() && "Preview renderer received no storage buffers.");
+#endif
   if (!EnsureTarget()) {
     return false;
   }

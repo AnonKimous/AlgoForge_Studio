@@ -37,6 +37,17 @@ fs::path _BuildPackageJsonPath(const algorithm::AlgorithmPackageLocation& packag
   return package_root / (algorithm_name + "_package.json");
 }
 
+fs::path _BuildPackageDefaultJsonPath(const algorithm::AlgorithmPackageLocation& package_location) {
+  fs::path package_root = package_location.package_root;
+  if (package_root.empty()) {
+    package_root = package_location.manifest_path.parent_path();
+  }
+  if (package_root.empty()) {
+    return {};
+  }
+  return package_root / "default.json";
+}
+
 std::string _ReadPackageTextFile(const std::string& path) {
   std::ifstream file(path, std::ios::binary);
   if (!file) {
@@ -80,6 +91,17 @@ uint32_t _GetUintField(const cJSON* object, const char* key, uint32_t fallback =
     return fallback;
   }
   return static_cast<uint32_t>(item->valuedouble);
+}
+
+std::string _GetStringField(const cJSON* object, const char* key) {
+  if (!object || !key) {
+    return {};
+  }
+  const cJSON* item = cJSON_GetObjectItemCaseSensitive(object, key);
+  if (!item || !cJSON_IsString(item) || !item->valuestring) {
+    return {};
+  }
+  return item->valuestring;
 }
 
 std::vector<uint32_t> _GetShapeField(const cJSON* object) {
@@ -338,20 +360,7 @@ bool _LoadPackageRuntimeReflector(
       return false;
     }
 
-    const cJSON* input = cJSON_GetObjectItemCaseSensitive(item, "input");
-    const cJSON* input_source = input && cJSON_IsObject(input) ? input : item;
     std::vector<std::string> container_names{};
-    const cJSON* varity = cJSON_GetObjectItemCaseSensitive(input_source, "varity");
-    const cJSON* array = cJSON_GetObjectItemCaseSensitive(input_source, "array");
-    if (varity) {
-      const std::vector<std::string> varity_names = _GetStringList(varity);
-      container_names.insert(container_names.end(), varity_names.begin(), varity_names.end());
-    }
-    if (array) {
-      const std::vector<std::string> array_names = _GetStringList(array);
-      container_names.insert(container_names.end(), array_names.begin(), array_names.end());
-    }
-
     std::string reflection_object_name;
     const cJSON* reflect_fun = cJSON_GetObjectItemCaseSensitive(item, "reflectFun");
     const std::string item_filter_name =
@@ -385,22 +394,49 @@ bool _LoadPackageRuntimeReflector(
       continue;
     }
 
-    const cJSON* output = cJSON_GetObjectItemCaseSensitive(item, "output");
-    if (output && cJSON_IsObject(output)) {
-      const cJSON* output_var = cJSON_GetObjectItemCaseSensitive(output, "v");
-      const cJSON* output_arr = cJSON_GetObjectItemCaseSensitive(output, "a");
-      const cJSON* output_kind = output_var && cJSON_IsObject(output_var)
-        ? output_var
-        : (output_arr && cJSON_IsObject(output_arr) ? output_arr : nullptr);
-      if (output_kind) {
-        const cJSON* name_item = cJSON_GetObjectItemCaseSensitive(output_kind, "name");
-        if (name_item && cJSON_IsString(name_item) && name_item->valuestring) {
-          reflection_object_name = name_item->valuestring;
-        }
+    const cJSON* input = cJSON_GetObjectItemCaseSensitive(item, "input");
+    if (!input || !cJSON_IsObject(input)) {
+      cJSON_Delete(root);
+      if (out_error_message) {
+        *out_error_message = "Package reflector item is missing input object: " + package_json_path.generic_string();
       }
+      return false;
     }
-    if (reflection_object_name.empty()) {
-      const cJSON* name_item = cJSON_GetObjectItemCaseSensitive(item, "name");
+
+    const cJSON* varity = cJSON_GetObjectItemCaseSensitive(input, "varity");
+    const cJSON* array = cJSON_GetObjectItemCaseSensitive(input, "array");
+    if (varity) {
+      const std::vector<std::string> varity_names = _GetStringList(varity);
+      container_names.insert(container_names.end(), varity_names.begin(), varity_names.end());
+    }
+    if (array) {
+      const std::vector<std::string> array_names = _GetStringList(array);
+      container_names.insert(container_names.end(), array_names.begin(), array_names.end());
+    }
+    if (container_names.empty()) {
+      cJSON_Delete(root);
+      if (out_error_message) {
+        *out_error_message = "Package reflector item has an empty input list: " + package_json_path.generic_string();
+      }
+      return false;
+    }
+
+    const cJSON* output = cJSON_GetObjectItemCaseSensitive(item, "output");
+    if (!output || !cJSON_IsObject(output)) {
+      cJSON_Delete(root);
+      if (out_error_message) {
+        *out_error_message = "Package reflector item is missing output object: " + package_json_path.generic_string();
+      }
+      return false;
+    }
+
+    const cJSON* output_var = cJSON_GetObjectItemCaseSensitive(output, "v");
+    const cJSON* output_arr = cJSON_GetObjectItemCaseSensitive(output, "a");
+    const cJSON* output_kind = output_var && cJSON_IsObject(output_var)
+      ? output_var
+      : (output_arr && cJSON_IsObject(output_arr) ? output_arr : nullptr);
+    if (output_kind) {
+      const cJSON* name_item = cJSON_GetObjectItemCaseSensitive(output_kind, "name");
       if (name_item && cJSON_IsString(name_item) && name_item->valuestring) {
         reflection_object_name = name_item->valuestring;
       }
@@ -428,6 +464,156 @@ bool _LoadPackageRuntimeReflector(
 
   cJSON_Delete(root);
   return true;
+}
+
+struct PackageDefaultResourceBinding {
+  std::string resource_name;
+  std::string resource_kind;
+  std::string source_path;
+  bool required{true};
+};
+
+struct PackageDefaultDescriptorValue {
+  std::string descriptor_name;
+  float scalar_value{0.0f};
+};
+
+struct PackageDefaultSchema {
+  bool valid{false};
+  bool has_default_file{false};
+  std::vector<PackageDefaultResourceBinding> resource_bindings;
+  std::vector<PackageDefaultDescriptorValue> descriptor_values;
+  std::string error_message;
+};
+
+PackageDefaultSchema _LoadPackageDefaultSchema(
+  const algorithm::AlgorithmPackageLocation& package_location) {
+  PackageDefaultSchema schema{};
+  const fs::path package_default_json_path = _BuildPackageDefaultJsonPath(package_location);
+  if (package_default_json_path.empty()) {
+    schema.error_message = "Failed to resolve package default JSON file.";
+    return schema;
+  }
+
+  std::error_code ec;
+  if (!fs::exists(package_default_json_path, ec) || !fs::is_regular_file(package_default_json_path, ec)) {
+    schema.valid = true;
+    schema.has_default_file = false;
+    return schema;
+  }
+
+  schema.has_default_file = true;
+
+  const std::string json_text = _ReadPackageTextFile(package_default_json_path.generic_string());
+  if (json_text.empty()) {
+    schema.error_message = "Failed to read package default JSON file: " + package_default_json_path.generic_string();
+    return schema;
+  }
+
+  cJSON* root = cJSON_Parse(json_text.c_str());
+  if (!root) {
+    schema.error_message = "Failed to parse package default JSON file: " + package_default_json_path.generic_string();
+    return schema;
+  }
+
+  const std::string algorithm_name = _GetStringField(root, "algorithm_name");
+  const std::string expected_algorithm_name = package_location.algorithm_name.empty()
+    ? package_location.manifest_name
+    : package_location.algorithm_name;
+  if (algorithm_name.empty() || (!expected_algorithm_name.empty() && algorithm_name != expected_algorithm_name)) {
+    schema.error_message =
+      "Package default JSON algorithm_name mismatch: " + package_default_json_path.generic_string();
+    cJSON_Delete(root);
+    return schema;
+  }
+
+  const cJSON* resource_bindings = cJSON_GetObjectItemCaseSensitive(root, "resource_bindings");
+  if (resource_bindings) {
+    if (!cJSON_IsArray(resource_bindings)) {
+      schema.error_message =
+        "Package default JSON resource_bindings must be an array: " + package_default_json_path.generic_string();
+      cJSON_Delete(root);
+      return schema;
+    }
+    const int resource_count = cJSON_GetArraySize(resource_bindings);
+    schema.resource_bindings.reserve(resource_count > 0 ? static_cast<size_t>(resource_count) : 0u);
+    for (int i = 0; i < resource_count; ++i) {
+      const cJSON* item = cJSON_GetArrayItem(resource_bindings, i);
+      if (!item || !cJSON_IsObject(item)) {
+        schema.error_message =
+          "Package default JSON resource binding is invalid: " + package_default_json_path.generic_string();
+        cJSON_Delete(root);
+        return schema;
+      }
+      PackageDefaultResourceBinding binding{};
+      binding.resource_name = _GetStringField(item, "resource_name");
+      binding.resource_kind = _GetStringField(item, "resource_kind");
+      binding.source_path = _GetStringField(item, "source_path");
+      const cJSON* required_item = cJSON_GetObjectItemCaseSensitive(item, "required");
+      if (required_item) {
+        if (!cJSON_IsBool(required_item)) {
+          schema.error_message =
+            "Package default JSON resource binding required field must be boolean: " +
+            package_default_json_path.generic_string();
+          cJSON_Delete(root);
+          return schema;
+        }
+        binding.required = cJSON_IsTrue(required_item);
+      }
+      if (binding.resource_name.empty() || binding.resource_kind.empty()) {
+        schema.error_message =
+          "Package default JSON resource binding is missing a name or kind: " +
+          package_default_json_path.generic_string();
+        cJSON_Delete(root);
+        return schema;
+      }
+      schema.resource_bindings.push_back(std::move(binding));
+    }
+  }
+
+  const cJSON* descriptor_values = cJSON_GetObjectItemCaseSensitive(root, "descriptor_values");
+  if (descriptor_values) {
+    if (!cJSON_IsArray(descriptor_values)) {
+      schema.error_message =
+        "Package default JSON descriptor_values must be an array: " + package_default_json_path.generic_string();
+      cJSON_Delete(root);
+      return schema;
+    }
+    const int descriptor_count = cJSON_GetArraySize(descriptor_values);
+    schema.descriptor_values.reserve(descriptor_count > 0 ? static_cast<size_t>(descriptor_count) : 0u);
+    for (int i = 0; i < descriptor_count; ++i) {
+      const cJSON* item = cJSON_GetArrayItem(descriptor_values, i);
+      if (!item || !cJSON_IsObject(item)) {
+        schema.error_message =
+          "Package default JSON descriptor value is invalid: " + package_default_json_path.generic_string();
+        cJSON_Delete(root);
+        return schema;
+      }
+      PackageDefaultDescriptorValue value{};
+      value.descriptor_name = _GetStringField(item, "descriptor_name");
+      if (value.descriptor_name.empty()) {
+        schema.error_message =
+          "Package default JSON descriptor value is missing descriptor_name: " +
+          package_default_json_path.generic_string();
+        cJSON_Delete(root);
+        return schema;
+      }
+      if (!cJSON_GetObjectItemCaseSensitive(item, "scalar_value") ||
+          !cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(item, "scalar_value"))) {
+        schema.error_message =
+          "Package default JSON descriptor value is missing scalar_value: " +
+          package_default_json_path.generic_string();
+        cJSON_Delete(root);
+        return schema;
+      }
+      value.scalar_value = static_cast<float>(cJSON_GetObjectItemCaseSensitive(item, "scalar_value")->valuedouble);
+      schema.descriptor_values.push_back(std::move(value));
+    }
+  }
+
+  cJSON_Delete(root);
+  schema.valid = true;
+  return schema;
 }
 
 }  // namespace
@@ -562,6 +748,72 @@ bool CreateAlgorithmObjectFromLocation(
   }
 
   *out_group = std::move(group);
+  if (out_error_message) {
+    out_error_message->clear();
+  }
+  return true;
+}
+
+bool LoadAlgorithmPackageDefaultBindingsFromLocation(
+  const algorithm::AlgorithmPackageLocation& package_location,
+  std::vector<algorithm_management::AlgorithmResourceBinding>* out_resource_bindings,
+  std::vector<algorithm_management::AlgorithmDescriptorValue>* out_descriptor_values,
+  bool* out_has_default_file,
+  std::string* out_error_message) {
+  if (!out_resource_bindings || !out_descriptor_values) {
+    if (out_error_message) {
+      *out_error_message = "Default binding output pointers are null.";
+    }
+    return false;
+  }
+
+  out_resource_bindings->clear();
+  out_descriptor_values->clear();
+  if (out_has_default_file) {
+    *out_has_default_file = false;
+  }
+
+  if (!package_location.valid) {
+    if (out_error_message) {
+      *out_error_message = "Algorithm package location is invalid.";
+    }
+    return false;
+  }
+
+  const PackageDefaultSchema schema = _LoadPackageDefaultSchema(package_location);
+  if (!schema.valid) {
+    if (out_error_message) {
+      *out_error_message = schema.error_message;
+    }
+    return false;
+  }
+
+  if (!schema.has_default_file) {
+    if (out_error_message) {
+      out_error_message->clear();
+    }
+    return true;
+  }
+
+  out_resource_bindings->reserve(schema.resource_bindings.size());
+  for (const PackageDefaultResourceBinding& binding : schema.resource_bindings) {
+    out_resource_bindings->push_back(algorithm_management::AlgorithmResourceBinding{
+      .resource_name = binding.resource_name,
+      .resource_kind = binding.resource_kind,
+      .source_path = binding.source_path,
+    });
+  }
+  out_descriptor_values->reserve(schema.descriptor_values.size());
+  for (const PackageDefaultDescriptorValue& value : schema.descriptor_values) {
+    out_descriptor_values->push_back(algorithm_management::AlgorithmDescriptorValue{
+      .descriptor_name = value.descriptor_name,
+      .scalar_value = value.scalar_value,
+    });
+  }
+
+  if (out_has_default_file) {
+    *out_has_default_file = true;
+  }
   if (out_error_message) {
     out_error_message->clear();
   }

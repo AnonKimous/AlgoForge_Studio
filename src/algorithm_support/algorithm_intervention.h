@@ -45,3 +45,8 @@ using algorithm_support::AlgorithmInterventionDescriptor;
 using algorithm_support::AlgorithmInterventionMode;
 using algorithm_support::DecodedAlgorithmIntervention;
 
+namespace algorithm_management {
+using algorithm_support::AlgorithmInterventionDescriptor;
+using algorithm_support::AlgorithmInterventionMode;
+using algorithm_support::DecodedAlgorithmIntervention;
+}  // namespace algorithm_management

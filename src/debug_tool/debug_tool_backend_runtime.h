@@ -5,6 +5,7 @@
 #include "runtime_systems/runtime_environment.h"
 
 #include <chrono>
+#include <cassert>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -43,6 +44,7 @@ class DebugToolBackendRuntime : public IDebugToolHost {
   }
   void StartTicking() override {
     agent_manager_.StartTicking();
+    agent_manager_.Tick(runtime_environment_.input(), runtime_environment_.MousePosition(), frame_dt_);
   }
   void PauseTicking() override {
     agent_manager_.PauseTicking();
@@ -67,6 +69,12 @@ class DebugToolBackendRuntime : public IDebugToolHost {
     std::vector<debug_tool::RequestedResourceEntry>* out_resources,
     std::vector<debug_tool::RequestedDescriptorEntry>* out_descriptors,
     std::string* out_error_message = nullptr) const override;
+  bool LoadAlgorithmPackageDefaultBindings(
+    const std::string& algorithm_name,
+    std::vector<debug_tool::AlgorithmResourceBinding>* out_resource_bindings,
+    std::vector<debug_tool::AlgorithmDescriptorValue>* out_descriptor_values,
+    bool* out_has_default_file = nullptr,
+    std::string* out_error_message = nullptr) const override;
   bool BuildRenderPreviewRequest(
     size_t agent_index,
     size_t algorithm_index,
@@ -76,12 +84,17 @@ class DebugToolBackendRuntime : public IDebugToolHost {
   Vec2 mouse_position() const override { return runtime_environment_.MousePosition(); }
   float frame_dt_seconds() const override { return frame_dt_; }
   bool has_render_preview_texture() const override { return runtime_environment_.HasRenderPreviewTexture(); }
+  std::string render_preview_debug_summary() const override { return runtime_environment_.RenderPreviewDebugSummary(); }
   ImTextureID render_preview_texture_id() const override { return runtime_environment_.RenderPreviewTextureId(); }
   ImVec2 render_preview_texture_size() const override { return runtime_environment_.RenderPreviewTextureSize(); }
   void SetRenderPreviewExtent(ImVec2 extent) override {
     runtime_environment_.SetRenderPreviewExtent(extent);
   }
   void SetRenderPreviewRequest(runtime_systems::RenderPreviewRequest request) override {
+    if (request.valid) {
+      assert(!request.stage_name.empty() && "Render preview request is missing a stage name.");
+      assert(!request.storage_buffers.empty() && "Render preview request is missing storage buffers.");
+    }
     render_preview_request_ = std::move(request);
     runtime_environment_.SetRenderPreviewRequest(render_preview_request_);
   }

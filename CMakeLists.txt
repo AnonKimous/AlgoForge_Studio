@@ -238,31 +238,23 @@ add_library(common_data STATIC
 )
 target_include_directories(common_data PUBLIC ${PROJECT_INCLUDE_DIRS})
 
-add_library(algorithm_support STATIC
+add_library(algorithm_management STATIC
+  src/algorithm_management/job_cpu.cpp
+  src/algorithm_management/job_gpu.cpp
   src/algorithm_support/algorithm_package_location.cpp
   src/algorithm_support/algorithm_support_manager.cpp
   src/algorithm_support/algorithm_intervention.cpp
   src/algorithm_support/algorithm_package_decomposer.cpp
   src/algorithm_support/algorithm_plugin_loader.cpp
-  ${CJSON_SOURCE_DIR}/cJSON.c
-)
-target_include_directories(algorithm_support PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_compile_definitions(algorithm_support PRIVATE
-  ALGORITHM_MANAGEMENT_MANIFEST_SEARCH_ROOT="${ALGORITHM_MANAGEMENT_MANIFEST_SEARCH_ROOT}"
-)
-target_link_libraries(algorithm_support PUBLIC common_data runtime_systems)
-
-add_library(algorithm_management STATIC
-  src/algorithm_management/job_cpu.cpp
-  src/algorithm_management/job_gpu.cpp
   src/algorithm_support/algorithm_package_loader.cpp
+  ${CJSON_SOURCE_DIR}/cJSON.c
 )
 target_include_directories(algorithm_management PUBLIC ${PROJECT_INCLUDE_DIRS})
 target_compile_definitions(algorithm_management PRIVATE
   ALGORITHM_MANAGEMENT_LAYER_INTERNAL_BUILD=1
   ALGORITHM_MANAGEMENT_MANIFEST_SEARCH_ROOT="${ALGORITHM_MANAGEMENT_MANIFEST_SEARCH_ROOT}"
 )
-target_link_libraries(algorithm_management PUBLIC common_data runtime_systems algorithm_support)
+target_link_libraries(algorithm_management PUBLIC common_data runtime_systems)
 
 add_library(runtime_systems STATIC
   src/runtime_systems/window/sdl_window.cpp
@@ -290,7 +282,7 @@ add_library(agent STATIC
   src/agent/agent.cpp
 )
 target_include_directories(agent PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(agent PUBLIC common_data algorithm_management algorithm_support)
+target_link_libraries(agent PUBLIC common_data algorithm_management)
 
 add_library(agent_management STATIC
   src/agent_management/agent_ticker.cpp
@@ -304,7 +296,7 @@ add_library(debug_tool_backend STATIC
   src/debug_tool/debug_tool_backend_runtime.cpp
 )
 target_include_directories(debug_tool_backend PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(debug_tool_backend PUBLIC common_data agent_management runtime_systems algorithm_management algorithm_support)
+target_link_libraries(debug_tool_backend PUBLIC common_data agent_management runtime_systems algorithm_management)
 
 add_library(debug_tool_frontend STATIC
   src/debug_tool/debug_tool_frontend_panel.cpp

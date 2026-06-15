@@ -1,6 +1,7 @@
 #include "debug_tool_frontend_panel.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cctype>
 #include <cstring>
 #include <fstream>
@@ -8,6 +9,7 @@
 #include <imgui.h>
 #include <SDL3/SDL.h>
 #include <sstream>
+#include <unordered_map>
 
 namespace debug_tool_frontend {
 
@@ -205,6 +207,64 @@ void _ResizePreservingValues(std::vector<T>* values, size_t new_size) {
   values->resize(new_size);
 }
 
+#ifndef NDEBUG
+#define DEBUG_TOOL_ASSERT(condition, message) assert((condition) && (message))
+#else
+#define DEBUG_TOOL_ASSERT(condition, message) ((void)0)
+#endif
+
+bool _ValidateRequestedResourceEntries(
+  const std::vector<debug_tool::RequestedResourceEntry>& requested_resources,
+  const std::string& algorithm_name,
+  std::string* out_error_message) {
+  for (size_t i = 0; i < requested_resources.size(); ++i) {
+    const debug_tool::RequestedResourceEntry& resource = requested_resources[i];
+    if (resource.resource_name.empty()) {
+      if (out_error_message) {
+        *out_error_message =
+          "Backend returned an unreadable requested resource entry without a resource name for '" +
+          algorithm_name + "'.";
+      }
+      return false;
+    }
+    if (resource.resource_kind.empty()) {
+      if (out_error_message) {
+        *out_error_message =
+          "Backend returned an unreadable requested resource entry without a resource kind for '" +
+          algorithm_name + "'.";
+      }
+      return false;
+    }
+  }
+  return true;
+}
+
+bool _ValidateRequestedDescriptorEntries(
+  const std::vector<debug_tool::RequestedDescriptorEntry>& requested_descriptors,
+  const std::string& algorithm_name,
+  std::string* out_error_message) {
+  for (size_t i = 0; i < requested_descriptors.size(); ++i) {
+    const debug_tool::RequestedDescriptorEntry& descriptor = requested_descriptors[i];
+    if (descriptor.descriptor_name.empty()) {
+      if (out_error_message) {
+        *out_error_message =
+          "Backend returned an unreadable requested descriptor entry without a descriptor name for '" +
+          algorithm_name + "'.";
+      }
+      return false;
+    }
+    if (descriptor.container_name.empty()) {
+      if (out_error_message) {
+        *out_error_message =
+          "Backend returned an unreadable requested descriptor entry without a container name for '" +
+          algorithm_name + "'.";
+      }
+      return false;
+    }
+  }
+  return true;
+}
+
 }  // namespace
 
 void DebugToolFrontendPanel::InitializeAgentComposerDefaults() {
@@ -241,6 +301,119 @@ void DebugToolFrontendPanel::InitializeAlgorithmCatalog(IDebugToolHost& host) {
   } else {
     agent_composer_ui_state_.algorithm_catalog_error = std::move(catalog_error);
   }
+}
+
+bool DebugToolFrontendPanel::RefreshAlgorithmComposerBindings(
+  IDebugToolHost& host,
+  const std::string& algorithm_name) {
+  if (algorithm_name.empty()) {
+    agent_composer_ui_state_.reflected_algorithm_name.clear();
+    agent_composer_ui_state_.reflection_error.clear();
+    agent_composer_ui_state_.reflection_valid = false;
+    agent_composer_ui_state_.resource_inputs.clear();
+    agent_composer_ui_state_.descriptor_inputs.clear();
+    return true;
+  }
+
+  std::vector<debug_tool::RequestedResourceEntry> requested_resources;
+  std::vector<debug_tool::RequestedDescriptorEntry> requested_descriptors;
+  std::string error_message;
+  if (!host.QueryAlgorithmRequestedBindings(
+        algorithm_name,
+        &requested_resources,
+        &requested_descriptors,
+        &error_message) ||
+      !_ValidateRequestedResourceEntries(requested_resources, algorithm_name, &error_message) ||
+      !_ValidateRequestedDescriptorEntries(requested_descriptors, algorithm_name, &error_message)) {
+    agent_composer_ui_state_.reflected_algorithm_name = algorithm_name;
+    agent_composer_ui_state_.reflection_error = std::move(error_message);
+    agent_composer_ui_state_.reflection_valid = false;
+    agent_composer_ui_state_.resource_inputs.clear();
+    agent_composer_ui_state_.descriptor_inputs.clear();
+    return false;
+  }
+
+  agent_composer_ui_state_.reflected_algorithm_name = algorithm_name;
+  agent_composer_ui_state_.reflection_error.clear();
+  agent_composer_ui_state_.reflection_valid = true;
+  agent_composer_ui_state_.resource_inputs.clear();
+  agent_composer_ui_state_.descriptor_inputs.clear();
+  _ResizePreservingValues(&agent_composer_ui_state_.resource_inputs, requested_resources.size());
+  _ResizePreservingValues(&agent_composer_ui_state_.descriptor_inputs, requested_descriptors.size());
+  for (size_t i = 0; i < requested_resources.size(); ++i) {
+    agent_composer_ui_state_.resource_inputs[i].resource_name = requested_resources[i].resource_name;
+    agent_composer_ui_state_.resource_inputs[i].resource_kind = requested_resources[i].resource_kind;
+    agent_composer_ui_state_.resource_inputs[i].required = requested_resources[i].required;
+    agent_composer_ui_state_.resource_inputs[i].resource_path.fill('\0');
+  }
+  for (size_t i = 0; i < requested_descriptors.size(); ++i) {
+    agent_composer_ui_state_.descriptor_inputs[i].descriptor_name = requested_descriptors[i].descriptor_name;
+    agent_composer_ui_state_.descriptor_inputs[i].container_name = requested_descriptors[i].container_name;
+    agent_composer_ui_state_.descriptor_inputs[i].array_index = requested_descriptors[i].array_index;
+    agent_composer_ui_state_.descriptor_inputs[i].scalar_value = 0.0f;
+  }
+
+  std::vector<debug_tool::AlgorithmResourceBinding> default_resource_bindings;
+  std::vector<debug_tool::AlgorithmDescriptorValue> default_descriptor_values;
+  bool has_default_file = false;
+  error_message.clear();
+  if (!host.LoadAlgorithmPackageDefaultBindings(
+        algorithm_name,
+        &default_resource_bindings,
+        &default_descriptor_values,
+        &has_default_file,
+        &error_message)) {
+    agent_composer_ui_state_.reflected_algorithm_name = algorithm_name;
+    agent_composer_ui_state_.reflection_error = std::move(error_message);
+    agent_composer_ui_state_.reflection_valid = false;
+    agent_composer_ui_state_.resource_inputs.clear();
+    agent_composer_ui_state_.descriptor_inputs.clear();
+    return false;
+  }
+  if (!has_default_file) {
+    return true;
+  }
+
+  std::unordered_map<std::string, size_t> resource_index_by_name;
+  for (size_t i = 0; i < agent_composer_ui_state_.resource_inputs.size(); ++i) {
+    resource_index_by_name.emplace(agent_composer_ui_state_.resource_inputs[i].resource_name, i);
+  }
+  for (const debug_tool::AlgorithmResourceBinding& default_binding : default_resource_bindings) {
+    const auto found = resource_index_by_name.find(default_binding.resource_name);
+    if (found == resource_index_by_name.end()) {
+      agent_composer_ui_state_.reflected_algorithm_name = algorithm_name;
+      agent_composer_ui_state_.reflection_error =
+        "Default JSON contains an unknown resource binding: " + default_binding.resource_name;
+      agent_composer_ui_state_.reflection_valid = false;
+      agent_composer_ui_state_.resource_inputs.clear();
+      agent_composer_ui_state_.descriptor_inputs.clear();
+      return false;
+    }
+    agent_composer_ui_state_.resource_inputs[found->second].resource_path.fill('\0');
+    _SetTextBuffer(
+      &agent_composer_ui_state_.resource_inputs[found->second].resource_path,
+      default_binding.source_path);
+  }
+
+  std::unordered_map<std::string, size_t> descriptor_index_by_name;
+  for (size_t i = 0; i < agent_composer_ui_state_.descriptor_inputs.size(); ++i) {
+    descriptor_index_by_name.emplace(agent_composer_ui_state_.descriptor_inputs[i].descriptor_name, i);
+  }
+  for (const debug_tool::AlgorithmDescriptorValue& default_value : default_descriptor_values) {
+    const auto found = descriptor_index_by_name.find(default_value.descriptor_name);
+    if (found == descriptor_index_by_name.end()) {
+      agent_composer_ui_state_.reflected_algorithm_name = algorithm_name;
+      agent_composer_ui_state_.reflection_error =
+        "Default JSON contains an unknown descriptor value: " + default_value.descriptor_name;
+      agent_composer_ui_state_.reflection_valid = false;
+      agent_composer_ui_state_.resource_inputs.clear();
+      agent_composer_ui_state_.descriptor_inputs.clear();
+      return false;
+    }
+    agent_composer_ui_state_.descriptor_inputs[found->second].scalar_value = default_value.scalar_value;
+  }
+
+  return true;
 }
 
 void DebugToolFrontendPanel::InitializeFileBrowserDefaults() {
@@ -437,58 +610,18 @@ void DebugToolFrontendPanel::DrawAgentComposerUi(IDebugToolHost& host) {
 
   ImGui::SeparatorText("Mount Algorithm");
   ImGui::TextUnformatted("Use the Files page to browse folders and drag paths into resource slots.");
+  const bool algorithm_running = selected_agent_available && !selected_agent_summary.algorithms.empty();
+  ImGui::BeginDisabled(algorithm_running);
 
   const std::string algorithm_name = _TrimCopy(agent_composer_ui_state_.algorithm_name.data());
   if (algorithm_name.empty()) {
     agent_composer_ui_state_.selected_algorithm_catalog_index = -1;
-    if (!agent_composer_ui_state_.reflected_algorithm_name.empty() ||
-        agent_composer_ui_state_.reflection_valid ||
-        !agent_composer_ui_state_.resource_inputs.empty() ||
-        !agent_composer_ui_state_.descriptor_inputs.empty()) {
-      agent_composer_ui_state_.reflected_algorithm_name.clear();
-      agent_composer_ui_state_.reflection_error.clear();
-      agent_composer_ui_state_.reflection_valid = false;
-      agent_composer_ui_state_.resource_inputs.clear();
-      agent_composer_ui_state_.descriptor_inputs.clear();
-    }
+    RefreshAlgorithmComposerBindings(host, algorithm_name);
   } else {
     const int catalog_index = _FindAlgorithmCatalogIndex(agent_composer_ui_state_.algorithm_catalog_entries, algorithm_name);
     agent_composer_ui_state_.selected_algorithm_catalog_index = catalog_index;
     if (algorithm_name != agent_composer_ui_state_.reflected_algorithm_name) {
-      std::vector<debug_tool::RequestedResourceEntry> requested_resources;
-      std::vector<debug_tool::RequestedDescriptorEntry> requested_descriptors;
-      std::string error_message;
-      if (host.QueryAlgorithmRequestedBindings(
-            algorithm_name,
-            &requested_resources,
-            &requested_descriptors,
-            &error_message)) {
-        agent_composer_ui_state_.reflected_algorithm_name = algorithm_name;
-        agent_composer_ui_state_.reflection_error.clear();
-        agent_composer_ui_state_.reflection_valid = true;
-        agent_composer_ui_state_.resource_inputs.clear();
-        agent_composer_ui_state_.descriptor_inputs.clear();
-        _ResizePreservingValues(&agent_composer_ui_state_.resource_inputs, requested_resources.size());
-        _ResizePreservingValues(&agent_composer_ui_state_.descriptor_inputs, requested_descriptors.size());
-        for (size_t i = 0; i < requested_resources.size(); ++i) {
-          agent_composer_ui_state_.resource_inputs[i].resource_name = requested_resources[i].resource_name;
-          agent_composer_ui_state_.resource_inputs[i].resource_kind = requested_resources[i].resource_kind;
-          agent_composer_ui_state_.resource_inputs[i].required = requested_resources[i].required;
-          agent_composer_ui_state_.resource_inputs[i].resource_path.fill('\0');
-        }
-        for (size_t i = 0; i < requested_descriptors.size(); ++i) {
-          agent_composer_ui_state_.descriptor_inputs[i].descriptor_name = requested_descriptors[i].descriptor_name;
-          agent_composer_ui_state_.descriptor_inputs[i].container_name = requested_descriptors[i].container_name;
-          agent_composer_ui_state_.descriptor_inputs[i].array_index = requested_descriptors[i].array_index;
-          agent_composer_ui_state_.descriptor_inputs[i].scalar_value = 0.0f;
-        }
-      } else {
-        agent_composer_ui_state_.reflected_algorithm_name = algorithm_name;
-        agent_composer_ui_state_.reflection_error = std::move(error_message);
-        agent_composer_ui_state_.reflection_valid = false;
-        agent_composer_ui_state_.resource_inputs.clear();
-        agent_composer_ui_state_.descriptor_inputs.clear();
-      }
+      RefreshAlgorithmComposerBindings(host, algorithm_name);
     }
   }
 
@@ -633,6 +766,7 @@ void DebugToolFrontendPanel::DrawAgentComposerUi(IDebugToolHost& host) {
     }
   }
 
+  ImGui::EndDisabled();
   if (!ImGui::Button("Start Algorithm")) {
     return;
   }
@@ -1097,6 +1231,7 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
   }
 
   ImGui::SeparatorText("Mount New Algorithm");
+  ImGui::BeginDisabled(selected_algorithm_summary && selected_algorithm_index >= 0);
   if (!agent_composer_ui_state_.algorithm_catalog_entries.empty()) {
     const std::string current_display = (agent_composer_ui_state_.selected_algorithm_catalog_index >= 0 &&
       agent_composer_ui_state_.selected_algorithm_catalog_index <
@@ -1158,54 +1293,12 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
   const std::string algorithm_name = _TrimCopy(agent_composer_ui_state_.algorithm_name.data());
   if (algorithm_name.empty()) {
     agent_composer_ui_state_.selected_algorithm_catalog_index = -1;
-    if (!agent_composer_ui_state_.reflected_algorithm_name.empty() ||
-        agent_composer_ui_state_.reflection_valid ||
-        !agent_composer_ui_state_.resource_inputs.empty() ||
-        !agent_composer_ui_state_.descriptor_inputs.empty()) {
-      agent_composer_ui_state_.reflected_algorithm_name.clear();
-      agent_composer_ui_state_.reflection_error.clear();
-      agent_composer_ui_state_.reflection_valid = false;
-      agent_composer_ui_state_.resource_inputs.clear();
-      agent_composer_ui_state_.descriptor_inputs.clear();
-    }
+    RefreshAlgorithmComposerBindings(host, algorithm_name);
   } else {
     const int catalog_index = _FindAlgorithmCatalogIndex(agent_composer_ui_state_.algorithm_catalog_entries, algorithm_name);
     agent_composer_ui_state_.selected_algorithm_catalog_index = catalog_index;
     if (algorithm_name != agent_composer_ui_state_.reflected_algorithm_name) {
-      std::vector<debug_tool::RequestedResourceEntry> requested_resources;
-      std::vector<debug_tool::RequestedDescriptorEntry> requested_descriptors;
-      std::string error_message;
-      if (host.QueryAlgorithmRequestedBindings(
-            algorithm_name,
-            &requested_resources,
-            &requested_descriptors,
-            &error_message)) {
-        agent_composer_ui_state_.reflected_algorithm_name = algorithm_name;
-        agent_composer_ui_state_.reflection_error.clear();
-        agent_composer_ui_state_.reflection_valid = true;
-        agent_composer_ui_state_.resource_inputs.clear();
-        agent_composer_ui_state_.descriptor_inputs.clear();
-        _ResizePreservingValues(&agent_composer_ui_state_.resource_inputs, requested_resources.size());
-        _ResizePreservingValues(&agent_composer_ui_state_.descriptor_inputs, requested_descriptors.size());
-        for (size_t i = 0; i < requested_resources.size(); ++i) {
-          agent_composer_ui_state_.resource_inputs[i].resource_name = requested_resources[i].resource_name;
-          agent_composer_ui_state_.resource_inputs[i].resource_kind = requested_resources[i].resource_kind;
-          agent_composer_ui_state_.resource_inputs[i].required = requested_resources[i].required;
-          agent_composer_ui_state_.resource_inputs[i].resource_path.fill('\0');
-        }
-        for (size_t i = 0; i < requested_descriptors.size(); ++i) {
-          agent_composer_ui_state_.descriptor_inputs[i].descriptor_name = requested_descriptors[i].descriptor_name;
-          agent_composer_ui_state_.descriptor_inputs[i].container_name = requested_descriptors[i].container_name;
-          agent_composer_ui_state_.descriptor_inputs[i].array_index = requested_descriptors[i].array_index;
-          agent_composer_ui_state_.descriptor_inputs[i].scalar_value = 0.0f;
-        }
-      } else {
-        agent_composer_ui_state_.reflected_algorithm_name = algorithm_name;
-        agent_composer_ui_state_.reflection_error = std::move(error_message);
-        agent_composer_ui_state_.reflection_valid = false;
-        agent_composer_ui_state_.resource_inputs.clear();
-        agent_composer_ui_state_.descriptor_inputs.clear();
-      }
+      RefreshAlgorithmComposerBindings(host, algorithm_name);
     }
   }
 
@@ -1298,35 +1391,69 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
       ImGui::PopID();
     }
   }
+  ImGui::EndDisabled();
+
+  runtime_systems::RenderPreviewRequest preview_request{};
+  if (selected_algorithm_summary) {
+    const size_t preview_algorithm_index = selected_algorithm_index >= 0
+      ? static_cast<size_t>(selected_algorithm_index)
+      : 0u;
+    std::string preview_error_message;
+    if (host.BuildRenderPreviewRequest(
+          0u,
+          preview_algorithm_index,
+          &preview_request,
+          &preview_error_message) &&
+        preview_request.valid) {
+      host.SetRenderPreviewRequest(std::move(preview_request));
+    } else {
+      host.ui_status_message() = preview_error_message.empty()
+        ? "Selected algorithm failed preview validation."
+        : std::move(preview_error_message);
+#ifndef NDEBUG
+      DEBUG_TOOL_ASSERT(false, "Selected algorithm failed preview validation.");
+#endif
+    }
+  } else {
+    host.SetRenderPreviewRequest({});
+  }
 
   ImGui::SeparatorText("Start And Reset");
-  runtime_systems::RenderPreviewRequest preview_request{};
-  std::string preview_error_message;
-  if (selected_algorithm_summary) {
-    size_t preview_algorithm_index = 0u;
-    if (selected_algorithm_index >= 0) {
-      preview_algorithm_index = static_cast<size_t>(selected_algorithm_index);
-    }
-    host.BuildRenderPreviewRequest(
-      0u,
-      preview_algorithm_index,
-      &preview_request,
-      &preview_error_message);
-  }
-  if (preview_request.valid) {
-    ImGui::Text("Preview Stage: %s", preview_request.stage_name.c_str());
-    ImGui::Text("Preview Buffers: %zu", preview_request.storage_buffers.size());
-    ImGui::Text("Preview Instances: %u", preview_request.instance_count);
-    host.SetRenderPreviewRequest(preview_request);
-  } else if (!preview_error_message.empty()) {
-    ImGui::TextWrapped("%s", preview_error_message.c_str());
-  } else {
-    ImGui::TextUnformatted("No drawable result-render stage.");
-  }
-
   const bool algorithm_running = selected_algorithm_summary && selected_algorithm_index >= 0;
   const char* action_label = algorithm_running ? "Reset Algorithm" : "Start Algorithm";
   if (ImGui::Button(action_label, ImVec2(180.0f, 0.0f))) {
+    auto build_and_apply_preview_for_algorithm = [&](size_t algorithm_index, std::string* out_error_message) -> bool {
+      runtime_systems::RenderPreviewRequest mounted_preview_request{};
+      std::string mounted_preview_error_message;
+      if (!host.BuildRenderPreviewRequest(
+            0u,
+            algorithm_index,
+            &mounted_preview_request,
+            &mounted_preview_error_message)) {
+        DEBUG_TOOL_ASSERT(false, "Submitted algorithm did not produce a drawable preview.");
+        if (out_error_message) {
+          *out_error_message = mounted_preview_error_message.empty()
+            ? "Submitted algorithm did not produce a drawable preview."
+            : std::move(mounted_preview_error_message);
+        }
+        return false;
+      }
+      if (!mounted_preview_request.valid) {
+        DEBUG_TOOL_ASSERT(false, "Submitted algorithm did not produce a drawable preview.");
+        if (out_error_message) {
+          *out_error_message = mounted_preview_error_message.empty()
+            ? "Submitted algorithm did not produce a drawable preview."
+            : std::move(mounted_preview_error_message);
+        }
+        return false;
+      }
+      if (out_error_message) {
+        out_error_message->clear();
+      }
+      host.SetRenderPreviewRequest(std::move(mounted_preview_request));
+      return true;
+    };
+
     if (!algorithm_running) {
       if (algorithm_name.empty()) {
         host.ui_status_message() = "Algorithm name must not be empty.";
@@ -1358,16 +1485,22 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
               &attach_error_message,
               debug_tool::AlgorithmMountMode::Direct,
               agent_composer_ui_state_.execution_preference)) {
+          DEBUG_TOOL_ASSERT(false, "Failed to attach algorithm to the built-in agent.");
           host.ui_status_message() = attach_error_message.empty()
             ? "Failed to start algorithm on built-in agent."
-            : std::move(attach_error_message);
+            : ("Failed to start algorithm on built-in agent: " + attach_error_message);
         } else {
           agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(attached_algorithm_index);
-          host.StartTicking();
-          if (preview_request.valid) {
-            host.SetRenderPreviewRequest(preview_request);
+          std::string preview_error_message;
+          if (!build_and_apply_preview_for_algorithm(attached_algorithm_index, &preview_error_message)) {
+            DEBUG_TOOL_ASSERT(false, "Submitted algorithm failed preview validation.");
+            host.ui_status_message() = preview_error_message.empty()
+              ? "Algorithm started, but no drawable result was produced."
+              : std::move(preview_error_message);
+          } else {
+            host.StartTicking();
+            host.ui_status_message() = "Algorithm started on built-in agent.";
           }
-          host.ui_status_message() = "Algorithm started on built-in agent.";
         }
       }
     } else {
@@ -1396,18 +1529,22 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
               &reset_error_message,
               reset_mount_mode,
               reset_execution_preference)) {
-          agent_composer_ui_state_.selected_algorithm_index = -1;
-          host.SetRenderPreviewRequest({});
+          DEBUG_TOOL_ASSERT(false, "Failed to reattach the selected algorithm.");
           host.ui_status_message() = reset_error_message.empty()
             ? "Failed to reattach the selected algorithm."
-            : std::move(reset_error_message);
+            : ("Failed to reattach the selected algorithm: " + reset_error_message);
         } else {
           agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(reset_attached_algorithm_index);
-          host.StartTicking();
-          if (preview_request.valid) {
-            host.SetRenderPreviewRequest(preview_request);
+          std::string preview_error_message;
+          if (!build_and_apply_preview_for_algorithm(reset_attached_algorithm_index, &preview_error_message)) {
+            DEBUG_TOOL_ASSERT(false, "Reset algorithm failed preview validation.");
+            host.ui_status_message() = preview_error_message.empty()
+              ? "Selected algorithm was reset, but no drawable result was produced."
+              : std::move(preview_error_message);
+          } else {
+            host.StartTicking();
+            host.ui_status_message() = "Selected algorithm was reset.";
           }
-          host.ui_status_message() = "Selected algorithm was reset.";
         }
       }
     }
@@ -1496,6 +1633,7 @@ void DebugToolFrontendPanel::DrawDebugToolFrontend(IDebugToolHost& host) {
     }
     ImGui::Text("Status: %s", host.ui_status_message().empty() ? "ready" : host.ui_status_message().c_str());
     ImGui::Text("Managed agents: %zu", host.agent_count());
+    ImGui::TextWrapped("%s", host.render_preview_debug_summary().c_str());
     ImGui::Text(
       "Algorithm signal: %s",
       host.combined_algorithm_to_agent_signal().pause_requested ? "pause requested" : "idle");

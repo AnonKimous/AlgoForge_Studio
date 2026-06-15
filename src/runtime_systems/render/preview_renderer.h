@@ -30,8 +30,10 @@ class PreviewRenderer {
   void SetTargetExtent(VkExtent2D extent);
   void ApplyTargetExtent();
   void SetRequest(RenderPreviewRequest request);
+  bool HasRequest() const;
   bool Record(VkCommandBuffer command_buffer);
   bool HasTexture() const;
+  std::string DebugSummary() const;
   VkDescriptorSet PreviewTextureDescriptorSet() const;
   VkExtent2D PreviewTextureExtent() const;
   void Destroy();

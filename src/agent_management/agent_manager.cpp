@@ -4,6 +4,7 @@
 #include "agent_management/agent_ticker.h"
 #undef AGENT_MANAGEMENT_LAYER_PUBLIC_FACADE_INCLUDE
 
+#include <cassert>
 #include <memory>
 #include <chrono>
 #include <utility>
@@ -179,6 +180,7 @@ bool AgentManager::AttachAlgorithmToAgent(
     out_error_message,
     mount_mode,
     execution_preference)) {
+    assert(false && "Failed to mount algorithm.");
     if (out_error_message && out_error_message->empty()) {
       set_error("Failed to mount algorithm.");
     }

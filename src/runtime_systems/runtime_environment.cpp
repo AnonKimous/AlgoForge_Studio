@@ -6,6 +6,7 @@
 #include "runtime_systems/render/imgui_vulkan_runtime.h"
 #include "runtime_systems/window/sdl_window.h"
 
+#include <cassert>
 #include <string>
 #include <utility>
 
@@ -74,8 +75,14 @@ void RuntimeEnvironment::SetDrawCallback(DrawCallback callback) {
 }
 
 void RuntimeEnvironment::SetRenderPreviewRequest(RenderPreviewRequest request) {
+  if (request.valid) {
+    assert(!request.stage_name.empty() && "Render preview request is missing a stage name.");
+    assert(!request.storage_buffers.empty() && "Render preview request is missing storage buffers.");
+  }
   if (imgui_runtime_) {
     imgui_runtime_->SetRenderPreviewRequest(std::move(request));
+  } else {
+    assert(!request.valid && "A valid render preview request arrived before the runtime was initialized.");
   }
 }
 
@@ -97,6 +104,10 @@ void RuntimeEnvironment::SetExecutionSymbols(RuntimeExecutionSymbols execution_s
 
 bool RuntimeEnvironment::HasRenderPreviewTexture() const {
   return imgui_runtime_ ? imgui_runtime_->HasRenderPreviewTexture() : false;
+}
+
+std::string RuntimeEnvironment::RenderPreviewDebugSummary() const {
+  return imgui_runtime_ ? imgui_runtime_->RenderPreviewDebugSummary() : std::string("preview=uninitialized");
 }
 
 ImTextureID RuntimeEnvironment::RenderPreviewTextureId() const {
