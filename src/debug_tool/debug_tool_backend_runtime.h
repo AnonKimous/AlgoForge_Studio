@@ -42,6 +42,11 @@ class DebugToolBackendRuntime : public IDebugToolHost {
     std::string* out_error_message = nullptr) override {
     return agent_manager_.DetachAlgorithmFromAgent(agent_index, algorithm_index, out_error_message);
   }
+  bool HotReloadAlgorithmPackage(
+    size_t agent_index,
+    size_t algorithm_index,
+    size_t* out_algorithm_index = nullptr,
+    std::string* out_error_message = nullptr) override;
   void StartTicking() override {
     agent_manager_.StartTicking();
     agent_manager_.Tick(runtime_environment_.input(), runtime_environment_.MousePosition(), frame_dt_);

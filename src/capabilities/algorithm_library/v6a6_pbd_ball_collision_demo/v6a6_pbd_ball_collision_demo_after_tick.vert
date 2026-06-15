@@ -136,6 +136,9 @@ void main() {
   float top;
   ReadBoundary(left, right, bottom, top);
   float radius = ReadRadius(right - left, top - bottom);
+  const float screen_scale = min(
+    algorithm_viewport.width / max(right - left, 1.0e-6),
+    algorithm_viewport.height / max(top - bottom, 1.0e-6));
 
   vec2 pos = vec2(ball_pos_x_in.data[index], ball_pos_y_in.data[index]);
   vec2 vel = vec2(ball_vel_x_in.data[index], ball_vel_y_in.data[index]);
@@ -220,13 +223,9 @@ void main() {
     vec2(-1.0, 1.0),
     vec2(1.0, 1.0)
   );
-  vec2 pixel_pos = vec2(
-    (pos.x - left) / max(right - left, 1.0e-6) * algorithm_viewport.width,
-    (pos.y - bottom) / max(top - bottom, 1.0e-6) * algorithm_viewport.height
-  );
+  vec2 pixel_pos = vec2(pos.x - left, pos.y - bottom) * screen_scale;
   vec2 corner = quad_offsets[gl_VertexIndex];
-  vec2 radius_px = vec2(radius / max(right - left, 1.0e-6) * algorithm_viewport.width,
-    radius / max(top - bottom, 1.0e-6) * algorithm_viewport.height);
+  vec2 radius_px = vec2(radius * screen_scale, radius * screen_scale);
   gl_Position = vec4(
     (pixel_pos + corner * radius_px) / vec2(algorithm_viewport.width, algorithm_viewport.height) * 2.0 - 1.0,
     0.0,

@@ -1230,8 +1230,39 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
     DrawCustomInterventionUi(host, slot.agent_index, slot.algorithm_index, selected_agent_summary, *selected_algorithm_summary, &slot);
   }
 
+  auto build_and_apply_preview_for_algorithm = [&](size_t algorithm_index, std::string* out_error_message) -> bool {
+    runtime_systems::RenderPreviewRequest mounted_preview_request{};
+    std::string mounted_preview_error_message;
+    if (!host.BuildRenderPreviewRequest(
+          0u,
+          algorithm_index,
+          &mounted_preview_request,
+          &mounted_preview_error_message)) {
+      DEBUG_TOOL_ASSERT(false, "Submitted algorithm did not produce a drawable preview.");
+      if (out_error_message) {
+        *out_error_message = mounted_preview_error_message.empty()
+          ? "Submitted algorithm did not produce a drawable preview."
+          : std::move(mounted_preview_error_message);
+      }
+      return false;
+    }
+    if (!mounted_preview_request.valid) {
+      DEBUG_TOOL_ASSERT(false, "Submitted algorithm did not produce a drawable preview.");
+      if (out_error_message) {
+        *out_error_message = mounted_preview_error_message.empty()
+          ? "Submitted algorithm did not produce a drawable preview."
+          : std::move(mounted_preview_error_message);
+      }
+      return false;
+    }
+    if (out_error_message) {
+      out_error_message->clear();
+    }
+    host.SetRenderPreviewRequest(std::move(mounted_preview_request));
+    return true;
+  };
+
   ImGui::SeparatorText("Mount New Algorithm");
-  ImGui::BeginDisabled(selected_algorithm_summary && selected_algorithm_index >= 0);
   if (!agent_composer_ui_state_.algorithm_catalog_entries.empty()) {
     const std::string current_display = (agent_composer_ui_state_.selected_algorithm_catalog_index >= 0 &&
       agent_composer_ui_state_.selected_algorithm_catalog_index <
@@ -1243,8 +1274,86 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
         const auto& entry = agent_composer_ui_state_.algorithm_catalog_entries[i];
         const bool is_selected = static_cast<int>(i) == agent_composer_ui_state_.selected_algorithm_catalog_index;
         if (ImGui::Selectable(entry.display_name.c_str(), is_selected)) {
+          const std::string new_algorithm_name = entry.algorithm_name;
           agent_composer_ui_state_.selected_algorithm_catalog_index = static_cast<int>(i);
-          _SetTextBuffer(&agent_composer_ui_state_.algorithm_name, entry.algorithm_name);
+          if (selected_algorithm_summary &&
+              selected_algorithm_index >= 0 &&
+              new_algorithm_name != selected_algorithm_summary->algorithm_name) {
+            if (!RefreshAlgorithmComposerBindings(host, new_algorithm_name)) {
+              host.ui_status_message() = agent_composer_ui_state_.reflection_error.empty()
+                ? "Failed to load algorithm bindings."
+                : agent_composer_ui_state_.reflection_error;
+              ImGui::EndCombo();
+              ImGui::End();
+              return;
+            }
+
+            _SetTextBuffer(&agent_composer_ui_state_.algorithm_name, new_algorithm_name);
+
+            std::vector<debug_tool::AlgorithmResourceBinding> resource_bindings;
+            for (const auto& resource : agent_composer_ui_state_.resource_inputs) {
+              resource_bindings.push_back(debug_tool::AlgorithmResourceBinding{
+                .resource_name = resource.resource_name,
+                .resource_kind = resource.resource_kind,
+                .source_path = _TrimCopy(resource.resource_path.data()),
+              });
+            }
+            std::vector<debug_tool::AlgorithmDescriptorValue> descriptor_values;
+            for (const auto& descriptor : agent_composer_ui_state_.descriptor_inputs) {
+              descriptor_values.push_back(debug_tool::AlgorithmDescriptorValue{
+                .descriptor_name = descriptor.descriptor_name,
+                .scalar_value = descriptor.scalar_value,
+              });
+            }
+
+            std::string detach_error_message;
+            if (!host.DetachAlgorithmFromAgent(
+                  0u,
+                  static_cast<size_t>(selected_algorithm_index),
+                  &detach_error_message)) {
+              host.ui_status_message() = detach_error_message.empty()
+                ? "Failed to unload the selected algorithm."
+                : std::move(detach_error_message);
+              ImGui::EndCombo();
+              ImGui::End();
+              return;
+            }
+
+            host.ClearGpuExecutors();
+            size_t attached_algorithm_index = 0u;
+            std::string attach_error_message;
+            if (!host.AttachAlgorithmToAgent(
+                  0u,
+                  new_algorithm_name,
+                  resource_bindings,
+                  descriptor_values,
+                  &attached_algorithm_index,
+                  &attach_error_message,
+                  debug_tool::AlgorithmMountMode::Direct,
+                  agent_composer_ui_state_.execution_preference)) {
+              host.ui_status_message() = attach_error_message.empty()
+                ? "Failed to start algorithm on built-in agent."
+                : ("Failed to start algorithm on built-in agent: " + attach_error_message);
+              ImGui::EndCombo();
+              ImGui::End();
+              return;
+            }
+
+            agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(attached_algorithm_index);
+            std::string preview_error_message;
+            if (!build_and_apply_preview_for_algorithm(attached_algorithm_index, &preview_error_message)) {
+              host.ui_status_message() = preview_error_message.empty()
+                ? "Algorithm started, but no drawable result was produced."
+                : std::move(preview_error_message);
+            } else {
+              host.StartTicking();
+              host.ui_status_message() = "Algorithm swapped on built-in agent.";
+            }
+            ImGui::EndCombo();
+            ImGui::End();
+            return;
+          }
+          _SetTextBuffer(&agent_composer_ui_state_.algorithm_name, new_algorithm_name);
         }
         if (is_selected) {
           ImGui::SetItemDefaultFocus();
@@ -1391,7 +1500,6 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
       ImGui::PopID();
     }
   }
-  ImGui::EndDisabled();
 
   runtime_systems::RenderPreviewRequest preview_request{};
   if (selected_algorithm_summary) {
@@ -1549,6 +1657,26 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
       }
     }
   }
+
+  ImGui::Spacing();
+  ImGui::BeginDisabled(!selected_algorithm_summary);
+  if (ImGui::Button("Hot Update DLL + SPV", ImVec2(180.0f, 0.0f))) {
+    size_t rebuilt_algorithm_index = static_cast<size_t>(selected_algorithm_index);
+    std::string hot_reload_error_message;
+    if (host.HotReloadAlgorithmPackage(
+          0u,
+          static_cast<size_t>(selected_algorithm_index),
+          &rebuilt_algorithm_index,
+          &hot_reload_error_message)) {
+      agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(rebuilt_algorithm_index);
+      host.ui_status_message() = "Algorithm hot rebuilt and reloaded.";
+    } else {
+      host.ui_status_message() = hot_reload_error_message.empty()
+        ? "Algorithm hot rebuild failed."
+        : std::move(hot_reload_error_message);
+    }
+  }
+  ImGui::EndDisabled();
 
   ImGui::End();
 }

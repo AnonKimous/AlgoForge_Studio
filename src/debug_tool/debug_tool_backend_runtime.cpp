@@ -4,6 +4,7 @@
 #include "cJSON.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <cassert>
 #include <chrono>
 #include <cctype>
@@ -75,6 +76,42 @@ std::string _AlgorithmLibraryRootPath() {
     }
   }
   return candidates[0].string();
+}
+
+std::string _ProjectRootPath() {
+  const std::filesystem::path algorithm_library_root = _AlgorithmLibraryRootPath();
+  if (!algorithm_library_root.empty()) {
+    const std::filesystem::path root = algorithm_library_root.parent_path().parent_path().parent_path();
+    if (!root.empty()) {
+      return root.string();
+    }
+  }
+  return ".";
+}
+
+std::string _MakeCIdentifier(const std::string& text) {
+  std::string result;
+  result.reserve(text.size() + 1u);
+  for (size_t i = 0; i < text.size(); ++i) {
+    const unsigned char ch = static_cast<unsigned char>(text[i]);
+    const bool is_identifier_char =
+      (ch >= 'a' && ch <= 'z') ||
+      (ch >= 'A' && ch <= 'Z') ||
+      (ch >= '0' && ch <= '9') ||
+      ch == '_';
+    if (i == 0u && (ch >= '0' && ch <= '9')) {
+      result.push_back('_');
+    }
+    result.push_back(is_identifier_char ? static_cast<char>(ch) : '_');
+  }
+  return result;
+}
+
+std::string _HotReloadBuildCommand(const std::string& algorithm_name) {
+  const std::string root = _ProjectRootPath();
+  const std::string script_path = (std::filesystem::path(root) / "build_algorithm_hot.bat").string();
+  const std::string target_name = _MakeCIdentifier(algorithm_name);
+  return "\"" + script_path + "\" \"" + target_name + "\"";
 }
 
 std::string _ResolveAlgorithmShaderPath(
@@ -308,6 +345,136 @@ bool DebugToolBackendRuntime::AttachAlgorithmToAgent(
     DEBUG_TOOL_ASSERT(false, "Failed to attach algorithm to the built-in agent.");
   }
   return attached;
+}
+
+bool DebugToolBackendRuntime::HotReloadAlgorithmPackage(
+  size_t agent_index,
+  size_t algorithm_index,
+  size_t* out_algorithm_index,
+  std::string* out_error_message) {
+  if (out_algorithm_index) {
+    *out_algorithm_index = 0u;
+  }
+
+  debug_tool::AgentRuntimeSummary agent_summary{};
+  if (!GetAgentSummary(agent_index, &agent_summary)) {
+    if (out_error_message) {
+      *out_error_message = "Selected agent is unavailable.";
+    }
+    return false;
+  }
+  if (algorithm_index >= agent_summary.algorithms.size()) {
+    if (out_error_message) {
+      *out_error_message = "Selected algorithm is unavailable.";
+    }
+    return false;
+  }
+
+  const debug_tool::AlgorithmRuntimeSummary algorithm_summary =
+    agent_summary.algorithms[algorithm_index];
+  if (algorithm_summary.algorithm_name.empty()) {
+    if (out_error_message) {
+      *out_error_message = "Selected algorithm has no name.";
+    }
+    return false;
+  }
+
+  const bool was_ticking = agent_manager_.tick_enabled();
+  if (was_ticking) {
+    agent_manager_.PauseTicking();
+  }
+
+  std::string detach_error_message;
+  if (!agent_manager_.DetachAlgorithmFromAgent(agent_index, algorithm_index, &detach_error_message)) {
+    if (was_ticking) {
+      agent_manager_.StartTicking();
+    }
+    if (out_error_message) {
+      *out_error_message = detach_error_message.empty()
+        ? ("Failed to detach algorithm '" + algorithm_summary.algorithm_name + "'.")
+        : std::move(detach_error_message);
+    }
+    return false;
+  }
+
+  runtime_environment_.ClearGpuExecutors();
+  runtime_environment_.SetRenderPreviewRequest({});
+
+  const std::string build_command = _HotReloadBuildCommand(algorithm_summary.algorithm_name);
+  const int build_result = std::system(build_command.c_str());
+  if (build_result != 0) {
+    size_t restored_algorithm_index = 0u;
+    std::string restore_error_message;
+    if (!agent_manager_.AttachAlgorithmToAgent(
+          agent_index,
+          algorithm_summary.algorithm_name,
+          _ToAgentResourceBindings(algorithm_summary.resource_bindings),
+          _ToAgentDescriptorValues(algorithm_summary.descriptor_values),
+          &restored_algorithm_index,
+          &restore_error_message,
+          static_cast<agent::AlgorithmMountMode>(static_cast<int>(algorithm_summary.mount_mode)),
+          static_cast<agent::AlgorithmExecutionPreference>(static_cast<int>(algorithm_summary.execution_preference)))) {
+      if (out_error_message) {
+        *out_error_message = restore_error_message.empty()
+          ? ("Hot reload failed and the old algorithm could not be restored for '" +
+            algorithm_summary.algorithm_name + "'.")
+          : std::move(restore_error_message);
+      }
+    } else if (out_error_message) {
+      *out_error_message =
+        "Hot reload build failed for '" + algorithm_summary.algorithm_name + "'.";
+    }
+
+    runtime_environment_.ClearGpuExecutors();
+    runtime_environment_.SetRenderPreviewRequest({});
+
+    if (out_algorithm_index) {
+      *out_algorithm_index = restored_algorithm_index;
+    }
+    if (was_ticking) {
+      agent_manager_.StartTicking();
+    }
+    return false;
+  }
+
+  size_t rebuilt_algorithm_index = 0u;
+  std::string attach_error_message;
+  if (!agent_manager_.AttachAlgorithmToAgent(
+        agent_index,
+        algorithm_summary.algorithm_name,
+        _ToAgentResourceBindings(algorithm_summary.resource_bindings),
+        _ToAgentDescriptorValues(algorithm_summary.descriptor_values),
+        &rebuilt_algorithm_index,
+        &attach_error_message,
+        static_cast<agent::AlgorithmMountMode>(static_cast<int>(algorithm_summary.mount_mode)),
+        static_cast<agent::AlgorithmExecutionPreference>(static_cast<int>(algorithm_summary.execution_preference)))) {
+    if (out_error_message) {
+      *out_error_message = attach_error_message.empty()
+        ? ("Hot reload succeeded, but the updated algorithm could not be reattached for '" +
+          algorithm_summary.algorithm_name + "'.")
+        : std::move(attach_error_message);
+    }
+    runtime_environment_.ClearGpuExecutors();
+    runtime_environment_.SetRenderPreviewRequest({});
+    if (was_ticking) {
+      agent_manager_.StartTicking();
+    }
+    return false;
+  }
+
+  runtime_environment_.ClearGpuExecutors();
+  runtime_environment_.SetRenderPreviewRequest({});
+
+  if (out_algorithm_index) {
+    *out_algorithm_index = rebuilt_algorithm_index;
+  }
+  if (out_error_message) {
+    out_error_message->clear();
+  }
+  if (was_ticking) {
+    agent_manager_.StartTicking();
+  }
+  return true;
 }
 
 bool DebugToolBackendRuntime::GetAgentSummary(

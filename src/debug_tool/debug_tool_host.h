@@ -126,6 +126,11 @@ class IDebugToolHost {
     size_t agent_index,
     size_t algorithm_index,
     std::string* out_error_message = nullptr) = 0;
+  virtual bool HotReloadAlgorithmPackage(
+    size_t agent_index,
+    size_t algorithm_index,
+    size_t* out_algorithm_index = nullptr,
+    std::string* out_error_message = nullptr) = 0;
   virtual void StartTicking() = 0;
   virtual void PauseTicking() = 0;
   virtual bool tick_enabled() const = 0;
