@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import os
 import json
 import shutil
 import subprocess
@@ -9,9 +10,40 @@ from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+from urllib.parse import urlparse
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _resolve_codex_command(command: str) -> str:
+    search_roots: list[Path] = []
+    localappdata = os.environ.get("LOCALAPPDATA", "").strip()
+    if localappdata:
+        search_roots.extend(
+            [
+                Path(localappdata) / "OpenAI" / "Codex" / "bin",
+                Path(localappdata) / "Programs" / "OpenAI" / "Codex" / "bin",
+            ]
+        )
+    install_dir = os.environ.get("CODEX_INSTALL_DIR", "").strip()
+    if install_dir:
+        search_roots.append(Path(install_dir))
+    for root in search_roots:
+        if root.is_dir():
+            matches = sorted(root.rglob("codex.exe"))
+            if matches:
+                return str(matches[0])
+    env_command = os.environ.get("CODEX_COMMAND", "").strip()
+    if env_command:
+        which_env = shutil.which(env_command)
+        if which_env is not None:
+            return which_env
+    resolved = command.strip() or "codex"
+    which_resolved = shutil.which(resolved)
+    if which_resolved is not None:
+        return which_resolved
+    return env_command or resolved
 
 
 def _resolve_default_template_path() -> Path:
@@ -34,6 +66,9 @@ class ContainerItem:
     kind: str
     count: int = 1
     stride: int = 4
+    value: str = ""
+    values: list[str] = field(default_factory=list)
+    view_offset: int = 0
     x: float = 0.0
     y: float = 0.0
     locked: bool = False
@@ -101,6 +136,8 @@ class FunctionFrameItem:
     script: str = ""
     input_name: str = "in"
     output_name: str = "out"
+    expected_input: str = ""
+    expected_output: str = ""
     x: float = 0.0
     y: float = 0.0
     width: float = 360.0
@@ -225,6 +262,14 @@ class ProjectState:
             return "containerelement"
         return lowered
 
+    def _resource_output_ports(self, resource_kind: str, outputs: list[str] | None = None) -> list[str]:
+        kind = self._normalize_kind(resource_kind)
+        if outputs:
+            return list(outputs)
+        if kind:
+            return [kind]
+        return ["out"]
+
     def _resolve_node(self, kind: str, name: str) -> Any:
         node_kind = self._normalize_kind(kind)
         node_name = str(name).strip()
@@ -312,11 +357,7 @@ class ProjectState:
             return [node.kind or "out"]
         if node_kind == "resnode":
             assert isinstance(node, ResourceNodeItem)
-            if node.outputs:
-                return list(node.outputs)
-            if node.resource_types:
-                return list(node.resource_types)
-            return [node.resource_kind or "out"]
+            return self._resource_output_ports(node.resource_kind, node.outputs)
         if node_kind == "function":
             assert isinstance(node, FunctionFrameItem)
             return [node.output_name or "out"]
@@ -628,6 +669,9 @@ class ProjectState:
             entry = {
                 "count": container.count,
                 "stride": container.stride,
+                "value": container.value,
+                "values": list(container.values),
+                "view_offset": container.view_offset,
                 "x": container.x,
                 "y": container.y,
             }
@@ -693,16 +737,13 @@ class ProjectState:
 
         res_items: list[dict[str, Any]] = []
         for item in self.res_nodes:
-            resource_types = list(item.resource_types) if item.resource_types else list(item.outputs)
-            if not resource_types:
-                resource_types = [item.resource_kind or "mesh"]
-            outputs = list(item.outputs) if item.outputs else list(resource_types)
-            if not outputs:
-                outputs = list(resource_types)
+            resource_kind = str(item.resource_kind or (item.resource_types[0] if item.resource_types else "mesh"))
+            resource_types = [resource_kind]
+            outputs = [resource_kind]
             res_items.append(
                 {
                     "name": item.name,
-                    "resource_kind": item.resource_kind or resource_types[0],
+                    "resource_kind": resource_kind,
                     "resourceTypes": resource_types,
                     "outputs": outputs,
                     "x": item.x,
@@ -720,6 +761,8 @@ class ProjectState:
                     "script": item.script,
                     "input_name": item.input_name,
                     "output_name": item.output_name,
+                    "expected_input": item.expected_input,
+                    "expected_output": item.expected_output,
                     "x": item.x,
                     "y": item.y,
                     "width": item.width,
@@ -799,12 +842,18 @@ class ProjectState:
                 project.containers.append(ContainerItem(name=f"v{index + 1}", kind="variable"))
         elif isinstance(variables, dict):
             for name, entry in variables.items():
+                values = entry.get("values", [])
+                if not isinstance(values, list):
+                    values = [values] if values else []
                 project.containers.append(
                     ContainerItem(
                         name=str(name),
                         kind="variable",
                         count=int(entry.get("count", 1)),
                         stride=int(entry.get("stride", 4)),
+                        value=str(entry.get("value") or ""),
+                        values=[str(value) for value in values],
+                        view_offset=int(entry.get("view_offset", 0)),
                         x=float(entry.get("x", 0.0)),
                         y=float(entry.get("y", 0.0)),
                     )
@@ -816,12 +865,18 @@ class ProjectState:
                 project.containers.append(ContainerItem(name=f"a{index + 1}", kind="array"))
         elif isinstance(arrays, dict):
             for name, entry in arrays.items():
+                values = entry.get("values", [])
+                if not isinstance(values, list):
+                    values = [values] if values else []
                 project.containers.append(
                     ContainerItem(
                         name=str(name),
                         kind="array",
                         count=int(entry.get("count", 1)),
                         stride=int(entry.get("stride", 4)),
+                        value=str(entry.get("value") or ""),
+                        values=[str(value) for value in values],
+                        view_offset=int(entry.get("view_offset", 0)),
                         x=float(entry.get("x", 0.0)),
                         y=float(entry.get("y", 0.0)),
                     )
@@ -923,17 +978,14 @@ class ProjectState:
                 resource_types = item.get("resourceTypes", item.get("resources", []))
                 if not isinstance(resource_types, list):
                     resource_types = [resource_types] if resource_types else []
-                outputs = item.get("outputs", resource_types)
-                if not isinstance(outputs, list):
-                    outputs = [outputs] if outputs else []
-                if not resource_types and outputs:
-                    resource_types = list(outputs)
+                resource_kind = str(item.get("resource_kind") or item.get("kind") or (resource_types[0] if resource_types else "mesh"))
+                resource_types = [resource_kind]
                 project.res_nodes.append(
                     ResourceNodeItem(
                         name=str(item.get("name") or f"resNode_{index}"),
-                        resource_types=[str(value) for value in resource_types] if resource_types else ["mesh"],
-                        outputs=[str(value) for value in outputs] if outputs else ["mesh"],
-                        resource_kind=str(item.get("resource_kind") or item.get("kind") or (resource_types[0] if resource_types else "mesh")),
+                        resource_types=resource_types,
+                        outputs=[resource_kind],
+                        resource_kind=resource_kind,
                         x=float(item.get("x", 0.0)),
                         y=float(item.get("y", 0.0)),
                         width=float(item.get("width", 360.0)),
@@ -951,6 +1003,8 @@ class ProjectState:
                         script=str(item.get("script") or ""),
                         input_name=str(item.get("input_name") or "in"),
                         output_name=str(item.get("output_name") or "out"),
+                        expected_input=str(item.get("expected_input") or ""),
+                        expected_output=str(item.get("expected_output") or ""),
                         x=float(item.get("x", 0.0)),
                         y=float(item.get("y", 0.0)),
                         width=float(item.get("width", 360.0)),
@@ -983,7 +1037,7 @@ class ProjectState:
             project.containers.append(ContainerItem(name="v1", kind="variable"))
             project.containers.append(ContainerItem(name="a1", kind="array"))
         if not project.res_nodes:
-            project.res_nodes.append(ResourceNodeItem(name="resNode_1", resource_types=["mesh", "obj", "gltf"], outputs=["mesh", "obj", "gltf"], resource_kind="mesh"))
+            project.res_nodes.append(ResourceNodeItem(name="resNode_1", resource_types=["mesh"], outputs=["mesh"], resource_kind="mesh"))
         if not project.intervention_stages:
             project.intervention_stages.extend(
                 [
@@ -1064,7 +1118,7 @@ class MockAgentClient:
         self.base_url = ""
         self.api_key = ""
         self.codex_command = "codex"
-        self.timeout_seconds = 120
+        self.timeout_seconds = 60
 
     def _build_prompt(self, project: ProjectState, selection: str, prompt: str) -> str:
         summary = [
@@ -1109,10 +1163,13 @@ class MockAgentClient:
         base_url = self.base_url.strip()
         if not base_url:
             raise ValueError("API base_url is required when provider is api.")
+        parsed = urlparse(base_url)
         if base_url.endswith("/chat/completions"):
             url = base_url
         elif base_url.endswith("/v1"):
             url = base_url + "/chat/completions"
+        elif parsed.netloc.endswith("deepseek.com") and parsed.path in {"", "/"}:
+            url = base_url.rstrip("/") + "/chat/completions"
         else:
             url = base_url.rstrip("/") + "/v1/chat/completions"
         body = {
@@ -1143,8 +1200,8 @@ class MockAgentClient:
         return content
 
     def _call_codex(self, project: ProjectState, selection: str, prompt: str) -> str:
-        command = self.codex_command.strip() or "codex"
-        if shutil.which(command) is None:
+        command = _resolve_codex_command(self.codex_command)
+        if not Path(command).exists():
             raise RuntimeError(f"Codex command not found: {command}")
         args = [
             command,
