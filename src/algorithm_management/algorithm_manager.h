@@ -6,14 +6,16 @@
 #include <vector>
 
 #define ALGORITHM_MANAGEMENT_LAYER_PUBLIC_FACADE_INCLUDE 1
-#include "algorithm_support/algorithm_intervention.h"
 #include "algorithm_support/algorithm_container_manifest.h"
-#include "algorithm_support/algorithm_protocol.h"
+#include "algorithm_support/algorithm_intervention.h"
 #include "algorithm_support/algorithm_package_location.h"
-#include "algorithm_support/algorithm_support_manager.h"
+#include "algorithm_support/algorithm_protocol.h"
 #include "algorithm_support/algorithm_types.h"
-#include "algorithm_management/job_system.h"
 #undef ALGORITHM_MANAGEMENT_LAYER_PUBLIC_FACADE_INCLUDE
+
+#define RUNTIME_SYSTEMS_LAYER_PUBLIC_FACADE_INCLUDE 1
+#include "runtime_systems/runtime_systems.h"
+#undef RUNTIME_SYSTEMS_LAYER_PUBLIC_FACADE_INCLUDE
 
 namespace algorithm_management {
 
@@ -22,35 +24,14 @@ using ::algorithm::AlgorithmContainerManifest;
 using ::algorithm::AlgorithmContainerManifestItem;
 using ::algorithm::AlgorithmContainerSet;
 using ::algorithm::AlgorithmContainerStorageKind;
-using ::algorithm::AlgorithmStandardContainerLayout;
 using ::algorithm::AlgorithmPackageLocation;
 using ::algorithm::AlgorithmProfile;
 using ::algorithm::AlgorithmReflectionBinding;
 using ::algorithm::AlgorithmReflector;
 using ::algorithm::AlgorithmReflectorManifestItem;
-
+using ::algorithm::AlgorithmStandardContainerLayout;
 using ::algorithm::FindAlgorithmContainer;
 using ::algorithm::TryResolveAlgorithmPackageLocation;
-
-inline bool CreateAlgorithmPackageRuntimeReflectorByName(
-  const std::string& algorithm_name,
-  std::shared_ptr<::algorithm::AlgorithmReflector>* out_reflector,
-  std::string* out_error_message = nullptr) {
-  return algorithm_support::CreateAlgorithmPackageRuntimeReflectorByName(
-    algorithm_name,
-    out_reflector,
-    out_error_message);
-}
-
-inline bool CreateAlgorithmInterventionByName(
-  const std::string& algorithm_name,
-  std::shared_ptr<::agent::IAlgorithmIntervention>* out_intervention,
-  std::string* out_error_message = nullptr) {
-  return algorithm_support::CreateAlgorithmInterventionByName(
-    algorithm_name,
-    out_intervention,
-    out_error_message);
-}
 
 inline bool CreateAlgorithmObjectFromLocation(
   const ::algorithm::AlgorithmPackageLocation& package_location,
@@ -59,26 +40,6 @@ inline bool CreateAlgorithmObjectFromLocation(
   return algorithm_support::CreateAlgorithmObjectFromLocation(
     package_location,
     out_group,
-    out_error_message);
-}
-
-inline bool CreateAlgorithmPackageContainerSetFromLocation(
-  const ::algorithm::AlgorithmPackageLocation& package_location,
-  std::shared_ptr<::algorithm::AlgorithmContainerSet>* out_container_set,
-  std::string* out_error_message = nullptr) {
-  return algorithm_support::CreateAlgorithmPackageContainerSetFromLocation(
-    package_location,
-    out_container_set,
-    out_error_message);
-}
-
-inline bool TryLoadAlgorithmPluginComponents(
-  const ::algorithm::AlgorithmPackageLocation& package_location,
-  AlgorithmPluginComponents* out_components,
-  std::string* out_error_message = nullptr) {
-  return algorithm_support::TryLoadAlgorithmPluginComponents(
-    package_location,
-    out_components,
     out_error_message);
 }
 
@@ -163,12 +124,17 @@ inline bool LoadAlgorithmPackageDefaultBindings(
     out_error_message);
 }
 
-inline bool DecomposeAlgorithmObject(
+inline bool FinalizeAlgorithmObject(
   const ::agent::AlgorithmObject& algorithm_object,
-  const std::vector<AlgorithmResourceBinding>& resource_bindings,
-  const std::vector<AlgorithmDescriptorValue>& descriptor_values,
   ::algorithm::AlgorithmContainerSet* container_set,
   std::string* out_error_message = nullptr) {
+  if (!container_set) {
+    if (out_error_message) {
+      *out_error_message = "AlgorithmContainerSet output pointer is null.";
+    }
+    return false;
+  }
+
   ::algorithm::AlgorithmPackageLocation package_location{};
   std::string location_error_message;
   if (!TryResolveAlgorithmPackageLocation(
@@ -183,12 +149,82 @@ inline bool DecomposeAlgorithmObject(
     return false;
   }
 
-  return algorithm_support::DecomposeAlgorithmPackageFromLocation(
+  const bool ok = algorithm_support::DecomposeAlgorithmPackageFromLocation(
     package_location,
-    resource_bindings,
-    descriptor_values,
+    algorithm_object.resource_bindings,
+    algorithm_object.descriptor_values,
     container_set,
     out_error_message);
+  if (ok && out_error_message) {
+    out_error_message->clear();
+  }
+  return ok;
+}
+
+inline bool SubmitAlgorithmObject(
+  const ::agent::AlgorithmObject& object,
+  const ::agent::AgentTickContext& context,
+  const common_data::AgentToAlgorithmSignal& agent_to_algorithm_signal,
+  ::algorithm::AlgorithmContainerSet* container_set,
+  common_data::AlgorithmToAgentSignal* out_algorithm_to_agent_signal,
+  ::agent::AlgorithmPackageDebugState* out_debug_state,
+  std::string* out_error_message = nullptr) {
+  if (!container_set || !out_algorithm_to_agent_signal || !out_debug_state) {
+    if (out_error_message) {
+      *out_error_message = "Algorithm submit output pointer is null.";
+    }
+    return false;
+  }
+
+  if (object.execution_preference == AlgorithmExecutionPreference::Gpu) {
+    if (!object.gpu_symbol) {
+      if (out_error_message) {
+        *out_error_message = "Ready GPU algorithm is missing a GPU symbol.";
+      }
+      return false;
+    }
+
+    if (!runtime_systems::job_gpu::Execute(
+          object,
+          container_set,
+          context,
+          out_error_message)) {
+      return false;
+    }
+
+    if (object.algorithm_reflector && !object.algorithm_reflector->empty()) {
+      if (!runtime_systems::job_gpu::Synchronize(
+            object,
+            container_set,
+            out_error_message)) {
+        return false;
+      }
+    }
+    if (out_error_message) {
+      out_error_message->clear();
+    }
+    return true;
+  }
+
+  if (!object.cpu_symbol || !object.temporaryTest_main_thread_executor) {
+    if (out_error_message) {
+      *out_error_message = "Ready CPU algorithm is missing its main-thread executor.";
+    }
+    return false;
+  }
+
+  const bool ok = runtime_systems::job_cpu::Execute(
+    object,
+    context,
+    agent_to_algorithm_signal,
+    container_set,
+    out_algorithm_to_agent_signal,
+    out_debug_state,
+    out_error_message);
+  if (ok && out_error_message) {
+    out_error_message->clear();
+  }
+  return ok;
 }
 
 inline IoBufferPacket BuildAlgorithmInterventionPacket(
@@ -227,9 +263,9 @@ using algorithm_management::AlgorithmReflector;
 using algorithm_management::AlgorithmReflectorManifestItem;
 using algorithm_management::AlgorithmPackageLocation;
 using algorithm_management::FindAlgorithmContainer;
-using algorithm_management::CreateAlgorithmPackageRuntimeReflectorByName;
-using algorithm_management::CreateAlgorithmInterventionByName;
 using algorithm_management::CreateAlgorithmObjectFromLocation;
+using algorithm_management::FinalizeAlgorithmObject;
 using algorithm_management::QueryAlgorithmRequestedBindings;
-using algorithm_management::DecomposeAlgorithmObject;
+using algorithm_management::LoadAlgorithmPackageDefaultBindings;
+using algorithm_management::SubmitAlgorithmObject;
 using algorithm_management::TryResolveAlgorithmPackageLocation;

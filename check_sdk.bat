@@ -4,96 +4,114 @@ setlocal EnableExtensions
 set "ROOT=%~dp0"
 set "ROOT=%ROOT:~0,-1%"
 set "CMAKE=D:\Program Files\CMake\bin\cmake.exe"
-set "SDK_LIB=%ROOT%\sdk\sdk.lib"
-set "SDK_HEADER=%ROOT%\sdk\include\sdk_kernel.h"
-set "CORE_BUILD_DEBUG=%ROOT%\build\Debug"
-set "ALGO_BUILD=%ROOT%\build_algorithms"
 set "SRC_LIBRARY_DIR=%ROOT%\src\capabilities\algorithm_library"
-set "APP_DIR=%ROOT%\app"
-set "APP_LIBRARY_DIR=%APP_DIR%\src\capabilities\algorithm_library"
+set "ALGO_ROOT=%ROOT%\algorithmLib"
+set "ALGO_SRC_ROOT=%ALGO_ROOT%\algorithmSrc"
+set "ALGO_RUNTIME_ROOT=%ALGO_ROOT%\algorithmruntimeLib"
+set "ALGO_BUILD=%ALGO_ROOT%\.build_check"
 set "ORIG_PATH=%Path%"
 set "PATH="
 set "Path=%ORIG_PATH%"
+set "PUSHD_DONE=0"
 
-if not exist "%SDK_LIB%" (
-  echo SDK build artifact is missing: "%SDK_LIB%"
+if not exist "%ROOT%\build\Debug\algorithm_management.lib" (
+  echo Core library is missing: "%ROOT%\build\Debug\algorithm_management.lib"
   exit /b 1
 )
 
-if not exist "%SDK_HEADER%" (
-  echo SDK public header is missing: "%SDK_HEADER%"
+if not exist "%ROOT%\build\Debug\common_data.lib" (
+  echo Core library is missing: "%ROOT%\build\Debug\common_data.lib"
   exit /b 1
 )
 
-if not exist "%CORE_BUILD_DEBUG%\algorithm_management.lib" (
-  echo Core library is missing: "%CORE_BUILD_DEBUG%\algorithm_management.lib"
+if not exist "%ROOT%\build\Debug\runtime_systems.lib" (
+  echo Core library is missing: "%ROOT%\build\Debug\runtime_systems.lib"
   exit /b 1
 )
 
-if not exist "%CORE_BUILD_DEBUG%\common_data.lib" (
-  echo Core library is missing: "%CORE_BUILD_DEBUG%\common_data.lib"
+if not exist "%ALGO_ROOT%" mkdir "%ALGO_ROOT%"
+if errorlevel 1 (
+  echo Failed to create algorithm root: "%ALGO_ROOT%"
   exit /b 1
 )
 
-if not exist "%CORE_BUILD_DEBUG%\runtime_systems.lib" (
-  echo Core library is missing: "%CORE_BUILD_DEBUG%\runtime_systems.lib"
+if exist "%ALGO_SRC_ROOT%" (
+  rmdir /s /q "%ALGO_SRC_ROOT%"
+  if errorlevel 1 (
+    echo Failed to reset algorithm source root: "%ALGO_SRC_ROOT%"
+    exit /b 1
+  )
+)
+if not exist "%ALGO_SRC_ROOT%" mkdir "%ALGO_SRC_ROOT%"
+if errorlevel 1 (
+  echo Failed to create algorithm source root: "%ALGO_SRC_ROOT%"
   exit /b 1
+)
+
+if exist "%ALGO_RUNTIME_ROOT%" (
+  rmdir /s /q "%ALGO_RUNTIME_ROOT%"
+  if errorlevel 1 (
+    echo Failed to reset algorithm runtime root: "%ALGO_RUNTIME_ROOT%"
+    exit /b 1
+  )
+)
+if not exist "%ALGO_RUNTIME_ROOT%" mkdir "%ALGO_RUNTIME_ROOT%"
+if errorlevel 1 (
+  echo Failed to create algorithm runtime root: "%ALGO_RUNTIME_ROOT%"
+  exit /b 1
+)
+
+if exist "%ALGO_BUILD%" (
+  rmdir /s /q "%ALGO_BUILD%"
+  if errorlevel 1 (
+    echo Failed to reset temporary build root: "%ALGO_BUILD%"
+    exit /b 1
+  )
+)
+if not exist "%ALGO_BUILD%" mkdir "%ALGO_BUILD%"
+if errorlevel 1 (
+  echo Failed to create temporary build root: "%ALGO_BUILD%"
+  exit /b 1
+)
+
+call "%ROOT%\algorithm_build_common.bat" SyncLibraryRoot "%SRC_LIBRARY_DIR%" "%ALGO_SRC_ROOT%"
+if errorlevel 1 (
+  set "EXITCODE=1"
+  goto :cleanup
+)
+
+for /d %%D in ("%SRC_LIBRARY_DIR%\*") do (
+  call "%ROOT%\algorithm_build_common.bat" SyncAlgorithmFolder "%%~fD" "%ALGO_SRC_ROOT%\%%~nxD"
+  if errorlevel 1 (
+    set "EXITCODE=1"
+    goto :cleanup
+  )
 )
 
 pushd "%ROOT%"
-"%CMAKE%" -S "%ROOT%\src\capabilities\algorithm_library" -B "%ALGO_BUILD%" --fresh -DBUILD_ALGORITHM_SAMPLE_PLUGIN=ON -DCORE_BUILD_DIR="%ROOT%\build"
+set "PUSHD_DONE=1"
+"%CMAKE%" -S "%ALGO_ROOT%" -B "%ALGO_BUILD%" --fresh -DBUILD_ALGORITHM_SAMPLE_PLUGIN=ON -DCORE_BUILD_DIR="%ROOT%\build" -DALGORITHM_LIBRARY_SOURCE_ROOT="%ALGO_SRC_ROOT%" -DALGORITHM_LIBRARY_RUNTIME_OUTPUT_ROOT="%ALGO_RUNTIME_ROOT%"
 if errorlevel 1 (
-  set "EXITCODE=%ERRORLEVEL%"
-  popd
-  exit /b %EXITCODE%
+  set "EXITCODE=1"
+  goto :cleanup
 )
 "%CMAKE%" --build "%ALGO_BUILD%" --config Debug --target algorithm_packages -j 2
 if errorlevel 1 (
-  set "EXITCODE=%ERRORLEVEL%"
-  popd
-  exit /b %EXITCODE%
+  set "EXITCODE=1"
+  goto :cleanup
 )
+
+call "%ROOT%\algorithm_build_common.bat" PruneRuntimeOutput "%ALGO_RUNTIME_ROOT%"
+if errorlevel 1 (
+  set "EXITCODE=1"
+  goto :cleanup
+)
+
 set "EXITCODE=0"
-if not exist "%APP_LIBRARY_DIR%" mkdir "%APP_LIBRARY_DIR%"
-if errorlevel 1 set "EXITCODE=1"
-for /d %%D in ("%SRC_LIBRARY_DIR%\*") do (
-  call :SyncAlgorithmFolder "%%~fD"
-  if errorlevel 1 set "EXITCODE=1"
-)
-if not "%EXITCODE%"=="0" goto :cleanup
-if not errorlevel 1 (
-  if exist "%ROOT%\src\capabilities\algorithm_library\algorithm_catalog.json" copy /Y "%ROOT%\src\capabilities\algorithm_library\algorithm_catalog.json" "%APP_LIBRARY_DIR%\" >nul
-  if exist "%ROOT%\src\capabilities\algorithm_library\agents.md" copy /Y "%ROOT%\src\capabilities\algorithm_library\agents.md" "%APP_LIBRARY_DIR%\" >nul
-)
+
 :cleanup
-popd
+if "%PUSHD_DONE%"=="1" popd
+if exist "%ALGO_BUILD%" (
+  rmdir /s /q "%ALGO_BUILD%"
+)
 exit /b %EXITCODE%
-
-:SyncAlgorithmFolder
-setlocal EnableExtensions
-set "SOURCE_DIR=%~1"
-for %%I in ("%SOURCE_DIR%") do set "ALG_NAME=%%~nxI"
-set "DEST_DIR=%APP_LIBRARY_DIR%\%ALG_NAME%"
-if not exist "%DEST_DIR%" mkdir "%DEST_DIR%"
-if errorlevel 1 exit /b 1
-
-for %%E in (json vert frag spv) do (
-  if exist "%SOURCE_DIR%\*.%%E" (
-    copy /Y "%SOURCE_DIR%\*.%%E" "%DEST_DIR%\" >nul
-    if errorlevel 1 exit /b 1
-  )
-)
-
-for %%C in (Debug Release) do (
-  if exist "%SOURCE_DIR%\%%C\*.dll" (
-    copy /Y "%SOURCE_DIR%\%%C\*.dll" "%DEST_DIR%\" >nul
-    if errorlevel 1 exit /b 1
-  )
-  if exist "%SOURCE_DIR%\%%C\*.pdb" (
-    copy /Y "%SOURCE_DIR%\%%C\*.pdb" "%DEST_DIR%\" >nul
-    if errorlevel 1 exit /b 1
-  )
-)
-
-endlocal
-exit /b 0

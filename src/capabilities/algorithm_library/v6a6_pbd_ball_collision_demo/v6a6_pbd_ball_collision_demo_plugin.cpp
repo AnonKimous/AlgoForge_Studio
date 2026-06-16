@@ -926,8 +926,15 @@ extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateBundle(
   out_bundle->gpu_symbol = true;
 
   std::shared_ptr<agent::IAlgorithmIntervention> inner_intervention{};
-  if (!algorithm_management::CreateAlgorithmInterventionByName(
+  algorithm::AlgorithmPackageLocation package_location{};
+  if (!algorithm_management::TryResolveAlgorithmPackageLocation(
         request->algorithm_name ? request->algorithm_name : "",
+        &package_location,
+        nullptr)) {
+    return false;
+  }
+  if (!algorithm_support::LoadAlgorithmInterventionFromLocation(
+        package_location,
         &inner_intervention,
         nullptr)) {
     return false;
@@ -947,8 +954,15 @@ extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateRuntimeReflec
   }
 
   std::shared_ptr<algorithm::AlgorithmReflector> runtime_reflector{};
-  if (!algorithm_management::CreateAlgorithmPackageRuntimeReflectorByName(
+  algorithm::AlgorithmPackageLocation package_location{};
+  if (!algorithm_management::TryResolveAlgorithmPackageLocation(
         request->algorithm_name ? request->algorithm_name : "",
+        &package_location,
+        nullptr)) {
+    return false;
+  }
+  if (!algorithm_support::LoadAlgorithmPackageRuntimeReflectorFromLocation(
+        package_location,
         &runtime_reflector,
         nullptr)) {
     return false;

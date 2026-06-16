@@ -19,7 +19,7 @@ When code and docs disagree, follow the code and update the docs.
 - Lower layers do not depend upward.
 - `common_data` is shared in-memory data only.
 - `common_data` is the one exception to the single-facade header rule.
-- `runtime_systems` owns the SDL, ImGui, and Vulkan runtime shell.
+- `runtime_systems` owns the SDL, ImGui, and Vulkan runtime shell and exposes one facade header.
 - `algorithm_support` contains package support and reflection helpers, but its public entrypoints are surfaced through `algorithm_management`.
 - `algorithm_support` only consumes resolved algorithm package locations and performs assembly/loading; it does not search for packages.
 - `agent` and `debug_tool_backend` should reach algorithm loading through `algorithm_management`, not by including `algorithm_support` directly.
@@ -33,7 +33,7 @@ When code and docs disagree, follow the code and update the docs.
 - Modules under `src/capabilities` are capability modules, not strict main-trunk hops.
 - Capability modules may aggregate lower-level contracts, but they must not introduce upward dependencies into strict trunk layers.
 - Optional capabilities must be linked explicitly by any consumer.
-- `capabilities/algorithm_library` is built through the dedicated batch tool `check_sdk.bat`, not through the `debugTool` solution.
+- `capabilities/algorithm_library` is legacy/deprecated. Do not add new work there; the packaged mirror lives in `algorithmLib/algorithmSrc`, and built DLL/SPV artifacts live in `algorithmLib/algorithmruntimeLib`.
 
 ## Current Module Graph
 
@@ -75,7 +75,7 @@ UI path:
 Capability modules grouped under `src/capabilities`:
 
 - `agent`
-- `algorithm_library`
+- `algorithm_library` (legacy/deprecated)
 - `sidecar`
 
 Current project-library dependency graph from `CMakeLists.txt`:
@@ -94,7 +94,7 @@ Current project-library dependency graph from `CMakeLists.txt`:
 Important note:
 
 `algorithm_support` still exists as a helper bundle, but the public loading path is
-carried through `algorithm_management`.
+carried through `algorithm_management`, which owns the unified package loader facade.
 
 `capabilities/agent` is intentionally different: it is consumed by trunk code,
 but it is a capability carrier rather than one strict hop in the layering path.
@@ -114,14 +114,13 @@ src/
 │  ├─ agent/
 │  │  ├─ agent.h/.cpp
 │  │  └─ README.md
-│  ├─ algorithm_library/
+│  ├─ algorithm_library/ (legacy/deprecated)
 │  │  └─ README.md
 │  └─ sidecar/
 │     ├─ mesh_io.h/.cpp
 │     └─ README.md
 ├─ common_data/
 ├─ algorithm_support/
-│  ├─ algorithm_support_manager.h
 │  ├─ algorithm_intervention.h
 │  └─ algorithm_protocol.h
 ├─ runtime_systems/
@@ -132,13 +131,14 @@ src/
 ## Public Interfaces
 
 - `common_data`: specific headers or `common_data/common_data.h`
-- `algorithm_support`: `algorithm_support/algorithm_support_manager.h` and `algorithm_support/algorithm_intervention.h`
+- `algorithm_support`: internal helper bundle; public entrypoints are surfaced through `algorithm_management`
 - `algorithm_management`: `algorithm_management/algorithm_manager.h`
 - `algorithm_management` package-location helper: `algorithm_management/algorithm_package_location.h`
-- `runtime_systems`: `runtime_systems/runtime_environment.h`
+- `runtime_systems`: `runtime_systems/runtime_systems.h`
 - `debug_tool_backend`: no public interface; it is an internal debug backend target
 - `debug_tool`: `debug_tool/debug_tool_host.h`, `debug_tool/debug_tool_backend_runtime.h`, and `debug_tool/debug_tool_frontend_panel.h`
-- `sdk`: `sdk/sdk_kernel.h` and `sdk/sdk_decomposer.h`
+- `agent_management`: `agent_management/agent_management.h`
+- `sdk`: `sdk/sdk.h`
 
 ## Module Roles
 
@@ -149,7 +149,7 @@ Strict trunk layer for manifest-driven runtime container creation.
 It should:
 
 - load official JSON manifests
-- resolve manifest names from `capabilities/algorithm_library`
+- resolve manifest names from `algorithmLib/algorithmSrc`
 - resolve algorithm package locations before algorithm support assembly
 - create real runtime containers from a manifest
 - cache per-manifest container templates for fast clone-and-clear reuse
@@ -181,7 +181,7 @@ It should not:
 - own the runtime shell
 - become a hidden execution graph manager
 
-### `capabilities/algorithm_library`
+### `capabilities/algorithm_library` (legacy/deprecated)
 
 Reserved home for concrete algorithm package capability bundles.
 
@@ -192,7 +192,7 @@ Keep:
 - package-local hook bundles
 
 Do not move manager responsibilities out of `algorithm_management` into this
-directory.
+directory. The generated package mirror should go to `algorithmLib/algorithmSrc`, not into `src/` or `app/`.
 
 ### `capabilities/sidecar`
 

@@ -1,5 +1,9 @@
 #pragma once
 
+#if !defined(RUNTIME_SYSTEMS_LAYER_INTERNAL_BUILD) && !defined(RUNTIME_SYSTEMS_LAYER_PUBLIC_FACADE_INCLUDE)
+#error "Do not include runtime_systems/runtime_environment.h directly. Use runtime_systems/runtime_systems.h."
+#endif
+
 #include "common_data/common_data.h"
 #include "runtime_systems/render/render_preview_request.h"
 
@@ -43,7 +47,6 @@ class RuntimeEnvironment {
   void SetRenderPreviewRequest(RenderPreviewRequest request);
   void SetRenderPreviewExtent(ImVec2 extent);
   void ClearGpuExecutors();
-  void SetExecutionSymbols(RuntimeExecutionSymbols execution_symbols);
   bool HasRenderPreviewTexture() const;
   std::string RenderPreviewDebugSummary() const;
   ImTextureID RenderPreviewTextureId() const;
@@ -53,7 +56,6 @@ class RuntimeEnvironment {
   const InputState& input() const;
   Vec2 MousePosition() const;
   bool has_window() const { return static_cast<bool>(window_); }
-  const RuntimeExecutionSymbols& execution_symbols() const { return execution_symbols_; }
 
  private:
   bool sdl_initialized_{false};

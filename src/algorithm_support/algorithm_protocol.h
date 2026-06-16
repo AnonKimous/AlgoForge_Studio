@@ -66,14 +66,9 @@ bool TryLoadAlgorithmPluginComponents(
   AlgorithmPluginComponents* out_components,
   std::string* out_error_message = nullptr);
 
-bool CreateAlgorithmPackageRuntimeReflectorByName(
-  const std::string& algorithm_name,
-  std::shared_ptr<algorithm::AlgorithmReflector>* out_reflector,
-  std::string* out_error_message = nullptr);
-
-bool CreateAlgorithmPackageContainerSetFromLocation(
+bool LoadAlgorithmPackageRuntimeReflectorFromLocation(
   const algorithm::AlgorithmPackageLocation& package_location,
-  std::shared_ptr<algorithm::AlgorithmContainerSet>* out_container_set,
+  std::shared_ptr<algorithm::AlgorithmReflector>* out_reflector,
   std::string* out_error_message = nullptr);
 
 bool QueryAlgorithmPackageRequestedBindingsFromLocation(
@@ -96,8 +91,8 @@ bool DecomposeAlgorithmPackageFromLocation(
   algorithm::AlgorithmContainerSet* container_set,
   std::string* out_error_message = nullptr);
 
-bool CreateAlgorithmInterventionByName(
-  const std::string& algorithm_name,
+bool LoadAlgorithmInterventionFromLocation(
+  const algorithm::AlgorithmPackageLocation& package_location,
   std::shared_ptr<agent::IAlgorithmIntervention>* out_intervention,
   std::string* out_error_message = nullptr);
 

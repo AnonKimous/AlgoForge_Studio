@@ -1,5 +1,6 @@
 #include "algorithm_gpu_executor.h"
 
+#include "algorithm_support/algorithm_library_paths.h"
 #include "runtime_systems/algorithm_gpu_context.h"
 
 #include <cstddef>
@@ -120,23 +121,6 @@ std::string _ResolveShaderBinaryPath(const std::string& path) {
   return std::filesystem::path(source_path.string() + ".spv").string();
 }
 
-std::string _AlgorithmLibraryRootPath() {
-  const std::filesystem::path candidates[] = {
-    "src/capabilities/algorithm_library",
-    "../src/capabilities/algorithm_library",
-    "../../src/capabilities/algorithm_library",
-    "../../../src/capabilities/algorithm_library",
-  };
-
-  std::error_code ec;
-  for (const std::filesystem::path& candidate : candidates) {
-    if (std::filesystem::exists(candidate, ec) && std::filesystem::is_directory(candidate, ec)) {
-      return candidate.string();
-    }
-  }
-  return candidates[0].string();
-}
-
 std::string _ResolveAlgorithmShaderPath(
   const std::string& algorithm_name,
   const std::string& shader_path) {
@@ -149,7 +133,10 @@ std::string _ResolveAlgorithmShaderPath(
     return path.string();
   }
 
-  return (std::filesystem::path(_AlgorithmLibraryRootPath()) / algorithm_name / shader_path).string();
+  return algorithm::library_paths::ResolveAlgorithmRelativePath(
+    algorithm::library_paths::ResolveAlgorithmLibraryRuntimeRoot(),
+    algorithm_name,
+    shader_path).string();
 }
 
 std::string _StageShaderKey(

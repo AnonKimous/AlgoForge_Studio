@@ -20,10 +20,10 @@ separates intentionally cross-layer code into `src/capabilities`.
 - `agent`: `agent/agent.h`
 - `algorithm_support`: internal implementation source group for package loading, plugin loading, support helpers, and intervention payload code
 - `algorithm_management`: `algorithm_management/algorithm_manager.h` is the single public entrypoint
-- `runtime_systems`: `runtime_systems/runtime_environment.h`, `runtime_systems/memory_manager.h`
-- `agent_management`: `agent_management/agent_manager.h`
+- `runtime_systems`: `runtime_systems/runtime_systems.h` is the public facade; `memory_manager.h` remains an internal support header
+- `agent_management`: `agent_management/agent_management.h` is the public facade
 - `debug_tool`: `debug_tool/debug_tool_host.h` for the host interface, `debug_tool/debug_tool_backend_runtime.h` for the backend runtime, and `debug_tool/debug_tool_frontend_panel.h` for the frontend panel
-- `sdk`: `sdk/sdk_kernel.h` for the external agent/algorithm submission surface and `sdk/sdk_decomposer.h` for the submission requirements helper surface
+- `sdk`: `sdk/sdk.h` is the only public facade; `sdk_runtime_system.h` and `sdk_decomposer.h` are internal implementation headers
 
 ## Debug-Only Hooks
 
@@ -42,6 +42,6 @@ separates intentionally cross-layer code into `src/capabilities`.
 - For the algorithm-management layer, the only public interface header is `algorithm_management/algorithm_manager.h`.
 - The algorithm-management manager creates real runtime containers from container manifests; missing manifests should fail immediately rather than degrade later at runtime.
 - The same algorithm manifest may optionally create a reflector; reflector creation must also stay manifest-driven rather than descriptor-driven.
-- For the runtime-systems layer, internal window/render headers are not public.
-- For the agent-management layer, the only public interface header is `agent_management/agent_manager.h`.
-- `debugTool` is the debug executable surface. External SDK consumers should use `sdk/sdk_kernel.h` and should not depend on the UI layer.
+- For the runtime-systems layer, the only public interface header is `runtime_systems/runtime_systems.h`.
+- For the agent-management layer, the only public interface header is `agent_management/agent_management.h`.
+- `debugTool` is the debug executable surface. External SDK consumers should use `sdk/sdk.h` and should not depend on the UI layer.

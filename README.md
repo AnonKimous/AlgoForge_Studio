@@ -11,7 +11,7 @@ This project is a layered Vulkan + SDL3 sandbox for agent-driven physics and ren
 - `sdk` is the external agent/algorithm submission surface and reaches algorithm assembly through `agent_management` and `agent`; it does not touch `algorithm_management` internals directly.
 - An `agent` is the unit that carries algorithm packages, solver metadata, and intervention state.
 - The current default workflow is: choose resource descriptors -> keep the draft prefilled -> create an agent -> run immediately.
-- Algorithm packages are built by the dedicated batch tool `check_sdk.bat`; they are not compiled as part of the `debugTool` build.
+- Algorithm packages are built by the dedicated batch tool `check_sdk.bat`; they are not compiled as part of the `debugTool` build. The checked-out package mirror lives under `algorithmLib/algorithmSrc`, and runtime DLL/SPV artifacts live under `algorithmLib/algorithmruntimeLib`.
 
 ## Terminology Rule
 
@@ -28,10 +28,10 @@ This project is a layered Vulkan + SDL3 sandbox for agent-driven physics and ren
 - `common_data` holds shared mesh, math, input, and interaction types.
 - `runtime_systems` owns windowing, ImGui, and Vulkan runtime support.
 - `common_data` also carries the shared packet structs used for algorithm support and intervention payloads.
-- `algorithm_management` owns container-manifest loading, runtime container creation, plugin loading, and the support/intervention helpers that used to live in `algorithm_support`.
+- `algorithm_management` owns container-manifest loading, runtime container creation, plugin loading, and the unified package loader entrypoint.
 - `algorithm_support` is now an internal source group under the `algorithm_management` build target; external code should include `algorithm_management/algorithm_manager.h`.
 - `agent` sits above `algorithm_management` and owns the runtime agent object, including mount and submit entry points.
-- `capabilities/algorithm_library` is reserved for concrete algorithm package capability bundles.
+- `capabilities/algorithm_library` is legacy/deprecated package content. Do not add new capability bundles there; the packaged mirror is written to `algorithmLib/algorithmSrc` and `algorithmLib/algorithmruntimeLib`.
 - `capabilities/sidecar` hosts optional sidecar capabilities such as mesh import/export.
 - `agent_management` owns agent creation orchestration, mount/unmount, descriptor forwarding, and ticking. It does not create containers itself.
 - `debug_tool_frontend` provides the manual agent composer and live debug panel without keeping a mesh resident in app state.
@@ -50,13 +50,13 @@ This project is a layered Vulkan + SDL3 sandbox for agent-driven physics and ren
 
 ## SDK Boundary
 
-- External SDK users should include `src/sdk/sdk_kernel.h`.
+- External SDK users should include `src/sdk/sdk.h`.
 - The SDK should not create UI.
 - The SDK should not touch reflector or intervention hooks.
 
 ## Agent Composition
 
-- Write each small algorithm capability in `capabilities/algorithm_library` with its own container manifest and package hooks.
+- `capabilities/algorithm_library` is legacy/deprecated. Do not add new bundles there; keep active package work in the algorithm management loader path.
 - Build the final agent by attaching one or more algorithm support groups, solver config, and lightweight algorithm profiles to one agent object.
 - Let upper layers assemble the agent creation spec, then let `agent_management` create and retain agents for runtime stepping while each `Agent` handles algorithm mount and submit work for its attached groups.
 - The runtime does not try to validate the full graph; missing or incompatible bindings should fail at the point of use.

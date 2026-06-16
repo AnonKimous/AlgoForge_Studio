@@ -1,45 +1,30 @@
 @echo off
-setlocal EnableExtensions EnableDelayedExpansion
+setlocal EnableExtensions
 
 set "ROOT=%~dp0"
-set "APP_DIR=%ROOT%algorithm_studio"
-set "ENTRY=%APP_DIR%\algorithm_studio.py"
-set "REQUIREMENTS=%APP_DIR%\requirements.txt"
-set "CONDA_BAT="
-set "CONDA_ROOT="
-set "CONDA_DIR="
-set "PYTHON_EXE="
+set "ENTRY=%ROOT%algorithm_studio\algorithm_studio.py"
 
-for /f "delims=" %%I in ('where conda.bat 2^>nul') do (
-    set "CONDA_BAT=%%I"
-    goto :found_conda
+if not exist "%ENTRY%" (
+    echo Missing entry point: "%ENTRY%"
+    pause
+    exit /b 1
 )
 
-:found_conda
-if defined CONDA_BAT (
-    for %%I in ("!CONDA_BAT!") do set "CONDA_DIR=%%~dpI"
-    echo !CONDA_DIR! | findstr /i "\\condabin\\" >nul
-    if not errorlevel 1 (
-        for %%I in ("!CONDA_DIR!..") do set "CONDA_ROOT=%%~fI"
-    ) else (
-        echo !CONDA_DIR! | findstr /i "\\Library\\bin\\" >nul
-        if not errorlevel 1 (
-            for %%I in ("!CONDA_DIR!..\..") do set "CONDA_ROOT=%%~fI"
-        ) else (
-            echo Unrecognized conda.bat location: !CONDA_BAT!
-            exit /b 1
-        )
-    )
+where py >nul 2>nul
+if errorlevel 1 (
+    echo Python launcher "py" was not found.
+    pause
+    exit /b 1
 )
 
-set "PYTHON_EXE=!CONDA_ROOT!\envs\pytorch\python.exe"
+pushd "%ROOT%"
+py -3.9 -m algorithm_studio.algorithm_studio
+set "EXIT_CODE=%ERRORLEVEL%"
+popd
 
-if exist "%REQUIREMENTS%" (
-    for %%F in ("%REQUIREMENTS%") do if %%~zF gtr 0 "!PYTHON_EXE!" -m pip install -r "!REQUIREMENTS!"
+if not "%EXIT_CODE%"=="0" (
+    echo Algorithm Studio exited with code %EXIT_CODE%.
+    pause
 )
 
-start "" "!PYTHON_EXE!" "!ENTRY!"
-exit /b 0
-
-echo conda.bat was not found.
-exit /b 1
+exit /b %EXIT_CODE%

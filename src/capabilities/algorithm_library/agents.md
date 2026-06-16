@@ -12,7 +12,7 @@ Use `v` for variables and `a` for arrays.
 
 ## Example
 
-- `simple_point_motion_demo`
+- `temporary_test_line_motion`
   - `v1`, `v2`, `v3`: initial point position
   - `a1`: moving point buffer
 
@@ -42,67 +42,31 @@ Use `cjson` style comments in the package file examples:
 
 ```cjson
 {
-  "algorithm_name": "simple_point_motion_demo", // bundle name
+  "algorithm_name": "temporary_test_line_motion", // bundle name
   "globalCfg": {
     "solvePrecision": "fp32", // global precision for the package
     "defaultPrecision": "fp32"
   },
   "container": {
-    "variable": 6, // create v1..v6
-    "variableArray": 2 // create a1..a2
+    "variable": 3, // create v1..v3
+    "variableArray": 1 // create a1
   },
   "decomposer": {
     "res": {
-      "mesh": {
-        "vertex": "a1", // resource name -> container name
-        "edge": "a2",
-        "normal": "a3"
-      }
+      "buffer": {}
     },
     "description": [
-      // variable -> array
       {
-        "name": "velocity", // human-readable only
-        "from": ["v1", "v2", "v3"], // source variables
-        "to": {
-          "container": "a4", // target array container
-          "indices": [1, 2, 3] // component positions
-        }
-      },
-      // variable -> variable
-      {
-        "name": "control_copy",
-        "from": ["v4"],
-        "to": ["v5"]
-      },
-      // array -> array
-      {
-        "name": "mesh_copy",
-        "from": ["a1"],
-        "to": ["a2"]
+        "name": "point_position",
+        "from": ["start_x", "start_y", "start_z"],
+        "to": ["v1", "v2", "v3"]
       }
     ]
   },
   "reflector": {
-    "name": "positionABS", // human-readable group name
-    "functionName": "fun", // shared reflector function label
-    "inputs": [
-      "v1",
-      "v2",
-      "v3",
-      "v4",
-      "a1",
-      "a2"
-    ],
+    "name": "positionABS",
+    "functionName": "direct",
     "items": [
-      // direct reflection item
-      {
-        "name": "positionABS",
-        "from": ["v1", "v2", "v3"],
-        "to": ["position_x", "position_y", "position_z"],
-        "reflectFun": "direct"
-      },
-      // reflection item
       {
         "name": "positionABS",
         "from": ["a1"],
@@ -113,19 +77,15 @@ Use `cjson` style comments in the package file examples:
   },
   "intervention": {
     "stages": {
-      "preTick": {
-        "stage_name": "preTick", // pre-execution stage
-        "stage_kind": "preTick"
-      },
       "afterTick": {
-        "stage_name": "afterTick", // post-execution stage
+        "stage_name": "afterTick",
         "stage_kind": "afterTick",
         "used_algorithm_containers": {
           "arrays": [
             {
               "name": "a1",
               "kind": "array",
-              "tuple_width": 6,
+              "tuple_width": 3,
               "required": true
             }
           ],
@@ -133,26 +93,22 @@ Use `cjson` style comments in the package file examples:
         },
         "shader": {
           "pipeline": "graphics",
-          "vertex": "simple_point_motion_demo_result_render.vert",
-          "fragment": "simple_point_motion_demo_result_render.frag"
+          "vertex": "temporary_test_line_motion_gpu_tick.vert",
+          "fragment": "temporary_test_line_motion_gpu_tick.frag"
         }
       },
       "resultRender": {
-        "stage_name": "resultRender", // preview stage
+        "stage_name": "resultRender",
         "stage_kind": "resultRender",
         "functions": [
           "ApplyResultRender"
         ],
         "shader": {
           "pipeline": "graphics",
-          "vertex": "simple_point_motion_demo_result_render.vert",
-          "fragment": "simple_point_motion_demo_result_render.frag"
+          "vertex": "temporary_test_line_motion_result_render.vert",
+          "fragment": "temporary_test_line_motion_result_render.frag"
         }
       }
-    },
-    "controlSignal": {
-      "byte": 0, // one-byte signal slot reserved for intervention
-      "notes": "Any non-zero value means intervention is requested."
     }
   }
 }

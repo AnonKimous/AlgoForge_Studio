@@ -18,6 +18,8 @@ class MemoryManager final : public std::pmr::memory_resource {
  public:
   static MemoryManager& Instance();
 
+  void* Allocate(size_t bytes, size_t alignment, size_t offset = 0u);
+  void Deallocate(void* p);
   MemoryStatistics statistics() const;
   void ResetStatistics();
 

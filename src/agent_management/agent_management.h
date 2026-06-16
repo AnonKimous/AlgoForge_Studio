@@ -1,0 +1,5 @@
+#pragma once
+
+#define AGENT_MANAGEMENT_LAYER_PUBLIC_FACADE_INCLUDE 1
+#include "agent_manager.h"
+#undef AGENT_MANAGEMENT_LAYER_PUBLIC_FACADE_INCLUDE

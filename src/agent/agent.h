@@ -92,11 +92,10 @@ class Agent {
 
  private:
   bool initialized_{false};
-  std::string agent_name_{};
+  std::string agent_name_{}; 
   std::vector<AlgorithmObject> algorithm_objects_{};
   std::vector<AgentAlgorithmRuntimeState> algorithm_runtime_states_{};
   std::vector<AlgorithmAssemblyState> algorithm_assembly_states_{};
-  std::vector<size_t> algorithm_execution_end_queue_{};
   std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>> standard_shared_container_sets_{};
 };
 

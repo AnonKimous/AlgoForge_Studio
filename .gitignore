@@ -1,6 +1,8 @@
 # Build outputs
 build/
 build_algorithms/
+algorithmLib/
+build_algorithms_v6a6/
 out/
 bin/
 lib/
@@ -17,6 +19,9 @@ app/**/*.vert
 app/**/*.frag
 app/**/Debug/
 app/**/Release/
+app/src/capabilities/algorithm_library/
+__pycache__/
+*.pyc
 
 # CMake
 CMakeFiles/

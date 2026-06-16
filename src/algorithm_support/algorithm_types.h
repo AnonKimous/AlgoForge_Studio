@@ -11,6 +11,11 @@
 
 namespace algorithm {
 
+enum class AlgorithmReflectionRefreshMode {
+  EveryTick = 0,
+  CaptureOnceAfterCompletion = 1,
+};
+
 struct AlgorithmProfile {
   std::string algorithm_name;
   std::string container_manifest_name;
@@ -24,6 +29,7 @@ struct AlgorithmReflectionBinding {
 
 struct AlgorithmReflector {
   std::string algorithm_name;
+  AlgorithmReflectionRefreshMode refresh_mode{AlgorithmReflectionRefreshMode::EveryTick};
   std::unordered_map<std::string, std::vector<AlgorithmReflectionBinding>> reflection_objects_by_container_name;
   std::unordered_map<std::string, AlgorithmReflectionBinding> container_bindings_by_reflection_object_name;
 
@@ -34,6 +40,7 @@ struct AlgorithmReflector {
 
   void Clear() {
     algorithm_name.clear();
+    refresh_mode = AlgorithmReflectionRefreshMode::EveryTick;
     reflection_objects_by_container_name.clear();
     container_bindings_by_reflection_object_name.clear();
   }

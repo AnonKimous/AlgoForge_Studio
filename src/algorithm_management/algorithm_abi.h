@@ -58,6 +58,17 @@ enum class AlgorithmExecutionPreference {
   Gpu = 1,
 };
 
+enum class AlgorithmJobPriority {
+  High = 0,
+  Normal = 1,
+  Low = 2,
+};
+
+enum class AlgorithmTickLifetime {
+  Continuous = 0,
+  LaunchOnceThenHold = 1,
+};
+
 enum class AlgorithmExecutionPhase {
   Body = 0,
   PreExecution = 1,
@@ -101,6 +112,7 @@ struct AgentTickContext {
   Vec2 mouse_pixel{};
   float dt_seconds{0.0f};
   AlgorithmExecutionPhase execution_phase{AlgorithmExecutionPhase::Body};
+  AlgorithmJobPriority job_priority{AlgorithmJobPriority::High};
   const InteractionInterventionRequest* intervention_request{nullptr};
 };
 
@@ -110,6 +122,8 @@ struct AgentAlgorithmRuntimeState {
   AlgorithmToAgentSignal algorithm_to_agent_signal{};
   AlgorithmPackageDebugState debug_state{};
   AlgorithmReflectionSnapshot reflection_snapshot{};
+  bool launch_once_completed{false};
+  bool reflection_snapshot_cached{false};
 };
 
 enum class AlgorithmAssemblyState {
@@ -161,6 +175,7 @@ class AlgorithmObject {
   bool gpu_symbol{true};
   AlgorithmMountMode mount_mode{AlgorithmMountMode::Direct};
   AlgorithmExecutionPreference execution_preference{AlgorithmExecutionPreference::Gpu};
+  AlgorithmTickLifetime tick_lifetime{AlgorithmTickLifetime::Continuous};
   std::shared_ptr<IAlgorithmtemporaryTestMainThreadExecutor> temporaryTest_main_thread_executor;
   std::shared_ptr<IAlgorithmIntervention> intervention;
 
@@ -287,6 +302,7 @@ using algorithm_management::AlgorithmAssemblyState;
 using algorithm_management::AlgorithmDescriptorValue;
 using algorithm_management::AlgorithmExecutionPhase;
 using algorithm_management::AlgorithmExecutionPreference;
+using algorithm_management::AlgorithmJobPriority;
 using algorithm_management::AlgorithmInterventionContainerBinding;
 using algorithm_management::AlgorithmInterventionPackageDebugState;
 using algorithm_management::AlgorithmInterventionShaderSpec;
@@ -297,6 +313,7 @@ using algorithm_management::AlgorithmObject;
 using algorithm_management::AlgorithmPackageDebugState;
 using algorithm_management::AlgorithmReflectionSnapshot;
 using algorithm_management::AlgorithmReflectionValue;
+using algorithm_management::AlgorithmTickLifetime;
 using algorithm_management::AlgorithmRequestedDescriptorBindings;
 using algorithm_management::AlgorithmRequestedResources;
 using algorithm_management::AlgorithmResourceBinding;

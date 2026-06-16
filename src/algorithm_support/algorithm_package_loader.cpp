@@ -1,14 +1,14 @@
 #include "algorithm_support/algorithm_protocol.h"
 #include "algorithm_support/algorithm_package_location.h"
+#include "algorithm_support/algorithm_package_paths.h"
 #include "algorithm_support/algorithm_types.h"
+#include "algorithm_support/algorithm_json_utils.h"
 
 #include "cJSON.h"
 
 #include <filesystem>
-#include <fstream>
 #include <iterator>
 #include <memory>
-#include <sstream>
 #include <system_error>
 #include <utility>
 
@@ -18,113 +18,79 @@ namespace {
 
 namespace fs = std::filesystem;
 
-fs::path _BuildPackageJsonPath(const algorithm::AlgorithmPackageLocation& package_location) {
+bool _LoadPackageRuntimeLifetime(
+  const algorithm::AlgorithmPackageLocation& package_location,
+  algorithm_management::AlgorithmTickLifetime* out_tick_lifetime,
+  std::string* out_error_message) {
+  if (!out_tick_lifetime) {
+    if (out_error_message) {
+      *out_error_message = "AlgorithmTickLifetime output pointer is null.";
+    }
+    return false;
+  }
+
+  *out_tick_lifetime = algorithm_management::AlgorithmTickLifetime::Continuous;
+
   const std::string algorithm_name = package_location.algorithm_name.empty()
     ? package_location.manifest_name
     : package_location.algorithm_name;
-  if (algorithm_name.empty()) {
-    return {};
-  }
-
-  fs::path package_root = package_location.package_root;
-  if (package_root.empty()) {
-    package_root = package_location.manifest_path.parent_path();
-  }
-  if (package_root.empty()) {
-    return {};
-  }
-
-  return package_root / (algorithm_name + "_package.json");
-}
-
-fs::path _BuildPackageDefaultJsonPath(const algorithm::AlgorithmPackageLocation& package_location) {
-  fs::path package_root = package_location.package_root;
-  if (package_root.empty()) {
-    package_root = package_location.manifest_path.parent_path();
-  }
-  if (package_root.empty()) {
-    return {};
-  }
-  return package_root / "default.json";
-}
-
-std::string _ReadPackageTextFile(const std::string& path) {
-  std::ifstream file(path, std::ios::binary);
-  if (!file) {
-    return {};
-  }
-  std::ostringstream stream;
-  stream << file.rdbuf();
-  return stream.str();
-}
-
-std::vector<std::string> _GetStringList(const cJSON* item) {
-  std::vector<std::string> values{};
-  if (!item) {
-    return values;
-  }
-  if (cJSON_IsString(item) && item->valuestring) {
-    values.push_back(item->valuestring);
-    return values;
-  }
-  if (!cJSON_IsArray(item)) {
-    return values;
-  }
-  const int count = cJSON_GetArraySize(item);
-  values.reserve(count > 0 ? static_cast<size_t>(count) : 0u);
-  for (int i = 0; i < count; ++i) {
-    const cJSON* entry = cJSON_GetArrayItem(item, i);
-    if (!entry || !cJSON_IsString(entry) || !entry->valuestring) {
-      continue;
+  const fs::path package_json_path = algorithm::package_paths::ResolvePackageJsonPath(
+    package_location.package_root,
+    package_location.manifest_path,
+    algorithm_name);
+  if (package_json_path.empty()) {
+    if (out_error_message) {
+      *out_error_message = "Failed to resolve package JSON file for runtime lifetime.";
     }
-    values.emplace_back(entry->valuestring);
-  }
-  return values;
-}
-
-uint32_t _GetUintField(const cJSON* object, const char* key, uint32_t fallback = 0u) {
-  if (!object || !key) {
-    return fallback;
-  }
-  const cJSON* item = cJSON_GetObjectItemCaseSensitive(object, key);
-  if (!item || !cJSON_IsNumber(item) || item->valuedouble < 0.0) {
-    return fallback;
-  }
-  return static_cast<uint32_t>(item->valuedouble);
-}
-
-std::string _GetStringField(const cJSON* object, const char* key) {
-  if (!object || !key) {
-    return {};
-  }
-  const cJSON* item = cJSON_GetObjectItemCaseSensitive(object, key);
-  if (!item || !cJSON_IsString(item) || !item->valuestring) {
-    return {};
-  }
-  return item->valuestring;
-}
-
-std::vector<uint32_t> _GetShapeField(const cJSON* object) {
-  std::vector<uint32_t> shape{};
-  if (!object || !cJSON_IsObject(object)) {
-    return shape;
+    return false;
   }
 
-  const cJSON* shape_item = cJSON_GetObjectItemCaseSensitive(object, "shape");
-  if (!shape_item || !cJSON_IsArray(shape_item)) {
-    return shape;
-  }
-
-  const int count = cJSON_GetArraySize(shape_item);
-  shape.reserve(count > 0 ? static_cast<size_t>(count) : 0u);
-  for (int i = 0; i < count; ++i) {
-    const cJSON* dim = cJSON_GetArrayItem(shape_item, i);
-    if (!dim || !cJSON_IsNumber(dim) || dim->valuedouble < 0.0) {
-      continue;
+  const std::string json_text = json_utils::ReadTextFile(package_json_path);
+  if (json_text.empty()) {
+    if (out_error_message) {
+      *out_error_message = "Failed to read package JSON file: " + package_json_path.generic_string();
     }
-    shape.push_back(static_cast<uint32_t>(dim->valuedouble));
+    return false;
   }
-  return shape;
+
+  cJSON* root = cJSON_Parse(json_text.c_str());
+  if (!root) {
+    if (out_error_message) {
+      *out_error_message = "Failed to parse package JSON file: " + package_json_path.generic_string();
+    }
+    return false;
+  }
+
+  const cJSON* runtime = cJSON_GetObjectItemCaseSensitive(root, "runtime");
+  if (runtime) {
+    if (!cJSON_IsObject(runtime)) {
+      cJSON_Delete(root);
+      if (out_error_message) {
+        *out_error_message = "Package runtime section is invalid: " + package_json_path.generic_string();
+      }
+      return false;
+    }
+
+    const cJSON* launch_once = cJSON_GetObjectItemCaseSensitive(runtime, "launchOnce");
+    if (launch_once) {
+      if (!cJSON_IsBool(launch_once)) {
+        cJSON_Delete(root);
+        if (out_error_message) {
+          *out_error_message = "Package runtime launchOnce must be boolean: " + package_json_path.generic_string();
+        }
+        return false;
+      }
+      if (cJSON_IsTrue(launch_once)) {
+        *out_tick_lifetime = algorithm_management::AlgorithmTickLifetime::LaunchOnceThenHold;
+      }
+    }
+  }
+
+  cJSON_Delete(root);
+  if (out_error_message) {
+    out_error_message->clear();
+  }
+  return true;
 }
 
 bool _AppendContainer(
@@ -183,7 +149,13 @@ bool _LoadContainerSetFromPackageJson(
 
   out_container_set->reset();
 
-  const fs::path package_json_path = _BuildPackageJsonPath(package_location);
+  const std::string algorithm_name = package_location.algorithm_name.empty()
+    ? package_location.manifest_name
+    : package_location.algorithm_name;
+  const fs::path package_json_path = algorithm::package_paths::ResolvePackageJsonPath(
+    package_location.package_root,
+    package_location.manifest_path,
+    algorithm_name);
   if (package_json_path.empty()) {
     if (out_error_message) {
       *out_error_message = "Failed to resolve package JSON file.";
@@ -191,7 +163,7 @@ bool _LoadContainerSetFromPackageJson(
     return false;
   }
 
-  const std::string json_text = _ReadPackageTextFile(package_json_path.generic_string());
+  const std::string json_text = json_utils::ReadTextFile(package_json_path);
   if (json_text.empty()) {
     if (out_error_message) {
       *out_error_message = "Failed to read package JSON file: " + package_json_path.generic_string();
@@ -221,7 +193,7 @@ bool _LoadContainerSetFromPackageJson(
 
   const cJSON* variable_item = cJSON_GetObjectItemCaseSensitive(container_section, "variable");
   if (cJSON_IsNumber(variable_item)) {
-    const uint32_t variable_count = _GetUintField(container_section, "variable");
+    const uint32_t variable_count = json_utils::GetUintField(container_section, "variable");
     for (uint32_t i = 0; i < variable_count; ++i) {
       if (!_AppendContainer("v" + std::to_string(i + 1u), algorithm::AlgorithmContainerStorageKind::TemporaryRegister, 1u, sizeof(float), container_set.get())) {
         cJSON_Delete(root);
@@ -237,8 +209,8 @@ bool _LoadContainerSetFromPackageJson(
         }
         return false;
       }
-      const uint32_t element_count = cJSON_IsObject(child) ? std::max<uint32_t>(1u, _GetUintField(child, "count", 1u)) : 1u;
-      const std::vector<uint32_t> shape = _GetShapeField(child);
+      const uint32_t element_count = cJSON_IsObject(child) ? std::max<uint32_t>(1u, json_utils::GetUintField(child, "count", 1u)) : 1u;
+      const std::vector<uint32_t> shape = json_utils::GetShapeField(child);
       const uint32_t element_stride = shape.empty()
         ? sizeof(float)
         : static_cast<uint32_t>(shape.size()) * sizeof(float);
@@ -251,7 +223,7 @@ bool _LoadContainerSetFromPackageJson(
 
   const cJSON* variable_array_item = cJSON_GetObjectItemCaseSensitive(container_section, "variableArray");
   if (cJSON_IsNumber(variable_array_item)) {
-    const uint32_t variable_array_count = _GetUintField(container_section, "variableArray");
+    const uint32_t variable_array_count = json_utils::GetUintField(container_section, "variableArray");
     for (uint32_t i = 0; i < variable_array_count; ++i) {
       if (!_AppendContainer("a" + std::to_string(i + 1u), algorithm::AlgorithmContainerStorageKind::Array, 1u, sizeof(float), container_set.get())) {
         cJSON_Delete(root);
@@ -267,8 +239,8 @@ bool _LoadContainerSetFromPackageJson(
         }
         return false;
       }
-      const uint32_t element_count = cJSON_IsObject(child) ? std::max<uint32_t>(1u, _GetUintField(child, "count", 1u)) : 1u;
-      const std::vector<uint32_t> shape = _GetShapeField(child);
+      const uint32_t element_count = cJSON_IsObject(child) ? std::max<uint32_t>(1u, json_utils::GetUintField(child, "count", 1u)) : 1u;
+      const std::vector<uint32_t> shape = json_utils::GetShapeField(child);
       const uint32_t element_stride = shape.empty()
         ? sizeof(float)
         : static_cast<uint32_t>(shape.size()) * sizeof(float);
@@ -298,7 +270,13 @@ bool _LoadPackageRuntimeReflector(
     return false;
   }
 
-  const fs::path package_json_path = _BuildPackageJsonPath(package_location);
+  const std::string algorithm_name = package_location.algorithm_name.empty()
+    ? package_location.manifest_name
+    : package_location.algorithm_name;
+  const fs::path package_json_path = algorithm::package_paths::ResolvePackageJsonPath(
+    package_location.package_root,
+    package_location.manifest_path,
+    algorithm_name);
   if (package_json_path.empty()) {
     if (out_error_message) {
       *out_error_message = "Failed to resolve package JSON file for reflector.";
@@ -306,7 +284,7 @@ bool _LoadPackageRuntimeReflector(
     return false;
   }
 
-  const std::string json_text = _ReadPackageTextFile(package_json_path.generic_string());
+  const std::string json_text = json_utils::ReadTextFile(package_json_path);
   if (json_text.empty()) {
     if (out_error_message) {
       *out_error_message = "Failed to read package JSON file: " + package_json_path.generic_string();
@@ -343,6 +321,38 @@ bool _LoadPackageRuntimeReflector(
   out_reflector->Clear();
   out_reflector->algorithm_name = package_location.algorithm_name;
 
+  const cJSON* refresh_mode_item = cJSON_GetObjectItemCaseSensitive(reflector, "refreshMode");
+  if (refresh_mode_item) {
+    if (cJSON_IsString(refresh_mode_item) && refresh_mode_item->valuestring) {
+      const std::string refresh_mode = refresh_mode_item->valuestring;
+      if (refresh_mode == "captureOnce" ||
+          refresh_mode == "capture_once" ||
+          refresh_mode == "onceAfterCompletion" ||
+          refresh_mode == "once_after_completion") {
+        out_reflector->refresh_mode = algorithm::AlgorithmReflectionRefreshMode::CaptureOnceAfterCompletion;
+      } else if (refresh_mode == "everyTick" ||
+                 refresh_mode == "every_tick") {
+        out_reflector->refresh_mode = algorithm::AlgorithmReflectionRefreshMode::EveryTick;
+      } else {
+        cJSON_Delete(root);
+        if (out_error_message) {
+          *out_error_message = "Package reflector refreshMode is invalid: " + package_json_path.generic_string();
+        }
+        return false;
+      }
+    } else if (cJSON_IsBool(refresh_mode_item)) {
+      out_reflector->refresh_mode = cJSON_IsTrue(refresh_mode_item)
+        ? algorithm::AlgorithmReflectionRefreshMode::CaptureOnceAfterCompletion
+        : algorithm::AlgorithmReflectionRefreshMode::EveryTick;
+    } else {
+      cJSON_Delete(root);
+      if (out_error_message) {
+        *out_error_message = "Package reflector refreshMode must be string or boolean: " + package_json_path.generic_string();
+      }
+      return false;
+    }
+  }
+
   const cJSON* function_name_item = cJSON_GetObjectItemCaseSensitive(reflector, "functionName");
   const std::string default_filter_name =
     function_name_item && cJSON_IsString(function_name_item) && function_name_item->valuestring
@@ -371,8 +381,8 @@ bool _LoadPackageRuntimeReflector(
     if (item_filter_name == "direct") {
       const cJSON* from_item = cJSON_GetObjectItemCaseSensitive(item, "from");
       const cJSON* to_item = cJSON_GetObjectItemCaseSensitive(item, "to");
-      const std::vector<std::string> from_names = _GetStringList(from_item);
-      const std::vector<std::string> to_names = _GetStringList(to_item);
+      const std::vector<std::string> from_names = json_utils::GetStringList(from_item);
+      const std::vector<std::string> to_names = json_utils::GetStringList(to_item);
       if (from_names.size() != to_names.size() || from_names.empty()) {
         cJSON_Delete(root);
         if (out_error_message) {
@@ -406,11 +416,11 @@ bool _LoadPackageRuntimeReflector(
     const cJSON* varity = cJSON_GetObjectItemCaseSensitive(input, "varity");
     const cJSON* array = cJSON_GetObjectItemCaseSensitive(input, "array");
     if (varity) {
-      const std::vector<std::string> varity_names = _GetStringList(varity);
+      const std::vector<std::string> varity_names = json_utils::GetStringList(varity);
       container_names.insert(container_names.end(), varity_names.begin(), varity_names.end());
     }
     if (array) {
-      const std::vector<std::string> array_names = _GetStringList(array);
+      const std::vector<std::string> array_names = json_utils::GetStringList(array);
       container_names.insert(container_names.end(), array_names.begin(), array_names.end());
     }
     if (container_names.empty()) {
@@ -489,7 +499,9 @@ struct PackageDefaultSchema {
 PackageDefaultSchema _LoadPackageDefaultSchema(
   const algorithm::AlgorithmPackageLocation& package_location) {
   PackageDefaultSchema schema{};
-  const fs::path package_default_json_path = _BuildPackageDefaultJsonPath(package_location);
+  const fs::path package_default_json_path = algorithm::package_paths::ResolvePackageDefaultJsonPath(
+    package_location.package_root,
+    package_location.manifest_path);
   if (package_default_json_path.empty()) {
     schema.error_message = "Failed to resolve package default JSON file.";
     return schema;
@@ -504,7 +516,7 @@ PackageDefaultSchema _LoadPackageDefaultSchema(
 
   schema.has_default_file = true;
 
-  const std::string json_text = _ReadPackageTextFile(package_default_json_path.generic_string());
+  const std::string json_text = json_utils::ReadTextFile(package_default_json_path);
   if (json_text.empty()) {
     schema.error_message = "Failed to read package default JSON file: " + package_default_json_path.generic_string();
     return schema;
@@ -516,7 +528,7 @@ PackageDefaultSchema _LoadPackageDefaultSchema(
     return schema;
   }
 
-  const std::string algorithm_name = _GetStringField(root, "algorithm_name");
+  const std::string algorithm_name = json_utils::GetStringField(root, "algorithm_name");
   const std::string expected_algorithm_name = package_location.algorithm_name.empty()
     ? package_location.manifest_name
     : package_location.algorithm_name;
@@ -546,9 +558,9 @@ PackageDefaultSchema _LoadPackageDefaultSchema(
         return schema;
       }
       PackageDefaultResourceBinding binding{};
-      binding.resource_name = _GetStringField(item, "resource_name");
-      binding.resource_kind = _GetStringField(item, "resource_kind");
-      binding.source_path = _GetStringField(item, "source_path");
+      binding.resource_name = json_utils::GetStringField(item, "resource_name");
+      binding.resource_kind = json_utils::GetStringField(item, "resource_kind");
+      binding.source_path = json_utils::GetStringField(item, "source_path");
       const cJSON* required_item = cJSON_GetObjectItemCaseSensitive(item, "required");
       if (required_item) {
         if (!cJSON_IsBool(required_item)) {
@@ -590,7 +602,7 @@ PackageDefaultSchema _LoadPackageDefaultSchema(
         return schema;
       }
       PackageDefaultDescriptorValue value{};
-      value.descriptor_name = _GetStringField(item, "descriptor_name");
+      value.descriptor_name = json_utils::GetStringField(item, "descriptor_name");
       if (value.descriptor_name.empty()) {
         schema.error_message =
           "Package default JSON descriptor value is missing descriptor_name: " +
@@ -618,32 +630,13 @@ PackageDefaultSchema _LoadPackageDefaultSchema(
 
 }  // namespace
 
-bool CreateAlgorithmPackageContainerSetFromLocation(
+bool LoadAlgorithmPackageRuntimeReflectorFromLocation(
   const algorithm::AlgorithmPackageLocation& package_location,
-  std::shared_ptr<algorithm::AlgorithmContainerSet>* out_container_set,
-  std::string* out_error_message) {
-  return _LoadContainerSetFromPackageJson(package_location, out_container_set, out_error_message);
-}
-
-bool CreateAlgorithmPackageRuntimeReflectorByName(
-  const std::string& algorithm_name,
   std::shared_ptr<algorithm::AlgorithmReflector>* out_reflector,
   std::string* out_error_message) {
   if (!out_reflector) {
     if (out_error_message) {
       *out_error_message = "AlgorithmReflector output pointer is null.";
-    }
-    return false;
-  }
-
-  algorithm::AlgorithmPackageLocation package_location{};
-  std::string location_error_message;
-  if (!algorithm::TryResolveAlgorithmPackageLocation(
-        algorithm_name,
-        &package_location,
-        &location_error_message)) {
-    if (out_error_message) {
-      *out_error_message = std::move(location_error_message);
     }
     return false;
   }
@@ -692,6 +685,20 @@ bool CreateAlgorithmObjectFromLocation(
     return false;
   }
 
+  algorithm_management::AlgorithmTickLifetime tick_lifetime = algorithm_management::AlgorithmTickLifetime::Continuous;
+  if (!_LoadPackageRuntimeLifetime(package_location, &tick_lifetime, out_error_message)) {
+    return false;
+  }
+  group.tick_lifetime = tick_lifetime;
+
+  auto _ApplyLaunchOnceReflectionPolicy = [&group]() {
+    if (group.tick_lifetime == algorithm_management::AlgorithmTickLifetime::LaunchOnceThenHold &&
+        group.algorithm_reflector &&
+        group.algorithm_reflector->refresh_mode == algorithm::AlgorithmReflectionRefreshMode::EveryTick) {
+      group.algorithm_reflector->refresh_mode = algorithm::AlgorithmReflectionRefreshMode::CaptureOnceAfterCompletion;
+    }
+  };
+
   AlgorithmPluginComponents plugin_components{};
   std::string plugin_error_message;
   if (package_location.has_plugin_module &&
@@ -705,13 +712,14 @@ bool CreateAlgorithmObjectFromLocation(
     }
     if (!group.algorithm_reflector) {
       std::shared_ptr<algorithm::AlgorithmReflector> runtime_reflector{};
-      if (CreateAlgorithmPackageRuntimeReflectorByName(
-            package_location.algorithm_name,
+      if (LoadAlgorithmPackageRuntimeReflectorFromLocation(
+            package_location,
             &runtime_reflector,
             nullptr)) {
         group.algorithm_reflector = std::move(runtime_reflector);
       }
     }
+    _ApplyLaunchOnceReflectionPolicy();
     if (group.intervention) {
       _AppendHiddenInterventionSignalContainer(group.shared_container_set.get());
     }
@@ -730,8 +738,8 @@ bool CreateAlgorithmObjectFromLocation(
 
   group.cpu_symbol = true;
   group.gpu_symbol = true;
-  if (!CreateAlgorithmInterventionByName(
-        package_location.algorithm_name,
+  if (!LoadAlgorithmInterventionFromLocation(
+        package_location,
         &group.intervention,
         out_error_message)) {
     return false;
@@ -740,12 +748,14 @@ bool CreateAlgorithmObjectFromLocation(
     _AppendHiddenInterventionSignalContainer(group.shared_container_set.get());
   }
   std::shared_ptr<algorithm::AlgorithmReflector> runtime_reflector{};
-  if (CreateAlgorithmPackageRuntimeReflectorByName(
-        package_location.algorithm_name,
+  if (LoadAlgorithmPackageRuntimeReflectorFromLocation(
+        package_location,
         &runtime_reflector,
         nullptr)) {
     group.algorithm_reflector = std::move(runtime_reflector);
   }
+
+  _ApplyLaunchOnceReflectionPolicy();
 
   *out_group = std::move(group);
   if (out_error_message) {

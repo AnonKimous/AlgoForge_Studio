@@ -1,17 +1,16 @@
 #include "algorithm_support/algorithm_intervention.h"
 #include "algorithm_support/algorithm_protocol.h"
 #include "algorithm_support/algorithm_package_location.h"
+#include "algorithm_support/algorithm_package_paths.h"
+#include "algorithm_support/algorithm_json_utils.h"
 
 #include "algorithm_management/algorithm_abi.h"
-#include "algorithm_management/algorithm_manager.h"
 #include "cJSON.h"
 
 #include <cstddef>
 #include <algorithm>
 #include <filesystem>
 #include <cstring>
-#include <fstream>
-#include <sstream>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -69,74 +68,11 @@ bool _ReadPod(const std::vector<std::byte>& bytes, size_t* offset, T* value) {
   return true;
 }
 
-std::string _ReadTextFile(const std::string& path) {
-  std::ifstream file(path, std::ios::binary);
-  if (!file) {
-    return {};
-  }
-  std::ostringstream stream;
-  stream << file.rdbuf();
-  return stream.str();
-}
-
-std::string _GetStringField(const cJSON* object, const char* key) {
-  if (!object || !key) {
-    return {};
-  }
-  const cJSON* item = cJSON_GetObjectItemCaseSensitive(object, key);
-  if (!item || !cJSON_IsString(item) || !item->valuestring) {
-    return {};
-  }
-  return item->valuestring;
-}
-
-uint32_t _GetUintField(const cJSON* object, const char* key, uint32_t fallback = 0u) {
-  if (!object || !key) {
-    return fallback;
-  }
-  const cJSON* item = cJSON_GetObjectItemCaseSensitive(object, key);
-  if (!item || !cJSON_IsNumber(item) || item->valuedouble < 0.0) {
-    return fallback;
-  }
-  return static_cast<uint32_t>(item->valuedouble);
-}
-
-bool _GetBoolField(const cJSON* object, const char* key, bool fallback = false) {
-  if (!object || !key) {
-    return fallback;
-  }
-  const cJSON* item = cJSON_GetObjectItemCaseSensitive(object, key);
-  if (!item) {
-    return fallback;
-  }
-  if (item->type & (cJSON_True | cJSON_False)) {
-    return (item->type & cJSON_True) != 0;
-  }
-  return fallback;
-}
-
 std::string _AlgorithmNameFromLocation(const algorithm::AlgorithmPackageLocation& package_location) {
   if (!package_location.algorithm_name.empty()) {
     return package_location.algorithm_name;
   }
   return package_location.manifest_name;
-}
-
-std::filesystem::path _BuildPackageJsonPath(const algorithm::AlgorithmPackageLocation& package_location) {
-  const std::string algorithm_name = _AlgorithmNameFromLocation(package_location);
-  if (algorithm_name.empty()) {
-    return {};
-  }
-
-  std::filesystem::path package_root = package_location.package_root;
-  if (package_root.empty()) {
-    package_root = package_location.manifest_path.parent_path();
-  }
-  if (package_root.empty()) {
-    return {};
-  }
-
-  return package_root / (algorithm_name + "_package.json");
 }
 
 bool _ParseInterventionStageKind(
@@ -167,13 +103,17 @@ bool _ParseInterventionStageKind(
 
 _InterventionSchema _LoadInterventionSchema(const algorithm::AlgorithmPackageLocation& package_location) {
   _InterventionSchema schema{};
-  const std::filesystem::path path = _BuildPackageJsonPath(package_location);
+  const std::string algorithm_name = _AlgorithmNameFromLocation(package_location);
+  const std::filesystem::path path = algorithm::package_paths::ResolvePackageJsonPath(
+    package_location.package_root,
+    package_location.manifest_path,
+    algorithm_name);
   if (path.empty()) {
     schema.error_message = "Failed to resolve package JSON file.";
     return schema;
   }
 
-  const std::string json_text = _ReadTextFile(path.string());
+  const std::string json_text = json_utils::ReadTextFile(path);
   if (json_text.empty()) {
     schema.error_message = "Failed to read package JSON file: " + path.string();
     return schema;
@@ -206,12 +146,12 @@ _InterventionSchema _LoadInterventionSchema(const algorithm::AlgorithmPackageLoc
 
     const std::string stage_key = stage_item->string;
     agent::AlgorithmInterventionStageSpec stage_spec{};
-    stage_spec.stage_name = _GetStringField(stage_item, "stage_name");
+    stage_spec.stage_name = json_utils::GetStringField(stage_item, "stage_name");
     if (stage_spec.stage_name.empty()) {
       stage_spec.stage_name = stage_key;
     }
 
-    const std::string stage_kind_text = _GetStringField(stage_item, "stage_kind");
+    const std::string stage_kind_text = json_utils::GetStringField(stage_item, "stage_kind");
     if (!_ParseInterventionStageKind(stage_spec.stage_name, stage_kind_text, &stage_spec.stage_kind)) {
       schema.error_message = "Invalid stage kind in package JSON file: " + path.string();
       cJSON_Delete(root);
@@ -237,19 +177,19 @@ _InterventionSchema _LoadInterventionSchema(const algorithm::AlgorithmPackageLoc
             binding.tuple_width = 3u;
             binding.required = true;
           } else if (cJSON_IsObject(item)) {
-            binding.container_name = _GetStringField(item, "name");
+            binding.container_name = json_utils::GetStringField(item, "name");
             if (binding.container_name.empty()) {
-              binding.container_name = _GetStringField(item, "container");
+              binding.container_name = json_utils::GetStringField(item, "container");
             }
-            binding.container_kind = _GetStringField(item, "kind");
+            binding.container_kind = json_utils::GetStringField(item, "kind");
             if (binding.container_kind.empty()) {
               binding.container_kind = "array";
             }
-            binding.tuple_width = _GetUintField(item, "tuple_width", 3u);
+            binding.tuple_width = json_utils::GetUintField(item, "tuple_width", 3u);
             if (binding.tuple_width == 0u) {
               binding.tuple_width = 3u;
             }
-            binding.required = _GetBoolField(item, "required", true);
+            binding.required = json_utils::GetBoolField(item, "required", true);
           }
 
           if (binding.container_name.empty()) {
@@ -276,9 +216,9 @@ _InterventionSchema _LoadInterventionSchema(const algorithm::AlgorithmPackageLoc
 
     const cJSON* shader = cJSON_GetObjectItemCaseSensitive(stage_item, "shader");
     if (shader && cJSON_IsObject(shader)) {
-      stage_spec.shader.vertex_shader_path = _GetStringField(shader, "vertex");
-      stage_spec.shader.fragment_shader_path = _GetStringField(shader, "fragment");
-      stage_spec.shader.pipeline_kind = _GetStringField(shader, "pipeline");
+      stage_spec.shader.vertex_shader_path = json_utils::GetStringField(shader, "vertex");
+      stage_spec.shader.fragment_shader_path = json_utils::GetStringField(shader, "fragment");
+      stage_spec.shader.pipeline_kind = json_utils::GetStringField(shader, "pipeline");
     }
 
     if (stage_spec.stage_kind == agent::AlgorithmInterventionStageKind::ResultRender) {
@@ -456,8 +396,8 @@ bool _DecodeAlgorithmInterventionData(
 
 }  // namespace
 
-bool CreateAlgorithmInterventionByName(
-  const std::string& algorithm_name,
+bool LoadAlgorithmInterventionFromLocation(
+  const algorithm::AlgorithmPackageLocation& package_location,
   std::shared_ptr<agent::IAlgorithmIntervention>* out_intervention,
   std::string* out_error_message) {
   if (!out_intervention) {
@@ -466,25 +406,12 @@ bool CreateAlgorithmInterventionByName(
     }
     return false;
   }
-  algorithm::AlgorithmPackageLocation package_location{};
-  std::string location_error_message;
-  if (!algorithm_management::TryResolveAlgorithmPackageLocation(
-        algorithm_name,
-        &package_location,
-        &location_error_message)) {
-    if (out_error_message) {
-      *out_error_message = location_error_message.empty()
-        ? ("Failed to resolve algorithm package location for '" + algorithm_name + "'.")
-        : std::move(location_error_message);
-    }
-    return false;
-  }
 
   const _InterventionSchema schema = _LoadInterventionSchema(package_location);
   if (!schema.valid) {
     if (out_error_message) {
       *out_error_message = schema.error_message.empty()
-        ? ("Failed to load intervention schema for '" + algorithm_name + "'.")
+        ? "Failed to load intervention schema from package location."
         : std::move(schema.error_message);
     }
     return false;

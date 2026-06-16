@@ -1,6 +1,7 @@
 #include "debug_tool_backend_runtime.h"
 
 #include "algorithm_management/algorithm_manager.h"
+#include "algorithm_support/algorithm_library_paths.h"
 #include "cJSON.h"
 
 #include <algorithm>
@@ -24,20 +25,7 @@ namespace {
 #endif
 
 std::string _AlgorithmCatalogPath() {
-  const std::filesystem::path candidates[] = {
-    "src/capabilities/algorithm_library/algorithm_catalog.json",
-    "../src/capabilities/algorithm_library/algorithm_catalog.json",
-    "../../src/capabilities/algorithm_library/algorithm_catalog.json",
-    "../../../src/capabilities/algorithm_library/algorithm_catalog.json",
-  };
-
-  std::error_code ec;
-  for (const std::filesystem::path& candidate : candidates) {
-    if (std::filesystem::exists(candidate, ec) && std::filesystem::is_regular_file(candidate, ec)) {
-      return candidate.string();
-    }
-  }
-  return candidates[0].string();
+  return (algorithm::library_paths::ResolveAlgorithmLibrarySourceRoot() / "algorithm_catalog.json").string();
 }
 
 std::string _ReadTextFile(const std::string& path) {
@@ -61,30 +49,11 @@ std::string _GetJsonStringField(const cJSON* object, const char* key) {
   return item->valuestring;
 }
 
-std::string _AlgorithmLibraryRootPath() {
-  const std::filesystem::path candidates[] = {
-    "src/capabilities/algorithm_library",
-    "../src/capabilities/algorithm_library",
-    "../../src/capabilities/algorithm_library",
-    "../../../src/capabilities/algorithm_library",
-  };
-
-  std::error_code ec;
-  for (const std::filesystem::path& candidate : candidates) {
-    if (std::filesystem::exists(candidate, ec) && std::filesystem::is_directory(candidate, ec)) {
-      return candidate.string();
-    }
-  }
-  return candidates[0].string();
-}
-
 std::string _ProjectRootPath() {
-  const std::filesystem::path algorithm_library_root = _AlgorithmLibraryRootPath();
-  if (!algorithm_library_root.empty()) {
-    const std::filesystem::path root = algorithm_library_root.parent_path().parent_path().parent_path();
-    if (!root.empty()) {
-      return root.string();
-    }
+  const std::filesystem::path root = algorithm::library_paths::ResolveProjectRootFromAlgorithmLibraryRoot(
+    algorithm::library_paths::ResolveAlgorithmLibrarySourceRoot());
+  if (!root.empty()) {
+    return root.string();
   }
   return ".";
 }
@@ -126,7 +95,10 @@ std::string _ResolveAlgorithmShaderPath(
     return path.string();
   }
 
-  return (std::filesystem::path(_AlgorithmLibraryRootPath()) / algorithm_name / shader_path).string();
+  return algorithm::library_paths::ResolveAlgorithmRelativePath(
+    algorithm::library_paths::ResolveAlgorithmLibraryRuntimeRoot(),
+    algorithm_name,
+    shader_path).string();
 }
 
 const agent::AlgorithmReflectionValue* _FindReflectionValue(

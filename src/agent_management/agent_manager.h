@@ -1,5 +1,9 @@
 #pragma once
 
+#if !defined(AGENT_MANAGEMENT_LAYER_INTERNAL_BUILD) && !defined(AGENT_MANAGEMENT_LAYER_PUBLIC_FACADE_INCLUDE)
+#error "Do not include agent_management/agent_manager.h directly. Use agent_management/agent_management.h."
+#endif
+
 #include "agent/agent.h"
 #include "common_data/common_data.h"
 

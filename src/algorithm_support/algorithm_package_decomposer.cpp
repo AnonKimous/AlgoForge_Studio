@@ -2,16 +2,16 @@
 #include "algorithm_management/algorithm_abi.h"
 
 #include "algorithm_support/algorithm_container_manifest.h"
+#include "algorithm_support/algorithm_json_utils.h"
 #include "algorithm_support/algorithm_package_location.h"
+#include "algorithm_support/algorithm_package_paths.h"
 
 #include "cJSON.h"
 
 #include <algorithm>
 #include <filesystem>
 #include <cstring>
-#include <fstream>
 #include <iterator>
-#include <sstream>
 #include <string_view>
 #include <utility>
 
@@ -52,68 +52,6 @@ struct PackageDecomposerSchema {
   std::string error_message;
 };
 
-std::string _ReadPackageTextFile(const std::string& path) {
-  std::ifstream file(path, std::ios::binary);
-  if (!file) {
-    return {};
-  }
-  std::ostringstream stream;
-  stream << file.rdbuf();
-  return stream.str();
-}
-
-std::string _GetPackageStringField(const cJSON* object, const char* key) {
-  if (!object || !key) {
-    return {};
-  }
-  const cJSON* item = cJSON_GetObjectItemCaseSensitive(object, key);
-  if (!item || !cJSON_IsString(item) || !item->valuestring) {
-    return {};
-  }
-  return item->valuestring;
-}
-
-std::vector<std::string> _GetPackageStringList(const cJSON* item) {
-  std::vector<std::string> values;
-  if (!item) {
-    return values;
-  }
-  if (cJSON_IsString(item) && item->valuestring) {
-    values.push_back(item->valuestring);
-    return values;
-  }
-  if (!cJSON_IsArray(item)) {
-    return values;
-  }
-  const int count = cJSON_GetArraySize(item);
-  values.reserve(count > 0 ? static_cast<size_t>(count) : 0u);
-  for (int i = 0; i < count; ++i) {
-    const cJSON* entry = cJSON_GetArrayItem(item, i);
-    if (!entry || !cJSON_IsString(entry) || !entry->valuestring) {
-      continue;
-    }
-    values.emplace_back(entry->valuestring);
-  }
-  return values;
-}
-
-std::vector<uint32_t> _GetPackageUintList(const cJSON* item) {
-  std::vector<uint32_t> values;
-  if (!item || !cJSON_IsArray(item)) {
-    return values;
-  }
-  const int count = cJSON_GetArraySize(item);
-  values.reserve(count > 0 ? static_cast<size_t>(count) : 0u);
-  for (int i = 0; i < count; ++i) {
-    const cJSON* entry = cJSON_GetArrayItem(item, i);
-    if (!entry || !cJSON_IsNumber(entry) || entry->valuedouble < 0.0) {
-      continue;
-    }
-    values.push_back(static_cast<uint32_t>(entry->valuedouble));
-  }
-  return values;
-}
-
 bool _ParsePackageDecomposerBinding(
   const cJSON* binding_item,
   const std::string& package_path,
@@ -124,13 +62,13 @@ bool _ParsePackageDecomposerBinding(
     return false;
   }
 
-  out_binding->from_names = _GetPackageStringList(cJSON_GetObjectItemCaseSensitive(binding_item, "from"));
+  out_binding->from_names = json_utils::GetStringList(cJSON_GetObjectItemCaseSensitive(binding_item, "from"));
   const cJSON* to_item = cJSON_GetObjectItemCaseSensitive(binding_item, "to");
   if (to_item && cJSON_IsObject(to_item)) {
-    out_binding->target_container_name = _GetPackageStringField(to_item, "container");
-    out_binding->target_indices = _GetPackageUintList(cJSON_GetObjectItemCaseSensitive(to_item, "indices"));
+    out_binding->target_container_name = json_utils::GetStringField(to_item, "container");
+    out_binding->target_indices = json_utils::GetUintList(cJSON_GetObjectItemCaseSensitive(to_item, "indices"));
   } else {
-    out_binding->target_container_names = _GetPackageStringList(to_item);
+    out_binding->target_container_names = json_utils::GetStringList(to_item);
   }
 
   if (out_binding->from_names.empty()) {
@@ -156,7 +94,7 @@ bool _ParsePackageDecomposerDescriptionEntry(
     return false;
   }
 
-  out_entry->name = _GetPackageStringField(entry_item, "name");
+  out_entry->name = json_utils::GetStringField(entry_item, "name");
   if (out_entry->name.empty()) {
     _SetErrorMessage(out_error_message, "Description entry is missing a name: " + package_path);
     return false;
@@ -195,35 +133,22 @@ bool _ParsePackageDecomposerResourceGroup(
   return true;
 }
 
-std::filesystem::path _BuildPackageJsonPath(const algorithm::AlgorithmPackageLocation& package_location) {
-  const std::string algorithm_name = package_location.algorithm_name.empty()
-    ? package_location.manifest_name
-    : package_location.algorithm_name;
-  if (algorithm_name.empty()) {
-    return {};
-  }
-
-  fs::path package_root = package_location.package_root;
-  if (package_root.empty()) {
-    package_root = package_location.manifest_path.parent_path();
-  }
-  if (package_root.empty()) {
-    return {};
-  }
-
-  return package_root / (algorithm_name + "_package.json");
-}
-
 PackageDecomposerSchema _LoadPackageDecomposerSchema(
   const algorithm::AlgorithmPackageLocation& package_location) {
   PackageDecomposerSchema schema{};
-  const fs::path package_json_path = _BuildPackageJsonPath(package_location);
+  const std::string algorithm_name = package_location.algorithm_name.empty()
+    ? package_location.manifest_name
+    : package_location.algorithm_name;
+  const fs::path package_json_path = algorithm::package_paths::ResolvePackageJsonPath(
+    package_location.package_root,
+    package_location.manifest_path,
+    algorithm_name);
   if (package_json_path.empty()) {
     schema.error_message = "Failed to resolve package JSON file for decomposer.";
     return schema;
   }
 
-  const std::string json_text = _ReadPackageTextFile(package_json_path.generic_string());
+  const std::string json_text = json_utils::ReadTextFile(package_json_path);
   if (json_text.empty()) {
     schema.error_message = "Failed to read package JSON file: " + package_json_path.generic_string();
     return schema;

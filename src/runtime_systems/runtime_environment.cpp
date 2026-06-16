@@ -1,4 +1,6 @@
+#define RUNTIME_SYSTEMS_LAYER_INTERNAL_BUILD 1
 #include "runtime_environment.h"
+#include "job_system.h"
 
 #include <SDL3/SDL.h>
 
@@ -31,12 +33,17 @@ bool RuntimeEnvironment::Init(
   int width,
   int height,
   RuntimeExecutionSymbols execution_symbols) {
+  if (!InitializeJobSystem()) {
+    return false;
+  }
+
   if (window_ || imgui_runtime_) {
     execution_symbols_ = execution_symbols;
     return true;
   }
 
   if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
+    ShutdownJobSystem();
     return false;
   }
   sdl_initialized_ = true;
@@ -98,10 +105,6 @@ void RuntimeEnvironment::ClearGpuExecutors() {
   }
 }
 
-void RuntimeEnvironment::SetExecutionSymbols(RuntimeExecutionSymbols execution_symbols) {
-  execution_symbols_ = execution_symbols;
-}
-
 bool RuntimeEnvironment::HasRenderPreviewTexture() const {
   return imgui_runtime_ ? imgui_runtime_->HasRenderPreviewTexture() : false;
 }
@@ -133,6 +136,7 @@ void RuntimeEnvironment::Destroy() {
     imgui_runtime_.reset();
   }
   window_.reset();
+  ShutdownJobSystem();
   execution_symbols_ = {};
   if (sdl_initialized_) {
     SDL_Quit();
@@ -141,3 +145,5 @@ void RuntimeEnvironment::Destroy() {
 }
 
 }  // namespace runtime_systems
+
+#undef RUNTIME_SYSTEMS_LAYER_INTERNAL_BUILD

@@ -1,4 +1,5 @@
 #include "algorithm_support/algorithm_package_location.h"
+#include "algorithm_support/algorithm_library_paths.h"
 
 #include <algorithm>
 #include <cctype>
@@ -14,10 +15,6 @@ namespace algorithm {
 namespace {
 
 namespace fs = std::filesystem;
-
-#ifndef ALGORITHM_MANAGEMENT_MANIFEST_SEARCH_ROOT
-#define ALGORITHM_MANAGEMENT_MANIFEST_SEARCH_ROOT "src/capabilities/algorithm_library"
-#endif
 
 enum class ManifestLookupResult {
   Found,
@@ -114,7 +111,7 @@ ManifestLookupResult _ResolveManifestPathByName(
     return ManifestLookupResult::Error;
   }
 
-  const fs::path search_root = fs::path(ALGORITHM_MANAGEMENT_MANIFEST_SEARCH_ROOT);
+  const fs::path search_root = library_paths::ResolveAlgorithmLibrarySourceRoot();
   std::error_code ec;
   if (!fs::exists(search_root, ec) || !fs::is_directory(search_root, ec)) {
     if (out_error_message) {
@@ -216,11 +213,11 @@ bool TryResolveAlgorithmPackageLocation(
   out_location->manifest_path = manifest_path;
   out_location->package_root = manifest_path.parent_path();
 
-  const fs::path package_root = out_location->package_root;
+  const fs::path project_root = library_paths::ResolveProjectRootFromAlgorithmLibraryRoot(
+    library_paths::ResolveAlgorithmLibrarySourceRoot());
   const fs::path plugin_candidates[] = {
-    package_root / "Debug" / (trimmed_name + ".dll"),
-    package_root / "Release" / (trimmed_name + ".dll"),
-    package_root / (trimmed_name + ".dll"),
+    project_root / "algorithmLib" / "algorithmruntimeLib" / trimmed_name / (trimmed_name + ".dll"),
+    project_root / "algorithmLib" / "algorithmruntimeLib" / (trimmed_name + ".dll"),
   };
 
   std::error_code ec;

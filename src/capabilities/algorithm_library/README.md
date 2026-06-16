@@ -2,20 +2,25 @@
 
 This directory stores concrete algorithm bundle assets.
 
-The directory is built by the dedicated batch tool `check_sdk.bat`, so it can be compiled independently from the `debugTool` solution.
+The directory is built by the dedicated batch tool `check_sdk.bat`, so it can be compiled independently from the `debugTool` solution. The packaged mirror is written to `algorithmLib/algorithmSrc`, and runtime DLL/SPV output is written to `algorithmLib/algorithmruntimeLib`.
 
 ## Layout
 
 Each algorithm lives in its own subdirectory named after the algorithm:
 
 ```text
-src/capabilities/algorithm_library/<algorithm_name>/
+algorithmLib/algorithmSrc/<algorithm_name>/
+algorithmLib/algorithmruntimeLib/<algorithm_name>/
 ```
 
 Each algorithm directory may contain:
 
 - `<algorithm_name>_package.json`
   - unified bundle manifest containing container, decomposer, reflector, and intervention sections
+- `runtime.launchOnce`
+  - optional boolean runtime hint
+  - when `true`, the host runs the algorithm once and then keeps it out of later agent ticks
+  - the first successful post-run reflection snapshot is cached and reused
 - intervention stage names use `preTick` and `afterTick`; `resultRender` stays separate
 - intervention stages are wrapper stages around the algorithm body, not the body itself
 - `resultRender` stages may carry GPU `shader` entries together with array bindings
@@ -35,6 +40,10 @@ Reflector entries live inside the package manifest:
   - human-readable group name
 - `reflector.functionName`
   - shared reflector function label for the group
+- `reflector.refreshMode`
+  - optional reflection refresh policy
+  - use `everyTick` for the current behavior
+  - use `captureOnce` or `onceAfterCompletion` to cache the first successful snapshot
 - `reflector.items[]`
   - each item may declare `input`/`output` with `varity`/`array`
   - if `reflectFun` is `direct`, each item may also declare flat `from` and `to`
@@ -45,9 +54,7 @@ first.
 
 ## UI Catalog
 
-The UI reads `algorithm_catalog.json` in this directory to populate the
-algorithm selection dropdown. The catalog lists available algorithms and points
-to their bundle names.
+The UI reads `algorithm_catalog.json` from `algorithmLib/algorithmSrc` to populate the algorithm selection dropdown. The catalog lists available algorithms and points to their bundle names.
 
 ## Compatibility
 
