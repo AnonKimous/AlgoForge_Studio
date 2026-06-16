@@ -6,7 +6,7 @@ build_algorithms_v6a6/
 out/
 bin/
 lib/
-sdk/
+/sdk/
 app/**/*.dll
 app/**/*.pdb
 app/**/*.lib
@@ -68,3 +68,4 @@ $RECYCLE.BIN/
 build.ps1
 build_msvc.cmd
 build_local.cmd
+tools/launch_algorithm_studio_local.bat
