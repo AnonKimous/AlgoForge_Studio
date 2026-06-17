@@ -1,63 +1,21 @@
 from __future__ import annotations
 
 import copy
-import os
 import json
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
 from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
-
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-
-
-def _resolve_codex_command(command: str) -> str:
-    search_roots: list[Path] = []
-    localappdata = os.environ.get("LOCALAPPDATA", "").strip()
-    if localappdata:
-        search_roots.extend(
-            [
-                Path(localappdata) / "OpenAI" / "Codex" / "bin",
-                Path(localappdata) / "Programs" / "OpenAI" / "Codex" / "bin",
-            ]
-        )
-    install_dir = os.environ.get("CODEX_INSTALL_DIR", "").strip()
-    if install_dir:
-        search_roots.append(Path(install_dir))
-    for root in search_roots:
-        if root.is_dir():
-            matches = sorted(root.rglob("codex.exe"))
-            if matches:
-                return str(matches[0])
-    env_command = os.environ.get("CODEX_COMMAND", "").strip()
-    if env_command:
-        which_env = shutil.which(env_command)
-        if which_env is not None:
-            return which_env
-    resolved = command.strip() or "codex"
-    which_resolved = shutil.which(resolved)
-    if which_resolved is not None:
-        return which_resolved
-    return env_command or resolved
-
-
-def _resolve_default_template_path() -> Path:
-    candidates = [
-        PROJECT_ROOT / "algorithmLib" / "algorithmSrc" / "algorithm_package_example.json",
-        PROJECT_ROOT / "src" / "capabilities" / "algorithm_library" / "algorithm_package_example.json",
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    return candidates[0]
-
-
-DEFAULT_TEMPLATE_PATH = _resolve_default_template_path()
+try:
+    from .shared import DEFAULT_TEMPLATE_PATH, PROJECT_ROOT, _resolve_codex_command
+except ImportError:
+    from shared import DEFAULT_TEMPLATE_PATH, PROJECT_ROOT, _resolve_codex_command
 
 
 @dataclass
@@ -68,6 +26,7 @@ class ContainerItem:
     stride: int = 4
     value: str = ""
     values: list[str] = field(default_factory=list)
+    structure: list[str] = field(default_factory=list)
     view_offset: int = 0
     x: float = 0.0
     y: float = 0.0
@@ -145,6 +104,17 @@ class FunctionFrameItem:
 
 
 @dataclass
+class FunctionTextItem:
+    name: str
+    function_name: str = ""
+    text: str = ""
+    x: float = 0.0
+    y: float = 0.0
+    width: float = 360.0
+    height: float = 200.0
+
+
+@dataclass
 class ConnectionItem:
     source_kind: str
     source_name: str
@@ -183,9 +153,11 @@ class ProjectState:
     reflector_items: list[ReflectorItem] = field(default_factory=list)
     res_nodes: list[ResourceNodeItem] = field(default_factory=list)
     function_frames: list[FunctionFrameItem] = field(default_factory=list)
+    function_text_items: list[FunctionTextItem] = field(default_factory=list)
     connections: list[ConnectionItem] = field(default_factory=list)
     intervention_stages: list[InterventionStage] = field(default_factory=list)
     notes: str = ""
+    manifest_text: str = ""
 
     def next_container_name(self, kind: str) -> str:
         prefix = "v" if kind == "variable" else "a"
@@ -236,6 +208,17 @@ class ProjectState:
                 return candidate
             index += 1
 
+    def next_function_text_name(self, function_name: str = "fun") -> str:
+        base = f"{function_name}_text".strip() or "fun_text"
+        if all(item.name != base for item in self.function_text_items):
+            return base
+        index = 1
+        while True:
+            candidate = f"{base}_{index}"
+            if all(item.name != candidate for item in self.function_text_items):
+                return candidate
+            index += 1
+
     def next_intervention_name(self) -> str:
         index = 1
         while True:
@@ -256,6 +239,8 @@ class ProjectState:
             return "resnode"
         if lowered == "function":
             return "function"
+        if lowered in {"functiontext", "funtext", "textnode", "text"}:
+            return "functiontext"
         if lowered == "stage":
             return "interventioner"
         if lowered in {"containerelement", "containergroup"}:
@@ -303,6 +288,10 @@ class ProjectState:
             for item in self.function_frames:
                 if item.name == node_name:
                     return item
+        elif node_kind == "functiontext":
+            for item in self.function_text_items:
+                if item.name == node_name:
+                    return item
         raise ValueError(f"Unknown node reference: {node_kind}:{node_name}")
 
     def iter_nodes(self) -> list[tuple[str, str, Any]]:
@@ -314,6 +303,7 @@ class ProjectState:
         nodes.extend(("interventioner", item.name, item) for item in self.intervention_stages)
         nodes.extend(("resnode", item.name, item) for item in self.res_nodes)
         nodes.extend(("function", item.name, item) for item in self.function_frames)
+        nodes.extend(("functiontext", item.name, item) for item in self.function_text_items)
         return nodes
 
     def input_ports_for(self, kind: str, name: str) -> list[str]:
@@ -328,6 +318,8 @@ class ProjectState:
             node = self._resolve_node(kind, name)
             assert isinstance(node, FunctionFrameItem)
             return [node.input_name or "in"]
+        if node_kind == "functiontext":
+            return []
         raise ValueError(f"Unsupported node kind for input ports: {node_kind}")
 
     def output_ports_for(self, kind: str, name: str) -> list[str]:
@@ -361,6 +353,8 @@ class ProjectState:
         if node_kind == "function":
             assert isinstance(node, FunctionFrameItem)
             return [node.output_name or "out"]
+        if node_kind == "functiontext":
+            return []
         raise ValueError(f"Unsupported node kind for output ports: {node_kind}")
 
     def validate_container_group(self, group: ContainerGroupItem) -> None:
@@ -618,13 +612,16 @@ class ProjectState:
             if kind == "containerelement":
                 entry["width"] = float(getattr(item, "width", 360.0))
                 entry["height"] = float(getattr(item, "height", 220.0))
-            elif kind in {"decomposer", "reflector", "resnode", "interventioner", "function"}:
+            elif kind in {"decomposer", "reflector", "resnode", "interventioner", "function", "functiontext"}:
                 entry["width"] = float(getattr(item, "width", 360.0))
                 entry["height"] = float(getattr(item, "height", 220.0))
                 if kind == "function":
                     entry["script"] = str(getattr(item, "script", ""))
                     entry["input_name"] = str(getattr(item, "input_name", "in"))
                     entry["output_name"] = str(getattr(item, "output_name", "out"))
+                if kind == "functiontext":
+                    entry["text"] = str(getattr(item, "text", ""))
+                    entry["function_name"] = str(getattr(item, "function_name", ""))
             nodes.append(entry)
         return nodes
 
@@ -661,6 +658,33 @@ class ProjectState:
             )
         return connections
 
+    def has_explicit_layout(self) -> bool:
+        for _kind, _name, item in self.iter_nodes():
+            x = float(getattr(item, "x", 0.0))
+            y = float(getattr(item, "y", 0.0))
+            if abs(x) > 0.001 or abs(y) > 0.001:
+                return True
+        return False
+
+    def apply_default_layout(self) -> None:
+        x = 32.0
+        y = 32.0
+        row_height = 0.0
+        max_width = 1400.0
+        gap_x = 28.0
+        gap_y = 28.0
+        for _kind, _name, item in self.iter_nodes():
+            width = float(getattr(item, "width", 180.0))
+            height = float(getattr(item, "height", 96.0))
+            if x + width > max_width and row_height > 0.0:
+                x = 32.0
+                y += row_height + gap_y
+                row_height = 0.0
+            item.x = x
+            item.y = y
+            x += width + gap_x
+            row_height = max(row_height, height)
+
     def to_package_json(self) -> dict[str, Any]:
         self.sync_container_groups_from_geometry()
         variable_section: dict[str, Any] = {}
@@ -671,6 +695,7 @@ class ProjectState:
                 "stride": container.stride,
                 "value": container.value,
                 "values": list(container.values),
+                "structure": list(container.structure),
                 "view_offset": container.view_offset,
                 "x": container.x,
                 "y": container.y,
@@ -770,6 +795,20 @@ class ProjectState:
                 }
             )
 
+        function_text_items: list[dict[str, Any]] = []
+        for item in self.function_text_items:
+            function_text_items.append(
+                {
+                    "name": item.name,
+                    "function_name": item.function_name,
+                    "text": item.text,
+                    "x": item.x,
+                    "y": item.y,
+                    "width": item.width,
+                    "height": item.height,
+                }
+            )
+
         stage_map: dict[str, Any] = {}
         for stage in self.intervention_stages:
             stage_map[stage.name] = {
@@ -816,6 +855,9 @@ class ProjectState:
             "function": {
                 "items": function_items,
             },
+            "functionText": {
+                "items": function_text_items,
+            },
             "intervention": {
                 "stages": stage_map,
             },
@@ -825,6 +867,15 @@ class ProjectState:
             },
             "notes": self.notes,
         }
+
+    def rebuild_manifest_text(self) -> str:
+        self.manifest_text = json.dumps(self.to_package_json(), indent=2, ensure_ascii=False)
+        return self.manifest_text
+
+    def current_manifest_text(self) -> str:
+        if not self.manifest_text:
+            return self.rebuild_manifest_text()
+        return self.manifest_text
 
     @classmethod
     def from_package_json(cls, payload: dict[str, Any]) -> ProjectState:
@@ -845,6 +896,9 @@ class ProjectState:
                 values = entry.get("values", [])
                 if not isinstance(values, list):
                     values = [values] if values else []
+                structure = entry.get("structure", [])
+                if not isinstance(structure, list):
+                    structure = [structure] if structure else []
                 project.containers.append(
                     ContainerItem(
                         name=str(name),
@@ -853,6 +907,7 @@ class ProjectState:
                         stride=int(entry.get("stride", 4)),
                         value=str(entry.get("value") or ""),
                         values=[str(value) for value in values],
+                        structure=[str(value) for value in structure],
                         view_offset=int(entry.get("view_offset", 0)),
                         x=float(entry.get("x", 0.0)),
                         y=float(entry.get("y", 0.0)),
@@ -868,6 +923,9 @@ class ProjectState:
                 values = entry.get("values", [])
                 if not isinstance(values, list):
                     values = [values] if values else []
+                structure = entry.get("structure", [])
+                if not isinstance(structure, list):
+                    structure = [structure] if structure else []
                 project.containers.append(
                     ContainerItem(
                         name=str(name),
@@ -876,6 +934,7 @@ class ProjectState:
                         stride=int(entry.get("stride", 4)),
                         value=str(entry.get("value") or ""),
                         values=[str(value) for value in values],
+                        structure=[str(value) for value in structure],
                         view_offset=int(entry.get("view_offset", 0)),
                         x=float(entry.get("x", 0.0)),
                         y=float(entry.get("y", 0.0)),
@@ -1012,6 +1071,22 @@ class ProjectState:
                     )
                 )
 
+        function_text_section = payload.get("functionText", {})
+        function_text_items = function_text_section.get("items", [])
+        if isinstance(function_text_items, list):
+            for index, item in enumerate(function_text_items, start=1):
+                project.function_text_items.append(
+                    FunctionTextItem(
+                        name=str(item.get("name") or f"fun_text_{index}"),
+                        function_name=str(item.get("function_name") or ""),
+                        text=str(item.get("text") or ""),
+                        x=float(item.get("x", 0.0)),
+                        y=float(item.get("y", 0.0)),
+                        width=float(item.get("width", 360.0)),
+                        height=float(item.get("height", 200.0)),
+                    )
+                )
+
         stages = payload.get("intervention", {}).get("stages", {})
         if isinstance(stages, dict):
             for stage_name, stage in stages.items():
@@ -1032,20 +1107,6 @@ class ProjectState:
                         height=float(stage.get("height", 220.0)),
                     )
                 )
-
-        if not project.containers:
-            project.containers.append(ContainerItem(name="v1", kind="variable"))
-            project.containers.append(ContainerItem(name="a1", kind="array"))
-        if not project.res_nodes:
-            project.res_nodes.append(ResourceNodeItem(name="resNode_1", resource_types=["mesh"], outputs=["mesh"], resource_kind="mesh"))
-        if not project.intervention_stages:
-            project.intervention_stages.extend(
-                [
-                    InterventionStage(name="preTick", kind="preTick"),
-                    InterventionStage(name="afterTick", kind="afterTick"),
-                    InterventionStage(name="resultRender", kind="resultRender"),
-                ]
-            )
 
         for group in project.container_groups:
             project.validate_container_group(group)
@@ -1107,6 +1168,9 @@ class ProjectState:
                     )
                     project.validate_connection(connection)
                     project.connections.append(connection)
+        if not project.has_explicit_layout():
+            project.apply_default_layout()
+        project.rebuild_manifest_text()
         return project
 
 
@@ -1118,7 +1182,7 @@ class MockAgentClient:
         self.base_url = ""
         self.api_key = ""
         self.codex_command = "codex"
-        self.timeout_seconds = 60
+        self.timeout_seconds = 180
 
     def _build_prompt(self, project: ProjectState, selection: str, prompt: str) -> str:
         summary = [
@@ -1186,7 +1250,12 @@ class MockAgentClient:
                 response_text = response.read().decode("utf-8", errors="replace")
         except HTTPError as exc:
             error_body = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
-            raise RuntimeError(f"API request failed: {exc.code} {exc.reason}\n{error_body}") from exc
+            error_text = " ".join(
+                part.strip()
+                for part in [f"{exc.code} {exc.reason}".strip(), error_body.splitlines()[0].strip() if error_body else ""]
+                if part
+            )
+            raise RuntimeError(f"API request failed: {error_text or exc.reason}") from exc
         except URLError as exc:
             raise RuntimeError(f"API request failed: {exc.reason}") from exc
         data = json.loads(response_text)
@@ -1216,27 +1285,24 @@ class MockAgentClient:
             args.extend(["--model", model])
         args.append("-")
         stdin_prompt = self._build_prompt(project, selection, prompt)
-        completed = subprocess.run(
-            args,
-            input=stdin_prompt,
-            text=True,
-            encoding="utf-8",
-            errors="strict",
-            capture_output=True,
-            timeout=self.timeout_seconds,
-            check=False,
-        )
-        output = (completed.stdout or "").strip()
-        error_output = (completed.stderr or "").strip()
-        if completed.returncode != 0:
-            raise RuntimeError(
-                "Codex command failed "
-                f"(exit {completed.returncode}).\n{error_output or output or 'No output captured.'}"
+        try:
+            completed = subprocess.run(
+                args,
+                input=stdin_prompt,
+                text=True,
+                encoding="utf-8",
+                errors="strict",
+                capture_output=True,
+                timeout=self.timeout_seconds,
+                check=False,
             )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(f"Codex command timed out after {self.timeout_seconds} seconds.") from exc
+        output = (completed.stdout or "").strip()
+        if completed.returncode != 0:
+            raise RuntimeError(f"Codex command failed (exit {completed.returncode}).") from None
         if output:
             return output
-        if error_output:
-            return error_output
         return "Codex finished without output."
 
     def generate(self, project: ProjectState, selection: str, prompt: str) -> str:

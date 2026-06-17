@@ -17,6 +17,13 @@
 #include "runtime_systems/runtime_systems.h"
 #undef RUNTIME_SYSTEMS_LAYER_PUBLIC_FACADE_INCLUDE
 
+namespace agent_management {
+struct AlgorithmPipelineStallReport;
+bool ReportAlgorithmPipelineStall(
+  const AlgorithmPipelineStallReport& report,
+  std::string* out_error_message);
+}  // namespace agent_management
+
 namespace algorithm_management {
 
 using ::algorithm::AlgorithmContainer;
@@ -29,6 +36,7 @@ using ::algorithm::AlgorithmProfile;
 using ::algorithm::AlgorithmReflectionBinding;
 using ::algorithm::AlgorithmReflector;
 using ::algorithm::AlgorithmReflectorManifestItem;
+using ::algorithm_management::AlgorithmPipelineStageSubmission;
 using ::algorithm::AlgorithmStandardContainerLayout;
 using ::algorithm::FindAlgorithmContainer;
 using ::algorithm::TryResolveAlgorithmPackageLocation;
@@ -261,11 +269,20 @@ using algorithm_management::AlgorithmProfile;
 using algorithm_management::AlgorithmReflectionBinding;
 using algorithm_management::AlgorithmReflector;
 using algorithm_management::AlgorithmReflectorManifestItem;
+using algorithm_management::PipelineStageBridge;
+using algorithm_management::AlgorithmRuntimeTransferBinding;
+using algorithm_management::AlgorithmRuntimeTransferEdge;
+using algorithm_management::AlgorithmRuntimeTransferMap;
 using algorithm_management::AlgorithmPackageLocation;
 using algorithm_management::FindAlgorithmContainer;
 using algorithm_management::CreateAlgorithmObjectFromLocation;
 using algorithm_management::FinalizeAlgorithmObject;
+using algorithm_management::PipelineStageBridgeIngress;
+using algorithm_management::PipelineStageBridgeEgress;
+using algorithm_management::LoadAlgorithmPackageTransferMapFromLocation;
 using algorithm_management::QueryAlgorithmRequestedBindings;
 using algorithm_management::LoadAlgorithmPackageDefaultBindings;
 using algorithm_management::SubmitAlgorithmObject;
 using algorithm_management::TryResolveAlgorithmPackageLocation;
+using agent_management::AlgorithmPipelineStallReport;
+using agent_management::ReportAlgorithmPipelineStall;

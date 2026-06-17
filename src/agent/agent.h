@@ -43,6 +43,12 @@ class Agent {
     std::string* out_error_message = nullptr,
     AlgorithmMountMode mount_mode = AlgorithmMountMode::Direct,
     AlgorithmExecutionPreference execution_preference = AlgorithmExecutionPreference::Gpu);
+  bool MountPipelineAlgorithm(
+    const std::string& pipeline_name,
+    const std::vector<AlgorithmPipelineStageSubmission>& stage_submissions,
+    size_t* out_index = nullptr,
+    std::string* out_error_message = nullptr,
+    AlgorithmExecutionPreference execution_preference = AlgorithmExecutionPreference::Gpu);
   bool AppendAlgorithmObject(AlgorithmObject object, size_t* out_index = nullptr);
   bool RemoveAlgorithm(size_t index);
   void RefreshInterventionSignals(const AgentTickContext& context);
@@ -89,6 +95,7 @@ class Agent {
   const AgentAlgorithmRuntimeState* algorithm_runtime_state(size_t index) const {
     return index < algorithm_runtime_states_.size() ? &algorithm_runtime_states_[index] : nullptr;
   }
+  bool PipelineNameInUse(const std::string& pipeline_name) const;
 
  private:
   bool initialized_{false};

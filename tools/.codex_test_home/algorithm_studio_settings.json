@@ -1,0 +1,8 @@
+{
+  "provider": "codex",
+  "model": "gpt-5.4-mini",
+  "approval_mode": "manual",
+  "base_url": "",
+  "api_key": "",
+  "agent_command": "codex"
+}

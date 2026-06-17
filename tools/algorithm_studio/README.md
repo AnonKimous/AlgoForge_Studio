@@ -44,6 +44,15 @@ This is a UI-first prototype.
 - The project can be extended later to generate C++ and trigger hot builds.
 - The launcher expects Python 3.10 or newer.
 
+## Pipeline Bridge Notes
+
+- Pipeline algorithms should prefer `standard container` layouts.
+- Pipeline and normal algorithms are handled by separate backend submission paths.
+- The runtime bridge should resolve `standard_layout` first and treat standard slots as the primary stage-to-stage carrier.
+- Non-standard containers must be transferred as same-name containers with identical structure, or the backend should fail fast.
+- Standard slots like `v1`, `v2`, `v3` may be grouped into higher-level aliases for readability, while the runtime still resolves the underlying standard slots.
+- Direct transfer for non-standard containers must keep the same container name on both sides and the same structure.
+
 ## Launch behavior
 
 - The GUI runs on the machine's local Python interpreter.

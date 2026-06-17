@@ -5,6 +5,7 @@
 
 #include <memory>
 #include <string>
+#include <unordered_map>
 
 namespace algorithm {
 class AlgorithmReflector;
@@ -66,9 +67,29 @@ bool TryLoadAlgorithmPluginComponents(
   AlgorithmPluginComponents* out_components,
   std::string* out_error_message = nullptr);
 
-bool LoadAlgorithmPackageRuntimeReflectorFromLocation(
+bool LoadAlgorithmPackageReflectorFromLocation(
   const algorithm::AlgorithmPackageLocation& package_location,
   std::shared_ptr<algorithm::AlgorithmReflector>* out_reflector,
+  std::string* out_error_message = nullptr);
+
+bool LoadAlgorithmPackageTransferMapFromLocation(
+  const algorithm::AlgorithmPackageLocation& package_location,
+  std::shared_ptr<algorithm::AlgorithmRuntimeTransferMap>* out_transfer_map,
+  bool* out_has_transfer_map = nullptr,
+  std::string* out_error_message = nullptr);
+
+bool PipelineStageBridgeIngress(
+  const algorithm::AlgorithmRuntimeTransferMap& transfer_map,
+  const std::string& target_stage_name,
+  const std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>& stage_container_sets,
+  algorithm::AlgorithmContainerSet* out_target_container_set,
+  std::string* out_error_message = nullptr);
+
+bool PipelineStageBridgeEgress(
+  const algorithm::AlgorithmRuntimeTransferMap& transfer_map,
+  const std::string& source_stage_name,
+  const algorithm::AlgorithmContainerSet& source_container_set,
+  std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>* stage_container_sets,
   std::string* out_error_message = nullptr);
 
 bool QueryAlgorithmPackageRequestedBindingsFromLocation(
@@ -101,6 +122,62 @@ bool CreateAlgorithmObjectFromLocation(
   agent::AlgorithmObject* out_group,
   std::string* out_error_message = nullptr);
 
+class PipelineStageBridge {
+ public:
+  PipelineStageBridge() = default;
+  explicit PipelineStageBridge(std::shared_ptr<algorithm::AlgorithmRuntimeTransferMap> transfer_map)
+    : transfer_map_(std::move(transfer_map)) {}
+
+  void SetTransferMap(std::shared_ptr<algorithm::AlgorithmRuntimeTransferMap> transfer_map) {
+    transfer_map_ = std::move(transfer_map);
+  }
+
+  const std::shared_ptr<algorithm::AlgorithmRuntimeTransferMap>& transfer_map() const {
+    return transfer_map_;
+  }
+
+  bool IngestFromPreviousStage(
+    const std::string& target_stage_name,
+    const std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>& stage_container_sets,
+    algorithm::AlgorithmContainerSet* out_target_container_set,
+    std::string* out_error_message = nullptr) const {
+    if (!transfer_map_) {
+      if (out_error_message) {
+        *out_error_message = "Algorithm runtime transfer map is unavailable.";
+      }
+      return false;
+    }
+    return PipelineStageBridgeIngress(
+      *transfer_map_,
+      target_stage_name,
+      stage_container_sets,
+      out_target_container_set,
+      out_error_message);
+  }
+
+  bool EmitToNextStage(
+    const std::string& source_stage_name,
+    const algorithm::AlgorithmContainerSet& source_container_set,
+    std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>* stage_container_sets,
+    std::string* out_error_message = nullptr) const {
+    if (!transfer_map_) {
+      if (out_error_message) {
+        *out_error_message = "Algorithm runtime transfer map is unavailable.";
+      }
+      return false;
+    }
+    return PipelineStageBridgeEgress(
+      *transfer_map_,
+      source_stage_name,
+      source_container_set,
+      stage_container_sets,
+      out_error_message);
+  }
+
+ private:
+  std::shared_ptr<algorithm::AlgorithmRuntimeTransferMap> transfer_map_{};
+};
+
 }  // namespace algorithm_support
 
 namespace algorithm_library_plugin = algorithm_support;
@@ -111,6 +188,13 @@ using algorithm_support::AlgorithmPluginComponents;
 using algorithm_support::AlgorithmPluginCreateBundleFn;
 using algorithm_support::AlgorithmPluginCreateRuntimeReflectorFn;
 using algorithm_support::AlgorithmPluginRequest;
+using algorithm_support::PipelineStageBridge;
+using ::algorithm::AlgorithmRuntimeTransferBinding;
+using ::algorithm::AlgorithmRuntimeTransferEdge;
+using ::algorithm::AlgorithmRuntimeTransferMap;
+using algorithm_support::PipelineStageBridgeIngress;
+using algorithm_support::PipelineStageBridgeEgress;
+using algorithm_support::LoadAlgorithmPackageTransferMapFromLocation;
 }  // namespace algorithm_management
 
 #if defined(ALGORITHM_LIBRARY_PLUGIN_BUILD)

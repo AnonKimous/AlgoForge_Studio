@@ -961,7 +961,7 @@ extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateRuntimeReflec
         nullptr)) {
     return false;
   }
-  if (!algorithm_support::LoadAlgorithmPackageRuntimeReflectorFromLocation(
+  if (!algorithm_support::LoadAlgorithmPackageReflectorFromLocation(
         package_location,
         &runtime_reflector,
         nullptr)) {

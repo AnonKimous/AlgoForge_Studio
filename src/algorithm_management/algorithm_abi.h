@@ -48,9 +48,22 @@ struct AlgorithmDescriptorValue {
   float scalar_value{0.0f};
 };
 
+struct AlgorithmPipelineStageSubmission {
+  std::string stage_name;
+  std::vector<AlgorithmResourceBinding> resource_bindings;
+  std::vector<AlgorithmDescriptorValue> descriptor_values;
+};
+
+struct AlgorithmPipelineStageRuntimeStat {
+  std::string stage_name;
+  float elapsed_seconds{0.0f};
+  std::string reason;
+};
+
 enum class AlgorithmMountMode {
   Direct = 0,
   StandardContainer = 1,
+  Pipeline = 2,
 };
 
 enum class AlgorithmExecutionPreference {
@@ -124,6 +137,13 @@ struct AgentAlgorithmRuntimeState {
   AlgorithmReflectionSnapshot reflection_snapshot{};
   bool launch_once_completed{false};
   bool reflection_snapshot_cached{false};
+  uint64_t pipeline_progress_signature{0u};
+  bool pipeline_progress_signature_valid{false};
+  float pipeline_no_progress_seconds{0.0f};
+  bool pipeline_stall_report_requested{false};
+  bool pipeline_stall_reported{false};
+  std::string pipeline_stall_reason;
+  std::vector<AlgorithmPipelineStageRuntimeStat> pipeline_stage_runtime_stats;
 };
 
 enum class AlgorithmAssemblyState {
@@ -168,7 +188,12 @@ class AlgorithmObject {
   algorithm::AlgorithmProfile algorithm_profile{};
   std::shared_ptr<IAlgorithmPackageSupport> reflector;
   std::shared_ptr<algorithm::AlgorithmReflector> algorithm_reflector;
+  std::shared_ptr<algorithm::AlgorithmRuntimeTransferMap> runtime_transfer_map;
   std::shared_ptr<algorithm::AlgorithmContainerSet> shared_container_set;
+  bool pipeline_stage{false};
+  std::string pipeline_name;
+  uint32_t pipeline_stage_index{0u};
+  uint32_t pipeline_stage_count{0u};
   std::vector<AlgorithmResourceBinding> resource_bindings;
   std::vector<AlgorithmDescriptorValue> descriptor_values;
   bool cpu_symbol{true};
@@ -309,6 +334,8 @@ using algorithm_management::AlgorithmInterventionShaderSpec;
 using algorithm_management::AlgorithmInterventionStageKind;
 using algorithm_management::AlgorithmInterventionStageSpec;
 using algorithm_management::AlgorithmMountMode;
+using algorithm_management::AlgorithmPipelineStageSubmission;
+using algorithm_management::AlgorithmPipelineStageRuntimeStat;
 using algorithm_management::AlgorithmObject;
 using algorithm_management::AlgorithmPackageDebugState;
 using algorithm_management::AlgorithmReflectionSnapshot;

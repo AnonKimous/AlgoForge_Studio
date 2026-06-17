@@ -297,11 +297,6 @@ class AlgorithmGpuExecutorImpl {
           }
           continue;
         }
-        if (container->storage_kind != algorithm::AlgorithmContainerStorageKind::Array) {
-          _ThrowGpuTickError(
-            "GPU tick stage container '" + binding.container_name + "' is not an array.",
-            out_error_message);
-        }
         if (container->element_stride == 0u || container->bytes.empty()) {
           if (binding.required) {
             _ThrowGpuTickError(

@@ -32,3 +32,12 @@
 3. `filter` 映射和 `filter` 拆解要统一用这个名字，不要再拆成两个不同术语。
 4. 如果清单里出现自定义结构，优先按树结构解释，而不是按单个变量/数组解释。
 
+## Pipeline Bridge Note
+
+1. `standard container` is the preferred pipeline path.
+2. Pipeline and normal algorithms are submitted through separate backend paths.
+3. `PipelineStageBridge` should resolve `standard_layout` first and prefer standard-slot interpretation.
+4. Non-standard containers are not a soft fallback: they must be transferred as same-name containers with identical structure, or the runtime should fail fast.
+5. Standard slots like `v1`, `v2`, `v3` may be grouped into more readable logical names, but runtime should still resolve the underlying standard slots.
+6. Direct transfer for non-standard containers must keep the same container name on both sides and the same structure.
+7. If an algorithm depends heavily on non-standard containers, the toolchain should warn the developer to move back toward standard containers.

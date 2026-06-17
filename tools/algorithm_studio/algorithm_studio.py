@@ -3,574 +3,122 @@
 from __future__ import annotations
 
 import copy
-import os
+import ctypes
 import json
+import mimetypes
+import os
+import re
 import shutil
 import subprocess
-from dataclasses import dataclass, field
+import tempfile
+import time
+from datetime import datetime
 from pathlib import Path
 import tkinter as tk
 from tkinter import font as tkfont
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from typing import Any
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
-from urllib.parse import urlparse
+from ctypes import wintypes
+from urllib.parse import unquote, urlparse
+
+LRESULT_TYPE = getattr(ctypes, "c_ssize_t", ctypes.c_longlong if ctypes.sizeof(ctypes.c_void_p) == ctypes.sizeof(ctypes.c_longlong) else ctypes.c_long)
+CHAT_HISTORY_FULL_TURN_LIMIT = 12
+CHAT_HISTORY_RECENT_TURN_COUNT = 8
 
 try:
     from .approval_rules import ApprovalDecision, ApprovalRuleSet, evaluate_access_rules, load_access_rules, resolve_access_rules_path
 except ImportError:
     from approval_rules import ApprovalDecision, ApprovalRuleSet, evaluate_access_rules, load_access_rules, resolve_access_rules_path
 
+try:
+    from .shared import (
+        BLUEPRINT_NODE_MIN_HEIGHT,
+        BLUEPRINT_NODE_WIDTH,
+        CANVAS_PADDING,
+        COLORS,
+        NODE_HEIGHT,
+        NODE_WIDTH,
+        PROJECT_ROOT,
+        SETTINGS_PATH,
+        SIDEBAR_COLLAPSED_WIDTH,
+        SIDEBAR_EXPANDED_WIDTH,
+        SPECIAL_CARD_HEIGHT,
+        SPECIAL_CARD_WIDTH,
+        _load_algorithm_studio_settings,
+        _resolve_codex_command,
+        _save_algorithm_studio_settings,
+    )
+    from .ui_shell import (
+        build_main_area,
+        build_toolbar,
+        build_ui,
+        build_welcome_page,
+        configure_style,
+        destroy_welcome_page,
+        finalize_welcome,
+        welcome_connect_api,
+        welcome_import_existing_agent,
+        welcome_use_codex,
+    )
+except ImportError:
+    from shared import (
+        BLUEPRINT_NODE_MIN_HEIGHT,
+        BLUEPRINT_NODE_WIDTH,
+        CANVAS_PADDING,
+        COLORS,
+        NODE_HEIGHT,
+        NODE_WIDTH,
+        PROJECT_ROOT,
+        SETTINGS_PATH,
+        SIDEBAR_COLLAPSED_WIDTH,
+        SIDEBAR_EXPANDED_WIDTH,
+        SPECIAL_CARD_HEIGHT,
+        SPECIAL_CARD_WIDTH,
+        _load_algorithm_studio_settings,
+        _resolve_codex_command,
+        _save_algorithm_studio_settings,
+    )
+    from ui_shell import (
+        build_main_area,
+        build_toolbar,
+        build_ui,
+        build_welcome_page,
+        configure_style,
+        destroy_welcome_page,
+        finalize_welcome,
+        welcome_connect_api,
+        welcome_import_existing_agent,
+        welcome_use_codex,
+    )
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-SETTINGS_PATH = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))) / "algorithm_studio_settings.json"
-
-
-def _resolve_codex_command(command: str) -> str:
-    search_roots: list[Path] = []
-    localappdata = os.environ.get("LOCALAPPDATA", "").strip()
-    if localappdata:
-        search_roots.extend(
-            [
-                Path(localappdata) / "OpenAI" / "Codex" / "bin",
-                Path(localappdata) / "Programs" / "OpenAI" / "Codex" / "bin",
-            ]
-        )
-    install_dir = os.environ.get("CODEX_INSTALL_DIR", "").strip()
-    if install_dir:
-        search_roots.append(Path(install_dir))
-    for root in search_roots:
-        if root.is_dir():
-            matches = sorted(root.rglob("codex.exe"))
-            if matches:
-                return str(matches[0])
-    env_command = os.environ.get("CODEX_COMMAND", "").strip()
-    if env_command:
-        which_env = shutil.which(env_command)
-        if which_env is not None:
-            return which_env
-    resolved = command.strip() or "codex"
-    which_resolved = shutil.which(resolved)
-    if which_resolved is not None:
-        return which_resolved
-    return env_command or resolved
-
-
-def _resolve_default_template_path() -> Path:
-    candidates = [
-        PROJECT_ROOT / "algorithmLib" / "algorithmSrc" / "algorithm_package_example.json",
-        PROJECT_ROOT / "src" / "capabilities" / "algorithm_library" / "algorithm_package_example.json",
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    return candidates[0]
-
-
-DEFAULT_TEMPLATE_PATH = _resolve_default_template_path()
-
-
-def _load_algorithm_studio_settings() -> dict[str, str]:
-    if SETTINGS_PATH.exists():
-        return json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
-    return {}
-
-
-def _save_algorithm_studio_settings(settings: dict[str, str]) -> None:
-    SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    SETTINGS_PATH.write_text(json.dumps(settings, indent=2, ensure_ascii=False), encoding="utf-8")
-
-NODE_WIDTH = 154
-NODE_HEIGHT = 64
-SPECIAL_CARD_WIDTH = 210
-SPECIAL_CARD_HEIGHT = 108
-BLUEPRINT_NODE_WIDTH = 360
-BLUEPRINT_NODE_MIN_HEIGHT = 160
-CANVAS_PADDING = 24
-SIDEBAR_EXPANDED_WIDTH = 420
-SIDEBAR_COLLAPSED_WIDTH = 36
-
-COLORS = {
-    "window": "#111418",
-    "panel": "#161b22",
-    "panel_alt": "#1b212b",
-    "canvas": "#0f1319",
-    "grid": "#202632",
-    "text": "#edf2f7",
-    "muted": "#8b98a7",
-    "accent": "#6ee7ff",
-    "accent_2": "#f59e0b",
-    "good": "#34d399",
-    "bad": "#f87171",
-    "container": "#1d4ed8",
-    "container_array": "#7c3aed",
-    "stage": "#0f766e",
-    "agent": "#b45309",
-    "edge": "#9aa4b2",
-    "preview": "#0b1020",
-}
-
-
-@dataclass
-class ContainerItem:
-    name: str
-    kind: str
-    count: int = 1
-    stride: int = 4
-    x: float = 0.0
-    y: float = 0.0
-    locked: bool = False
-
-
-@dataclass
-class DecomposerRule:
-    name: str
-    source: str
-    target: str
-
-
-@dataclass
-class ReflectorItem:
-    name: str
-    reflect_fun: str = "direct"
-    inputs_varity: list[str] = field(default_factory=list)
-    inputs_array: list[str] = field(default_factory=list)
-    output_kind: str = "v"
-    output_name: str = ""
-    direct_from: list[str] = field(default_factory=list)
-    direct_to: list[str] = field(default_factory=list)
-
-
-@dataclass
-class InterventionStage:
-    name: str
-    kind: str
-    used_variables: list[str] = field(default_factory=list)
-    used_arrays: list[str] = field(default_factory=list)
-    shader_vertex: str = ""
-    shader_fragment: str = ""
-    functions: list[str] = field(default_factory=list)
-    pipeline: str = "graphics"
-
-
-@dataclass
-class ProjectState:
-    algorithm_name: str = "new_algorithm"
-    package_name: str = "new_algorithm"
-    cpu_available: bool = True
-    gpu_available: bool = True
-    containers: list[ContainerItem] = field(default_factory=list)
-    decomposer_rules: list[DecomposerRule] = field(default_factory=list)
-    reflector_items: list[ReflectorItem] = field(default_factory=list)
-    intervention_stages: list[InterventionStage] = field(default_factory=list)
-    notes: str = ""
-
-    def next_container_name(self, kind: str) -> str:
-        prefix = "v" if kind == "variable" else "a"
-        index = 1
-        while True:
-            candidate = f"{prefix}{index}"
-            if all(container.name != candidate for container in self.containers):
-                return candidate
-            index += 1
-
-    def next_stage_name(self) -> str:
-        index = 1
-        while True:
-            candidate = f"stage_{index}"
-            if all(stage.name != candidate for stage in self.intervention_stages):
-                return candidate
-            index += 1
-
-    def to_package_json(self) -> dict[str, Any]:
-        variable_section: dict[str, Any] = {}
-        variable_array_section: dict[str, Any] = {}
-        for container in self.containers:
-            entry = {
-                "count": container.count,
-                "stride": container.stride,
-            }
-            if container.kind == "variable":
-                variable_section[container.name] = entry
-            else:
-                variable_array_section[container.name] = entry
-
-        decomposer_description: list[dict[str, Any]] = []
-        for rule in self.decomposer_rules:
-            decomposer_description.append(
-                {
-                    "name": rule.name,
-                    "from": [rule.source],
-                    "to": [rule.target],
-                }
-            )
-
-        reflector_items: list[dict[str, Any]] = []
-        for item in self.reflector_items:
-            if item.reflect_fun == "direct":
-                reflector_items.append(
-                    {
-                        "name": item.name,
-                        "from": item.direct_from or item.inputs_varity + item.inputs_array,
-                        "to": item.direct_to or ([item.output_name] if item.output_name else []),
-                        "reflectFun": "direct",
-                    }
-                )
-            else:
-                reflector_items.append(
-                    {
-                        "name": item.name,
-                        "input": {
-                            "varity": item.inputs_varity,
-                            "array": item.inputs_array,
-                        },
-                        "output": {
-                            item.output_kind: {
-                                "name": item.output_name,
-                            }
-                        },
-                        "reflectFun": item.reflect_fun,
-                    }
-                )
-
-        stage_map: dict[str, Any] = {}
-        for stage in self.intervention_stages:
-            stage_map[stage.name] = {
-                "stage_name": stage.name,
-                "stage_kind": stage.kind,
-                "functions": stage.functions,
-                "used_algorithm_containers": {
-                    "variables": [{"name": name, "kind": "variable", "tuple_width": 1, "required": True} for name in stage.used_variables],
-                    "arrays": [{"name": name, "kind": "array", "tuple_width": 1, "required": True} for name in stage.used_arrays],
-                },
-                "shader": {
-                    "pipeline": stage.pipeline,
-                    "vertex": stage.shader_vertex,
-                    "fragment": stage.shader_fragment,
-                },
-            }
-
-        return {
-            "algorithm_name": self.algorithm_name,
-            "package_name": self.package_name,
-            "cpu_available": self.cpu_available,
-            "gpu_available": self.gpu_available,
-            "container": {
-                "variable": variable_section,
-                "variableArray": variable_array_section,
-            },
-            "decomposer": {
-                "res": {},
-                "description": decomposer_description,
-            },
-            "reflector": {
-                "name": f"{self.algorithm_name}_reflector",
-                "functionName": "direct",
-                "items": reflector_items,
-            },
-            "intervention": {
-                "stages": stage_map,
-            },
-            "notes": self.notes,
-        }
-
-    @classmethod
-    def from_package_json(cls, payload: dict[str, Any]) -> ProjectState:
-        project = cls()
-        project.algorithm_name = str(payload.get("algorithm_name") or payload.get("package_name") or "new_algorithm")
-        project.package_name = str(payload.get("package_name") or project.algorithm_name)
-        project.cpu_available = bool(payload.get("cpu_available", True))
-        project.gpu_available = bool(payload.get("gpu_available", True))
-        project.notes = str(payload.get("notes") or "")
-
-        container_section = payload.get("container", {})
-        variables = container_section.get("variable", {})
-        if isinstance(variables, int):
-            for index in range(max(0, variables)):
-                project.containers.append(ContainerItem(name=f"v{index + 1}", kind="variable"))
-        elif isinstance(variables, dict):
-            for name, entry in variables.items():
-                project.containers.append(
-                    ContainerItem(
-                        name=str(name),
-                        kind="variable",
-                        count=int(entry.get("count", 1)),
-                        stride=int(entry.get("stride", 4)),
-                    )
-                )
-
-        arrays = container_section.get("variableArray", {})
-        if isinstance(arrays, int):
-            for index in range(max(0, arrays)):
-                project.containers.append(ContainerItem(name=f"a{index + 1}", kind="array"))
-        elif isinstance(arrays, dict):
-            for name, entry in arrays.items():
-                project.containers.append(
-                    ContainerItem(
-                        name=str(name),
-                        kind="array",
-                        count=int(entry.get("count", 1)),
-                        stride=int(entry.get("stride", 4)),
-                    )
-                )
-
-        decomposer = payload.get("decomposer", {})
-        for index, rule in enumerate(decomposer.get("description", []), start=1):
-            sources = rule.get("from", [])
-            targets = rule.get("to", [])
-            source = str(sources[0]) if sources else ""
-            target = str(targets[0]) if targets else ""
-            if source and target:
-                project.decomposer_rules.append(
-                    DecomposerRule(
-                        name=str(rule.get("name") or f"rule_{index}"),
-                        source=source,
-                        target=target,
-                    )
-                )
-
-        reflector = payload.get("reflector", {})
-        for index, item in enumerate(reflector.get("items", []), start=1):
-            direct_from = [str(value) for value in item.get("from", [])]
-            direct_to = [str(value) for value in item.get("to", [])]
-            input_object = item.get("input", {})
-            output_object = item.get("output", {})
-            output_kind = "v" if "v" in output_object else "a"
-            output_name = ""
-            if output_kind in output_object:
-                output_name = str(output_object[output_kind].get("name") or "")
-            project.reflector_items.append(
-                ReflectorItem(
-                    name=str(item.get("name") or f"reflector_{index}"),
-                    reflect_fun=str(item.get("reflectFun") or "direct"),
-                    inputs_varity=[str(value) for value in input_object.get("varity", [])],
-                    inputs_array=[str(value) for value in input_object.get("array", [])],
-                    output_kind=output_kind,
-                    output_name=output_name,
-                    direct_from=direct_from,
-                    direct_to=direct_to,
-                )
-            )
-
-        stages = payload.get("intervention", {}).get("stages", {})
-        if isinstance(stages, dict):
-            for stage_name, stage in stages.items():
-                used = stage.get("used_algorithm_containers", {})
-                project.intervention_stages.append(
-                    InterventionStage(
-                        name=str(stage_name),
-                        kind=str(stage.get("stage_kind") or stage.get("kind") or stage_name),
-                        used_variables=[str(item.get("name")) for item in used.get("variables", []) if item.get("name")],
-                        used_arrays=[str(item.get("name")) for item in used.get("arrays", []) if item.get("name")],
-                        shader_vertex=str(stage.get("shader", {}).get("vertex") or ""),
-                        shader_fragment=str(stage.get("shader", {}).get("fragment") or ""),
-                        functions=[str(value) for value in stage.get("functions", [])],
-                        pipeline=str(stage.get("shader", {}).get("pipeline") or "graphics"),
-                    )
-                )
-
-        if not project.containers:
-            project.containers.append(ContainerItem(name="v1", kind="variable"))
-            project.containers.append(ContainerItem(name="a1", kind="array"))
-        if not project.intervention_stages:
-            project.intervention_stages.extend(
-                [
-                    InterventionStage(name="preTick", kind="preTick"),
-                    InterventionStage(name="afterTick", kind="afterTick"),
-                    InterventionStage(name="resultRender", kind="resultRender"),
-                ]
-            )
-        return project
-
-
-class MockAgentClient:
-    def __init__(self) -> None:
-        self.provider = "codex"
-        self.model = "gpt-5.4-mini"
-        self.approval_mode = "manual"
-        self.base_url = ""
-        self.api_key = ""
-        self.codex_command = "codex"
-        self.timeout_seconds = 60
-
-    def _build_prompt(self, project: ProjectState, selection: str, prompt: str) -> str:
-        summary = [
-            f"selection={selection}",
-            f"approval_mode={self.approval_mode}",
-            f"containers={len(project.containers)}",
-            f"container_groups={len(project.container_groups)}",
-            f"rules={len(project.decomposer_rules)}",
-            f"reflectors={len(project.reflector_items)}",
-            f"res={len(project.res_nodes)}",
-            f"functions={len(project.function_frames)}",
-            f"stages={len(project.intervention_stages)}",
-        ]
-        return (
-            "You are the Algorithm Studio agent.\n"
-            "Use strict failures. Do not silently ignore invalid state.\n\n"
-            + "\n".join(summary)
-            + "\n\nPrompt:\n"
-            + prompt.strip()
-        )
-
-    def _build_openai_messages(self, project: ProjectState, selection: str, prompt: str) -> list[dict[str, str]]:
-        system_message = (
-            "You are the Algorithm Studio agent.\n"
-            "Use strict failures. Do not silently ignore invalid state.\n"
-            f"Selection: {selection}\n"
-            f"approval_mode={self.approval_mode}\n"
-            f"containers={len(project.containers)}, "
-            f"container_groups={len(project.container_groups)}, "
-            f"rules={len(project.decomposer_rules)}, "
-            f"reflectors={len(project.reflector_items)}, "
-            f"res={len(project.res_nodes)}, "
-            f"functions={len(project.function_frames)}, "
-            f"stages={len(project.intervention_stages)}"
-        )
-        return [
-            {"role": "system", "content": system_message},
-            {"role": "user", "content": prompt.strip()},
-        ]
-
-    def _call_api(self, project: ProjectState, selection: str, prompt: str) -> str:
-        base_url = self.base_url.strip()
-        if not base_url:
-            raise ValueError("API base_url is required when provider is api.")
-        parsed = urlparse(base_url)
-        if base_url.endswith("/chat/completions"):
-            url = base_url
-        elif base_url.endswith("/v1"):
-            url = base_url + "/chat/completions"
-        elif parsed.netloc.endswith("deepseek.com") and parsed.path in {"", "/"}:
-            url = base_url.rstrip("/") + "/chat/completions"
-        else:
-            url = base_url.rstrip("/") + "/v1/chat/completions"
-        body = {
-            "model": self.model.strip() or "gpt-5.4-mini",
-            "messages": self._build_openai_messages(project, selection, prompt),
-        }
-        payload = json.dumps(body).encode("utf-8")
-        headers = {"Content-Type": "application/json"}
-        if self.api_key.strip():
-            headers["Authorization"] = f"Bearer {self.api_key.strip()}"
-        request = Request(url, data=payload, headers=headers, method="POST")
-        try:
-            with urlopen(request, timeout=self.timeout_seconds) as response:
-                response_text = response.read().decode("utf-8", errors="replace")
-        except HTTPError as exc:
-            error_body = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
-            raise RuntimeError(f"API request failed: {exc.code} {exc.reason}\n{error_body}") from exc
-        except URLError as exc:
-            raise RuntimeError(f"API request failed: {exc.reason}") from exc
-        data = json.loads(response_text)
-        choices = data.get("choices", [])
-        if not choices:
-            raise RuntimeError("API response did not contain choices.")
-        message = choices[0].get("message", {})
-        content = str(message.get("content") or "").strip()
-        if not content:
-            raise RuntimeError("API response did not contain assistant content.")
-        return content
-
-    def _call_codex(self, project: ProjectState, selection: str, prompt: str) -> str:
-        command = _resolve_codex_command(self.codex_command)
-        if not Path(command).exists():
-            raise RuntimeError(f"Codex command not found: {command}")
-        args = [
-            command,
-            "exec",
-            "--cd",
-            str(PROJECT_ROOT),
-            "--color",
-            "never",
-        ]
-        model = self.model.strip()
-        if model:
-            args.extend(["--model", model])
-        args.append("-")
-        stdin_prompt = self._build_prompt(project, selection, prompt)
-        completed = subprocess.run(
-            args,
-            input=stdin_prompt,
-            text=True,
-            encoding="utf-8",
-            errors="strict",
-            capture_output=True,
-            timeout=self.timeout_seconds,
-            check=False,
-        )
-        output = (completed.stdout or "").strip()
-        error_output = (completed.stderr or "").strip()
-        if completed.returncode != 0:
-            raise RuntimeError(
-                "Codex command failed "
-                f"(exit {completed.returncode}).\n{error_output or output or 'No output captured.'}"
-            )
-        if output:
-            return output
-        if error_output:
-            return error_output
-        return "Codex finished without output."
-
-    def generate(self, project: ProjectState, selection: str, prompt: str) -> str:
-        mode = self.provider.strip().lower()
-        if mode == "api":
-            return self._call_api(project, selection, prompt)
-        if mode == "codex":
-            return self._call_codex(project, selection, prompt)
-        summary = [
-            f"provider={self.provider}",
-            f"model={self.model}",
-            f"approval_mode={self.approval_mode}",
-            f"selection={selection}",
-            f"containers={len(project.containers)}",
-            f"container_groups={len(project.container_groups)}",
-            f"rules={len(project.decomposer_rules)}",
-            f"reflectors={len(project.reflector_items)}",
-            f"res={len(project.res_nodes)}",
-            f"functions={len(project.function_frames)}",
-            f"stages={len(project.intervention_stages)}",
-        ]
-        return (
-            "Mock agent response\n"
-            + "\n".join(summary)
-            + "\n\nPrompt:\n"
-            + prompt.strip()
-            + "\n\nNext action:\n"
-            + "Generate package JSON patch, C++ skeleton, or shader binding update."
-        )
-
-
-if __package__:
+try:
     from .backend import (
         ContainerGroupItem,
         ConnectionItem,
         ContainerItem,
         DecomposerRule,
-        DEFAULT_TEMPLATE_PATH,
         FunctionFrameItem,
+        FunctionTextItem,
         InterventionStage,
-        MockAgentClient,
         ProjectState,
         ResourceNodeItem,
         ReflectorItem,
-        generate_cpp_skeleton,
     )
-else:
+    from .agent_client import MockAgentClient, generate_cpp_skeleton
+except ImportError:
     from backend import (
         ContainerGroupItem,
         ConnectionItem,
         ContainerItem,
         DecomposerRule,
-        DEFAULT_TEMPLATE_PATH,
+        FunctionFrameItem,
+        FunctionTextItem,
         InterventionStage,
-        MockAgentClient,
         ProjectState,
         ResourceNodeItem,
         ReflectorItem,
-        generate_cpp_skeleton,
     )
+    from agent_client import MockAgentClient, generate_cpp_skeleton
 
 
 class AlgorithmStudioApp:
@@ -581,12 +129,19 @@ class AlgorithmStudioApp:
         self.root.configure(bg=COLORS["window"])
 
         self.project = ProjectState()
+        self.project_manifest_text_cache = self.project.rebuild_manifest_text()
+        self.project_manifest_revision = 1
+        self.document_editor_dirty = False
+        self.document_editor_applying = False
+        self.document_apply_after_id: str | None = None
+        self.document_last_error: str | None = None
         self.agent_client = MockAgentClient()
         self.selected_container_name: str | None = None
         self.selected_rule_name: str | None = None
         self.selected_reflector_name: str | None = None
         self.selected_res_node_name: str | None = None
         self.selected_function_name: str | None = None
+        self.selected_function_text_name: str | None = None
         self.selected_stage_name: str | None = None
         self.selected_container_group_name: str | None = None
         self.selection_state: dict[str, Any] | None = None
@@ -645,10 +200,18 @@ class AlgorithmStudioApp:
         self.agent_output_var = tk.StringVar()
         self.sidebar_collapsed_var = tk.BooleanVar(value=False)
         self.agent_ready_var = tk.BooleanVar(value=False)
-        self.chat_history: list[dict[str, str]] = []
+        self.chat_history: list[dict[str, Any]] = []
+        self.chat_attachments: list[dict[str, str]] = []
+        self.chat_attachment_summary_var = tk.StringVar(value="No attachments.")
         self.chat_busy = False
         self.status_var = tk.StringVar(value="Ready.")
         self.welcome_status_var = tk.StringVar(value="Choose how to connect to an agent.")
+        self.execution_panel_collapsed_var = tk.BooleanVar(value=False)
+        self.execution_summary_var = tk.StringVar(value="No execution trace yet.")
+        self.execution_started_at: float | None = None
+        self.execution_elapsed_after_id: str | None = None
+        self.execution_runs: list[dict[str, Any]] = []
+        self.execution_current_run: dict[str, Any] | None = None
         self.preview_text: tk.Text | None = None
         self.log_text: tk.Text | None = None
         self.canvas: tk.Canvas | None = None
@@ -657,10 +220,13 @@ class AlgorithmStudioApp:
         self.reflector_list: tk.Listbox | None = None
         self.stage_list: tk.Listbox | None = None
         self.inspector_text: tk.Text | None = None
-        self.selection_frame: ttk.LabelFrame | None = None
+        self.selection_frame: ttk.Frame | None = None
+        self.selection_body_frame: ttk.Frame | None = None
         self.selection_summary_text: tk.Text | None = None
         self.selection_editor_frame: ttk.Frame | None = None
+        self.selection_toggle_button: ttk.Button | None = None
         self.selection_name_var = tk.StringVar(value=self.project.next_container_group_name())
+        self.selection_panel_collapsed_var = tk.BooleanVar(value=False)
         self.selection_value_text: tk.Text | None = None
         self.selection_value_entry: ttk.Entry | None = None
         self.selection_apply_button: ttk.Button | None = None
@@ -671,47 +237,38 @@ class AlgorithmStudioApp:
         self.approval_row: ttk.Frame | None = None
         self.connection_row: ttk.LabelFrame | None = None
         self.connection_toggle_button: ttk.Button | None = None
+        self.build_button: ttk.Button | None = None
         self.chat_history_text: tk.Text | None = None
         self.chat_input_text: tk.Text | None = None
+        self.chat_attachment_label: ttk.Label | None = None
         self.chat_send_button: ttk.Button | None = None
+        self.chat_rendered_images: list[tk.PhotoImage] = []
+        self._chat_drop_wndproc: Any | None = None
+        self._chat_drop_old_wndproc: Any | None = None
+        self._chat_drop_hwnd: int | None = None
         self.sidebar_toggle_button: ttk.Button | None = None
         self.connection_panel_visible_var = tk.BooleanVar(value=False)
         self.welcome_frame: ttk.Frame | None = None
         self.welcome_result: str | None = None
+        self.execution_body_frame: ttk.Frame | None = None
+        self.execution_toggle_button: ttk.Button | None = None
         self.access_rules_path = resolve_access_rules_path()
         self._apply_saved_settings()
         self._configure_style()
         self._build_ui()
         self._install_settings_persistence()
+        self._apply_selection_panel_layout()
+        self._apply_execution_panel_layout()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._sync_project_to_vars()
         self._refresh_all()
         self._log("Algorithm Studio started.")
 
     def _configure_style(self) -> None:
-        style = ttk.Style(self.root)
-        try:
-            style.theme_use("clam")
-        except tk.TclError:
-            pass
-
-        style.configure("TFrame", background=COLORS["window"])
-        style.configure("TLabel", background=COLORS["window"], foreground=COLORS["text"])
-        style.configure("TButton", padding=(10, 6))
-        style.configure("TLabelframe", background=COLORS["panel"], foreground=COLORS["text"])
-        style.configure("TLabelframe.Label", background=COLORS["panel"], foreground=COLORS["accent"])
-        style.configure("TNotebook", background=COLORS["window"], borderwidth=0)
-        style.configure("TNotebook.Tab", padding=(12, 8))
-        style.map("TNotebook.Tab", foreground=[("selected", COLORS["accent"]), ("!selected", COLORS["text"])])
-        style.configure("Dark.Horizontal.TScale", background=COLORS["panel"])
-        self.root.option_add("*Font", ("Segoe UI", 10))
+        configure_style(self)
 
     def _build_ui(self) -> None:
-        self.root.columnconfigure(0, weight=1)
-        self.root.rowconfigure(1, weight=1)
-
-        self._build_toolbar()
-        self._build_main_area()
+        build_ui(self)
 
     def _settings_payload(self) -> dict[str, str]:
         return {
@@ -749,95 +306,33 @@ class AlgorithmStudioApp:
 
     def _on_close(self) -> None:
         self._save_settings()
+        self._cancel_document_apply()
+        self._uninstall_chat_input_drop_target()
         self.root.destroy()
 
     def _build_toolbar(self) -> None:
-        toolbar = ttk.Frame(self.root, padding=(12, 10))
-        toolbar.grid(row=0, column=0, sticky="ew")
-
-        buttons = [
-            ("New", self._new_project),
-            ("Load Package", self._load_package),
-            ("Save Package", self._save_package),
-        ]
-        for index, (label, command) in enumerate(buttons):
-            ttk.Button(toolbar, text=label, command=command).grid(row=0, column=index, padx=(0, 8))
+        build_toolbar(self)
 
     def _build_main_area(self) -> None:
-        main = ttk.Frame(self.root, padding=(12, 0, 12, 12))
-        main.grid(row=1, column=0, sticky="nsew")
-        main.columnconfigure(0, weight=0)
-        main.columnconfigure(1, weight=1)
-        main.columnconfigure(2, weight=0, minsize=SIDEBAR_EXPANDED_WIDTH)
-        main.rowconfigure(0, weight=1)
-
-        self._build_palette_panel(main)
-        self._build_canvas_panel(main)
-        self._build_sidebar_panel(main)
+        build_main_area(self)
 
     def _build_welcome_page(self) -> None:
-        overlay = ttk.Frame(self.root, padding=24)
-        overlay.place(relx=0, rely=0, relwidth=1, relheight=1)
-        overlay.lift()
-        overlay.columnconfigure(0, weight=1)
-        overlay.rowconfigure(0, weight=1)
-        self.welcome_frame = overlay
-
-        shell = ttk.Frame(overlay, padding=24)
-        shell.place(relx=0.5, rely=0.5, anchor="center")
-        shell.columnconfigure(0, weight=1)
-
-        card = ttk.LabelFrame(shell, text="Welcome", padding=20)
-        card.grid(row=0, column=0, sticky="nsew")
-        card.columnconfigure(0, weight=1)
-
-        ttk.Label(
-            card,
-            text="Choose one way to enter: connect to a local Codex agent or wire in your API once.",
-            wraplength=440,
-            foreground=COLORS["text"],
-        ).grid(row=0, column=0, sticky="ew", pady=(0, 12))
-
-        codex_binary = _resolve_codex_command(self.agent_command_var.get())
-        codex_label = "Local Codex binary detected" if Path(codex_binary).exists() else "Local Codex binary not found"
-        ttk.Label(card, text=codex_label, foreground=COLORS["muted"]).grid(row=1, column=0, sticky="ew", pady=(0, 8))
-
-        buttons = ttk.Frame(card)
-        buttons.grid(row=2, column=0, sticky="ew", pady=(8, 8))
-        buttons.columnconfigure((0, 1), weight=1)
-
-        api_button = ttk.Button(buttons, text="Connect API", command=self._welcome_connect_api)
-        api_button.grid(row=0, column=0, sticky="ew", padx=(0, 8))
-        codex_button = ttk.Button(buttons, text="Use Existing Agent", command=self._welcome_use_codex)
-        codex_button.grid(row=0, column=1, sticky="ew")
-
-        ttk.Label(card, textvariable=self.welcome_status_var, wraplength=440, foreground=COLORS["accent"]).grid(
-            row=3, column=0, sticky="ew", pady=(8, 0)
-        )
+        build_welcome_page(self)
 
     def _destroy_welcome_page(self) -> None:
-        if self.welcome_frame is not None:
-            self.welcome_frame.destroy()
-            self.welcome_frame = None
+        destroy_welcome_page(self)
 
     def _finalize_welcome(self, provider: str) -> None:
-        self.provider_var.set(provider)
-        self.agent_ready_var.set(True)
-        self._sync_agent_client_settings()
-        self._destroy_welcome_page()
-        self._append_chat_message("system", f"Connected using {provider}.")
-        self._log(f"Connected agent source: {provider}.")
+        finalize_welcome(self, provider)
 
     def _welcome_use_codex(self) -> None:
-        self.welcome_status_var.set("Using local Codex binary.")
-        self._finalize_welcome("codex")
+        welcome_use_codex(self)
 
     def _welcome_connect_api(self) -> None:
-        self.welcome_status_var.set("API connection is configured from the sidebar.")
-        self._finalize_welcome("api")
+        welcome_connect_api(self)
 
     def _welcome_import_existing_agent(self) -> None:
-        self._welcome_use_codex()
+        welcome_import_existing_agent(self)
 
     def _build_palette_panel(self, parent: ttk.Frame) -> None:
         palette_shell = ttk.Frame(parent, padding=(0, 0, 12, 0))
@@ -915,9 +410,9 @@ class AlgorithmStudioApp:
         self._create_palette_group(
             inner_frame,
             4,
-            "ResNode",
+            "MeshNode",
             [
-                ("resnode", "M", "mesh"),
+                ("resnode", "M", "meshNode"),
             ],
         )
         _sync_palette_scrollregion()
@@ -929,16 +424,18 @@ class AlgorithmStudioApp:
         self._bind_palette_wheel(group)
 
         for index, (kind, icon, label) in enumerate(items):
+            display_icon = "fn" if kind == "function" else icon
+            display_label = "fun" if kind == "function" else label
             tile = tk.Frame(group, bg=COLORS["panel_alt"], highlightbackground=COLORS["accent"], highlightthickness=1)
             tile.grid(row=index, column=0, sticky="ew", pady=(0, 8))
             tile.columnconfigure(1, weight=1)
             tile.rowconfigure(1, weight=1)
             tile.kind = kind  # type: ignore[attr-defined]
 
-            badge = tk.Label(tile, text=icon, bg=COLORS["panel_alt"], fg=COLORS["accent"], width=3, anchor="center")
+            badge = tk.Label(tile, text=display_icon, bg=COLORS["panel_alt"], fg=COLORS["accent"], width=3, anchor="center")
             badge.grid(row=0, column=0, rowspan=2, padx=8, pady=8)
 
-            title_label = tk.Label(tile, text=label, bg=COLORS["panel_alt"], fg=COLORS["text"], anchor="w")
+            title_label = tk.Label(tile, text=display_label, bg=COLORS["panel_alt"], fg=COLORS["text"], anchor="w")
             title_label.grid(row=0, column=1, sticky="ew", pady=(8, 0))
 
             sub_label = tk.Label(tile, text="drag to canvas", bg=COLORS["panel_alt"], fg=COLORS["muted"], anchor="w")
@@ -995,14 +492,21 @@ class AlgorithmStudioApp:
 
     def _drop_palette_item(self, kind: str, x: float, y: float, variant: str | None = None) -> None:
         if kind == "containerelement":
-            name = self.project.next_container_group_name()
-            group = ContainerGroupItem(
-                name=name,
-                x=x,
-                y=y,
-                width=360.0,
-                height=220.0,
-            )
+            name = self._singleton_ui_node_name(kind) or self.project.next_container_group_name()
+            existing_group = self._find_container_group(name)
+            if existing_group is not None:
+                existing_group.x = x
+                existing_group.y = y
+                self.selected_container_group_name = name
+                self.selected_container_name = None
+                self.selected_rule_name = None
+                self.selected_reflector_name = None
+                self.selected_stage_name = None
+                self.selected_res_node_name = None
+                self._refresh_all()
+                self._log(f"Moved container {name}.")
+                return
+            group = ContainerGroupItem(name=name, x=x, y=y, width=360.0, height=220.0)
             self.project.validate_container_group(group)
             self.project.container_groups.append(group)
             self.selected_container_group_name = name
@@ -1012,19 +516,23 @@ class AlgorithmStudioApp:
             self.selected_stage_name = None
             self.selected_res_node_name = None
             self._refresh_all()
-            self._log(f"Added containerElement {name}.")
+            self._log(f"Added container {name}.")
             return
         if kind == "decomposer":
-            name = self.project.next_decomposer_name()
-            self.project.decomposer_rules.append(
-                DecomposerRule(
-                    name=name,
-                    source="",
-                    target="",
-                    x=x,
-                    y=y,
-                )
-            )
+            name = self._singleton_ui_node_name(kind) or self.project.next_decomposer_name()
+            existing_rule = self._find_rule(name)
+            if existing_rule is not None:
+                existing_rule.x = x
+                existing_rule.y = y
+                self.selected_rule_name = name
+                self.selected_container_name = None
+                self.selected_reflector_name = None
+                self.selected_stage_name = None
+                self.selected_res_node_name = None
+                self._refresh_all()
+                self._log(f"Moved decomposer {name}.")
+                return
+            self.project.decomposer_rules.append(DecomposerRule(name=name, source="", target="", x=x, y=y))
             self.selected_rule_name = name
             self.selected_container_name = None
             self.selected_reflector_name = None
@@ -1069,7 +577,18 @@ class AlgorithmStudioApp:
             self._log(f"Added container {name}.")
             return
         if kind == "reflector":
-            name = self.project.next_reflector_name()
+            name = self._singleton_ui_node_name(kind) or self.project.next_reflector_name()
+            existing_reflector = self._find_reflector(name)
+            if existing_reflector is not None:
+                existing_reflector.x = x
+                existing_reflector.y = y
+                self.selected_reflector_name = name
+                self.selected_container_name = None
+                self.selected_stage_name = None
+                self.selected_res_node_name = None
+                self._refresh_all()
+                self._log(f"Moved reflector {name}.")
+                return
             self.project.reflector_items.append(
                 ReflectorItem(
                     name=name,
@@ -1085,7 +604,18 @@ class AlgorithmStudioApp:
             self._log(f"Added reflector {name}.")
             return
         if kind == "interventioner" or kind == "stage":
-            name = self.project.next_intervention_name()
+            name = self._singleton_ui_node_name(kind) or self.project.next_intervention_name()
+            existing_stage = self._find_stage(name)
+            if existing_stage is not None:
+                existing_stage.x = x
+                existing_stage.y = y
+                self.selected_stage_name = name
+                self.selected_container_name = None
+                self.selected_reflector_name = None
+                self.selected_res_node_name = None
+                self._refresh_all()
+                self._log(f"Moved interventioner {name}.")
+                return
             self.project.intervention_stages.append(
                 InterventionStage(
                     name=name,
@@ -1102,8 +632,23 @@ class AlgorithmStudioApp:
             self._log(f"Added interventioner {name}.")
             return
         if kind == "resnode":
-            name = self.project.next_res_name()
+            name = self._singleton_ui_node_name(kind) or self.project.next_res_name()
+            existing_res = self._find_res_node(name)
             resource_kind = variant or "mesh"
+            if existing_res is not None:
+                existing_res.x = x
+                existing_res.y = y
+                existing_res.resource_kind = resource_kind
+                existing_res.resource_types = [resource_kind]
+                existing_res.outputs = [resource_kind]
+                self.selected_res_node_name = name
+                self.selected_container_name = None
+                self.selected_rule_name = None
+                self.selected_reflector_name = None
+                self.selected_stage_name = None
+                self._refresh_all()
+                self._log(f"Moved meshNode {name}.")
+                return
             self.project.res_nodes.append(
                 ResourceNodeItem(
                     name=name,
@@ -1120,10 +665,23 @@ class AlgorithmStudioApp:
             self.selected_reflector_name = None
             self.selected_stage_name = None
             self._refresh_all()
-            self._log(f"Added resNode {name}.")
+            self._log(f"Added meshNode {name}.")
             return
         if kind == "function":
-            name = self.project.next_function_name()
+            name = self._singleton_ui_node_name(kind) or self.project.next_function_name()
+            existing_function = self._find_function_frame(name)
+            if existing_function is not None:
+                existing_function.x = x
+                existing_function.y = y
+                self.selected_function_name = name
+                self.selected_container_name = None
+                self.selected_rule_name = None
+                self.selected_reflector_name = None
+                self.selected_res_node_name = None
+                self.selected_stage_name = None
+                self._refresh_all()
+                self._log(f"Moved function {name}.")
+                return
             self.project.function_frames.append(
                 FunctionFrameItem(
                     name=name,
@@ -1141,7 +699,7 @@ class AlgorithmStudioApp:
             self.selected_res_node_name = None
             self.selected_stage_name = None
             self._refresh_all()
-            self._log(f"Added function {name}.")
+            self._log(f"Added fun {name}.")
             return
 
     def _resource_output_ports(self, resource_kind: str, outputs: list[str] | None = None) -> list[str]:
@@ -1156,7 +714,8 @@ class AlgorithmStudioApp:
         frame = ttk.Frame(parent)
         frame.grid(row=0, column=1, sticky="nsew")
         frame.columnconfigure(0, weight=1)
-        frame.rowconfigure(0, weight=1)
+        frame.rowconfigure(0, weight=3)
+        frame.rowconfigure(1, weight=2)
 
         canvas_frame = ttk.LabelFrame(frame, text="Scene", padding=8)
         canvas_frame.grid(row=0, column=0, sticky="nsew")
@@ -1184,6 +743,31 @@ class AlgorithmStudioApp:
         self.canvas.bind("<Button-5>", self._on_canvas_mouse_wheel)
         self.canvas.bind("<Configure>", lambda _event: self._redraw_canvas())
 
+        document_frame = ttk.LabelFrame(frame, text="Document", padding=8)
+        document_frame.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
+        document_frame.rowconfigure(0, weight=1)
+        document_frame.columnconfigure(0, weight=1)
+        document_scroll = ttk.Scrollbar(document_frame, orient="vertical")
+        document_scroll.grid(row=0, column=1, sticky="ns")
+        preview_text = tk.Text(
+            document_frame,
+            wrap="none",
+            bg=COLORS["canvas"],
+            fg=COLORS["text"],
+            insertbackground=COLORS["text"],
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=1,
+            highlightbackground=COLORS["grid"],
+            highlightcolor=COLORS["accent"],
+            yscrollcommand=document_scroll.set,
+            font=("Consolas", 9),
+        )
+        preview_text.grid(row=0, column=0, sticky="nsew")
+        preview_text.bind("<<Modified>>", self._on_document_text_modified)
+        document_scroll.config(command=preview_text.yview)
+        self.preview_text = preview_text
+
     def _build_sidebar_panel(self, parent: ttk.Frame) -> None:
         shell = ttk.Frame(parent, width=SIDEBAR_EXPANDED_WIDTH, padding=(0, 0, 0, 0))
         shell.grid(row=0, column=2, sticky="ns")
@@ -1210,15 +794,28 @@ class AlgorithmStudioApp:
         body.rowconfigure(1, weight=1)
         self.sidebar_body = body
 
-        selection_frame = ttk.LabelFrame(body, text="Selection", padding=8)
-        selection_frame.grid(row=0, column=0, sticky="ew")
-        selection_frame.columnconfigure(0, weight=1)
-        selection_frame.columnconfigure(1, weight=1)
-        selection_frame.columnconfigure(2, weight=1)
-        self.selection_frame = selection_frame
+        selection_shell = ttk.Frame(body)
+        selection_shell.grid(row=0, column=0, sticky="ew")
+        selection_shell.columnconfigure(0, weight=1)
+        self.selection_frame = selection_shell
+
+        selection_header = ttk.Frame(selection_shell)
+        selection_header.grid(row=0, column=0, sticky="ew")
+        selection_header.columnconfigure(0, weight=1)
+        ttk.Label(selection_header, text="Selection").grid(row=0, column=0, sticky="w")
+        selection_toggle = ttk.Button(selection_header, text="收起", width=8, command=self._toggle_selection_panel)
+        selection_toggle.grid(row=0, column=1, sticky="e")
+        self.selection_toggle_button = selection_toggle
+
+        selection_body = ttk.Frame(selection_shell, padding=8)
+        selection_body.grid(row=1, column=0, sticky="ew")
+        selection_body.columnconfigure(0, weight=1)
+        selection_body.columnconfigure(1, weight=1)
+        selection_body.columnconfigure(2, weight=1)
+        self.selection_body_frame = selection_body
 
         selection_summary = tk.Text(
-            selection_frame,
+            selection_body,
             wrap="word",
             height=6,
             bg=COLORS["canvas"],
@@ -1234,14 +831,14 @@ class AlgorithmStudioApp:
         selection_summary.configure(state="disabled")
         self.selection_summary_text = selection_summary
 
-        selection_name_row = ttk.Frame(selection_frame)
+        selection_name_row = ttk.Frame(selection_body)
         selection_name_row.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(8, 0))
         selection_name_row.columnconfigure(1, weight=1)
         ttk.Label(selection_name_row, text="Merge name").grid(row=0, column=0, sticky="w", padx=(0, 8))
         selection_name_entry = ttk.Entry(selection_name_row, textvariable=self.selection_name_var)
         selection_name_entry.grid(row=0, column=1, sticky="ew")
 
-        selection_buttons = ttk.Frame(selection_frame)
+        selection_buttons = ttk.Frame(selection_body)
         selection_buttons.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(8, 0))
         selection_buttons.columnconfigure((0, 1, 2, 3), weight=1)
         ttk.Button(selection_buttons, text="Copy", command=self._copy_current_selection).grid(row=0, column=0, sticky="ew", padx=(0, 6))
@@ -1271,15 +868,73 @@ class AlgorithmStudioApp:
         )
         self.chat_history_text.grid(row=0, column=0, sticky="nsew")
         history_scroll.config(command=self.chat_history_text.yview)
-        self.chat_history_text.tag_configure("user", foreground=COLORS["accent"])
-        self.chat_history_text.tag_configure("assistant", foreground=COLORS["good"])
-        self.chat_history_text.tag_configure("system", foreground=COLORS["muted"])
-        self.chat_history_text.tag_configure("error", foreground=COLORS["bad"])
+        self.chat_history_text.tag_configure(
+            "user",
+            foreground=COLORS["good"],
+            justify="right",
+            lmargin1=120,
+            lmargin2=120,
+            rmargin=12,
+        )
+        self.chat_history_text.tag_configure(
+            "assistant",
+            foreground=COLORS["accent"],
+            justify="left",
+            lmargin1=12,
+            lmargin2=12,
+            rmargin=120,
+        )
+        self.chat_history_text.tag_configure(
+            "system",
+            foreground=COLORS["bad"],
+            justify="left",
+            lmargin1=12,
+            lmargin2=12,
+            rmargin=120,
+        )
+        self.chat_history_text.tag_configure(
+            "error",
+            foreground=COLORS["bad"],
+            justify="left",
+            lmargin1=12,
+            lmargin2=12,
+            rmargin=120,
+        )
+        self.chat_history_text.tag_configure(
+            "activity",
+            foreground=COLORS["muted"],
+            justify="left",
+            lmargin1=12,
+            lmargin2=12,
+            rmargin=120,
+            font=("Segoe UI", 9),
+        )
+        self.chat_history_text.tag_configure(
+            "chat_code",
+            lmargin1=24,
+            lmargin2=24,
+            rmargin=120,
+            spacing1=4,
+            spacing3=4,
+            font=("Consolas", 9),
+            background=COLORS["panel_alt"],
+        )
+        self.chat_history_text.tag_configure(
+            "chat_code_label",
+            lmargin1=24,
+            lmargin2=24,
+            rmargin=120,
+            spacing1=2,
+            font=("Consolas", 8, "bold"),
+            foreground=COLORS["muted"],
+            background=COLORS["panel_alt"],
+        )
         self.chat_history_text.configure(state="disabled")
 
         input_frame = ttk.LabelFrame(body, text="Prompt", padding=8)
         input_frame.grid(row=2, column=0, sticky="ew", pady=(8, 0))
         input_frame.columnconfigure(0, weight=1)
+        input_frame.rowconfigure(0, weight=1)
         input_scroll = ttk.Scrollbar(input_frame, orient="vertical")
         input_scroll.grid(row=0, column=1, sticky="ns")
         self.chat_input_text = tk.Text(
@@ -1300,9 +955,21 @@ class AlgorithmStudioApp:
         input_scroll.config(command=self.chat_input_text.yview)
         self.chat_input_text.bind("<Return>", self._send_chat_message_from_event)
         self.chat_input_text.bind("<Shift-Return>", self._insert_chat_newline_from_event)
+        self.chat_input_text.bind("<Control-v>", self._handle_chat_paste_event)
+        self.chat_input_text.bind("<Control-V>", self._handle_chat_paste_event)
+        self.chat_input_text.bind("<Shift-Insert>", self._handle_chat_paste_event)
+
+        action_row = ttk.Frame(input_frame)
+        action_row.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        action_row.columnconfigure(0, weight=1)
+        action_row.columnconfigure(1, weight=1)
+        ttk.Button(action_row, text="Clear Chat", command=self._clear_chat_history).grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        self.chat_send_button = ttk.Button(action_row, text="Send", command=self._send_chat_message)
+        self.chat_send_button.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        self._install_chat_input_drop_target()
 
         settings_row = ttk.Frame(body)
-        settings_row.grid(row=3, column=0, sticky="ew", pady=(6, 0))
+        settings_row.grid(row=3, column=0, sticky="ew", pady=(8, 0))
         settings_row.columnconfigure(0, weight=1)
         settings_row.columnconfigure(1, weight=1)
         settings_row.columnconfigure(2, weight=1)
@@ -1344,10 +1011,6 @@ class AlgorithmStudioApp:
         self.connection_row = connection_row
         self.connection_row.grid_remove()
 
-        self._append_chat_message(
-            "system",
-            f"ChatBox ready. Pick a model, then ask a question. Approval mode: {self.approval_mode_var.get().strip() or 'manual'}.",
-        )
         self.agent_text = self.chat_input_text
         self.agent_output_box = self.chat_history_text
         self._apply_sidebar_layout()
@@ -1361,6 +1024,14 @@ class AlgorithmStudioApp:
     def _toggle_connection_panel(self) -> None:
         self.connection_panel_visible_var.set(not self.connection_panel_visible_var.get())
         self._apply_connection_panel_layout()
+
+    def _toggle_selection_panel(self) -> None:
+        self.selection_panel_collapsed_var.set(not self.selection_panel_collapsed_var.get())
+        self._apply_selection_panel_layout()
+
+    def _toggle_execution_panel(self) -> None:
+        self.execution_panel_collapsed_var.set(not self.execution_panel_collapsed_var.get())
+        self._apply_execution_panel_layout()
 
     def _apply_sidebar_layout(self) -> None:
         if not self.sidebar_shell or not self.sidebar_body or not self.sidebar_toggle_button:
@@ -1389,6 +1060,28 @@ class AlgorithmStudioApp:
             self.connection_row.grid_remove()
             self.connection_toggle_button.configure(text="Provider / Key >")
 
+    def _apply_selection_panel_layout(self) -> None:
+        if not self.selection_body_frame or not self.selection_toggle_button:
+            return
+        if self.selection_panel_collapsed_var.get():
+            self.selection_body_frame.grid_remove()
+            self.selection_toggle_button.configure(text="唤起")
+        else:
+            if not self.selection_body_frame.winfo_ismapped():
+                self.selection_body_frame.grid()
+            self.selection_toggle_button.configure(text="收起")
+
+    def _apply_execution_panel_layout(self) -> None:
+        if not self.execution_body_frame or not self.execution_toggle_button:
+            return
+        if self.execution_panel_collapsed_var.get():
+            self.execution_body_frame.grid_remove()
+            self.execution_toggle_button.configure(text="唤起")
+        else:
+            if not self.execution_body_frame.winfo_ismapped():
+                self.execution_body_frame.grid()
+            self.execution_toggle_button.configure(text="收起")
+
     def _on_provider_selection_changed(self, _event: tk.Event | None = None) -> None:
         provider = self.provider_var.get().strip().lower() or "codex"
         self._sync_agent_client_settings()
@@ -1409,6 +1102,9 @@ class AlgorithmStudioApp:
         self.cpu_var.set(self.project.cpu_available)
         self.gpu_var.set(self.project.gpu_available)
 
+    def _new_skeleton_project(self) -> ProjectState:
+        return ProjectState()
+
     def _apply_project_vars(self) -> None:
         self.project.algorithm_name = self.project_name_var.get().strip() or "new_algorithm"
         self.project.package_name = self.package_name_var.get().strip() or self.project.algorithm_name
@@ -1417,51 +1113,16 @@ class AlgorithmStudioApp:
         self._refresh_all()
 
     def _reset_scene(self) -> None:
-        self.project = ProjectState()
-        self._sync_project_to_vars()
-        self._reset_chat_state()
-        self.selected_container_name = None
-        self.selected_rule_name = None
-        self.selected_reflector_name = None
-        self.selected_res_node_name = None
-        self.selected_function_name = None
-        self.selected_stage_name = None
-        self.selected_container_group_name = None
-        self.selection_state = None
-        self.connection_drag_state = None
-        self.marquee_state = None
-        self.canvas_pan_state = None
-        self.container_group_drag_state = None
-        self.container_group_resize_state = None
-        self.toolnode_resize_state = None
-        self._refresh_all()
+        self._replace_project_state(self._new_skeleton_project(), source="Scene reset.", reset_chat=True)
         self._log("Scene reset.")
 
     def _new_project(self) -> None:
-        self._reset_scene()
-        self.project.algorithm_name = "new_algorithm"
-        self.project.package_name = "new_algorithm"
-        self._sync_project_to_vars()
+        self._replace_project_state(self._new_skeleton_project(), source="New project.", reset_chat=True)
+        self._log("Created new project skeleton.")
 
     def _load_default_template(self) -> None:
-        if not DEFAULT_TEMPLATE_PATH.exists():
-            messagebox.showerror("Template missing", str(DEFAULT_TEMPLATE_PATH))
-            return
-        payload = json.loads(DEFAULT_TEMPLATE_PATH.read_text(encoding="utf-8"))
-        self.project = ProjectState.from_package_json(payload)
-        self._reset_chat_state()
-        self.connection_drag_state = None
-        self.selected_container_group_name = None
-        self.selection_state = None
-        self.selected_function_name = None
-        self.marquee_state = None
-        self.canvas_pan_state = None
-        self.container_group_drag_state = None
-        self.container_group_resize_state = None
-        self.toolnode_resize_state = None
-        self._sync_project_to_vars()
-        self._refresh_all()
-        self._log(f"Loaded template {DEFAULT_TEMPLATE_PATH}.")
+        self._replace_project_state(self._new_skeleton_project(), source="Loaded skeleton template.", reset_chat=True)
+        self._log("Loaded skeleton template.")
 
     def _load_package(self) -> None:
         path = filedialog.askopenfilename(
@@ -1475,22 +1136,12 @@ class AlgorithmStudioApp:
         except Exception as exc:  # noqa: BLE001
             messagebox.showerror("Load failed", f"{path}\n\n{exc}")
             return
-        self.project = ProjectState.from_package_json(payload)
-        self._reset_chat_state()
-        self.connection_drag_state = None
-        self.selected_container_group_name = None
-        self.selection_state = None
-        self.selected_function_name = None
-        self.marquee_state = None
-        self.canvas_pan_state = None
-        self.container_group_drag_state = None
-        self.container_group_resize_state = None
-        self.toolnode_resize_state = None
-        self._sync_project_to_vars()
-        self._refresh_all()
+        self._replace_project_state(ProjectState.from_package_json(payload), source=f"Loaded package {path}.", reset_chat=True)
         self._log(f"Loaded package {path}.")
 
     def _save_package(self) -> None:
+        if not self._commit_document_editor_or_report():
+            return
         path = filedialog.asksaveasfilename(
             title="Save algorithm package JSON",
             defaultextension=".json",
@@ -1518,30 +1169,941 @@ class AlgorithmStudioApp:
         self._log(f"Exported C++ skeleton to {path}.")
         self.status_var.set(f"Exported {Path(path).name}.")
 
-    def _hot_build_stub(self) -> None:
+    def _canonical_build_algorithm_name(self) -> str:
         self._apply_project_vars()
-        self._log("Hot build is not wired yet. This button is reserved for the later DLL + SPV build step.")
-        messagebox.showinfo("Hot Build", "The build hook is reserved for the later DLL + SPV integration.")
+        algorithm_name = self.project.algorithm_name.strip()
+        package_name = self.project.package_name.strip() or algorithm_name
+        if not algorithm_name:
+            raise RuntimeError("Algorithm name is required before build.")
+        if not package_name:
+            raise RuntimeError("Package name is required before build.")
+        if algorithm_name != package_name:
+            raise RuntimeError("Build currently requires algorithm_name and package_name to match.")
+        if not re.fullmatch(r"[A-Za-z0-9_]+", algorithm_name):
+            raise RuntimeError("Algorithm name must use only letters, numbers, and underscores for build.")
+        return algorithm_name
+
+    def _is_inline_shader_source(self, text: str) -> bool:
+        stripped = text.strip()
+        if not stripped:
+            return False
+        if "\n" in stripped or "\r" in stripped:
+            return True
+        shader_tokens = ("#version", "void main", "layout(", "gl_", "vec2", "vec3", "vec4", "mat4")
+        lowered = stripped.lower()
+        return any(token.lower() in lowered for token in shader_tokens)
+
+    def _existing_algorithm_folder(self, algorithm_name: str) -> Path:
+        return PROJECT_ROOT / "src" / "capabilities" / "algorithm_library" / algorithm_name
+
+    def _existing_algorithm_catalog_path(self) -> Path:
+        return PROJECT_ROOT / "src" / "capabilities" / "algorithm_library" / "algorithm_catalog.json"
+
+    def _materialize_stage_shader(
+        self,
+        bundle_dir: Path,
+        algorithm_name: str,
+        stage: InterventionStage,
+        shader_kind: str,
+        field_value: str,
+    ) -> str:
+        text = field_value.strip()
+        if not text:
+            return ""
+        expected_ext = ".vert" if shader_kind == "vertex" else ".frag"
+        if self._is_inline_shader_source(text):
+            stage_token = re.sub(r"[^A-Za-z0-9_]+", "_", stage.name.strip() or stage.kind.strip() or "stage").strip("_") or "stage"
+            filename = f"{algorithm_name}_{stage_token}{expected_ext}"
+            (bundle_dir / filename).write_text(text.rstrip() + "\n", encoding="utf-8")
+            return filename
+        filename = Path(text).name
+        if not filename.endswith(expected_ext):
+            raise RuntimeError(f"Stage {stage.name} {shader_kind} shader must end with {expected_ext}.")
+        if not (bundle_dir / filename).exists():
+            raise RuntimeError(f"Stage {stage.name} {shader_kind} shader file is missing: {filename}")
+        return filename
+
+    def _function_script_payload(self) -> str | None:
+        scripts: list[tuple[str, str]] = []
+        for item in self.project.function_frames:
+            text = item.script.strip()
+            if not text or text == "agent writes text and code here":
+                continue
+            scripts.append((item.name, text))
+        if not scripts:
+            return None
+        if len(scripts) > 1:
+            names = ", ".join(name for name, _text in scripts)
+            raise RuntimeError(f"Build currently supports one non-empty fun script. Found: {names}")
+        return scripts[0][1].rstrip() + "\n"
+
+    def _update_algorithm_catalog_entry(self, algorithm_name: str, manifest_name: str) -> None:
+        catalog_path = self._existing_algorithm_catalog_path()
+        payload: dict[str, Any]
+        if catalog_path.exists():
+            payload = json.loads(catalog_path.read_text(encoding="utf-8"))
+            if not isinstance(payload, dict):
+                raise RuntimeError("algorithm_catalog.json root must be an object.")
+        else:
+            payload = {}
+        raw_algorithms = payload.get("algorithms", [])
+        if raw_algorithms is None:
+            raw_algorithms = []
+        if not isinstance(raw_algorithms, list):
+            raise RuntimeError("algorithm_catalog.json algorithms must be a list.")
+        algorithms: list[dict[str, Any]] = []
+        for entry in raw_algorithms:
+            if not isinstance(entry, dict):
+                raise RuntimeError("algorithm_catalog.json contains a non-object algorithm entry.")
+            if str(entry.get("name") or "").strip() == algorithm_name:
+                continue
+            algorithms.append(entry)
+        algorithms.append(
+            {
+                "name": algorithm_name,
+                "display_name": algorithm_name,
+                "folder": algorithm_name,
+                "container_manifest": manifest_name,
+                "decomposer": manifest_name,
+                "reflector": manifest_name,
+                "intervention": manifest_name,
+            }
+        )
+        algorithms.sort(key=lambda entry: str(entry.get("name") or ""))
+        payload["algorithms"] = algorithms
+        catalog_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    def _materialize_algorithm_bundle(self) -> tuple[str, Path]:
+        if not self._commit_document_editor_or_report():
+            raise RuntimeError("Document is invalid.")
+        algorithm_name = self._canonical_build_algorithm_name()
+        bundle_dir = self._existing_algorithm_folder(algorithm_name)
+        bundle_dir.mkdir(parents=True, exist_ok=True)
+
+        expected_manifest_name = f"{algorithm_name}_package.json"
+        conflicting_manifests = [path.name for path in bundle_dir.glob("*_package.json") if path.name != expected_manifest_name]
+        if conflicting_manifests:
+            raise RuntimeError(f"Remove old package manifests from {bundle_dir.name}: {', '.join(conflicting_manifests)}")
+
+        plugin_path = bundle_dir / f"{algorithm_name}_plugin.cpp"
+        conflicting_plugins = [path.name for path in bundle_dir.glob("*_plugin.cpp") if path.name != plugin_path.name]
+        if conflicting_plugins:
+            raise RuntimeError(f"Remove old plugin sources from {bundle_dir.name}: {', '.join(conflicting_plugins)}")
+
+        manifest = copy.deepcopy(self.project.to_package_json())
+        manifest["algorithm_name"] = algorithm_name
+        manifest["package_name"] = algorithm_name
+        manifest.pop("ui", None)
+        manifest.pop("notes", None)
+        manifest.pop("function", None)
+        manifest.pop("functionText", None)
+
+        stage_lookup = {stage.name: stage for stage in self.project.intervention_stages}
+        stages_payload = manifest.get("intervention", {}).get("stages", {})
+        if not isinstance(stages_payload, dict):
+            raise RuntimeError("intervention.stages must be an object before build.")
+        for stage_name, stage_payload in stages_payload.items():
+            if not isinstance(stage_payload, dict):
+                raise RuntimeError(f"Stage payload must be an object: {stage_name}")
+            stage = stage_lookup.get(stage_name)
+            if stage is None:
+                raise RuntimeError(f"Missing stage model during build: {stage_name}")
+            vertex_ref = self._materialize_stage_shader(bundle_dir, algorithm_name, stage, "vertex", stage.shader_vertex)
+            fragment_ref = self._materialize_stage_shader(bundle_dir, algorithm_name, stage, "fragment", stage.shader_fragment)
+            if bool(vertex_ref) != bool(fragment_ref):
+                raise RuntimeError(f"Stage {stage_name} must provide both vertex and fragment shader content.")
+            shader_payload = stage_payload.get("shader")
+            if vertex_ref and fragment_ref:
+                if not isinstance(shader_payload, dict):
+                    shader_payload = {}
+                shader_payload["pipeline"] = str(shader_payload.get("pipeline") or stage.pipeline or "graphics")
+                shader_payload["vertex"] = vertex_ref
+                shader_payload["fragment"] = fragment_ref
+                stage_payload["shader"] = shader_payload
+            elif isinstance(shader_payload, dict):
+                shader_payload.pop("vertex", None)
+                shader_payload.pop("fragment", None)
+                if not shader_payload:
+                    stage_payload.pop("shader", None)
+
+        has_vertex_shader = any(bundle_dir.glob("*.vert"))
+        has_fragment_shader = any(bundle_dir.glob("*.frag"))
+        if not has_vertex_shader or not has_fragment_shader:
+            raise RuntimeError("Build requires shader sources in the algorithm folder. Provide vertex/fragment shader text or existing .vert/.frag files.")
+
+        manifest_path = bundle_dir / expected_manifest_name
+        manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+        plugin_text = self._function_script_payload()
+        if plugin_text is not None:
+            plugin_path.write_text(plugin_text, encoding="utf-8")
+
+        self._update_algorithm_catalog_entry(algorithm_name, expected_manifest_name)
+        return algorithm_name, bundle_dir
+
+    def _summarize_build_output(self, stdout_text: str, stderr_text: str) -> str:
+        lines = [line.strip() for line in (stdout_text + "\n" + stderr_text).splitlines() if line.strip()]
+        if not lines:
+            return "Build failed without output."
+        preview = lines[-6:]
+        return " | ".join(self._compact_activity_text(line, limit=72) for line in preview)
+
+    def _run_build_command(self, algorithm_name: str) -> str:
+        build_script = PROJECT_ROOT / "build_algorithm_hot.bat"
+        if not build_script.exists():
+            raise RuntimeError(f"Build script is missing: {build_script}")
+        completed = subprocess.run(
+            ["cmd.exe", "/c", str(build_script), algorithm_name],
+            cwd=str(PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        if completed.returncode != 0:
+            raise RuntimeError(self._summarize_build_output(completed.stdout, completed.stderr))
+        return self._summarize_build_output(completed.stdout, completed.stderr)
+
+    def _build_current_algorithm(self) -> None:
+        try:
+            if not self._commit_document_editor_or_report():
+                return
+            algorithm_name = self._canonical_build_algorithm_name()
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("Build error", str(exc))
+            return
+
+        if self.build_button:
+            self.build_button.configure(state="disabled")
+        self._start_execution_trace("构建算法", f"准备把 {algorithm_name} 的 doc / cpp / shader 落盘并编译。")
+        self.status_var.set(f"Building {algorithm_name}...")
+        self._append_execution_trace("正在整理当前文档和脚本。", "reasoning")
+
+        def finish_success(bundle_dir: Path, output_summary: str) -> None:
+            if self.build_button:
+                self.build_button.configure(state="normal")
+            runtime_dir = PROJECT_ROOT / "algorithmLib" / "algorithmruntimeLib" / bundle_dir.name
+            detail = f"已构建到 {runtime_dir}"
+            if output_summary:
+                detail = f"{detail} | {output_summary}"
+            self._finish_execution_trace("构建算法", True, detail)
+            self.status_var.set(f"Build finished for {bundle_dir.name}.")
+            self._log(f"Built algorithm {bundle_dir.name}.")
+
+        def finish_error(exc: Exception) -> None:
+            if self.build_button:
+                self.build_button.configure(state="normal")
+            message = self._compact_activity_text(str(exc), limit=180) or "Build failed."
+            self._finish_execution_trace("构建算法", False, message)
+            self.status_var.set("Build failed.")
+            self._log(f"Build failed: {message}")
+            messagebox.showerror("Build error", str(exc))
+
+        def worker() -> None:
+            try:
+                self.root.after(0, lambda: self._append_execution_trace("正在写入算法包目录。", "reasoning"))
+                resolved_name, bundle_dir = self._materialize_algorithm_bundle()
+                self.root.after(0, lambda: self._append_execution_trace("正在调用专用构建批处理。", "reasoning"))
+                output_summary = self._run_build_command(resolved_name)
+            except Exception as exc:  # noqa: BLE001
+                self.root.after(0, lambda exc=exc: finish_error(exc))
+                return
+            self.root.after(0, lambda bundle_dir=bundle_dir, output_summary=output_summary: finish_success(bundle_dir, output_summary))
+
+        import threading
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _reset_chat_state(self) -> None:
         self.chat_busy = False
         self.chat_history = []
+        self.chat_rendered_images.clear()
+        self._clear_chat_attachments()
         if self.chat_history_text:
             self.chat_history_text.configure(state="normal")
             self.chat_history_text.delete("1.0", tk.END)
             self.chat_history_text.configure(state="disabled")
         if self.chat_input_text:
             self.chat_input_text.delete("1.0", tk.END)
-        self._append_chat_message(
-            "system",
-            f"ChatBox ready. Pick a model, then ask a question. Approval mode: {self.approval_mode_var.get().strip() or 'manual'}.",
-        )
+        self._log(f"ChatBox ready. Approval mode: {self.approval_mode_var.get().strip() or 'manual'}.")
 
     def _generate_cpp_skeleton(self) -> str:
         return generate_cpp_skeleton(self.project.algorithm_name)
 
+    def _sync_project_manifest_cache(self) -> None:
+        manifest_text = self.project.rebuild_manifest_text()
+        if manifest_text != self.project_manifest_text_cache:
+            self.project_manifest_revision += 1
+        self.project_manifest_text_cache = manifest_text
+
+    def _project_manifest_text(self) -> str:
+        if not self.project_manifest_text_cache:
+            self._sync_project_manifest_cache()
+        return self.project_manifest_text_cache
+
+    def _current_document_text_for_agent(self) -> str:
+        if self.preview_text is not None:
+            text = self.preview_text.get("1.0", tk.END).strip()
+            if text:
+                return text
+        cached = self._project_manifest_text().strip()
+        if not cached:
+            raise AssertionError("Document text is unavailable.")
+        return cached
+
+    def _agent_document_context(self) -> str:
+        return "\n".join(
+            [
+                "Current document:",
+                self._current_document_text_for_agent(),
+            ]
+        )
+
+    def _extract_agent_tool_calls(self, response: str) -> tuple[list[dict[str, Any]], str]:
+        text = str(response or "")
+        tool_pattern = re.compile(r"```algorithm-studio-tool\s*(.*?)\s*```", re.IGNORECASE | re.DOTALL)
+        calls: list[dict[str, Any]] = []
+        for match in tool_pattern.finditer(text):
+            payload_text = match.group(1).strip()
+            try:
+                payload = json.loads(payload_text)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(f"Agent tool payload is not valid JSON: {exc}") from exc
+            if not isinstance(payload, dict):
+                raise RuntimeError("Agent tool payload must be a JSON object.")
+            calls.append(payload)
+        visible_text = tool_pattern.sub("", text).strip()
+        if calls:
+            return calls, visible_text
+        stripped = text.strip()
+        if stripped.startswith("{") and stripped.endswith("}"):
+            try:
+                payload = json.loads(stripped)
+            except json.JSONDecodeError:
+                return [], stripped
+            if isinstance(payload, dict) and str(payload.get("tool") or "").strip():
+                return [payload], ""
+        return [], stripped
+
+    def _apply_agent_update_document_tool(self, payload: dict[str, Any]) -> str:
+        tool_name = str(payload.get("tool") or "").strip()
+        if tool_name != "update_document":
+            raise RuntimeError(f"Unsupported agent tool: {tool_name or '(empty)'}")
+        if "document" not in payload:
+            raise RuntimeError("Agent update_document tool call is missing document.")
+        document_value = payload["document"]
+        if isinstance(document_value, str):
+            try:
+                document_payload = json.loads(document_value)
+            except json.JSONDecodeError as exc:
+                raise RuntimeError(f"Agent document string is not valid JSON: {exc}") from exc
+        elif isinstance(document_value, dict):
+            document_payload = copy.deepcopy(document_value)
+        else:
+            raise RuntimeError("Agent document must be a JSON object or a JSON string.")
+        if not isinstance(document_payload, dict):
+            raise RuntimeError("Agent document root must be a JSON object.")
+        project = ProjectState.from_package_json(document_payload)
+        self._cancel_document_apply()
+        self.document_editor_dirty = False
+        self.document_last_error = None
+        self._replace_project_state(project, source="Agent updated document.")
+        self._set_document_text(self._project_manifest_text())
+        message = self._compact_activity_text(str(payload.get("message") or payload.get("summary") or ""), limit=120)
+        if message:
+            return message
+        return "Document updated."
+
+    def _consume_agent_tool_response(self, response: str) -> str:
+        tool_calls, visible_text = self._extract_agent_tool_calls(response)
+        if not tool_calls:
+            return visible_text
+        summaries: list[str] = []
+        for payload in tool_calls:
+            tool_name = str(payload.get("tool") or "").strip()
+            if tool_name in {"ui_add_node", "ui_update_node", "ui_delete_node", "ui_add_rule"}:
+                summaries.append(self._apply_agent_ui_tool(payload))
+                continue
+            if tool_name == "update_document":
+                summaries.append(self._apply_agent_update_document_tool(payload))
+                continue
+            raise RuntimeError(f"Unsupported agent tool: {tool_name or '(empty)'}")
+        if visible_text:
+            return visible_text
+        summary_text = "\n".join(part for part in summaries if part)
+        if summary_text:
+            return summary_text
+        raise AssertionError("Agent tool response produced no visible message.")
+
+    def _agent_tool_int(self, payload: dict[str, Any], key: str, default: int) -> int:
+        value = payload.get(key, default)
+        try:
+            return int(value)
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(f"Agent tool field {key} must be an integer.") from exc
+
+    def _agent_tool_float(self, payload: dict[str, Any], key: str, default: float) -> float:
+        value = payload.get(key, default)
+        try:
+            return float(value)
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(f"Agent tool field {key} must be a number.") from exc
+
+    def _agent_tool_list_of_str(self, payload: dict[str, Any], key: str) -> list[str]:
+        value = payload.get(key, [])
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise RuntimeError(f"Agent tool field {key} must be a list.")
+        return [str(item) for item in value]
+
+    def _singleton_ui_node_name(self, kind: str) -> str | None:
+        normalized = str(kind).strip().lower()
+        if normalized in {"container", "containerelement", "container_group", "containergroup"}:
+            return "container"
+        if normalized == "decomposer":
+            return "decomposer"
+        if normalized == "reflector":
+            return "reflector"
+        if normalized in {"stage", "interventioner"}:
+            return "interventioner"
+        if normalized == "resnode":
+            return "meshNode"
+        if normalized == "function":
+            return "fun"
+        return None
+
+    def _agent_ui_default_position(self, sequence_index: int, lane: str = "tool") -> tuple[float, float]:
+        if lane == "container":
+            return CANVAS_PADDING + 36.0, CANVAS_PADDING + 48.0 + sequence_index * 110.0
+        if lane == "group":
+            return CANVAS_PADDING + 260.0, CANVAS_PADDING + 48.0
+        if lane == "tool":
+            return CANVAS_PADDING + 320.0, CANVAS_PADDING + 48.0 + sequence_index * 120.0
+        base = CANVAS_PADDING + 36.0
+        offset = sequence_index * 18.0
+        return base + offset, base + offset
+
+    def _clear_agent_selection(self) -> None:
+        self.selected_container_name = None
+        self.selected_rule_name = None
+        self.selected_reflector_name = None
+        self.selected_res_node_name = None
+        self.selected_function_name = None
+        self.selected_function_text_name = None
+        self.selected_stage_name = None
+        self.selected_container_group_name = None
+
+    def _apply_agent_ui_add_node(self, payload: dict[str, Any]) -> str:
+        kind = str(payload.get("kind") or "").strip().lower()
+        if not kind:
+            raise RuntimeError("ui_add_node requires kind.")
+        self._clear_agent_selection()
+        if kind in {"functiontext", "funtext", "textnode", "text"}:
+            function_name = str(payload.get("function_name") or payload.get("function") or "fun").strip()
+            if not function_name:
+                raise RuntimeError("ui_add_node requires function_name for functiontext.")
+            function_item = self._find_function_frame(function_name)
+            if function_item is None:
+                raise RuntimeError(f"Function not found for functiontext: {function_name}")
+            existing_for_function = self._find_function_text_for_function(function_name)
+            default_name = existing_for_function.name if existing_for_function is not None else self.project.next_function_text_name(function_name)
+            name = str(payload.get("name") or default_name).strip()
+            if not name:
+                raise RuntimeError("ui_add_node requires a non-empty functiontext name.")
+            x_default = function_item.x + 420.0
+            y_default = function_item.y
+            existing_item = self._find_function_text_item(name)
+            if existing_item is not None:
+                existing_item.function_name = function_name
+                existing_item.text = str(payload.get("text") or existing_item.text)
+                existing_item.x = self._agent_tool_float(payload, "x", existing_item.x if "x" in payload else x_default)
+                existing_item.y = self._agent_tool_float(payload, "y", existing_item.y if "y" in payload else y_default)
+                if "width" in payload:
+                    existing_item.width = self._agent_tool_float(payload, "width", existing_item.width)
+                if "height" in payload:
+                    existing_item.height = self._agent_tool_float(payload, "height", existing_item.height)
+                self.selected_function_text_name = name
+                self._refresh_all()
+                return f"Reused function text {name}."
+            text_item = FunctionTextItem(
+                name=name,
+                function_name=function_name,
+                text=str(payload.get("text") or ""),
+                x=self._agent_tool_float(payload, "x", x_default),
+                y=self._agent_tool_float(payload, "y", y_default),
+                width=self._agent_tool_float(payload, "width", 360.0),
+                height=self._agent_tool_float(payload, "height", 220.0),
+            )
+            self.project.function_text_items.append(text_item)
+            self.selected_function_text_name = name
+            self._refresh_all()
+            return f"Added function text {name}."
+        if kind in {"container", "containerelement", "container_group", "containergroup"}:
+            name = str(payload.get("name") or self._singleton_ui_node_name(kind) or self.project.next_container_group_name()).strip()
+            if not name:
+                raise RuntimeError("ui_add_node requires a non-empty containerElement name.")
+            x_default, y_default = self._agent_ui_default_position(len(self.project.container_groups), lane="group")
+            existing_group = self._find_container_group(name)
+            if existing_group is not None:
+                existing_group.x = self._agent_tool_float(payload, "x", existing_group.x if "x" in payload else x_default)
+                existing_group.y = self._agent_tool_float(payload, "y", existing_group.y if "y" in payload else y_default)
+                if "width" in payload:
+                    existing_group.width = self._agent_tool_float(payload, "width", existing_group.width)
+                if "height" in payload:
+                    existing_group.height = self._agent_tool_float(payload, "height", existing_group.height)
+                self.project.validate_container_group(existing_group)
+                self.selected_container_group_name = name
+                self._refresh_all()
+                return f"Reused container {name}."
+            group = ContainerGroupItem(name=name, x=self._agent_tool_float(payload, "x", x_default), y=self._agent_tool_float(payload, "y", y_default), width=self._agent_tool_float(payload, "width", 360.0), height=self._agent_tool_float(payload, "height", 220.0))
+            self.project.validate_container_group(group)
+            self.project.container_groups.append(group)
+            self.selected_container_group_name = name
+            self._refresh_all()
+            return f"Added container {name}."
+        if kind in {"variable", "array"}:
+            name = str(payload.get("name") or self.project.next_container_name(kind)).strip()
+            if not name:
+                raise RuntimeError("ui_add_node requires a non-empty container name.")
+            if self._find_container(name):
+                raise RuntimeError(f"Container already exists: {name}")
+            x_default, y_default = self._agent_ui_default_position(len(self.project.containers), lane="container")
+            count = max(1, self._agent_tool_int(payload, "count", 1))
+            stride_default = 4 if kind == "variable" else 12
+            stride = max(1, self._agent_tool_int(payload, "stride", stride_default))
+            container = ContainerItem(
+                name=name,
+                kind=kind,
+                count=count,
+                stride=stride,
+                value=str(payload.get("value") or ""),
+                values=self._agent_tool_list_of_str(payload, "values"),
+                structure=self._agent_tool_list_of_str(payload, "structure"),
+                x=self._agent_tool_float(payload, "x", x_default),
+                y=self._agent_tool_float(payload, "y", y_default),
+            )
+            self.project.containers.append(container)
+            self.selected_container_name = name
+            self._refresh_all()
+            return f"Added {kind} node {name}."
+        if kind in {"stage", "interventioner"}:
+            name = str(payload.get("name") or self._singleton_ui_node_name(kind) or self.project.next_stage_name()).strip()
+            if not name:
+                raise RuntimeError("ui_add_node requires a non-empty stage name.")
+            x_default, y_default = self._agent_ui_default_position(len(self.project.intervention_stages), lane="tool")
+            existing_stage = self._find_stage(name)
+            if existing_stage is not None:
+                existing_stage.x = self._agent_tool_float(payload, "x", existing_stage.x if "x" in payload else x_default)
+                existing_stage.y = self._agent_tool_float(payload, "y", existing_stage.y if "y" in payload else y_default)
+                if "stage_kind" in payload:
+                    existing_stage.kind = str(payload.get("stage_kind") or existing_stage.kind)
+                self.selected_stage_name = name
+                self._refresh_all()
+                return f"Reused stage {name}."
+            stage_kind = str(payload.get("stage_kind") or payload.get("kind_name") or "interventioner").strip() or "interventioner"
+            stage = InterventionStage(
+                name=name,
+                kind=stage_kind,
+                used_variables=self._agent_tool_list_of_str(payload, "used_variables"),
+                used_arrays=self._agent_tool_list_of_str(payload, "used_arrays"),
+                functions=self._agent_tool_list_of_str(payload, "functions"),
+                shader_vertex=str(payload.get("shader_vertex") or ""),
+                shader_fragment=str(payload.get("shader_fragment") or ""),
+                x=self._agent_tool_float(payload, "x", x_default),
+                y=self._agent_tool_float(payload, "y", y_default),
+            )
+            self.project.intervention_stages.append(stage)
+            self.selected_stage_name = name
+            self._refresh_all()
+            return f"Added stage {name}."
+        if kind == "resnode":
+            name = str(payload.get("name") or self._singleton_ui_node_name(kind) or self.project.next_res_name()).strip()
+            if not name:
+                raise RuntimeError("ui_add_node requires a non-empty resnode name.")
+            x_default, y_default = self._agent_ui_default_position(len(self.project.res_nodes), lane="tool")
+            resource_kind = str(payload.get("resource_kind") or "mesh").strip() or "mesh"
+            outputs = self._agent_tool_list_of_str(payload, "outputs") or [resource_kind]
+            existing_res = self._find_res_node(name)
+            if existing_res is not None:
+                existing_res.resource_kind = resource_kind
+                existing_res.resource_types = [resource_kind]
+                existing_res.outputs = outputs
+                existing_res.x = self._agent_tool_float(payload, "x", existing_res.x if "x" in payload else x_default)
+                existing_res.y = self._agent_tool_float(payload, "y", existing_res.y if "y" in payload else y_default)
+                self.selected_res_node_name = name
+                self._refresh_all()
+                return f"Reused meshNode {name}."
+            item = ResourceNodeItem(
+                name=name,
+                resource_types=[resource_kind],
+                outputs=outputs,
+                resource_kind=resource_kind,
+                x=self._agent_tool_float(payload, "x", x_default),
+                y=self._agent_tool_float(payload, "y", y_default),
+            )
+            self.project.res_nodes.append(item)
+            self.selected_res_node_name = name
+            self._refresh_all()
+            return f"Added meshNode {name}."
+        if kind == "function":
+            name = str(payload.get("name") or self._singleton_ui_node_name(kind) or self.project.next_function_name()).strip()
+            if not name:
+                raise RuntimeError("ui_add_node requires a non-empty function name.")
+            x_default, y_default = self._agent_ui_default_position(len(self.project.function_frames), lane="tool")
+            existing_function = self._find_function_frame(name)
+            if existing_function is not None:
+                existing_function.x = self._agent_tool_float(payload, "x", existing_function.x if "x" in payload else x_default)
+                existing_function.y = self._agent_tool_float(payload, "y", existing_function.y if "y" in payload else y_default)
+                if "script" in payload:
+                    existing_function.script = str(payload.get("script") or "")
+                self.selected_function_name = name
+                self._refresh_all()
+                return f"Reused fun {name}."
+            item = FunctionFrameItem(
+                name=name,
+                script=str(payload.get("script") or "agent writes text and code here"),
+                input_name=str(payload.get("input_name") or "in"),
+                output_name=str(payload.get("output_name") or "out"),
+                expected_input=str(payload.get("expected_input") or ""),
+                expected_output=str(payload.get("expected_output") or ""),
+                x=self._agent_tool_float(payload, "x", x_default),
+                y=self._agent_tool_float(payload, "y", y_default),
+            )
+            self.project.function_frames.append(item)
+            self.selected_function_name = name
+            self._refresh_all()
+            return f"Added fun {name}."
+        if kind == "reflector":
+            name = str(payload.get("name") or self._singleton_ui_node_name(kind) or self.project.next_reflector_name()).strip()
+            if not name:
+                raise RuntimeError("ui_add_node requires a non-empty reflector name.")
+            x_default, y_default = self._agent_ui_default_position(len(self.project.reflector_items), lane="tool")
+            existing_reflector = self._find_reflector(name)
+            if existing_reflector is not None:
+                existing_reflector.x = self._agent_tool_float(payload, "x", existing_reflector.x if "x" in payload else x_default)
+                existing_reflector.y = self._agent_tool_float(payload, "y", existing_reflector.y if "y" in payload else y_default)
+                self.selected_reflector_name = name
+                self._refresh_all()
+                return f"Reused reflector {name}."
+            item = ReflectorItem(
+                name=name,
+                reflect_fun=str(payload.get("reflect_fun") or "direct"),
+                inputs_varity=self._agent_tool_list_of_str(payload, "inputs_varity"),
+                inputs_array=self._agent_tool_list_of_str(payload, "inputs_array"),
+                output_kind=str(payload.get("output_kind") or "v"),
+                output_name=str(payload.get("output_name") or ""),
+                direct_from=self._agent_tool_list_of_str(payload, "direct_from"),
+                direct_to=self._agent_tool_list_of_str(payload, "direct_to"),
+                x=self._agent_tool_float(payload, "x", x_default),
+                y=self._agent_tool_float(payload, "y", y_default),
+            )
+            self.project.reflector_items.append(item)
+            self.selected_reflector_name = name
+            self._refresh_all()
+            return f"Added reflector {name}."
+        raise RuntimeError(f"ui_add_node does not support kind: {kind}")
+
+    def _apply_agent_ui_update_node(self, payload: dict[str, Any]) -> str:
+        kind = str(payload.get("kind") or "").strip().lower()
+        name = str(payload.get("name") or "").strip()
+        if not kind or not name:
+            raise RuntimeError("ui_update_node requires kind and name.")
+        if kind in {"functiontext", "funtext", "textnode", "text"}:
+            item = self._find_function_text_item(name)
+            if item is None:
+                raise RuntimeError(f"Function text not found: {name}")
+            if "function_name" in payload:
+                function_name = str(payload.get("function_name") or "").strip()
+                if not function_name:
+                    raise RuntimeError("function_name cannot be empty.")
+                if self._find_function_frame(function_name) is None:
+                    raise RuntimeError(f"Function not found for functiontext: {function_name}")
+                item.function_name = function_name
+            if "text" in payload:
+                item.text = str(payload.get("text") or "")
+            if "x" in payload:
+                item.x = self._agent_tool_float(payload, "x", item.x)
+            if "y" in payload:
+                item.y = self._agent_tool_float(payload, "y", item.y)
+            if "width" in payload:
+                item.width = self._agent_tool_float(payload, "width", item.width)
+            if "height" in payload:
+                item.height = self._agent_tool_float(payload, "height", item.height)
+            self.selected_function_text_name = name
+            self._refresh_all()
+            return f"Updated function text {name}."
+        if kind in {"container", "containerelement", "container_group", "containergroup"}:
+            item = self._find_container_group(name)
+            if item is None:
+                raise RuntimeError(f"containerElement not found: {name}")
+            if "x" in payload:
+                item.x = self._agent_tool_float(payload, "x", item.x)
+            if "y" in payload:
+                item.y = self._agent_tool_float(payload, "y", item.y)
+            if "width" in payload:
+                item.width = self._agent_tool_float(payload, "width", item.width)
+            if "height" in payload:
+                item.height = self._agent_tool_float(payload, "height", item.height)
+            self.project.validate_container_group(item)
+            self.selected_container_group_name = name
+            self._refresh_all()
+            return f"Updated container {name}."
+        if kind in {"variable", "array"}:
+            item = self._find_container(name)
+            if item is None:
+                raise RuntimeError(f"Container not found: {name}")
+            if "count" in payload:
+                item.count = max(1, self._agent_tool_int(payload, "count", item.count))
+            if "stride" in payload:
+                item.stride = max(1, self._agent_tool_int(payload, "stride", item.stride))
+            if "value" in payload:
+                item.value = str(payload.get("value") or "")
+            if "values" in payload:
+                item.values = self._agent_tool_list_of_str(payload, "values")
+            if "structure" in payload:
+                item.structure = self._agent_tool_list_of_str(payload, "structure")
+            if "x" in payload:
+                item.x = self._agent_tool_float(payload, "x", item.x)
+            if "y" in payload:
+                item.y = self._agent_tool_float(payload, "y", item.y)
+            self.selected_container_name = name
+            self._refresh_all()
+            return f"Updated {kind} node {name}."
+        if kind in {"stage", "interventioner"}:
+            item = self._find_stage(name)
+            if item is None:
+                raise RuntimeError(f"Stage not found: {name}")
+            if "stage_kind" in payload:
+                item.kind = str(payload.get("stage_kind") or item.kind)
+            if "functions" in payload:
+                item.functions = self._agent_tool_list_of_str(payload, "functions")
+            if "used_variables" in payload:
+                item.used_variables = self._agent_tool_list_of_str(payload, "used_variables")
+            if "used_arrays" in payload:
+                item.used_arrays = self._agent_tool_list_of_str(payload, "used_arrays")
+            if "shader_vertex" in payload:
+                item.shader_vertex = str(payload.get("shader_vertex") or "")
+            if "shader_fragment" in payload:
+                item.shader_fragment = str(payload.get("shader_fragment") or "")
+            if "x" in payload:
+                item.x = self._agent_tool_float(payload, "x", item.x)
+            if "y" in payload:
+                item.y = self._agent_tool_float(payload, "y", item.y)
+            self.selected_stage_name = name
+            self._refresh_all()
+            return f"Updated stage {name}."
+        if kind == "function":
+            item = self._find_function_frame(name)
+            if item is None:
+                raise RuntimeError(f"Function not found: {name}")
+            if "script" in payload:
+                item.script = str(payload.get("script") or "")
+            if "input_name" in payload:
+                item.input_name = str(payload.get("input_name") or "in")
+            if "output_name" in payload:
+                item.output_name = str(payload.get("output_name") or "out")
+            if "expected_input" in payload:
+                item.expected_input = str(payload.get("expected_input") or "")
+            if "expected_output" in payload:
+                item.expected_output = str(payload.get("expected_output") or "")
+            if "x" in payload:
+                item.x = self._agent_tool_float(payload, "x", item.x)
+            if "y" in payload:
+                item.y = self._agent_tool_float(payload, "y", item.y)
+            self.selected_function_name = name
+            self._refresh_all()
+            return f"Updated function {name}."
+        raise RuntimeError(f"ui_update_node does not support kind: {kind}")
+
+    def _apply_agent_ui_delete_node(self, payload: dict[str, Any]) -> str:
+        kind = str(payload.get("kind") or "").strip().lower()
+        name = str(payload.get("name") or "").strip()
+        if not kind or not name:
+            raise RuntimeError("ui_delete_node requires kind and name.")
+        self._clear_agent_selection()
+        if kind in {"functiontext", "funtext", "textnode", "text"}:
+            if self._find_function_text_item(name) is None:
+                raise RuntimeError(f"Function text not found: {name}")
+            self.selected_function_text_name = name
+            self._delete_selected_function_text()
+            return f"Deleted function text {name}."
+        if kind in {"container", "containerelement", "container_group", "containergroup"}:
+            if self._find_container_group(name) is None:
+                raise RuntimeError(f"containerElement not found: {name}")
+            self.selected_container_group_name = name
+            self._delete_selected_container_group()
+            return f"Deleted container {name}."
+        if kind in {"variable", "array"}:
+            if self._find_container(name) is None:
+                raise RuntimeError(f"Container not found: {name}")
+            self.selected_container_name = name
+            self._delete_selected_container()
+            return f"Deleted {kind} node {name}."
+        if kind in {"stage", "interventioner"}:
+            if self._find_stage(name) is None:
+                raise RuntimeError(f"Stage not found: {name}")
+            self.selected_stage_name = name
+            self._delete_selected_stage()
+            return f"Deleted stage {name}."
+        if kind == "resnode":
+            if self._find_res_node(name) is None:
+                raise RuntimeError(f"resNode not found: {name}")
+            self.selected_res_node_name = name
+            self._delete_selected_res_node()
+            return f"Deleted resNode {name}."
+        if kind == "function":
+            if self._find_function_frame(name) is None:
+                raise RuntimeError(f"Function not found: {name}")
+            self.selected_function_name = name
+            self._delete_selected_function()
+            return f"Deleted function {name}."
+        if kind == "reflector":
+            if self._find_reflector(name) is None:
+                raise RuntimeError(f"Reflector not found: {name}")
+            self.selected_reflector_name = name
+            self._delete_selected_reflector()
+            return f"Deleted reflector {name}."
+        raise RuntimeError(f"ui_delete_node does not support kind: {kind}")
+
+    def _apply_agent_ui_add_rule(self, payload: dict[str, Any]) -> str:
+        source = str(payload.get("source") or "").strip()
+        target = str(payload.get("target") or "").strip()
+        if not source or not target:
+            raise RuntimeError("ui_add_rule requires source and target.")
+        if self._find_container(source) is None:
+            raise RuntimeError(f"Rule source container not found: {source}")
+        if self._find_container(target) is None:
+            raise RuntimeError(f"Rule target container not found: {target}")
+        name = str(payload.get("name") or f"{source}_to_{target}").strip()
+        if not name:
+            raise RuntimeError("ui_add_rule requires a non-empty rule name.")
+        if self._find_rule(name):
+            raise RuntimeError(f"Rule already exists: {name}")
+        x_default, y_default = self._agent_ui_default_position(len(self.project.decomposer_rules))
+        rule = DecomposerRule(
+            name=name,
+            source=source,
+            target=target,
+            map_kind=str(payload.get("map_kind") or "v2v"),
+            descriptor_script=str(payload.get("descriptor_script") or ""),
+            resource_mode=str(payload.get("resource_mode") or "default"),
+            resource_script=str(payload.get("resource_script") or ""),
+            x=self._agent_tool_float(payload, "x", x_default),
+            y=self._agent_tool_float(payload, "y", y_default),
+        )
+        self.project.decomposer_rules.append(rule)
+        self.selected_rule_name = name
+        self._refresh_all()
+        return f"Added rule {name}."
+
+    def _apply_agent_ui_tool(self, payload: dict[str, Any]) -> str:
+        tool_name = str(payload.get("tool") or "").strip()
+        if tool_name == "ui_add_node":
+            return self._apply_agent_ui_add_node(payload)
+        if tool_name == "ui_update_node":
+            return self._apply_agent_ui_update_node(payload)
+        if tool_name == "ui_delete_node":
+            return self._apply_agent_ui_delete_node(payload)
+        if tool_name == "ui_add_rule":
+            return self._apply_agent_ui_add_rule(payload)
+        raise RuntimeError(f"Unsupported UI tool: {tool_name or '(empty)'}")
+
+    def _set_document_text(self, text: str) -> None:
+        if not self.preview_text:
+            return
+        self.document_editor_applying = True
+        try:
+            self.preview_text.delete("1.0", tk.END)
+            self.preview_text.insert("1.0", text)
+            self.preview_text.edit_modified(False)
+        finally:
+            self.document_editor_applying = False
+
+    def _cancel_document_apply(self) -> None:
+        if self.document_apply_after_id is None:
+            return
+        self.root.after_cancel(self.document_apply_after_id)
+        self.document_apply_after_id = None
+
+    def _on_document_text_modified(self, _event: tk.Event) -> None:
+        if not self.preview_text:
+            return
+        if self.document_editor_applying:
+            self.preview_text.edit_modified(False)
+            return
+        if not self.preview_text.edit_modified():
+            return
+        self.preview_text.edit_modified(False)
+        self.document_editor_dirty = True
+        self.document_last_error = None
+        self._cancel_document_apply()
+        self.document_apply_after_id = self.root.after(450, self._apply_document_editor_to_project)
+
+    def _replace_project_state(self, project: ProjectState, *, source: str, reset_chat: bool = False) -> None:
+        self.project = project
+        self.project_manifest_text_cache = self.project.current_manifest_text()
+        self.project_manifest_revision += 1
+        if reset_chat:
+            self._reset_chat_state()
+        self.connection_drag_state = None
+        self.marquee_state = None
+        self.canvas_pan_state = None
+        self.container_group_drag_state = None
+        self.container_group_resize_state = None
+        self.toolnode_resize_state = None
+        self.node_drag_state = None
+        self.palette_drag_state = None
+        self.selection_state = None
+        self.selected_container_name = None
+        self.selected_rule_name = None
+        self.selected_reflector_name = None
+        self.selected_res_node_name = None
+        self.selected_function_name = None
+        self.selected_stage_name = None
+        self.selected_container_group_name = None
+        self._sync_project_to_vars()
+        self._refresh_all()
+        self.status_var.set(source)
+
+    def _apply_document_editor_to_project(self) -> None:
+        self.document_apply_after_id = None
+        if not self.preview_text:
+            raise AssertionError("Document editor is not initialized.")
+        raw_text = self.preview_text.get("1.0", tk.END).strip()
+        if not raw_text:
+            self.document_last_error = "Document is empty."
+            self.status_var.set("Document is empty.")
+            return
+        try:
+            payload = json.loads(raw_text)
+            if not isinstance(payload, dict):
+                raise ValueError("Document root must be a JSON object.")
+            project = ProjectState.from_package_json(payload)
+        except Exception as exc:  # noqa: BLE001
+            self.document_last_error = str(exc)
+            self.status_var.set(f"Document invalid: {self._compact_activity_text(str(exc), limit=96)}")
+            return
+        self.document_editor_dirty = False
+        self.document_last_error = None
+        self._replace_project_state(project, source="Document applied.")
+        self._set_document_text(self._project_manifest_text())
+        self._log("Applied document changes to the scene.")
+
+    def _commit_document_editor_or_report(self) -> bool:
+        if not self.document_editor_dirty:
+            return True
+        self._apply_document_editor_to_project()
+        if self.document_editor_dirty:
+            message = self.document_last_error or "Document is invalid."
+            messagebox.showerror("Document error", message)
+            return False
+        return True
+
     def _refresh_all(self) -> None:
         self._sync_all_container_groups()
+        self._sync_project_manifest_cache()
         self._refresh_container_list()
         self._refresh_rule_list()
         self._refresh_reflector_list()
@@ -1591,9 +2153,10 @@ class AlgorithmStudioApp:
     def _refresh_preview(self) -> None:
         if not self.preview_text:
             return
-        preview = json.dumps(self.project.to_package_json(), indent=2, ensure_ascii=False)
-        self.preview_text.delete("1.0", tk.END)
-        self.preview_text.insert("1.0", preview)
+        if self.document_editor_dirty:
+            return
+        preview = self._project_manifest_text()
+        self._set_document_text(preview)
 
     def _refresh_inspector(self) -> None:
         if not self.inspector_text:
@@ -1623,9 +2186,9 @@ class AlgorithmStudioApp:
         self.selection_value_text = None
         self.selection_value_entry = None
         self.selection_apply_button = None
-        if not self.selection_frame:
+        if not self.selection_body_frame:
             return
-        parent = self.selection_frame
+        parent = self.selection_body_frame
         editor_row = ttk.Frame(parent)
         editor_row.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(8, 0))
         editor_row.columnconfigure(1, weight=1)
@@ -1708,11 +2271,11 @@ class AlgorithmStudioApp:
         if self.selected_container_name:
             container = self._find_container(self.selected_container_name)
             if container:
+                structure = self._container_structure_signature(container)
                 if container.kind == "variable":
                     detail_line = f"value: {container.value or '-'}"
                 else:
-                    start = min(max(container.view_offset, 0), max(0, len(container.values) - 1))
-                    preview = ", ".join(container.values[start : start + 4]) if container.values else "-"
+                    preview = ", ".join(self._container_value_preview(container, 4))
                     detail_line = f"values: {preview}"
                 return "\n".join(
                     [
@@ -1721,6 +2284,7 @@ class AlgorithmStudioApp:
                         f"kind: {container.kind}",
                         f"count: {container.count}",
                         f"stride: {container.stride}",
+                        f"structure: {structure}",
                         detail_line,
                         f"canvas: ({int(container.x)}, {int(container.y)})",
                         "",
@@ -1805,6 +2369,18 @@ class AlgorithmStudioApp:
                         f"script: {item.script or '-'}",
                     ]
                 )
+        if self.selected_function_text_name:
+            item = self._find_function_text_item(self.selected_function_text_name)
+            if item:
+                return "\n".join(
+                    [
+                        "Selected text",
+                        f"name: {item.name}",
+                        f"function: {item.function_name or '-'}",
+                        f"size: {int(getattr(item, 'width', 0))} x {int(getattr(item, 'height', 0))}",
+                        f"text: {self._compact_activity_text(item.text, limit=180) or '-'}",
+                    ]
+                )
         return "\n".join(
             [
                 "Nothing selected",
@@ -1835,6 +2411,7 @@ class AlgorithmStudioApp:
                         "stride": container.stride,
                         "value": container.value,
                         "values": list(container.values),
+                        "structure": list(container.structure),
                         "view_offset": container.view_offset,
                         "x": container.x,
                         "y": container.y,
@@ -1907,6 +2484,7 @@ class AlgorithmStudioApp:
                 stride=int(entry["stride"]),
                 value=str(entry["value"]),
                 values=[str(value) for value in entry.get("values", [])],
+                structure=[str(value) for value in entry.get("structure", [])],
                 view_offset=int(entry.get("view_offset", 0)),
                 x=paste_x + float(entry["x"]) - anchor_x,
                 y=paste_y + float(entry["y"]) - anchor_y,
@@ -1946,6 +2524,18 @@ class AlgorithmStudioApp:
                 return item
         return None
 
+    def _find_function_text_item(self, name: str) -> FunctionTextItem | None:
+        for item in self.project.function_text_items:
+            if item.name == name:
+                return item
+        return None
+
+    def _find_function_text_for_function(self, function_name: str) -> FunctionTextItem | None:
+        for item in self.project.function_text_items:
+            if item.function_name == function_name:
+                return item
+        return None
+
     def _find_stage(self, name: str) -> InterventionStage | None:
         for stage in self.project.intervention_stages:
             if stage.name == name:
@@ -1967,6 +2557,8 @@ class AlgorithmStudioApp:
             return self._find_res_node(name)
         if kind == "function":
             return self._find_function_frame(name)
+        if kind == "functiontext":
+            return self._find_function_text_item(name)
         if kind == "interventioner" or kind == "stage":
             return self._find_stage(name)
         if kind == "containerelement":
@@ -2358,10 +2950,20 @@ class AlgorithmStudioApp:
         if not item:
             return
         self.project.function_frames = [entry for entry in self.project.function_frames if entry.name != item.name]
+        self.project.function_text_items = [entry for entry in self.project.function_text_items if entry.function_name != item.name]
         self._remove_connections_for_node("function", item.name)
         self.selected_function_name = None
         self._refresh_all()
         self._log(f"Deleted function {item.name}.")
+
+    def _delete_selected_function_text(self) -> None:
+        item = self._current_function_text()
+        if not item:
+            return
+        self.project.function_text_items = [entry for entry in self.project.function_text_items if entry.name != item.name]
+        self.selected_function_text_name = None
+        self._refresh_all()
+        self._log(f"Deleted function text {item.name}.")
 
     def _add_stage(self) -> None:
         name = self.project.next_stage_name()
@@ -2474,6 +3076,11 @@ class AlgorithmStudioApp:
             return self._find_function_frame(self.selected_function_name)
         return None
 
+    def _current_function_text(self) -> FunctionTextItem | None:
+        if self.selected_function_text_name:
+            return self._find_function_text_item(self.selected_function_text_name)
+        return None
+
     def _add_reflector_from_selection(self) -> None:
         container = self._current_container()
         if not container:
@@ -2516,6 +3123,8 @@ class AlgorithmStudioApp:
                 "",
                 "Context:",
                 summary,
+                "",
+                self._agent_document_context(),
             ]
         )
 
@@ -2538,27 +3147,761 @@ class AlgorithmStudioApp:
     def _clear_chat_history(self) -> None:
         self.chat_history.clear()
         if self.chat_history_text:
+            self.chat_history_text.configure(state="normal")
             self.chat_history_text.delete("1.0", tk.END)
-        self._append_chat_message("system", "Chat history cleared.")
+            self.chat_history_text.configure(state="disabled")
+        self.chat_rendered_images.clear()
+        self._clear_chat_attachments()
+        self._log("Chat history cleared.")
 
-    def _append_chat_message(self, role: str, content: str) -> None:
-        message = {"role": role, "content": content}
+    def _chat_attachment_kind(self, path: Path) -> str:
+        mime_type = mimetypes.guess_type(str(path))[0] or ""
+        if mime_type.startswith("image/"):
+            return "image"
+        return "file"
+
+    def _refresh_chat_attachment_summary(self) -> None:
+        if not self.chat_attachments:
+            self.chat_attachment_summary_var.set("No attachments.")
+            return
+        names = ", ".join(item["name"] for item in self.chat_attachments[:3])
+        if len(self.chat_attachments) > 3:
+            names += f" +{len(self.chat_attachments) - 3}"
+        self.chat_attachment_summary_var.set(names)
+
+    def _report_chat_attachment_state(self, source: str) -> None:
+        self._refresh_chat_attachment_summary()
+        if not self.chat_attachments:
+            self.status_var.set("Ready.")
+            return
+        self.status_var.set(f"Attached {len(self.chat_attachments)} item(s) via {source}.")
+        self._log(f"Attached {len(self.chat_attachments)} item(s) via {source}: {self.chat_attachment_summary_var.get()}")
+
+    def _add_chat_attachments(self, paths: tuple[str, ...] | list[str], *, source: str) -> None:
+        existing_paths = {str(item["path"]) for item in self.chat_attachments}
+        for path_text in paths:
+            path = Path(str(path_text).strip())
+            if not path.exists():
+                raise FileNotFoundError(f"Attachment not found: {path}")
+            if not path.is_file():
+                raise AssertionError(f"Attachment must be a file: {path}")
+            normalized = str(path.resolve())
+            if normalized in existing_paths:
+                continue
+            existing_paths.add(normalized)
+            self.chat_attachments.append(
+                {
+                    "path": normalized,
+                    "name": path.name,
+                    "kind": self._chat_attachment_kind(path),
+                    "mime_type": mimetypes.guess_type(str(path))[0] or "application/octet-stream",
+                }
+            )
+        self._report_chat_attachment_state(source)
+
+    def _clear_chat_attachments(self) -> None:
+        self.chat_attachments.clear()
+        self._report_chat_attachment_state("clear")
+
+    def _widget_is_chat_input_target(self, widget: Any) -> bool:
+        current = widget
+        while current is not None:
+            if current is self.chat_input_text:
+                return True
+            current = getattr(current, "master", None)
+        return False
+
+    def _install_chat_input_drop_target(self) -> None:
+        if os.name != "nt":
+            return
+        if self.chat_input_text is None:
+            raise AssertionError("Chat input box is not initialized.")
+        if self._chat_drop_wndproc is not None:
+            return
+        self.root.update_idletasks()
+        hwnd = int(self.root.winfo_id())
+        user32 = ctypes.windll.user32
+        shell32 = ctypes.windll.shell32
+        shell32.DragAcceptFiles.argtypes = [wintypes.HWND, wintypes.BOOL]
+        shell32.DragAcceptFiles.restype = None
+        user32.GetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int]
+        user32.GetWindowLongPtrW.restype = ctypes.c_void_p
+        user32.SetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_void_p]
+        user32.SetWindowLongPtrW.restype = ctypes.c_void_p
+        user32.CallWindowProcW.argtypes = [ctypes.c_void_p, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+        user32.CallWindowProcW.restype = LRESULT_TYPE
+        shell32.DragQueryFileW.argtypes = [wintypes.HANDLE, wintypes.UINT, wintypes.LPWSTR, wintypes.UINT]
+        shell32.DragQueryFileW.restype = wintypes.UINT
+        shell32.DragQueryPoint.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.POINT)]
+        shell32.DragQueryPoint.restype = wintypes.BOOL
+        shell32.DragFinish.argtypes = [wintypes.HANDLE]
+        shell32.DragFinish.restype = None
+        wm_dropfiles = 0x0233
+        gwlp_wndproc = -4
+        old_wndproc = user32.GetWindowLongPtrW(hwnd, gwlp_wndproc)
+        if not old_wndproc:
+            raise OSError("Failed to read current window procedure.")
+        wndproc_type = ctypes.WINFUNCTYPE(LRESULT_TYPE, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
+
+        def _chat_drop_wndproc(window_handle: int, message: int, wparam: int, lparam: int) -> int:
+            if message == wm_dropfiles:
+                drop_handle = wintypes.HANDLE(wparam)
+                file_count = shell32.DragQueryFileW(drop_handle, 0xFFFFFFFF, None, 0)
+                point = wintypes.POINT()
+                if not shell32.DragQueryPoint(drop_handle, ctypes.byref(point)):
+                    shell32.DragFinish(drop_handle)
+                    raise AssertionError("Drop point is unavailable for WM_DROPFILES.")
+                dropped_paths: list[str] = []
+                for file_index in range(file_count):
+                    buffer_length = shell32.DragQueryFileW(drop_handle, file_index, None, 0) + 1
+                    buffer = ctypes.create_unicode_buffer(buffer_length)
+                    shell32.DragQueryFileW(drop_handle, file_index, buffer, buffer_length)
+                    dropped_paths.append(buffer.value)
+                shell32.DragFinish(drop_handle)
+                screen_x = self.root.winfo_rootx() + int(point.x)
+                screen_y = self.root.winfo_rooty() + int(point.y)
+                self.root.after(
+                    0,
+                    lambda paths=dropped_paths, x=screen_x, y=screen_y: self._handle_chat_external_drop(paths, x, y),
+                )
+                return 0
+            return user32.CallWindowProcW(old_wndproc, window_handle, message, wparam, lparam)
+
+        wndproc = wndproc_type(_chat_drop_wndproc)
+        new_wndproc_pointer = ctypes.cast(wndproc, ctypes.c_void_p).value
+        previous_wndproc = user32.SetWindowLongPtrW(hwnd, gwlp_wndproc, new_wndproc_pointer)
+        if not previous_wndproc:
+            raise OSError("Failed to install drop target window procedure.")
+        shell32.DragAcceptFiles(hwnd, True)
+        self._chat_drop_hwnd = hwnd
+        self._chat_drop_old_wndproc = previous_wndproc
+        self._chat_drop_wndproc = wndproc
+
+    def _uninstall_chat_input_drop_target(self) -> None:
+        if os.name != "nt":
+            return
+        if self._chat_drop_hwnd is None or self._chat_drop_old_wndproc is None:
+            return
+        user32 = ctypes.windll.user32
+        shell32 = ctypes.windll.shell32
+        shell32.DragAcceptFiles.argtypes = [wintypes.HWND, wintypes.BOOL]
+        shell32.DragAcceptFiles.restype = None
+        user32.SetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_void_p]
+        user32.SetWindowLongPtrW.restype = ctypes.c_void_p
+        shell32.DragAcceptFiles(self._chat_drop_hwnd, False)
+        restored = user32.SetWindowLongPtrW(self._chat_drop_hwnd, -4, self._chat_drop_old_wndproc)
+        if not restored:
+            raise OSError("Failed to restore original window procedure.")
+        self._chat_drop_hwnd = None
+        self._chat_drop_old_wndproc = None
+        self._chat_drop_wndproc = None
+
+    def _handle_chat_external_drop(self, paths: list[str], screen_x: int, screen_y: int) -> None:
+        widget = self.root.winfo_containing(screen_x, screen_y)
+        if not self._widget_is_chat_input_target(widget):
+            self.status_var.set("Drop ignored outside the chat input.")
+            return
+        if not paths:
+            raise AssertionError("External drop did not contain any file paths.")
+        self._add_chat_attachments(paths, source="drop")
+        if self.chat_input_text:
+            self.chat_input_text.focus_set()
+
+    def _clipboard_file_paths(self) -> list[str]:
+        if os.name != "nt":
+            raise AssertionError("Clipboard file attachments are only supported on Windows.")
+        user32 = ctypes.windll.user32
+        shell32 = ctypes.windll.shell32
+        cf_hdrop = 15
+        if not user32.OpenClipboard(None):
+            raise OSError("Failed to open the clipboard.")
+        try:
+            if not user32.IsClipboardFormatAvailable(cf_hdrop):
+                return []
+            drop_handle = user32.GetClipboardData(cf_hdrop)
+            if not drop_handle:
+                raise OSError("Clipboard reported file data but returned an invalid handle.")
+            shell32.DragQueryFileW.argtypes = [wintypes.HANDLE, wintypes.UINT, wintypes.LPWSTR, wintypes.UINT]
+            shell32.DragQueryFileW.restype = wintypes.UINT
+            file_count = shell32.DragQueryFileW(drop_handle, 0xFFFFFFFF, None, 0)
+            paths: list[str] = []
+            for file_index in range(file_count):
+                buffer_length = shell32.DragQueryFileW(drop_handle, file_index, None, 0) + 1
+                buffer = ctypes.create_unicode_buffer(buffer_length)
+                shell32.DragQueryFileW(drop_handle, file_index, buffer, buffer_length)
+                paths.append(buffer.value)
+            return paths
+        finally:
+            if not user32.CloseClipboard():
+                raise OSError("Failed to close the clipboard.")
+
+    def _clipboard_has_image(self) -> bool:
+        if os.name != "nt":
+            raise AssertionError("Clipboard image attachments are only supported on Windows.")
+        user32 = ctypes.windll.user32
+        cf_bitmap = 2
+        cf_dib = 8
+        cf_dibv5 = 17
+        if not user32.OpenClipboard(None):
+            raise OSError("Failed to open the clipboard.")
+        try:
+            return bool(
+                user32.IsClipboardFormatAvailable(cf_bitmap)
+                or user32.IsClipboardFormatAvailable(cf_dib)
+                or user32.IsClipboardFormatAvailable(cf_dibv5)
+            )
+        finally:
+            if not user32.CloseClipboard():
+                raise OSError("Failed to close the clipboard.")
+
+    def _save_clipboard_image_to_file(self) -> str:
+        if os.name != "nt":
+            raise AssertionError("Clipboard image attachments are only supported on Windows.")
+        fd, path_text = tempfile.mkstemp(prefix="algorithm_studio_clipboard_", suffix=".png")
+        os.close(fd)
+        output_path = Path(path_text)
+        output_path.unlink(missing_ok=True)
+        command = [
+            "powershell.exe",
+            "-NoProfile",
+            "-STA",
+            "-Command",
+            "& { param([string]$OutPath) "
+            "Add-Type -AssemblyName System.Windows.Forms; "
+            "Add-Type -AssemblyName System.Drawing; "
+            "$image = [System.Windows.Forms.Clipboard]::GetImage(); "
+            "if ($null -eq $image) { exit 3 }; "
+            "$image.Save($OutPath, [System.Drawing.Imaging.ImageFormat]::Png) }",
+            str(output_path),
+        ]
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="strict",
+            check=False,
+        )
+        if completed.returncode != 0:
+            output_path.unlink(missing_ok=True)
+            stderr = (completed.stderr or "").strip()
+            stdout = (completed.stdout or "").strip()
+            raise RuntimeError(f"Failed to read image data from the clipboard: {stderr or stdout or completed.returncode}")
+        if not output_path.exists():
+            raise AssertionError("Clipboard image export completed without creating a file.")
+        return str(output_path)
+
+    def _handle_chat_paste_event(self, event: tk.Event) -> str | None:
+        file_paths = self._clipboard_file_paths()
+        if file_paths:
+            self._add_chat_attachments(file_paths, source="clipboard")
+            return "break"
+        if self._clipboard_has_image():
+            image_path = self._save_clipboard_image_to_file()
+            self._add_chat_attachments([image_path], source="clipboard")
+            return "break"
+        return None
+
+    def _open_chat_attachment(self, path_text: str) -> None:
+        path = Path(path_text)
+        if not path.exists():
+            raise FileNotFoundError(f"Attachment not found: {path}")
+        os.startfile(str(path))
+
+    def _resolve_chat_output_attachment(self, candidate: str) -> dict[str, str] | None:
+        path_text = str(candidate).strip().strip("`").strip()
+        if not path_text:
+            return None
+        if path_text.startswith("<") and path_text.endswith(">"):
+            path_text = path_text[1:-1].strip()
+        lowered = path_text.lower()
+        if "://" in path_text and not lowered.startswith("file://"):
+            return None
+        if lowered.startswith("file://"):
+            parsed = urlparse(path_text)
+            parsed_path = unquote(parsed.path or "").strip()
+            if parsed_path.startswith("/") and len(parsed_path) > 2 and parsed_path[2] == ":":
+                parsed_path = parsed_path[1:]
+            path_text = parsed_path
+        path = Path(path_text)
+        if not path.is_absolute():
+            path = (PROJECT_ROOT / path_text).resolve()
+        if not path.exists():
+            return None
+        return {
+            "path": str(path),
+            "name": path.name,
+            "kind": self._chat_attachment_kind(path),
+            "mime_type": mimetypes.guess_type(str(path))[0] or "application/octet-stream",
+        }
+
+    def _insert_chat_attachment_link(self, tag: str, attachment: dict[str, str], index: int) -> None:
+        if not self.chat_history_text:
+            raise AssertionError("Chat history box is not initialized.")
+        line_tag = f"{tag}_attachment_{index}_{int(time.time() * 1000)}"
+        label = f"[{attachment['kind']}] {attachment['name']}"
+        start_index = self.chat_history_text.index(tk.END)
+        self.chat_history_text.insert(tk.END, label + "\n", (tag,))
+        end_index = self.chat_history_text.index(tk.END)
+        self.chat_history_text.tag_add(line_tag, start_index, end_index)
+        self.chat_history_text.tag_configure(
+            line_tag,
+            foreground=COLORS["accent"] if attachment["kind"] == "image" else COLORS["muted"],
+            underline=True,
+        )
+        self.chat_history_text.tag_bind(line_tag, "<Button-1>", lambda _event, path=attachment["path"]: self._open_chat_attachment(path))
+
+    def _insert_chat_attachment_preview(self, attachment: dict[str, str]) -> None:
+        if not self.chat_history_text or attachment["kind"] != "image":
+            return
+        try:
+            image = tk.PhotoImage(file=attachment["path"])
+        except tk.TclError:
+            return
+        max_width = 280
+        max_height = 180
+        factor_x = max(1, (image.width() + max_width - 1) // max_width)
+        factor_y = max(1, (image.height() + max_height - 1) // max_height)
+        factor = max(factor_x, factor_y)
+        if factor > 1:
+            image = image.subsample(factor, factor)
+        self.chat_rendered_images.append(image)
+        self.chat_history_text.image_create(tk.END, image=image, padx=16, pady=4)
+        self.chat_history_text.insert(tk.END, "\n")
+
+    def _insert_chat_code_block(self, tag: str, language: str, code: str) -> None:
+        if not self.chat_history_text:
+            raise AssertionError("Chat history box is not initialized.")
+        block_name = language.strip().lower() or "code"
+        self.chat_history_text.insert(tk.END, f"[{block_name}]\n", (tag, "chat_code_label"))
+        block_text = code.rstrip("\n")
+        if block_text:
+            self.chat_history_text.insert(tk.END, block_text + "\n", (tag, "chat_code"))
+
+    def _render_chat_message_content(self, tag: str, content: str) -> None:
+        if not self.chat_history_text:
+            raise AssertionError("Chat history box is not initialized.")
+        if not content:
+            return
+        code_block_pattern = re.compile(r"```([^\n`]*)\n(.*?)```", re.DOTALL)
+        cursor = 0
+        for match in code_block_pattern.finditer(content):
+            plain_text = content[cursor:match.start()]
+            if plain_text:
+                self.chat_history_text.insert(tk.END, plain_text, (tag,))
+            self._insert_chat_code_block(tag, match.group(1), match.group(2))
+            cursor = match.end()
+        tail = content[cursor:]
+        if tail:
+            self.chat_history_text.insert(tk.END, tail, (tag,))
+
+    def _detect_output_attachments(self, content: str) -> list[dict[str, str]]:
+        attachments: list[dict[str, str]] = []
+        seen_paths: set[str] = set()
+
+        def add_candidate(candidate: str) -> None:
+            attachment = self._resolve_chat_output_attachment(candidate)
+            if attachment is None:
+                return
+            normalized = attachment["path"]
+            if normalized in seen_paths:
+                return
+            seen_paths.add(normalized)
+            attachments.append(attachment)
+
+        for match in re.finditer(r"!\[[^\]]*\]\(([^)]+)\)", content):
+            add_candidate(match.group(1))
+        for match in re.finditer(r"(?<!!)\[[^\]]+\]\(([^)]+)\)", content):
+            add_candidate(match.group(1))
+        for raw_line in content.splitlines():
+            line = raw_line.strip().strip("`")
+            if not line:
+                continue
+            lowered = line.lower()
+            if Path(line).is_absolute() or lowered.startswith("file://") or line.startswith("./") or line.startswith(".\\") or line.startswith("../") or line.startswith("..\\"):
+                add_candidate(line)
+        return attachments
+
+    def _append_chat_message(
+        self,
+        role: str,
+        content: str,
+        *,
+        attachments: list[dict[str, str]] | None = None,
+    ) -> None:
+        message_attachments = [dict(item) for item in attachments or []]
+        if role == "assistant" and not message_attachments:
+            message_attachments = self._detect_output_attachments(content)
+        message = {"role": role, "content": content, "attachments": message_attachments}
         self.chat_history.append(message)
         if not self.chat_history_text:
             return
+        was_pinned = self._chat_history_is_pinned_to_bottom()
         self.chat_history_text.configure(state="normal")
-        prefix_map = {
-            "user": "User",
-            "assistant": "Assistant",
-            "system": "System",
-            "error": "Error",
-        }
         tag = role if role in {"user", "assistant", "system", "error"} else "system"
-        prefix = prefix_map.get(tag, "System")
-        self.chat_history_text.insert(tk.END, f"{prefix}\n", (tag,))
-        self.chat_history_text.insert(tk.END, content.strip() + "\n\n", (tag,))
-        self.chat_history_text.see(tk.END)
+        rendered_content = content.rstrip()
+        if rendered_content:
+            self._render_chat_message_content(tag, rendered_content)
+            self.chat_history_text.insert(tk.END, "\n", (tag,))
+        for index, attachment in enumerate(message_attachments):
+            self._insert_chat_attachment_link(tag, attachment, index)
+            self._insert_chat_attachment_preview(attachment)
+        self.chat_history_text.insert(tk.END, "\n", (tag,))
         self.chat_history_text.configure(state="disabled")
+        self._restore_chat_history_bottom_pin(was_pinned)
+
+    def _chat_history_transcript_line(self, item: dict[str, Any]) -> str:
+        role = str(item.get("role") or "system").capitalize()
+        content = str(item.get("content") or "").strip() or "(no text)"
+        attachments = item.get("attachments") or []
+        if attachments:
+            names = ", ".join(str(entry.get("name") or Path(str(entry.get("path") or "")).name) for entry in attachments)
+            return f"{role}: {content} [Attachments: {names}]"
+        return f"{role}: {content}"
+
+    def _chat_history_for_model(self) -> str:
+        items = [item for item in self.chat_history if item["role"] in {"user", "assistant"}]
+        if not items:
+            return "(empty)"
+        if len(items) <= CHAT_HISTORY_FULL_TURN_LIMIT:
+            return "\n".join(self._compact_activity_text(self._chat_history_transcript_line(item), limit=220) for item in items)
+        older = items[:-CHAT_HISTORY_RECENT_TURN_COUNT]
+        recent = items[-CHAT_HISTORY_RECENT_TURN_COUNT:]
+        older_preview = older[-CHAT_HISTORY_RECENT_TURN_COUNT:]
+        older_lines = [self._compact_activity_text(self._chat_history_transcript_line(item), limit=140) for item in older_preview]
+        older_lines = [line for line in older_lines if line]
+        summary_lines = [
+            f"Earlier compressed history: {len(older)} turn(s).",
+            *older_lines,
+        ]
+        recent_lines = [self._compact_activity_text(self._chat_history_transcript_line(item), limit=220) for item in recent]
+        recent_lines = [line for line in recent_lines if line]
+        return "\n".join(summary_lines + ["Recent turns:"] + recent_lines)
+
+    def _chat_history_is_pinned_to_bottom(self) -> bool:
+        if not self.chat_history_text:
+            return False
+        _first, last = self.chat_history_text.yview()
+        return last >= 0.999
+
+    def _restore_chat_history_bottom_pin(self, was_pinned: bool) -> None:
+        if was_pinned and self.chat_history_text:
+            self.chat_history_text.see(tk.END)
+
+    def _clear_execution_trace(self) -> None:
+        self._cancel_execution_elapsed_timer()
+        self.execution_started_at = None
+        self.execution_summary_var.set("No execution trace yet.")
+        self.execution_current_run = None
+
+    def _cancel_execution_elapsed_timer(self) -> None:
+        if self.execution_elapsed_after_id is None:
+            return
+        try:
+            self.root.after_cancel(self.execution_elapsed_after_id)
+        except tk.TclError:
+            pass
+        self.execution_elapsed_after_id = None
+
+    def _schedule_execution_elapsed_timer(self) -> None:
+        self._cancel_execution_elapsed_timer()
+        if self.execution_current_run is None:
+            return
+        self.execution_elapsed_after_id = self.root.after(250, self._tick_execution_elapsed)
+
+    def _tick_execution_elapsed(self) -> None:
+        self.execution_elapsed_after_id = None
+        run = self.execution_current_run
+        if not run:
+            return
+        self._refresh_activity_block(run)
+        self._schedule_execution_elapsed_timer()
+
+    def _find_execution_run(self, block_id: str) -> dict[str, Any] | None:
+        for run in self.execution_runs:
+            if str(run.get("id")) == block_id:
+                return run
+        return None
+
+    def _toggle_activity_block(self, block_id: str) -> None:
+        if not self.chat_history_text:
+            return
+        run = self._find_execution_run(block_id)
+        if not run:
+            return
+        self._set_activity_block_collapsed(run, not bool(run.get("collapsed", False)))
+
+    def _set_activity_block_collapsed(self, run: dict[str, Any], collapsed: bool) -> None:
+        if not self.chat_history_text:
+            return
+        was_pinned = self._chat_history_is_pinned_to_bottom()
+        self.chat_history_text.configure(state="normal")
+        self.chat_history_text.tag_configure(str(run["meta_tag"]), elide=collapsed)
+        self.chat_history_text.tag_configure(str(run["body_tag"]), elide=collapsed)
+        self.chat_history_text.configure(state="disabled")
+        self._restore_chat_history_bottom_pin(was_pinned)
+        run["collapsed"] = collapsed
+
+    def _format_execution_elapsed(self, elapsed: float) -> str:
+        return f"{max(0.0, elapsed):.1f}s"
+
+    def _compact_activity_text(self, text: str, *, limit: int = 96) -> str:
+        compact = " ".join(part.strip() for part in str(text).splitlines() if part.strip())
+        if not compact:
+            return ""
+        if len(compact) > limit:
+            return compact[: limit - 3].rstrip() + "..."
+        return compact
+
+    def _activity_label(self, title: str) -> str:
+        normalized = self._compact_activity_text(title, limit=24).lower()
+        if "chat" in normalized or "聊天" in normalized:
+            return "聊天"
+        if "function" in normalized or "函数" in normalized:
+            return "函数"
+        if "approval" in normalized or "审批" in normalized:
+            return "审批"
+        return self._compact_activity_text(title, limit=24) or "任务"
+
+    def _replace_activity_line(self, tag: str, text: str) -> None:
+        if not self.chat_history_text:
+            raise AssertionError("Chat history box is not initialized.")
+        ranges = self.chat_history_text.tag_ranges(tag)
+        if len(ranges) != 2:
+            raise AssertionError(f"Expected a single tagged range for {tag}.")
+        start, end = ranges
+        self.chat_history_text.delete(start, end)
+        self.chat_history_text.insert(start, f"{text}\n", (tag,))
+
+    def _activity_header_text(self, run: dict[str, Any], *, elapsed: float | None = None) -> str:
+        if elapsed is None:
+            started_at_perf = run.get("started_at_perf")
+            elapsed = 0.0 if started_at_perf is None else time.perf_counter() - float(started_at_perf)
+        state = str(run.get("state") or "running")
+        if state == "running":
+            prefix = f"执行中 {self._format_execution_elapsed(elapsed)}"
+        elif state == "done":
+            prefix = f"已完成 {self._format_execution_elapsed(elapsed)}"
+        else:
+            prefix = f"失败 {self._format_execution_elapsed(elapsed)}"
+        last_reasoning = self._compact_activity_text(str(run.get("last_reasoning") or ""), limit=72)
+        last_result = self._compact_activity_text(str(run.get("last_result") or ""), limit=72)
+        last_error = self._compact_activity_text(str(run.get("last_error") or ""), limit=72)
+        if state == "error" and last_error:
+            summary = last_error
+        elif last_reasoning:
+            summary = last_reasoning
+        elif state != "running" and last_result:
+            summary = last_result
+        else:
+            summary = self._activity_label(str(run.get("title") or "task"))
+        return self._compact_activity_text(f"{prefix} · {summary}", limit=140)
+
+    def _activity_meta_text(self, run: dict[str, Any]) -> str:
+        parts = [f"开始于 {run.get('started_at_text', '--:--:--')}"]
+        parts.append("点击展开查看详情")
+        return self._compact_activity_text(" · ".join(parts), limit=140)
+
+    def _refresh_activity_block(self, run: dict[str, Any], *, elapsed: float | None = None) -> None:
+        if not self.chat_history_text:
+            raise AssertionError("Chat history box is not initialized.")
+        header_text = self._activity_header_text(run, elapsed=elapsed)
+        meta_text = self._activity_meta_text(run)
+        was_pinned = self._chat_history_is_pinned_to_bottom()
+        self.chat_history_text.configure(state="normal")
+        self._replace_activity_line(str(run["header_tag"]), header_text)
+        self._replace_activity_line(str(run["meta_tag"]), meta_text)
+        self.chat_history_text.configure(state="disabled")
+        self._restore_chat_history_bottom_pin(was_pinned)
+        run["preview_lines"] = [header_text]
+        self.execution_summary_var.set(header_text)
+
+    def _set_activity_block_preview(self, run: dict[str, Any], lines: list[str]) -> None:
+        preview_lines = [self._compact_activity_text(line, limit=96) for line in lines if self._compact_activity_text(line, limit=96)]
+        if preview_lines:
+            run["last_reasoning"] = preview_lines[-1]
+        self._refresh_activity_block(run)
+
+    def _promote_activity_preview(self, message: str, tag: str) -> None:
+        run = self.execution_current_run
+        if not run:
+            return
+        text = self._compact_activity_text(message, limit=96)
+        if not text:
+            return
+        if tag == "reasoning":
+            if text == str(run.get("last_reasoning") or ""):
+                return
+            run["last_reasoning"] = text
+        elif tag == "error":
+            if text == str(run.get("last_error") or ""):
+                return
+            run["last_error"] = text
+        elif tag in {"result", "done"}:
+            if text == str(run.get("last_result") or ""):
+                return
+            run["last_result"] = text
+        self._refresh_activity_block(run)
+
+    def _append_activity_block(
+        self,
+        title: str,
+        detail_lines: list[str],
+        *,
+        collapsed: bool = False,
+    ) -> dict[str, Any] | None:
+        if not self.chat_history_text:
+            return None
+        block_id = f"{len(self.execution_runs) + 1}_{int(time.time() * 1000)}"
+        header_tag = f"activity_header_{block_id}"
+        meta_tag = f"activity_meta_{block_id}"
+        body_tag = f"activity_body_{block_id}"
+        lines = [self._compact_activity_text(line, limit=96) for line in detail_lines[:2]]
+        lines = [line for line in lines if line]
+        run = {
+            "id": block_id,
+            "title": title,
+            "header_tag": header_tag,
+            "meta_tag": meta_tag,
+            "body_tag": body_tag,
+            "collapsed": collapsed,
+            "preview_lines": [],
+            "state": "running",
+            "started_at_perf": time.perf_counter(),
+            "started_at_text": f"{datetime.now():%H:%M:%S}",
+            "last_reasoning": lines[0] if lines else "",
+            "last_result": "",
+            "last_error": "",
+            "last_body_entry": "",
+        }
+        header_text = self._activity_header_text(run, elapsed=0.0)
+        meta_text = self._activity_meta_text(run)
+        was_pinned = self._chat_history_is_pinned_to_bottom()
+        self.chat_history_text.configure(state="normal")
+        self.chat_history_text.insert(tk.END, f"{header_text}\n", (header_tag,))
+        self.chat_history_text.insert(tk.END, f"{meta_text}\n", (meta_tag,))
+        self.chat_history_text.tag_configure(
+            header_tag,
+            foreground=COLORS["muted"],
+            justify="left",
+            lmargin1=12,
+            lmargin2=12,
+            rmargin=120,
+            spacing1=2,
+            spacing3=1,
+            font=("Segoe UI", 10),
+        )
+        self.chat_history_text.tag_configure(
+            meta_tag,
+            foreground=COLORS["muted"],
+            justify="left",
+            lmargin1=24,
+            lmargin2=24,
+            rmargin=120,
+            spacing3=4,
+            font=("Segoe UI", 8),
+            elide=collapsed,
+        )
+        self.chat_history_text.tag_configure(
+            body_tag,
+            foreground=COLORS["muted"],
+            justify="left",
+            lmargin1=24,
+            lmargin2=24,
+            rmargin=120,
+            spacing3=4,
+            font=("Segoe UI", 8),
+            elide=collapsed,
+        )
+        self.chat_history_text.configure(state="disabled")
+        self._restore_chat_history_bottom_pin(was_pinned)
+        self.chat_history_text.tag_bind(header_tag, "<Button-1>", lambda _event, current_block_id=block_id: self._toggle_activity_block(current_block_id))
+        self.chat_history_text.tag_bind(meta_tag, "<Button-1>", lambda _event, current_block_id=block_id: self._toggle_activity_block(current_block_id))
+        self.execution_runs.append(run)
+        self.execution_current_run = run
+        self._set_activity_block_collapsed(run, collapsed)
+        return run
+
+    def _start_execution_trace(self, title: str, detail: str | list[str]) -> None:
+        if isinstance(detail, str):
+            detail_lines = [line.strip() for line in detail.splitlines() if line.strip()]
+        else:
+            detail_lines = [str(line).strip() for line in detail if str(line).strip()]
+        self._clear_execution_trace()
+        self.execution_started_at = time.perf_counter()
+        run = self._append_activity_block(title, detail_lines[:1], collapsed=True)
+        if run:
+            self._refresh_activity_block(run, elapsed=0.0)
+            if detail_lines[:1]:
+                self._append_execution_trace(detail_lines[0], "reasoning")
+        self._schedule_execution_elapsed_timer()
+
+    def _append_execution_trace(self, message: str, tag: str = "result") -> None:
+        run = self.execution_current_run
+        if not run or not self.chat_history_text:
+            return
+        if tag not in {"reasoning", "error", "result", "done"}:
+            return
+        body_tag = run["body_tag"]
+        text = self._compact_activity_text(message, limit=120)
+        if not text:
+            return
+        if tag == "error":
+            prefix = "错误: "
+        elif tag in {"result", "done"}:
+            prefix = "结果: "
+        else:
+            prefix = ""
+        body_entry = f"{prefix}{text}"
+        if body_entry == str(run.get("last_body_entry") or ""):
+            return
+        run["last_body_entry"] = body_entry
+        was_pinned = self._chat_history_is_pinned_to_bottom()
+        self.chat_history_text.configure(state="normal")
+        self.chat_history_text.insert(tk.END, f"{body_entry}\n", (body_tag,))
+        self.chat_history_text.configure(state="disabled")
+        self._restore_chat_history_bottom_pin(was_pinned)
+
+    def _finish_execution_trace(self, title: str, ok: bool, detail: str | None = None) -> None:
+        finished_at = datetime.now()
+        elapsed = 0.0 if self.execution_started_at is None else time.perf_counter() - self.execution_started_at
+        self._cancel_execution_elapsed_timer()
+        self.execution_started_at = None
+        run = self.execution_current_run
+        if run and self.chat_history_text:
+            run["state"] = "done" if ok else "error"
+            run["finished_at_text"] = f"{finished_at:%H:%M:%S}"
+            if detail:
+                if ok:
+                    run["last_result"] = self._compact_activity_text(detail, limit=96)
+                else:
+                    run["last_error"] = self._compact_activity_text(detail, limit=96)
+                self._append_execution_trace(detail, "result" if ok else "error")
+            self.chat_history_text.tag_configure(run["header_tag"], foreground=COLORS["bad"] if not ok else COLORS["muted"])
+            self.chat_history_text.tag_configure(run["meta_tag"], foreground=COLORS["bad"] if not ok else COLORS["muted"])
+            self._refresh_activity_block(run, elapsed=elapsed)
+            self._set_activity_block_collapsed(run, True)
+        self.execution_current_run = None
+
+    def _handle_agent_event(self, event: dict[str, str]) -> None:
+        event_type = str(event.get("type") or "").strip()
+        if event_type == "activity.start":
+            summary = str(event.get("summary") or "").strip()
+            detail = str(event.get("detail") or "").strip()
+            lines = [line for line in [summary, detail] if line]
+            self._start_execution_trace(str(event.get("title") or "请求"), lines)
+            return
+        if event_type == "activity.update":
+            detail = str(event.get("detail") or "").strip()
+            if detail:
+                tag = str(event.get("tag") or "tool_detail")
+                if tag == "result":
+                    return
+                if tag not in {"reasoning", "error", "done"}:
+                    return
+                self._promote_activity_preview(detail, tag)
+                self._append_execution_trace(detail, tag)
+            return
 
     def _send_chat_message_from_event(self, event: tk.Event) -> str:
         self._send_chat_message()
@@ -2577,50 +3920,59 @@ class AlgorithmStudioApp:
         if not self.chat_input_text:
             raise AssertionError("Chat input box is not initialized.")
         prompt = self.chat_input_text.get("1.0", tk.END).strip()
-        if not prompt:
+        attachments = [dict(item) for item in self.chat_attachments]
+        if not prompt and not attachments:
             raise AssertionError("Chat prompt is empty.")
+        prompt_for_model = prompt or "Please inspect the attached content."
         self._sync_agent_client_settings()
         selection = self._selection_label()
         context = self._chat_selected_context()
-        history_lines = [
-            f"{item['role'].capitalize()}: {item['content'].strip()}"
-            for item in self.chat_history[-11:-1]
-            if item["role"] in {"user", "assistant"}
-        ]
-        transcript = "\n".join(history_lines) if history_lines else "(empty)"
+        transcript = self._chat_history_for_model()
         final_prompt = "\n\n".join(
             [
                 context,
                 "Conversation history:",
                 transcript,
                 "User request:",
-                prompt,
+                prompt_for_model,
             ]
         ).strip()
         self.agent_prompt_var.set(final_prompt)
         try:
             approved = self._authorize_chat_request(selection, final_prompt)
         except Exception as exc:  # noqa: BLE001
-            message = str(exc)
+            message = self._compact_activity_text(str(exc), limit=120) or "审批检查失败。"
+            self._finish_execution_trace("聊天请求", False, f"审批失败：{message}")
             self._append_chat_message("error", message)
             self._log(f"Approval check failed: {message}")
             self.status_var.set("Approval check failed.")
             messagebox.showerror("Approval error", message)
             return
         if not approved:
+            self._finish_execution_trace("聊天请求", False, "审批未通过。")
             return
-        self._append_chat_message("user", prompt)
+        user_visible_content = prompt or "(attached content)"
+        self._append_chat_message("user", user_visible_content, attachments=attachments)
         self.chat_input_text.delete("1.0", tk.END)
+        self._clear_chat_attachments()
         self.chat_busy = True
         if self.chat_send_button:
             self.chat_send_button.configure(state="disabled")
-        self._append_chat_message("system", f"Sending request to {self.agent_client.provider}...")
         self.status_var.set(f"Sent to {self.agent_client.provider}; waiting for reply...")
         self._log(f"Chat request sent via {self.agent_client.provider}.")
 
+        def emit_event(event: dict[str, str]) -> None:
+            self.root.after(0, lambda event=event: self._handle_agent_event(event))
+
         def worker() -> None:
             try:
-                response = self.agent_client.generate(self.project, selection, final_prompt)
+                response = self.agent_client.generate(
+                    self.project,
+                    selection,
+                    final_prompt,
+                    attachments=attachments,
+                    event_callback=emit_event,
+                )
             except Exception as exc:  # noqa: BLE001
                 self.root.after(0, lambda exc=exc: self._finish_chat_request_error(exc))
                 return
@@ -2652,8 +4004,7 @@ class AlgorithmStudioApp:
             if decision.outcome == "deny":
                 self._log(f"Chat request denied by rules: {decision.reason}")
                 self.status_var.set("Request denied by access rules.")
-                messagebox.showerror("Approval denied", decision.reason)
-                self._append_chat_message("error", f"Approval denied: {decision.reason}")
+                messagebox.showwarning("Approval denied", decision.reason)
                 return False
             if decision.outcome == "manual":
                 self._log(f"Rule mode fell back to auto-approve: {decision.reason}")
@@ -2671,8 +4022,14 @@ class AlgorithmStudioApp:
         self.chat_busy = False
         if self.chat_send_button:
             self.chat_send_button.configure(state="normal")
-        self._append_chat_message("assistant", response)
-        self.agent_output_var.set(response)
+        try:
+            visible_response = self._consume_agent_tool_response(response)
+        except Exception as exc:  # noqa: BLE001
+            self._finish_chat_request_error(exc)
+            return
+        self._append_chat_message("assistant", visible_response)
+        self.agent_output_var.set(visible_response)
+        self._finish_execution_trace("聊天请求", True, f"已收到 {len(response.strip())} 个字符的回复。")
         self._log(f"Agent call completed via {self.agent_client.provider}.")
         self.status_var.set(f"Agent reply received from {self.agent_client.provider}.")
 
@@ -2680,9 +4037,10 @@ class AlgorithmStudioApp:
         self.chat_busy = False
         if self.chat_send_button:
             self.chat_send_button.configure(state="normal")
-        message = str(exc)
+        message = self._compact_activity_text(str(exc), limit=120) or "Agent 调用失败。"
         self._append_chat_message("error", message)
         self.agent_output_var.set(message)
+        self._finish_execution_trace("聊天请求", False, f"执行失败：{message}")
         self._log(f"Agent call failed: {message}")
         self.status_var.set("Agent call failed.")
 
@@ -2699,6 +4057,8 @@ class AlgorithmStudioApp:
             return f"resnode:{self.selected_res_node_name}"
         if self.selected_function_name:
             return f"function:{self.selected_function_name}"
+        if self.selected_function_text_name:
+            return f"functiontext:{self.selected_function_text_name}"
         if self.selected_stage_name:
             return f"interventioner:{self.selected_stage_name}"
         return "project"
@@ -2826,6 +4186,7 @@ class AlgorithmStudioApp:
         reflector = self._find_reflector(name)
         res_node = self._find_res_node(name)
         function_frame = self._find_function_frame(name)
+        function_text = self._find_function_text_item(name)
         stage = self._find_stage(name)
         rule = self._find_rule(name)
         self.selected_container_name = None
@@ -2834,6 +4195,7 @@ class AlgorithmStudioApp:
         self.selected_reflector_name = None
         self.selected_res_node_name = None
         self.selected_function_name = None
+        self.selected_function_text_name = None
         self.selected_stage_name = None
         if kind == "container" and container:
             self.selected_container_name = container.name
@@ -2847,6 +4209,8 @@ class AlgorithmStudioApp:
             self.selected_res_node_name = res_node.name
         elif kind == "function" and function_frame:
             self.selected_function_name = function_frame.name
+        elif kind == "functiontext" and function_text:
+            self.selected_function_text_name = function_text.name
         elif kind == "interventioner" and stage:
             self.selected_stage_name = stage.name
         elif kind == "stage" and stage:
@@ -2881,7 +4245,7 @@ class AlgorithmStudioApp:
                     "height": group.height,
                 }
                 return
-            if resize_kind in {"decomposer", "reflector", "resnode", "interventioner", "stage"}:
+            if resize_kind in {"decomposer", "reflector", "resnode", "function", "functiontext", "interventioner", "stage"}:
                 node = self._node_by_kind_name(resize_kind, resize_name)
                 if node is None:
                     raise AssertionError(f"Missing {resize_kind} node {resize_name}")
@@ -2929,7 +4293,7 @@ class AlgorithmStudioApp:
                     }
                     self._refresh_inspector()
                     return
-            elif kind in {"decomposer", "reflector", "resnode", "function", "interventioner", "stage"}:
+            elif kind in {"decomposer", "reflector", "resnode", "function", "functiontext", "interventioner", "stage"}:
                 should_drag = "node_header" in tags
             if should_drag:
                 self.node_drag_state = {
@@ -2951,10 +4315,11 @@ class AlgorithmStudioApp:
             self.selected_rule_name = None
             self.selected_reflector_name = None
             self.selected_res_node_name = None
+            self.selected_function_name = None
             self.selected_stage_name = None
+            self.selected_function_text_name = None
             self.selected_container_group_name = None
             self._redraw_canvas()
-            self._refresh_inspector()
             self.marquee_state = {
                 "x0": event.x,
                 "y0": event.y,
@@ -3051,11 +4416,22 @@ class AlgorithmStudioApp:
             if res_node:
                 res_node.x += dx
                 res_node.y += dy
+        elif kind == "function":
+            item = self._find_function_frame(name)
+            if item:
+                item.x += dx
+                item.y += dy
         elif kind == "interventioner" or kind == "stage":
             stage = self._find_stage(name)
             if stage:
                 stage.x += dx
                 stage.y += dy
+        elif kind == "functiontext":
+            item = self._find_function_text_item(name)
+            if item:
+                item.x += dx
+                item.y += dy
+        self._sync_project_manifest_cache()
         self._redraw_canvas()
 
     def _on_canvas_release(self, event: tk.Event) -> None:
@@ -3140,7 +4516,8 @@ class AlgorithmStudioApp:
         item_id = self._canvas_item_hit(event.x, event.y)
         if item_id is None:
             return
-        kind, node_name = self._node_info_from_tags(self.canvas.gettags(item_id))
+        tags = self.canvas.gettags(item_id)
+        kind, node_name = self._node_info_from_tags(tags)
         if not kind or not node_name:
             return
         self._select_item_on_canvas(kind, node_name)
@@ -3148,13 +4525,19 @@ class AlgorithmStudioApp:
             container = self._find_container(node_name)
             if not container:
                 raise AssertionError(f"Missing container {node_name}")
-            self._open_container_editor(container)
+            self._open_container_editor(container, focus_section=self._container_section_from_tags(tags))
             return
         if kind == "function":
             item = self._find_function_frame(node_name)
             if not item:
                 raise AssertionError(f"Missing function {node_name}")
             self._open_function_editor(item)
+            return
+        if kind == "functiontext":
+            item = self._find_function_text_item(node_name)
+            if not item:
+                raise AssertionError(f"Missing function text {node_name}")
+            self._open_function_text_editor(item)
             return
 
     def _on_canvas_right_press(self, event: tk.Event) -> None:
@@ -3219,6 +4602,8 @@ class AlgorithmStudioApp:
             menu.add_command(label="Delete", command=self._delete_selected_res_node)
         elif kind == "function":
             menu.add_command(label="Delete", command=self._delete_selected_function)
+        elif kind == "functiontext":
+            menu.add_command(label="Delete", command=self._delete_selected_function_text)
         elif kind == "interventioner" or kind == "stage":
             menu.add_command(label="Delete", command=self._delete_selected_stage)
         menu.tk_popup(event.x_root, event.y_root)
@@ -3235,20 +4620,274 @@ class AlgorithmStudioApp:
         self.selected_stage_name = None
         self._refresh_all()
 
-    def _open_container_editor(self, container: ContainerItem) -> None:
-        self.selected_container_name = container.name
-        self.selected_container_group_name = None
-        self.selection_state = None
-        self._refresh_all()
-        if container.kind == "variable" and self.selection_value_entry:
-            self.selection_value_entry.focus_set()
-            self.selection_value_entry.selection_range(0, tk.END)
-        elif container.kind == "array" and self.selection_value_text:
-            self.selection_value_text.focus_set()
+    def _container_section_from_tags(self, tags: tuple[str, ...]) -> str | None:
+        for tag in tags:
+            if tag.startswith("container_section:"):
+                section = tag.split(":", 1)[1].strip()
+                if section in {"structure", "value"}:
+                    return section
+        return None
+
+    def _container_structure_preview(self, container: ContainerItem, limit: int = 3) -> list[str]:
+        items = [str(value).strip() for value in getattr(container, "structure", []) if str(value).strip()]
+        if not items:
+            return ["-"]
+        if len(items) <= limit:
+            return items
+        return items[:limit] + [f"... ({len(items)} total)"]
+
+    def _container_structure_signature(self, container: ContainerItem) -> str:
+        items = [str(value).strip() for value in getattr(container, "structure", []) if str(value).strip()]
+        if not items:
+            return "-"
+        signature = "".join(item[0] for item in items if item)
+        return signature or "-"
+
+    def _container_value_preview(self, container: ContainerItem, limit: int = 3) -> list[str]:
+        if container.kind == "variable":
+            value = container.value.strip()
+            return [value or "-"]
+        values = [str(value).strip() for value in container.values if str(value).strip()]
+        if not values:
+            return ["-"]
+        start = min(max(getattr(container, "view_offset", 0), 0), max(0, len(values) - 1))
+        preview = values[start : start + limit]
+        if len(values) <= limit:
+            return preview
+        return [f"[{start + 1}:{start + len(preview)}] {', '.join(preview)}", f"... ({len(values)} total)"]
+
+    def _container_text_to_lines(self, text_widget: tk.Text) -> list[str]:
+        return [line.strip() for line in text_widget.get("1.0", tk.END).splitlines() if line.strip()]
+
+    def _open_container_editor(self, container: ContainerItem, focus_section: str | None = None) -> None:
+        dialog = tk.Toplevel(self.root)
+        dialog.title(f"Container {container.name}")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.geometry("900x660")
+        dialog.minsize(780, 560)
+
+        body = ttk.Frame(dialog, padding=12)
+        body.grid(row=0, column=0, sticky="nsew")
+        dialog.columnconfigure(0, weight=1)
+        dialog.rowconfigure(0, weight=1)
+        body.columnconfigure(0, weight=1)
+        body.columnconfigure(1, weight=1)
+        body.rowconfigure(2, weight=1)
+
+        header = ttk.Frame(body)
+        header.grid(row=0, column=0, columnspan=2, sticky="ew")
+        header.columnconfigure(1, weight=1)
+        header.columnconfigure(3, weight=1)
+        ttk.Label(header, text="Name").grid(row=0, column=0, sticky="w")
+        ttk.Label(header, text=container.name, foreground=COLORS["accent"]).grid(row=0, column=1, sticky="w", padx=(6, 18))
+        ttk.Label(header, text="Kind").grid(row=0, column=2, sticky="w")
+        ttk.Label(header, text=container.kind, foreground=COLORS["accent"]).grid(row=0, column=3, sticky="w", padx=(6, 0))
+
+        meta_row = ttk.Frame(body)
+        meta_row.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        meta_row.columnconfigure((1, 3, 5), weight=1)
+        ttk.Label(meta_row, text="Count").grid(row=0, column=0, sticky="w")
+        ttk.Label(meta_row, text=str(container.count), foreground=COLORS["muted"]).grid(row=0, column=1, sticky="w", padx=(6, 18))
+        ttk.Label(meta_row, text="Stride").grid(row=0, column=2, sticky="w")
+        ttk.Label(meta_row, text=str(container.stride), foreground=COLORS["muted"]).grid(row=0, column=3, sticky="w", padx=(6, 18))
+        ttk.Label(meta_row, text="Structure items").grid(row=0, column=4, sticky="w")
+        ttk.Label(meta_row, text=str(len(getattr(container, "structure", []))), foreground=COLORS["muted"]).grid(row=0, column=5, sticky="w", padx=(6, 0))
+
+        structure_frame = ttk.LabelFrame(body, text="Structure", padding=8)
+        structure_frame.grid(row=2, column=0, sticky="nsew", pady=(12, 0), padx=(0, 6))
+        structure_frame.columnconfigure(0, weight=1)
+        structure_frame.rowconfigure(0, weight=1)
+        structure_text = tk.Text(
+            structure_frame,
+            wrap="word",
+            height=12,
+            bg=COLORS["panel_alt"],
+            fg=COLORS["text"],
+            insertbackground=COLORS["text"],
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=1,
+            highlightbackground=COLORS["grid"],
+            highlightcolor=COLORS["accent"],
+        )
+        structure_text.grid(row=0, column=0, sticky="nsew")
+        structure_text.insert("1.0", "\n".join(self._container_structure_preview(container, limit=9999)))
+        structure_scroll = ttk.Scrollbar(structure_frame, orient="vertical", command=structure_text.yview)
+        structure_scroll.grid(row=0, column=1, sticky="ns")
+        structure_text.configure(yscrollcommand=structure_scroll.set)
+
+        value_label = "Value" if container.kind == "variable" else "Values"
+        value_frame = ttk.LabelFrame(body, text=value_label, padding=8)
+        value_frame.grid(row=2, column=1, sticky="nsew", pady=(12, 0), padx=(6, 0))
+        value_frame.columnconfigure(0, weight=1)
+        value_frame.rowconfigure(0, weight=1)
+        value_text = tk.Text(
+            value_frame,
+            wrap="word",
+            height=12 if container.kind == "array" else 6,
+            bg=COLORS["canvas"],
+            fg=COLORS["text"],
+            insertbackground=COLORS["text"],
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=1,
+            highlightbackground=COLORS["grid"],
+            highlightcolor=COLORS["accent"],
+        )
+        value_text.grid(row=0, column=0, sticky="nsew")
+        if container.kind == "variable":
+            value_text.insert("1.0", container.value)
+        else:
+            value_text.insert("1.0", "\n".join(container.values))
+        value_scroll = ttk.Scrollbar(value_frame, orient="vertical", command=value_text.yview)
+        value_scroll.grid(row=0, column=1, sticky="ns")
+        value_text.configure(yscrollcommand=value_scroll.set)
+
+        button_row = ttk.Frame(body)
+        button_row.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        button_row.columnconfigure(0, weight=1)
+        button_row.columnconfigure(1, weight=1)
+
+        def _apply_and_close() -> None:
+            container.structure = self._container_text_to_lines(structure_text)
+            if container.kind == "variable":
+                container.value = value_text.get("1.0", tk.END).strip()
+            else:
+                container.values = self._container_text_to_lines(value_text)
+            self._refresh_all()
+            self._log(f"Updated container {container.name}.")
+            dialog.destroy()
+
+        apply_button = ttk.Button(button_row, text="Apply", command=_apply_and_close)
+        apply_button.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        cancel_button = ttk.Button(button_row, text="Cancel", command=dialog.destroy)
+        cancel_button.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+
+        if focus_section == "structure":
+            structure_text.focus_set()
+        else:
+            value_text.focus_set()
+
+        dialog.bind("<Escape>", lambda _event: dialog.destroy())
+        dialog.bind("<Control-Return>", lambda _event: _apply_and_close())
+
+    def _ensure_function_text_item(self, function_name: str) -> FunctionTextItem:
+        existing = self._find_function_text_for_function(function_name)
+        if existing is not None:
+            return existing
+        function_item = self._find_function_frame(function_name)
+        if function_item is None:
+            raise AssertionError(f"Missing function {function_name} while creating text node.")
+        item = FunctionTextItem(
+            name=self.project.next_function_text_name(function_name),
+            function_name=function_name,
+            text="",
+            x=function_item.x + 420.0,
+            y=function_item.y,
+            width=360.0,
+            height=220.0,
+        )
+        self.project.function_text_items.append(item)
+        return item
+
+    def _rename_function_frame(self, item: FunctionFrameItem, new_name: str) -> None:
+        target_name = new_name.strip() or item.name
+        if target_name == item.name:
+            return
+        if self._find_function_frame(target_name):
+            raise RuntimeError(f"Function name already exists: {target_name}")
+        old_name = item.name
+        item.name = target_name
+        for connection in self.project.connections:
+            if connection.source_kind == "function" and connection.source_name == old_name:
+                connection.source_name = target_name
+            if connection.target_kind == "function" and connection.target_name == old_name:
+                connection.target_name = target_name
+        for stage in self.project.intervention_stages:
+            stage.functions = [target_name if value == old_name else value for value in stage.functions]
+        for text_item in self.project.function_text_items:
+            if text_item.function_name == old_name:
+                text_item.function_name = target_name
+                if text_item.name == f"{old_name}_text":
+                    previous_name = text_item.name
+                    text_item.name = self.project.next_function_text_name(target_name)
+                    if self.selected_function_text_name == previous_name:
+                        self.selected_function_text_name = text_item.name
+        if self.selected_function_name == old_name:
+            self.selected_function_name = target_name
+
+    def _open_function_text_editor(self, item: FunctionTextItem) -> None:
+        dialog = tk.Toplevel(self.root)
+        dialog.title(f"Text {item.name}")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.geometry("720x520")
+        dialog.minsize(640, 420)
+
+        body = ttk.Frame(dialog, padding=12)
+        body.grid(row=0, column=0, sticky="nsew")
+        dialog.columnconfigure(0, weight=1)
+        dialog.rowconfigure(0, weight=1)
+        body.columnconfigure(0, weight=1)
+        body.rowconfigure(1, weight=1)
+
+        header = ttk.Frame(body)
+        header.grid(row=0, column=0, sticky="ew")
+        header.columnconfigure(1, weight=1)
+        ttk.Label(header, text="Name").grid(row=0, column=0, sticky="w")
+        name_entry = ttk.Entry(header)
+        name_entry.grid(row=0, column=1, sticky="ew", padx=(6, 18))
+        name_entry.insert(0, item.name)
+        ttk.Label(header, text="Function").grid(row=0, column=2, sticky="w")
+        ttk.Label(header, text=item.function_name or "-", foreground=COLORS["accent"]).grid(row=0, column=3, sticky="w", padx=(6, 0))
+
+        text_frame = ttk.LabelFrame(body, text="Text", padding=8)
+        text_frame.grid(row=1, column=0, sticky="nsew", pady=(12, 0))
+        text_frame.columnconfigure(0, weight=1)
+        text_frame.rowconfigure(0, weight=1)
+        text_widget = tk.Text(
+            text_frame,
+            wrap="word",
+            bg=COLORS["panel_alt"],
+            fg=COLORS["text"],
+            insertbackground=COLORS["text"],
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=1,
+            highlightbackground=COLORS["grid"],
+            highlightcolor=COLORS["accent"],
+        )
+        text_widget.grid(row=0, column=0, sticky="nsew")
+        text_widget.insert("1.0", item.text)
+        text_scroll = ttk.Scrollbar(text_frame, orient="vertical", command=text_widget.yview)
+        text_scroll.grid(row=0, column=1, sticky="ns")
+        text_widget.configure(yscrollcommand=text_scroll.set)
+
+        button_row = ttk.Frame(body)
+        button_row.grid(row=2, column=0, sticky="ew", pady=(12, 0))
+        button_row.columnconfigure(0, weight=1)
+        button_row.columnconfigure(1, weight=1)
+
+        def save() -> None:
+            try:
+                new_name = name_entry.get().strip() or item.name
+                if new_name != item.name and self._find_function_text_item(new_name):
+                    raise RuntimeError(f"Text node name already exists: {new_name}")
+                item.name = new_name
+                item.text = text_widget.get("1.0", tk.END).strip()
+                self.selected_function_text_name = item.name
+                self._refresh_all()
+                dialog.destroy()
+            except Exception as exc:  # noqa: BLE001
+                messagebox.showerror("Text node save error", str(exc))
+
+        ttk.Button(button_row, text="Save", command=save).grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        ttk.Button(button_row, text="Close", command=dialog.destroy).grid(row=0, column=1, sticky="ew", padx=(6, 0))
 
     def _open_function_editor(self, item: FunctionFrameItem) -> None:
         dialog = tk.Toplevel(self.root)
-        dialog.title(f"Function {item.name}")
+        dialog.title(f"fun {item.name}")
         dialog.transient(self.root)
         dialog.grab_set()
         dialog.geometry("860x680")
@@ -3264,13 +4903,18 @@ class AlgorithmStudioApp:
         title_row.grid(row=0, column=0, columnspan=2, sticky="ew")
         title_row.columnconfigure(1, weight=1)
         title_row.columnconfigure(3, weight=1)
-        ttk.Label(title_row, text="Input").grid(row=0, column=0, sticky="w")
+        title_row.columnconfigure(5, weight=1)
+        ttk.Label(title_row, text="Name").grid(row=0, column=0, sticky="w")
+        name_entry = ttk.Entry(title_row, width=18)
+        name_entry.grid(row=0, column=1, sticky="ew", padx=(6, 18))
+        name_entry.insert(0, item.name)
+        ttk.Label(title_row, text="Input").grid(row=0, column=2, sticky="w")
         input_name_entry = ttk.Entry(title_row, width=18)
-        input_name_entry.grid(row=0, column=1, sticky="ew", padx=(6, 18))
+        input_name_entry.grid(row=0, column=3, sticky="ew", padx=(6, 18))
         input_name_entry.insert(0, item.input_name or "in")
-        ttk.Label(title_row, text="Output").grid(row=0, column=2, sticky="w")
+        ttk.Label(title_row, text="Output").grid(row=0, column=4, sticky="w")
         output_name_entry = ttk.Entry(title_row, width=18)
-        output_name_entry.grid(row=0, column=3, sticky="ew", padx=(6, 0))
+        output_name_entry.grid(row=0, column=5, sticky="ew", padx=(6, 0))
         output_name_entry.insert(0, item.output_name or "out")
 
         expected_input_frame = ttk.LabelFrame(body, text="Expected Input", padding=8)
@@ -3319,7 +4963,7 @@ class AlgorithmStudioApp:
         expected_output_scroll.grid(row=0, column=1, sticky="ns")
         expected_output_text.configure(yscrollcommand=expected_output_scroll.set)
 
-        script_frame = ttk.LabelFrame(body, text="Function Body", padding=8)
+        script_frame = ttk.LabelFrame(body, text="Real Function / Shader", padding=8)
         script_frame.grid(row=2, column=0, columnspan=2, sticky="nsew", pady=(12, 0))
         script_frame.columnconfigure(0, weight=1)
         script_frame.rowconfigure(0, weight=1)
@@ -3349,24 +4993,48 @@ class AlgorithmStudioApp:
         button_row.columnconfigure(2, weight=1)
         button_row.columnconfigure(3, weight=1)
 
-        def save() -> None:
+        def apply_fields() -> None:
+            new_name = name_entry.get().strip()
+            if not new_name:
+                raise RuntimeError("Function name is required.")
+            self._rename_function_frame(item, new_name)
+            dialog.title(f"fun {item.name}")
             item.input_name = input_name_entry.get().strip() or "in"
             item.output_name = output_name_entry.get().strip() or "out"
             item.expected_input = expected_input_text.get("1.0", tk.END).strip()
             item.expected_output = expected_output_text.get("1.0", tk.END).strip()
             item.script = script_text.get("1.0", tk.END).strip()
+
+        def save() -> None:
+            try:
+                apply_fields()
+            except Exception as exc:  # noqa: BLE001
+                messagebox.showerror("Function save error", str(exc))
+                return
             self._refresh_all()
             dialog.destroy()
 
         def request(mode: str) -> None:
             self._sync_agent_client_settings()
-            item.input_name = input_name_entry.get().strip() or "in"
-            item.output_name = output_name_entry.get().strip() or "out"
-            item.expected_input = expected_input_text.get("1.0", tk.END).strip()
-            item.expected_output = expected_output_text.get("1.0", tk.END).strip()
+            try:
+                apply_fields()
+            except Exception as exc:  # noqa: BLE001
+                messagebox.showerror("Function request error", str(exc))
+                return
             current_script = script_text.get("1.0", tk.END).strip()
+            current_text_item = self._find_function_text_for_function(item.name)
+            current_solution_text = "" if current_text_item is None else current_text_item.text.strip()
+            task_line = (
+                "Return a concise natural-language solution only. Focus on algorithm steps, data flow, C++ responsibilities, and shader responsibilities. Do not output code."
+                if mode == "plan"
+                else "Return concrete C++ and shader code as plain text. If both are needed, separate them with short headings."
+            )
             prompt = "\n".join(
                 [
+                    "You are helping complete a single fun node inside Algorithm Studio.",
+                    "Return plain text only.",
+                    "Do not emit algorithm-studio-tool blocks.",
+                    "",
                     f"Function name: {item.name}",
                     f"Input port: {item.input_name}",
                     f"Output port: {item.output_name}",
@@ -3380,19 +5048,26 @@ class AlgorithmStudioApp:
                     "Current function body:",
                     current_script or "-",
                     "",
+                    "Current solution text:",
+                    current_solution_text or "-",
+                    "",
+                    self._agent_document_context(),
+                    "",
                     "Task:",
-                    "First organize the algorithm language, then return code if requested." if mode == "plan" else "Return the raw code directly.",
+                    task_line,
                 ]
             ).strip()
             selection = f"function:{item.name}"
             try:
                 approved = self._authorize_chat_request(selection, prompt)
             except Exception as exc:  # noqa: BLE001
-                message = str(exc)
+                message = self._compact_activity_text(str(exc), limit=120) or "审批检查失败。"
+                self._finish_execution_trace("函数请求", False, f"审批失败：{message}")
                 self._append_chat_message("error", message)
                 messagebox.showerror("Approval error", message)
                 return
             if not approved:
+                self._finish_execution_trace("函数请求", False, "审批未通过。")
                 return
 
             button_plan.configure(state="disabled")
@@ -3401,16 +5076,34 @@ class AlgorithmStudioApp:
             close_button.configure(state="disabled")
             self.status_var.set(f"Sending function request for {item.name}...")
 
+            def emit_event(event: dict[str, str]) -> None:
+                mapped = dict(event)
+                mapped["title"] = "函数请求"
+                self.root.after(0, lambda event=mapped: self._handle_agent_event(event))
+
             def finish_success(response: str) -> None:
-                script_text.delete("1.0", tk.END)
-                script_text.insert("1.0", response.strip())
-                item.script = response.strip()
-                item.input_name = input_name_entry.get().strip() or "in"
-                item.output_name = output_name_entry.get().strip() or "out"
-                item.expected_input = expected_input_text.get("1.0", tk.END).strip()
-                item.expected_output = expected_output_text.get("1.0", tk.END).strip()
+                tool_calls, visible_response = self._extract_agent_tool_calls(response)
+                if tool_calls:
+                    raise RuntimeError("Function assistant must return plain text, not tool calls.")
+                content = visible_response.strip()
+                if not content:
+                    raise RuntimeError("Function assistant returned empty content.")
+                apply_fields()
+                if mode == "plan":
+                    text_item = self._ensure_function_text_item(item.name)
+                    text_item.text = content
+                    self.selected_function_name = None
+                    self.selected_function_text_name = text_item.name
+                else:
+                    script_text.delete("1.0", tk.END)
+                    script_text.insert("1.0", content)
+                    item.script = content
+                    self.selected_function_name = item.name
+                    self.selected_function_text_name = None
                 self._refresh_all()
-                self._append_chat_message("assistant", response)
+                self._append_chat_message("assistant", content)
+                detail = "已更新方案文本节点。" if mode == "plan" else "已更新真实函数 / shader。"
+                self._finish_execution_trace("函数请求", True, detail)
                 self.status_var.set(f"Function assistant finished for {item.name}.")
                 button_plan.configure(state="normal")
                 button_code.configure(state="normal")
@@ -3418,9 +5111,10 @@ class AlgorithmStudioApp:
                 close_button.configure(state="normal")
 
             def finish_error(exc: Exception) -> None:
-                message = str(exc)
+                message = self._compact_activity_text(str(exc), limit=120) or "Function assistant failed."
                 self._append_chat_message("error", message)
                 messagebox.showerror("Function assistant error", message)
+                self._finish_execution_trace("函数请求", False, f"执行失败：{message}")
                 self.status_var.set("Function assistant failed.")
                 button_plan.configure(state="normal")
                 button_code.configure(state="normal")
@@ -3429,19 +5123,29 @@ class AlgorithmStudioApp:
 
             def worker() -> None:
                 try:
-                    response = self.agent_client.generate(self.project, selection, prompt)
+                    response = self.agent_client.generate(
+                        self.project,
+                        selection,
+                        prompt,
+                        event_callback=emit_event,
+                    )
                 except Exception as exc:  # noqa: BLE001
                     self.root.after(0, lambda exc=exc: finish_error(exc))
                     return
-                self.root.after(0, lambda response=response: finish_success(response))
+                def on_success() -> None:
+                    try:
+                        finish_success(response)
+                    except Exception as exc:  # noqa: BLE001
+                        finish_error(exc)
+                self.root.after(0, on_success)
 
             import threading
 
             threading.Thread(target=worker, daemon=True).start()
 
-        button_plan = ttk.Button(button_row, text="拟定算法", command=lambda: request("plan"))
+        button_plan = ttk.Button(button_row, text="尝试给出解决方案", command=lambda: request("plan"))
         button_plan.grid(row=0, column=0, sticky="ew", padx=(0, 6))
-        button_code = ttk.Button(button_row, text="产出代码", command=lambda: request("code"))
+        button_code = ttk.Button(button_row, text="尝试给出真实函数/shader", command=lambda: request("code"))
         button_code.grid(row=0, column=1, sticky="ew", padx=6)
         save_button = ttk.Button(button_row, text="Save", command=save)
         save_button.grid(row=0, column=2, sticky="ew", padx=6)
@@ -4191,6 +5895,10 @@ class AlgorithmStudioApp:
             item_id = self._draw_function_frame_node(canvas, item)
             self.canvas_nodes[item.name] = item_id
             self.canvas_item_to_name[item_id] = item.name
+        for item in self.project.function_text_items:
+            item_id = self._draw_function_text_node(canvas, item)
+            self.canvas_nodes[item.name] = item_id
+            self.canvas_item_to_name[item_id] = item.name
         for stage in self.project.intervention_stages:
             item_id = self._draw_stage_node(canvas, stage)
             self.canvas_nodes[stage.name] = item_id
@@ -4287,7 +5995,7 @@ class AlgorithmStudioApp:
             y + 7,
             anchor="nw",
             fill=COLORS["window"],
-            text=f"ContainerElement {group.name}",
+            text="container" if group.name == "container" else f"container {group.name}",
             font=("Segoe UI", 12, "bold"),
             tags=(f"text_of_{item_id}", node_tag, "group_header", "draggable"),
         )
@@ -4397,18 +6105,14 @@ class AlgorithmStudioApp:
         x = container.x or CANVAS_PADDING + 40
         y = container.y or CANVAS_PADDING + 40
         fill = COLORS["container"] if container.kind == "variable" else COLORS["container_array"]
+        header_fill = "#06080d"
         title = container.name
         parent_group_name = self._container_parent_group_name(container.name)
         compact = parent_group_name is not None
-        width = 128.0 if compact else float(NODE_WIDTH)
-        height = 72.0 if compact else 88.0
-        if container.kind == "variable":
-            body = container.value or "-"
-        else:
-            values = list(container.values)
-            start = min(max(container.view_offset, 0), max(0, len(values) - 1))
-            preview = values[start : start + 4]
-            body = preview[0] if compact and preview else (f"[{start + 1}:{start + len(preview)}] {', '.join(preview)}" if preview else "-")
+        width = 132.0 if compact else float(NODE_WIDTH)
+        value_lines = self._container_value_preview(container, 2 if compact else 3)
+        content_rows = max(len(value_lines), 1)
+        height = max(92.0 if compact else 104.0, 62.0 + content_rows * 18.0)
         node_tag = f"node:container:{container.name}"
         outline = COLORS["accent"] if self.selected_container_name == container.name else fill
         item_id = canvas.create_rectangle(
@@ -4421,12 +6125,13 @@ class AlgorithmStudioApp:
             width=2,
             tags=(node_tag, "draggable"),
         )
+        header_height = 24
         canvas.create_rectangle(
             x,
             y,
             x + width,
-            y + 22,
-            fill=fill,
+            y + header_height,
+            fill=header_fill,
             outline=outline,
             width=2,
             tags=(node_tag, "node_header", "draggable"),
@@ -4435,25 +6140,51 @@ class AlgorithmStudioApp:
             x + width / 2,
             y + 5,
             anchor="n",
-            fill=COLORS["window"],
+            fill="#ffffff",
             text=title,
             font=("Segoe UI", 11, "bold"),
             tags=(f"text_of_{item_id}", node_tag, "node_header", "draggable"),
         )
-        canvas.create_text(
-            x + width / 2,
-            y + 29,
-            anchor="n",
-            fill=COLORS["good"],
-            text=body,
-            font=("Segoe UI", 11, "bold"),
-            width=width - 24,
-            justify="center",
-            tags=(f"text_of_{item_id}", node_tag, "node_body"),
+
+        body_top = y + header_height
+        port_y = y + height - 24
+        content_bottom = port_y - 10
+        canvas.create_rectangle(
+            x + 1,
+            body_top + 1,
+            x + width - 1,
+            content_bottom,
+            fill="#111827",
+            outline=COLORS["grid"],
+            width=1,
+            tags=(node_tag, "node_body", "container_section:value"),
         )
+
+        value_section_label = "VALUE" if container.kind == "variable" else "VALUES"
+        canvas.create_text(
+            x + 10,
+            body_top + 4,
+            anchor="nw",
+            fill=COLORS["muted"],
+            text=value_section_label,
+            font=("Segoe UI", 9, "bold"),
+            tags=(f"text_of_{item_id}", node_tag, "container_section:value"),
+        )
+        canvas.create_text(
+            x + 10,
+            body_top + 20,
+            anchor="nw",
+            fill=COLORS["good"],
+            text="\n".join(value_lines),
+            font=("Segoe UI", 9),
+            width=width - 20,
+            justify="left",
+            tags=(f"text_of_{item_id}", node_tag, "container_section:value"),
+        )
+
         input_tag = f"port:container:{container.name}:in:in"
-        input_x = x + width * 0.33
-        input_y = y + height - 18
+        input_x = x + width * 0.22
+        input_y = port_y
         canvas.create_oval(
             input_x - 6,
             input_y - 6,
@@ -4465,7 +6196,7 @@ class AlgorithmStudioApp:
         )
         canvas.create_text(
             input_x,
-            input_y + 9,
+            input_y + 10,
             anchor="n",
             fill=COLORS["muted"],
             text="in",
@@ -4474,7 +6205,7 @@ class AlgorithmStudioApp:
         )
         self._register_port("container", container.name, "in", "in", input_x, input_y)
         port_tag = f"port:container:{container.name}:out:out"
-        port_x = x + width * 0.67
+        port_x = x + width * 0.78
         port_y = input_y
         canvas.create_oval(
             port_x - 6,
@@ -4487,7 +6218,7 @@ class AlgorithmStudioApp:
         )
         canvas.create_text(
             port_x,
-            port_y + 9,
+            port_y + 10,
             anchor="n",
             fill=COLORS["muted"],
             text="out",
@@ -4840,8 +6571,8 @@ class AlgorithmStudioApp:
     def _draw_res_node(self, canvas: tk.Canvas, item: ResourceNodeItem) -> int:
         x = item.x or CANVAS_PADDING + 40
         y = item.y or CANVAS_PADDING + 420
-        width = max(float(getattr(item, "width", BLUEPRINT_NODE_WIDTH)), 240.0)
-        height = max(float(getattr(item, "height", BLUEPRINT_NODE_MIN_HEIGHT)), 132.0)
+        width = max(float(getattr(item, "width", BLUEPRINT_NODE_WIDTH)), 220.0)
+        height = max(float(getattr(item, "height", BLUEPRINT_NODE_MIN_HEIGHT)), 104.0)
         outline = COLORS["accent"] if self.selected_res_node_name == item.name else COLORS["agent"]
         node_tag = f"node:resnode:{item.name}"
         item_id = canvas.create_rectangle(
@@ -4871,7 +6602,7 @@ class AlgorithmStudioApp:
             y + 7,
             anchor="nw",
             fill=COLORS["window"],
-            text=f"resNode {item.name}",
+            text="meshNode" if item.name == "meshNode" else f"meshNode {item.name}",
             font=("Segoe UI", 12, "bold"),
             tags=(f"text_of_{item_id}", node_tag, "node_header", "draggable"),
         )
@@ -4908,7 +6639,7 @@ class AlgorithmStudioApp:
             (mesh_y0 + mesh_y1) / 2 - 1,
             anchor="center",
             fill=COLORS["window"],
-            text="mesh",
+            text="[mesh]",
             font=("Segoe UI", 12, "bold"),
             tags=(f"text_of_{item_id}", node_tag, "node_body"),
         )
@@ -4929,7 +6660,7 @@ class AlgorithmStudioApp:
             input_y - 1,
             anchor="nw",
             fill=COLORS["text"],
-            text="in",
+            text="",
             font=("Segoe UI", 10),
             width=80,
             justify="left",
@@ -4953,7 +6684,7 @@ class AlgorithmStudioApp:
             input_y - 1,
             anchor="e",
             fill=COLORS["text"],
-            text="mesh",
+            text="",
             font=("Segoe UI", 10),
             width=80,
             justify="right",
@@ -4979,16 +6710,16 @@ class AlgorithmStudioApp:
         y = item.y or CANVAS_PADDING + 520
         inputs = [item.input_name or "in"]
         outputs = [item.output_name or "out"]
-        script_lines = [line for line in (item.script or "script").splitlines() if line.strip()]
+        script_lines = [line for line in (item.script or "agent writes text and code here").splitlines() if line.strip()]
         if not script_lines:
-            script_lines = ["script"]
+            script_lines = ["agent writes text and code here"]
         return self._draw_blueprint_node(
             canvas,
             "function",
             item.name,
             x,
             y,
-            f"Function {item.name}",
+            "fun" if item.name == "fun" else f"fun {item.name}",
             inputs,
             outputs,
             script_lines,
@@ -4997,6 +6728,81 @@ class AlgorithmStudioApp:
             COLORS["good"],
             self.selected_function_name == item.name,
         )
+
+    def _draw_function_text_node(self, canvas: tk.Canvas, item: FunctionTextItem) -> int:
+        x = item.x or CANVAS_PADDING + 440
+        y = item.y or CANVAS_PADDING + 520
+        width = max(float(getattr(item, "width", BLUEPRINT_NODE_WIDTH)), 320.0)
+        height = max(float(getattr(item, "height", BLUEPRINT_NODE_MIN_HEIGHT)), 180.0)
+        outline = COLORS["accent"] if self.selected_function_text_name == item.name else COLORS["accent_2"]
+        node_tag = f"node:functiontext:{item.name}"
+        item_id = canvas.create_rectangle(
+            x,
+            y,
+            x + width,
+            y + height,
+            fill=COLORS["panel_alt"],
+            outline=outline,
+            width=2,
+            tags=(node_tag, "node_body"),
+        )
+
+        header_height = 30
+        canvas.create_rectangle(
+            x,
+            y,
+            x + width,
+            y + header_height,
+            fill=COLORS["accent_2"],
+            outline=outline,
+            width=2,
+            tags=(node_tag, "node_header", "draggable"),
+        )
+        canvas.create_text(
+            x + 12,
+            y + 7,
+            anchor="nw",
+            fill=COLORS["window"],
+            text=item.name,
+            font=("Segoe UI", 12, "bold"),
+            tags=(f"text_of_{item_id}", node_tag, "node_header", "draggable"),
+        )
+
+        function_label = f"fun: {item.function_name or '-'}"
+        canvas.create_text(
+            x + 12,
+            y + header_height + 10,
+            anchor="nw",
+            fill=COLORS["muted"],
+            text=function_label,
+            font=("Segoe UI", 10),
+            tags=(f"text_of_{item_id}", node_tag, "node_body"),
+        )
+
+        preview_text = item.text.strip() or "双击编辑方案文本"
+        canvas.create_text(
+            x + 12,
+            y + header_height + 34,
+            anchor="nw",
+            fill=COLORS["text"],
+            text=preview_text,
+            font=("Segoe UI", 10),
+            width=max(width - 24, 120.0),
+            tags=(f"text_of_{item_id}", node_tag, "node_body"),
+        )
+
+        handle_size = 10
+        handle_id = canvas.create_rectangle(
+            x + width - handle_size - 4,
+            y + height - handle_size - 4,
+            x + width - 4,
+            y + height - 4,
+            fill=COLORS["accent"],
+            outline=COLORS["accent"],
+            tags=(node_tag, "node_resize_handle", f"resize_handle:functiontext:{item.name}"),
+        )
+        canvas.tag_raise(handle_id)
+        return item_id
 
     def _draw_stage_node(self, canvas: tk.Canvas, stage: InterventionStage) -> int:
         x = stage.x or CANVAS_PADDING + 40

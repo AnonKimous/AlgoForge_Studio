@@ -6,10 +6,14 @@
 
 #include "cJSON.h"
 
+#include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <iterator>
 #include <memory>
 #include <system_error>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace algorithm_support {
@@ -93,6 +97,457 @@ bool _LoadPackageRuntimeLifetime(
   return true;
 }
 
+std::string _TrimRuntimeToken(std::string value) {
+  const auto is_space = [](unsigned char ch) {
+    return std::isspace(ch) != 0;
+  };
+  const auto begin = std::find_if_not(value.begin(), value.end(), is_space);
+  const auto end = std::find_if_not(value.rbegin(), value.rend(), is_space).base();
+  if (begin >= end) {
+    return {};
+  }
+  return std::string(begin, end);
+}
+
+bool _ParseRuntimeStageLinkKey(
+  const std::string& key,
+  std::string* out_source_stage_name,
+  std::string* out_target_stage_name,
+  std::string* out_error_message) {
+  if (!out_source_stage_name || !out_target_stage_name) {
+    if (out_error_message) {
+      *out_error_message = "Runtime stage link output pointers are null.";
+    }
+    return false;
+  }
+
+  const std::string::size_type arrow = key.find("->");
+  if (arrow == std::string::npos || key.find("->", arrow + 2u) != std::string::npos) {
+    if (out_error_message) {
+      *out_error_message = "Runtime stage link key must use the form source->target: " + key;
+    }
+    return false;
+  }
+
+  *out_source_stage_name = _TrimRuntimeToken(key.substr(0, arrow));
+  *out_target_stage_name = _TrimRuntimeToken(key.substr(arrow + 2u));
+  if (out_source_stage_name->empty() || out_target_stage_name->empty()) {
+    if (out_error_message) {
+      *out_error_message = "Runtime stage link key contains an empty stage name: " + key;
+    }
+    return false;
+  }
+  return true;
+}
+
+bool _AppendRuntimeTransferBinding(
+  algorithm::AlgorithmRuntimeTransferEdge* out_edge,
+  algorithm::AlgorithmRuntimeTransferBinding binding,
+  std::string* out_error_message) {
+  if (!out_edge) {
+    if (out_error_message) {
+      *out_error_message = "Runtime transfer edge output pointer is null.";
+    }
+    return false;
+  }
+  if (binding.from_name.empty() || binding.to_name.empty()) {
+    if (out_error_message) {
+      *out_error_message = "Runtime transfer binding is missing a source or target name.";
+    }
+    return false;
+  }
+  for (const algorithm::AlgorithmRuntimeTransferBinding& existing : out_edge->bindings) {
+    if (existing.from_name == binding.from_name) {
+      if (out_error_message) {
+        *out_error_message = "Runtime transfer binding source is duplicated: " + binding.from_name;
+      }
+      return false;
+    }
+    if (existing.to_name == binding.to_name) {
+      if (out_error_message) {
+        *out_error_message = "Runtime transfer binding target is duplicated: " + binding.to_name;
+      }
+      return false;
+    }
+  }
+  out_edge->bindings.push_back(std::move(binding));
+  return true;
+}
+
+bool _ValidateRuntimeTransferEdgeLinearity(
+  const algorithm::AlgorithmRuntimeTransferMap& transfer_map,
+  const algorithm::AlgorithmRuntimeTransferEdge& edge,
+  const std::string& package_path,
+  std::string* out_error_message) {
+  if (edge.source_stage_name == edge.target_stage_name) {
+    if (out_error_message) {
+      *out_error_message = "Runtime transfer edge cannot loop to itself: " + edge.source_stage_name +
+        "->" + edge.target_stage_name + " in " + package_path;
+    }
+    return false;
+  }
+
+  for (const algorithm::AlgorithmRuntimeTransferEdge& existing : transfer_map.stage_links) {
+    if (existing.source_stage_name == edge.source_stage_name &&
+        existing.target_stage_name == edge.target_stage_name) {
+      if (out_error_message) {
+        *out_error_message = "Runtime transfer edge is duplicated: " +
+          edge.source_stage_name + "->" + edge.target_stage_name;
+      }
+      return false;
+    }
+    if (existing.source_stage_name == edge.source_stage_name) {
+      if (out_error_message) {
+        *out_error_message = "Runtime transfer map must be linear: stage '" + edge.source_stage_name +
+          "' already maps to next stage '" + existing.target_stage_name + "' in " + package_path;
+      }
+      return false;
+    }
+    if (existing.target_stage_name == edge.target_stage_name) {
+      if (out_error_message) {
+        *out_error_message = "Runtime transfer map must be linear: stage '" + edge.target_stage_name +
+          "' already receives data from '" + existing.source_stage_name + "' in " + package_path;
+      }
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool _LoadRuntimeTransferBindingsFromObject(
+  const cJSON* bindings_object,
+  const std::string& package_path,
+  algorithm::AlgorithmRuntimeTransferEdge* out_edge,
+  std::string* out_error_message) {
+  if (!bindings_object || !cJSON_IsObject(bindings_object) || !out_edge) {
+    if (out_error_message) {
+      *out_error_message = "Runtime transfer bindings object is invalid: " + package_path;
+    }
+    return false;
+  }
+
+  for (const cJSON* child = bindings_object->child; child; child = child->next) {
+    if (!child->string || !*child->string) {
+      if (out_error_message) {
+        *out_error_message = "Runtime transfer binding source name is empty: " + package_path;
+      }
+      return false;
+    }
+
+    algorithm::AlgorithmRuntimeTransferBinding binding{};
+    binding.from_name = child->string;
+    if (cJSON_IsString(child) && child->valuestring) {
+      binding.to_name = child->valuestring;
+    } else if (cJSON_IsObject(child)) {
+      binding.to_name = json_utils::GetStringField(child, "to");
+      if (binding.to_name.empty()) {
+        binding.to_name = json_utils::GetStringField(child, "target");
+      }
+      binding.required = json_utils::GetBoolField(child, "required", true);
+    } else {
+      if (out_error_message) {
+        *out_error_message = "Runtime transfer binding value is invalid: " + package_path;
+      }
+      return false;
+    }
+
+    if (!_AppendRuntimeTransferBinding(out_edge, std::move(binding), out_error_message)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool _LoadRuntimeTransferBindingsFromArray(
+  const cJSON* bindings_array,
+  const std::string& package_path,
+  algorithm::AlgorithmRuntimeTransferEdge* out_edge,
+  std::string* out_error_message) {
+  if (!bindings_array || !cJSON_IsArray(bindings_array) || !out_edge) {
+    if (out_error_message) {
+      *out_error_message = "Runtime transfer bindings array is invalid: " + package_path;
+    }
+    return false;
+  }
+
+  const int binding_count = cJSON_GetArraySize(bindings_array);
+  for (int i = 0; i < binding_count; ++i) {
+    const cJSON* item = cJSON_GetArrayItem(bindings_array, i);
+    if (!item || !cJSON_IsObject(item)) {
+      if (out_error_message) {
+        *out_error_message = "Runtime transfer binding item is invalid: " + package_path;
+      }
+      return false;
+    }
+
+    algorithm::AlgorithmRuntimeTransferBinding binding{};
+    binding.from_name = json_utils::GetStringField(item, "from");
+    if (binding.from_name.empty()) {
+      binding.from_name = json_utils::GetStringField(item, "source");
+    }
+    binding.to_name = json_utils::GetStringField(item, "to");
+    if (binding.to_name.empty()) {
+      binding.to_name = json_utils::GetStringField(item, "target");
+    }
+    binding.required = json_utils::GetBoolField(item, "required", true);
+    if (!_AppendRuntimeTransferBinding(out_edge, std::move(binding), out_error_message)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool _LoadRuntimeTransferEdgeFromObject(
+  const cJSON* item,
+  const std::string& package_path,
+  algorithm::AlgorithmRuntimeTransferMap* out_transfer_map,
+  std::string* out_error_message) {
+  if (!item || !cJSON_IsObject(item) || !out_transfer_map) {
+    if (out_error_message) {
+      *out_error_message = "Runtime transfer edge item is invalid: " + package_path;
+    }
+    return false;
+  }
+
+  algorithm::AlgorithmRuntimeTransferEdge edge{};
+  edge.source_stage_name = json_utils::GetStringField(item, "from_stage");
+  if (edge.source_stage_name.empty()) {
+    edge.source_stage_name = json_utils::GetStringField(item, "source_stage");
+  }
+  edge.target_stage_name = json_utils::GetStringField(item, "to_stage");
+  if (edge.target_stage_name.empty()) {
+    edge.target_stage_name = json_utils::GetStringField(item, "target_stage");
+  }
+  if (edge.source_stage_name.empty() || edge.target_stage_name.empty()) {
+    if (out_error_message) {
+      *out_error_message = "Runtime transfer edge is missing source or target stage: " + package_path;
+    }
+    return false;
+  }
+
+  const cJSON* bindings = cJSON_GetObjectItemCaseSensitive(item, "bindings");
+  if (!bindings) {
+    bindings = cJSON_GetObjectItemCaseSensitive(item, "map");
+  }
+  if (!bindings) {
+    bindings = cJSON_GetObjectItemCaseSensitive(item, "links");
+  }
+  if (bindings) {
+    if (cJSON_IsObject(bindings)) {
+      if (!_LoadRuntimeTransferBindingsFromObject(bindings, package_path, &edge, out_error_message)) {
+        return false;
+      }
+    } else if (cJSON_IsArray(bindings)) {
+      if (!_LoadRuntimeTransferBindingsFromArray(bindings, package_path, &edge, out_error_message)) {
+        return false;
+      }
+    } else {
+      if (out_error_message) {
+        *out_error_message = "Runtime transfer edge bindings have an invalid type: " + package_path;
+      }
+      return false;
+    }
+  }
+
+  if (!_ValidateRuntimeTransferEdgeLinearity(*out_transfer_map, edge, package_path, out_error_message)) {
+    return false;
+  }
+
+  out_transfer_map->stage_links.push_back(std::move(edge));
+  return true;
+}
+
+bool _LoadRuntimeTransferEdgeFromKeyValue(
+  const std::string& edge_key,
+  const cJSON* value,
+  const std::string& package_path,
+  algorithm::AlgorithmRuntimeTransferMap* out_transfer_map,
+  std::string* out_error_message) {
+  if (!out_transfer_map) {
+    if (out_error_message) {
+      *out_error_message = "Runtime transfer map output pointer is null.";
+    }
+    return false;
+  }
+
+  std::string source_stage_name;
+  std::string target_stage_name;
+  if (!_ParseRuntimeStageLinkKey(edge_key, &source_stage_name, &target_stage_name, out_error_message)) {
+    return false;
+  }
+
+  algorithm::AlgorithmRuntimeTransferEdge edge{};
+  edge.source_stage_name = std::move(source_stage_name);
+  edge.target_stage_name = std::move(target_stage_name);
+  if (value) {
+    if (cJSON_IsObject(value)) {
+      if (!_LoadRuntimeTransferBindingsFromObject(value, package_path, &edge, out_error_message)) {
+        return false;
+      }
+    } else if (cJSON_IsArray(value)) {
+      if (!_LoadRuntimeTransferBindingsFromArray(value, package_path, &edge, out_error_message)) {
+        return false;
+      }
+    } else {
+      if (out_error_message) {
+        *out_error_message = "Runtime transfer edge payload is invalid: " + package_path;
+      }
+      return false;
+    }
+  }
+
+  if (!_ValidateRuntimeTransferEdgeLinearity(*out_transfer_map, edge, package_path, out_error_message)) {
+    return false;
+  }
+
+  out_transfer_map->stage_links.push_back(std::move(edge));
+  return true;
+}
+
+bool _LoadPackageRuntimeTransferMap(
+  const algorithm::AlgorithmPackageLocation& package_location,
+  algorithm::AlgorithmRuntimeTransferMap* out_transfer_map,
+  bool* out_has_transfer_map,
+  std::string* out_error_message) {
+  if (!out_transfer_map) {
+    if (out_error_message) {
+      *out_error_message = "AlgorithmRuntimeTransferMap output pointer is null.";
+    }
+    return false;
+  }
+
+  out_transfer_map->Clear();
+  if (out_has_transfer_map) {
+    *out_has_transfer_map = false;
+  }
+
+  const std::string algorithm_name = package_location.algorithm_name.empty()
+    ? package_location.manifest_name
+    : package_location.algorithm_name;
+  const fs::path package_json_path = algorithm::package_paths::ResolvePackageJsonPath(
+    package_location.package_root,
+    package_location.manifest_path,
+    algorithm_name);
+  if (package_json_path.empty()) {
+    if (out_error_message) {
+      *out_error_message = "Failed to resolve package JSON file for runtime transfer map.";
+    }
+    return false;
+  }
+
+  const std::string json_text = json_utils::ReadTextFile(package_json_path);
+  if (json_text.empty()) {
+    if (out_error_message) {
+      *out_error_message = "Failed to read package JSON file: " + package_json_path.generic_string();
+    }
+    return false;
+  }
+
+  cJSON* root = cJSON_Parse(json_text.c_str());
+  if (!root) {
+    if (out_error_message) {
+      *out_error_message = "Failed to parse package JSON file: " + package_json_path.generic_string();
+    }
+    return false;
+  }
+
+  const cJSON* runtime = cJSON_GetObjectItemCaseSensitive(root, "runtime");
+  if (!runtime) {
+    cJSON_Delete(root);
+    if (out_error_message) {
+      out_error_message->clear();
+    }
+    return true;
+  }
+  if (!cJSON_IsObject(runtime)) {
+    cJSON_Delete(root);
+    if (out_error_message) {
+      *out_error_message = "Package runtime section is invalid: " + package_json_path.generic_string();
+    }
+    return false;
+  }
+
+  const cJSON* pipeline = cJSON_GetObjectItemCaseSensitive(runtime, "pipeline");
+  if (!pipeline) {
+    cJSON_Delete(root);
+    if (out_error_message) {
+      out_error_message->clear();
+    }
+    return true;
+  }
+  if (!cJSON_IsObject(pipeline)) {
+    cJSON_Delete(root);
+    if (out_error_message) {
+      *out_error_message = "Package runtime pipeline section is invalid: " + package_json_path.generic_string();
+    }
+    return false;
+  }
+
+  const cJSON* mappings = cJSON_GetObjectItemCaseSensitive(pipeline, "mappings");
+  if (!mappings) {
+    cJSON_Delete(root);
+    if (out_error_message) {
+      *out_error_message = "Package runtime pipeline is missing mappings: " + package_json_path.generic_string();
+    }
+    return false;
+  }
+
+  out_transfer_map->algorithm_name = package_location.algorithm_name;
+
+  if (cJSON_IsObject(mappings)) {
+    for (const cJSON* child = mappings->child; child; child = child->next) {
+      if (!child->string || !*child->string) {
+        cJSON_Delete(root);
+        if (out_error_message) {
+          *out_error_message = "Runtime transfer mapping key is empty: " + package_json_path.generic_string();
+        }
+        return false;
+      }
+      if (!_LoadRuntimeTransferEdgeFromKeyValue(
+            child->string,
+            child,
+            package_json_path.generic_string(),
+            out_transfer_map,
+            out_error_message)) {
+        cJSON_Delete(root);
+        return false;
+      }
+    }
+  } else if (cJSON_IsArray(mappings)) {
+    const int mapping_count = cJSON_GetArraySize(mappings);
+    for (int i = 0; i < mapping_count; ++i) {
+      const cJSON* item = cJSON_GetArrayItem(mappings, i);
+      if (!_LoadRuntimeTransferEdgeFromObject(
+            item,
+            package_json_path.generic_string(),
+            out_transfer_map,
+            out_error_message)) {
+        cJSON_Delete(root);
+        return false;
+      }
+    }
+  } else {
+    cJSON_Delete(root);
+    if (out_error_message) {
+      *out_error_message = "Package runtime pipeline mappings are invalid: " + package_json_path.generic_string();
+    }
+    return false;
+  }
+
+  cJSON_Delete(root);
+  out_transfer_map->valid = true;
+  if (out_has_transfer_map) {
+    *out_has_transfer_map = true;
+  }
+  if (out_error_message) {
+    out_error_message->clear();
+  }
+  return true;
+}
+
 bool _AppendContainer(
   const std::string& container_name,
   algorithm::AlgorithmContainerStorageKind storage_kind,
@@ -134,6 +589,36 @@ bool _AppendHiddenInterventionSignalContainer(algorithm::AlgorithmContainerSet* 
   signal_container.bytes.resize(sizeof(uint32_t));
   out_container_set->hidden_containers.push_back(std::move(signal_container));
   return true;
+}
+
+std::string _BuildStandardContainerLayoutKey(const algorithm::AlgorithmContainerSet& container_set) {
+  std::vector<std::string> tokens{};
+  tokens.reserve(container_set.temporary_registers.size() + container_set.arrays.size());
+
+  for (const algorithm::AlgorithmContainer& container : container_set.temporary_registers) {
+    tokens.push_back(
+      "v:" + container.name + ":" +
+      std::to_string(container.element_count) + ":" +
+      std::to_string(container.element_stride));
+  }
+  for (const algorithm::AlgorithmContainer& container : container_set.arrays) {
+    tokens.push_back(
+      "a:" + container.name + ":" +
+      std::to_string(container.element_count) + ":" +
+      std::to_string(container.element_stride));
+  }
+
+  if (tokens.empty()) {
+    return {};
+  }
+
+  std::sort(tokens.begin(), tokens.end());
+  std::string key{"standard:"};
+  for (const std::string& token : tokens) {
+    key.append(token);
+    key.push_back('|');
+  }
+  return key;
 }
 
 bool _LoadContainerSetFromPackageJson(
@@ -252,6 +737,12 @@ bool _LoadContainerSetFromPackageJson(
   }
 
   cJSON_Delete(root);
+  container_set->standard_layout.layout_kind = "standard";
+  container_set->standard_layout.variable_count = static_cast<uint32_t>(container_set->temporary_registers.size());
+  container_set->standard_layout.array_count = static_cast<uint32_t>(container_set->arrays.size());
+  container_set->standard_layout.variable_prefix = "v";
+  container_set->standard_layout.array_prefix = "a";
+  container_set->standard_layout.layout_name = _BuildStandardContainerLayoutKey(*container_set);
   *out_container_set = std::move(container_set);
   if (out_error_message) {
     out_error_message->clear();
@@ -630,7 +1121,7 @@ PackageDefaultSchema _LoadPackageDefaultSchema(
 
 }  // namespace
 
-bool LoadAlgorithmPackageRuntimeReflectorFromLocation(
+bool LoadAlgorithmPackageReflectorFromLocation(
   const algorithm::AlgorithmPackageLocation& package_location,
   std::shared_ptr<algorithm::AlgorithmReflector>* out_reflector,
   std::string* out_error_message) {
@@ -651,6 +1142,53 @@ bool LoadAlgorithmPackageRuntimeReflectorFromLocation(
   }
 
   *out_reflector = std::make_shared<algorithm::AlgorithmReflector>(std::move(reflector));
+  if (out_error_message) {
+    out_error_message->clear();
+  }
+  return true;
+}
+
+bool LoadAlgorithmPackageTransferMapFromLocation(
+  const algorithm::AlgorithmPackageLocation& package_location,
+  std::shared_ptr<algorithm::AlgorithmRuntimeTransferMap>* out_transfer_map,
+  bool* out_has_transfer_map,
+  std::string* out_error_message) {
+  if (!out_transfer_map) {
+    if (out_error_message) {
+      *out_error_message = "AlgorithmRuntimeTransferMap output pointer is null.";
+    }
+    return false;
+  }
+
+  algorithm::AlgorithmRuntimeTransferMap transfer_map{};
+  bool has_transfer_map = false;
+  std::string transfer_map_error_message;
+  if (!_LoadPackageRuntimeTransferMap(
+        package_location,
+        &transfer_map,
+        &has_transfer_map,
+        &transfer_map_error_message)) {
+    if (out_error_message) {
+      *out_error_message = std::move(transfer_map_error_message);
+    }
+    return false;
+  }
+
+  if (!has_transfer_map) {
+    out_transfer_map->reset();
+    if (out_has_transfer_map) {
+      *out_has_transfer_map = false;
+    }
+    if (out_error_message) {
+      out_error_message->clear();
+    }
+    return true;
+  }
+
+  *out_transfer_map = std::make_shared<algorithm::AlgorithmRuntimeTransferMap>(std::move(transfer_map));
+  if (out_has_transfer_map) {
+    *out_has_transfer_map = true;
+  }
   if (out_error_message) {
     out_error_message->clear();
   }
@@ -691,6 +1229,18 @@ bool CreateAlgorithmObjectFromLocation(
   }
   group.tick_lifetime = tick_lifetime;
 
+  bool has_runtime_transfer_map = false;
+  if (!LoadAlgorithmPackageTransferMapFromLocation(
+        package_location,
+        &group.runtime_transfer_map,
+        &has_runtime_transfer_map,
+        out_error_message)) {
+    return false;
+  }
+  if (!has_runtime_transfer_map) {
+    group.runtime_transfer_map.reset();
+  }
+
   auto _ApplyLaunchOnceReflectionPolicy = [&group]() {
     if (group.tick_lifetime == algorithm_management::AlgorithmTickLifetime::LaunchOnceThenHold &&
         group.algorithm_reflector &&
@@ -712,7 +1262,7 @@ bool CreateAlgorithmObjectFromLocation(
     }
     if (!group.algorithm_reflector) {
       std::shared_ptr<algorithm::AlgorithmReflector> runtime_reflector{};
-      if (LoadAlgorithmPackageRuntimeReflectorFromLocation(
+      if (LoadAlgorithmPackageReflectorFromLocation(
             package_location,
             &runtime_reflector,
             nullptr)) {
@@ -748,7 +1298,7 @@ bool CreateAlgorithmObjectFromLocation(
     _AppendHiddenInterventionSignalContainer(group.shared_container_set.get());
   }
   std::shared_ptr<algorithm::AlgorithmReflector> runtime_reflector{};
-  if (LoadAlgorithmPackageRuntimeReflectorFromLocation(
+  if (LoadAlgorithmPackageReflectorFromLocation(
         package_location,
         &runtime_reflector,
         nullptr)) {

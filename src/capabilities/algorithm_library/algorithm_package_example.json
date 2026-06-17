@@ -6,7 +6,7 @@
       "defaultPrecision": "fp32"
     },
     "variable": 3,
-    "variableArray": 4
+    "variableArray": 0
   },
   "decomposer": {
     "res": {

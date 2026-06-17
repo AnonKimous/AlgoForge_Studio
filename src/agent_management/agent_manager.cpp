@@ -7,11 +7,48 @@
 #undef AGENT_MANAGEMENT_LAYER_PUBLIC_FACADE_INCLUDE
 
 #include <cassert>
+#include <algorithm>
+#include <iostream>
+#include <sstream>
 #include <memory>
 #include <chrono>
 #include <utility>
 
 namespace agent_management {
+
+bool ReportAlgorithmPipelineStall(
+  const AlgorithmPipelineStallReport& report,
+  std::string* out_error_message) {
+  std::ostringstream stream;
+  stream << "Pipeline algorithm stalled";
+  if (!report.algorithm_name.empty()) {
+    stream << " for '" << report.algorithm_name << "'";
+  }
+  if (report.stalled_seconds > 0.0f) {
+    stream << " after " << report.stalled_seconds << "s without progress";
+  }
+  if (!report.reason.empty()) {
+    stream << ": " << report.reason;
+  }
+  stream << '\n';
+  for (const auto& stage_stat : report.stage_runtime_stats) {
+    stream << "  stage " << stage_stat.stage_name << ": " << stage_stat.elapsed_seconds << "s";
+    if (!stage_stat.reason.empty()) {
+      stream << " | " << stage_stat.reason;
+    }
+    stream << '\n';
+  }
+
+  const std::string log_text = stream.str();
+  std::cerr << log_text;
+  if (out_error_message) {
+    *out_error_message = log_text;
+  }
+#ifndef NDEBUG
+  assert(false && "Pipeline algorithm stalled.");
+#endif
+  return false;
+}
 
 struct AgentManager::ManagedAgentEntry {
   std::shared_ptr<agent::Agent> agent{};
@@ -129,6 +166,42 @@ bool AgentManager::Tick(const InputState& input, Vec2 mouse_pixel, float dt_seco
     }
 
     managed_agent->ticker.Tick(input, mouse_pixel, dt_seconds);
+    if (managed_agent->agent) {
+      const auto& algorithm_objects = managed_agent->agent->algorithm_objects();
+      const auto& runtime_states = managed_agent->agent->algorithm_runtime_states();
+      const size_t paired_count = std::min(algorithm_objects.size(), runtime_states.size());
+      for (size_t i = 0; i < paired_count; ++i) {
+        const agent::AlgorithmObject& object = algorithm_objects[i];
+        const agent::AgentAlgorithmRuntimeState& runtime_state = runtime_states[i];
+        if (!object.pipeline_stage || object.pipeline_stage_index != 0u) {
+          continue;
+        }
+        if (!runtime_state.pipeline_stall_report_requested) {
+          continue;
+        }
+
+        AlgorithmPipelineStallReport report{};
+        report.algorithm_name = object.pipeline_name.empty()
+          ? object.algorithm_profile.algorithm_name
+          : object.pipeline_name;
+        report.stalled_seconds = runtime_state.pipeline_no_progress_seconds;
+        report.reason = runtime_state.pipeline_stall_reason.empty()
+          ? "No observable pipeline progress."
+          : runtime_state.pipeline_stall_reason;
+        report.stage_runtime_stats = runtime_state.pipeline_stage_runtime_stats;
+
+        std::string report_error_message;
+        if (!ReportAlgorithmPipelineStall(report, &report_error_message)) {
+          return false;
+        }
+
+        if (auto* mutable_runtime_state = managed_agent->agent->algorithm_runtime_state(i)) {
+          mutable_runtime_state->pipeline_stall_report_requested = false;
+        }
+        combined_algorithm_to_agent_signal_.stop_requested = true;
+        return false;
+      }
+    }
     if (managed_agent->limit_fps_flag == 0u) {
       managed_agent->one_shot_tick_consumed = true;
     } else {
@@ -185,6 +258,45 @@ bool AgentManager::AttachAlgorithmToAgent(
     assert(false && "Failed to mount algorithm.");
     if (out_error_message && out_error_message->empty()) {
       set_error("Failed to mount algorithm.");
+    }
+    return false;
+  }
+  managed_agents_[agent_index]->ResetTickBudget();
+
+  if (out_algorithm_index) {
+    *out_algorithm_index = algorithm_index;
+  }
+  return true;
+}
+
+bool AgentManager::AttachPipelineAlgorithmToAgent(
+  size_t agent_index,
+  const std::string& pipeline_name,
+  const std::vector<agent::AlgorithmPipelineStageSubmission>& stage_submissions,
+  size_t* out_algorithm_index,
+  std::string* out_error_message,
+  agent::AlgorithmExecutionPreference execution_preference) {
+  auto set_error = [&](const std::string& message) {
+    if (out_error_message) {
+      *out_error_message = message;
+    }
+  };
+
+  if (agent_index >= managed_agents_.size() || !managed_agents_[agent_index] || !managed_agents_[agent_index]->agent) {
+    set_error("Selected agent is unavailable.");
+    return false;
+  }
+
+  size_t algorithm_index = 0u;
+  if (!managed_agents_[agent_index]->agent->MountPipelineAlgorithm(
+        pipeline_name,
+        stage_submissions,
+        &algorithm_index,
+        out_error_message,
+        execution_preference)) {
+    assert(false && "Failed to mount pipeline algorithm.");
+    if (out_error_message && out_error_message->empty()) {
+      set_error("Failed to mount pipeline algorithm.");
     }
     return false;
   }

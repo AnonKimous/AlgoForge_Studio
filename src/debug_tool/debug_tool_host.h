@@ -46,9 +46,16 @@ struct AlgorithmDescriptorValue {
   float scalar_value{0.0f};
 };
 
+struct AlgorithmPipelineStageSubmission {
+  std::string stage_name;
+  std::vector<AlgorithmResourceBinding> resource_bindings;
+  std::vector<AlgorithmDescriptorValue> descriptor_values;
+};
+
 enum class AlgorithmMountMode {
   Direct = 0,
   StandardContainer = 1,
+  Pipeline = 2,
 };
 
 enum class AlgorithmExecutionPreference {
@@ -88,6 +95,10 @@ struct AlgorithmReflectionSnapshot {
 struct AlgorithmRuntimeSummary {
   std::string algorithm_name;
   AlgorithmAssemblyState assembly_state{AlgorithmAssemblyState::Failed};
+  std::string pipeline_name;
+  uint32_t pipeline_stage_index{0u};
+  uint32_t pipeline_stage_count{0u};
+  bool pipeline_stage{false};
   std::vector<AlgorithmResourceBinding> resource_bindings;
   std::vector<AlgorithmDescriptorValue> descriptor_values;
   bool cpu_symbol{true};
@@ -113,6 +124,11 @@ class IDebugToolHost {
   virtual bool GetAgentSummary(size_t agent_index, AgentRuntimeSummary* out_summary) const = 0;
   virtual const AlgorithmToAgentSignal& combined_algorithm_to_agent_signal() const = 0;
 
+  virtual bool IsPipelineAlgorithm(
+    const std::string& algorithm_name,
+    bool* out_is_pipeline,
+    std::string* out_error_message = nullptr) const = 0;
+
   virtual bool AttachAlgorithmToAgent(
     size_t agent_index,
     const std::string& algorithm_name,
@@ -121,6 +137,22 @@ class IDebugToolHost {
     size_t* out_algorithm_index = nullptr,
     std::string* out_error_message = nullptr,
     AlgorithmMountMode mount_mode = AlgorithmMountMode::Direct,
+    AlgorithmExecutionPreference execution_preference = AlgorithmExecutionPreference::Gpu) = 0;
+  virtual bool AttachPipelineAlgorithmToAgent(
+    size_t agent_index,
+    const std::string& pipeline_name,
+    const std::vector<AlgorithmPipelineStageSubmission>& stage_submissions,
+    size_t* out_algorithm_index = nullptr,
+    std::string* out_error_message = nullptr,
+    AlgorithmExecutionPreference execution_preference = AlgorithmExecutionPreference::Gpu) = 0;
+  virtual bool AttachPipelinePackageToAgent(
+    size_t agent_index,
+    const std::string& pipeline_name,
+    const std::string& pipeline_algorithm_name,
+    const std::vector<AlgorithmResourceBinding>& resource_bindings,
+    const std::vector<AlgorithmDescriptorValue>& descriptor_values,
+    size_t* out_algorithm_index = nullptr,
+    std::string* out_error_message = nullptr,
     AlgorithmExecutionPreference execution_preference = AlgorithmExecutionPreference::Gpu) = 0;
   virtual bool DetachAlgorithmFromAgent(
     size_t agent_index,

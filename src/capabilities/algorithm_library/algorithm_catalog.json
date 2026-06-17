@@ -10,6 +10,15 @@
       "intervention": "temporary_test_line_motion_package.json"
     },
     {
+      "name": "simple_point_motion_demo",
+      "display_name": "simple_point_motion_demo",
+      "folder": "simple_point_motion_demo",
+      "container_manifest": "simple_point_motion_demo_package.json",
+      "decomposer": "simple_point_motion_demo_package.json",
+      "reflector": "simple_point_motion_demo_package.json",
+      "intervention": "simple_point_motion_demo_package.json"
+    },
+    {
       "name": "v6a6_pbd_ball_collision_demo",
       "display_name": "v6a6_pbd_ball_collision_demo",
       "folder": "v6a6_pbd_ball_collision_demo",

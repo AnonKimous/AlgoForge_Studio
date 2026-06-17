@@ -1,0 +1,4 @@
+interface:
+  display_name: "Algorithm Studio Demo"
+  short_description: "Constrain minimal Algorithm Studio demo generation"
+  default_prompt: "Use $algorithm-studio-minimal-demo to create the smallest valid Algorithm Studio demo bundle."

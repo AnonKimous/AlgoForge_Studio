@@ -1,0 +1,96 @@
+{
+  "algorithm_name": "simple_point_motion_demo_stage2",
+  "globalCfg": {
+    "solvePrecision": "fp32",
+    "defaultPrecision": "fp32"
+  },
+  "container": {
+    "variable": 2,
+    "variableArray": 0
+  },
+  "demo": {
+    "mode": "right_edge",
+    "left": 50.0,
+    "right": 150.0,
+    "bottom": 50.0,
+    "top": 150.0,
+    "phase_speed": 0.50
+  },
+  "decomposer": {
+    "res": {},
+    "description": []
+  },
+  "reflector": {
+    "name": "position_xy",
+    "functionName": "direct",
+    "items": [
+      {
+        "name": "position_x",
+        "from": [
+          "v1"
+        ],
+        "to": [
+          "position_x"
+        ],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "position_y",
+        "from": [
+          "v2"
+        ],
+        "to": [
+          "position_y"
+        ],
+        "reflectFun": "direct"
+      }
+    ]
+  },
+  "intervention": {
+    "stages": {
+      "resultRender": {
+        "stage_name": "resultRender",
+        "stage_kind": "resultRender",
+        "used_algorithm_containers": {
+          "arrays": [
+            {
+              "name": "v1",
+              "kind": "variable",
+              "tuple_width": 1,
+              "required": true
+            },
+            {
+              "name": "v2",
+              "kind": "variable",
+              "tuple_width": 1,
+              "required": true
+            }
+          ]
+        },
+        "shader": {
+          "pipeline": "graphics",
+          "vertex": "simple_point_motion_demo_result_render.vert.spv",
+          "fragment": "simple_point_motion_demo_result_render.frag.spv"
+        }
+      }
+    }
+  },
+  "runtime": {
+    "pipeline": {
+      "mappings": {
+        "simple_point_motion_demo->simple_point_motion_demo_stage1": {
+          "v1": "v1",
+          "v2": "v2"
+        },
+        "simple_point_motion_demo_stage1->simple_point_motion_demo_stage2": {
+          "v1": "v1",
+          "v2": "v2"
+        },
+        "simple_point_motion_demo_stage2->simple_point_motion_demo_stage3": {
+          "v1": "v1",
+          "v2": "v2"
+        }
+      }
+    }
+  }
+}

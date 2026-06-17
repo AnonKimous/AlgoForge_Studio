@@ -9,6 +9,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <utility>
 #include <vector>
 
 namespace agent_management {
@@ -54,6 +55,17 @@ struct AlgorithmReflectionSnapshot {
   }
 };
 
+struct AlgorithmPipelineStallReport {
+  std::string algorithm_name;
+  float stalled_seconds{0.0f};
+  std::string reason;
+  std::vector<algorithm_management::AlgorithmPipelineStageRuntimeStat> stage_runtime_stats;
+};
+
+bool ReportAlgorithmPipelineStall(
+  const AlgorithmPipelineStallReport& report,
+  std::string* out_error_message = nullptr);
+
 class AgentManager {
  public:
   AgentManager();
@@ -68,6 +80,13 @@ class AgentManager {
     size_t* out_algorithm_index = nullptr,
     std::string* out_error_message = nullptr,
     agent::AlgorithmMountMode mount_mode = agent::AlgorithmMountMode::Direct,
+    agent::AlgorithmExecutionPreference execution_preference = agent::AlgorithmExecutionPreference::Gpu);
+  bool AttachPipelineAlgorithmToAgent(
+    size_t agent_index,
+    const std::string& pipeline_name,
+    const std::vector<agent::AlgorithmPipelineStageSubmission>& stage_submissions,
+    size_t* out_algorithm_index = nullptr,
+    std::string* out_error_message = nullptr,
     agent::AlgorithmExecutionPreference execution_preference = agent::AlgorithmExecutionPreference::Gpu);
   bool DetachAlgorithmFromAgent(
     size_t agent_index,

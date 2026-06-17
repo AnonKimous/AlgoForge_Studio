@@ -27,6 +27,10 @@ class DebugToolBackendRuntime : public IDebugToolHost {
   size_t agent_count() const override;
   bool GetAgentSummary(size_t agent_index, debug_tool::AgentRuntimeSummary* out_summary) const override;
   const AlgorithmToAgentSignal& combined_algorithm_to_agent_signal() const override;
+  bool IsPipelineAlgorithm(
+    const std::string& algorithm_name,
+    bool* out_is_pipeline,
+    std::string* out_error_message = nullptr) const override;
   bool AttachAlgorithmToAgent(
     size_t agent_index,
     const std::string& algorithm_name,
@@ -35,6 +39,22 @@ class DebugToolBackendRuntime : public IDebugToolHost {
     size_t* out_algorithm_index = nullptr,
     std::string* out_error_message = nullptr,
     debug_tool::AlgorithmMountMode mount_mode = debug_tool::AlgorithmMountMode::Direct,
+    debug_tool::AlgorithmExecutionPreference execution_preference = debug_tool::AlgorithmExecutionPreference::Gpu) override;
+  bool AttachPipelineAlgorithmToAgent(
+    size_t agent_index,
+    const std::string& pipeline_name,
+    const std::vector<debug_tool::AlgorithmPipelineStageSubmission>& stage_submissions,
+    size_t* out_algorithm_index = nullptr,
+    std::string* out_error_message = nullptr,
+    debug_tool::AlgorithmExecutionPreference execution_preference = debug_tool::AlgorithmExecutionPreference::Gpu) override;
+  bool AttachPipelinePackageToAgent(
+    size_t agent_index,
+    const std::string& pipeline_name,
+    const std::string& pipeline_algorithm_name,
+    const std::vector<debug_tool::AlgorithmResourceBinding>& resource_bindings,
+    const std::vector<debug_tool::AlgorithmDescriptorValue>& descriptor_values,
+    size_t* out_algorithm_index = nullptr,
+    std::string* out_error_message = nullptr,
     debug_tool::AlgorithmExecutionPreference execution_preference = debug_tool::AlgorithmExecutionPreference::Gpu) override;
   bool DetachAlgorithmFromAgent(
     size_t agent_index,
@@ -49,7 +69,7 @@ class DebugToolBackendRuntime : public IDebugToolHost {
     std::string* out_error_message = nullptr) override;
   void StartTicking() override {
     agent_manager_.StartTicking();
-    agent_manager_.Tick(runtime_environment_.input(), runtime_environment_.MousePosition(), frame_dt_);
+    (void)agent_manager_.Tick(runtime_environment_.input(), runtime_environment_.MousePosition(), frame_dt_);
   }
   void PauseTicking() override {
     agent_manager_.PauseTicking();
