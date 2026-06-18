@@ -5,6 +5,8 @@ build_algorithms_v6a6/
 out/
 bin/
 lib/
+/algorithmLib/.build_*/
+/algorithmLib/algorithmruntimeLib*/
 /algorithmLib/**/*.lib
 /algorithmLib/**/*.dll
 /algorithmLib/**/*.pdb
@@ -27,6 +29,7 @@ app/**/Debug/
 app/**/Release/
 app/src/capabilities/algorithm_library/
 __pycache__/
+tools/algorithm_studio/__pycache__/
 *.pyc
 
 # CMake
