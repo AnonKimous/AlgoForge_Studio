@@ -1,43 +1,20 @@
 # Algorithm Studio Agent Instructions
 
-## Operating Modes
+## Task Complexity
 
-The agent operates in two explicit modes.
-
-- `Plan mode`
-- `Execution mode`
-
-Treat mode selection as strict.
-
-### Plan Mode
-
-Enter this mode when the prompt says any of these:
-
-- `Phase: planning only.`
-- `plan mode`
-- `规划模式`
-- the prompt explicitly asks for planning, decomposition, or a proposal before edits
-
-In plan mode:
-
-- Think and plan first. Do not edit the scene yet.
-- Do not emit any `algorithm-studio-tool` block.
-- Do not rewrite the full `Document`.
-- Produce a short working document that can directly guide later execution.
+- First check whether the user command is short and whether there is a direct matching interface or tool path for it.
+- If the command is short and there is a direct matching interface or tool path, handle it directly without first writing a plan or checklist.
+- If the task is complex, ambiguous, risky, spans multiple coordinated edits, or does not have a clear direct interface path, prefer first producing a short working document or checklist instead of trying to handle everything immediately.
+- Do not split a normal request into a mandatory plan phase and a later execution phase.
+- If a checklist is genuinely needed, keep it inside the same pass and continue into execution instead of forcing a two-stage round trip.
+- That working document should stay short and execution-oriented.
 - Prefer 3 to 6 concrete steps.
 - State the minimum required nodes, stages, files, and bindings.
 - Explicitly call out what must not be added.
-- If the current context or document is too long, compress it before continuing.
+- Do not emit any `algorithm-studio-tool` block when only drafting the working document.
+- Do not rewrite the full `Document` just to think through the task.
 
-The plan-mode output should be plain text and should usually contain:
-
-- `Goal`
-- `Constraints`
-- `Minimal structure`
-- `Steps`
-- `Execution focus`
-
-Use this exact template when possible:
+Use this template when a checklist or working document is needed:
 
 ```text
 Goal
@@ -58,68 +35,32 @@ Steps
 3. third execution step
 
 Execution focus
-- the immediate next action for execution mode
+- the immediate next action
 ```
 
-Keep the plan document short. Prefer a working note that execution mode can act on immediately, not a long essay.
-
-When the document or prior context is long:
+When the document or prior context is genuinely long:
 
 - compress old conversation into a short working summary
 - compress the current scene into only the structures relevant to the task
 - compress the document into the minimum facts needed for execution
 - carry forward only constraints, target shape, unresolved decisions, and the next step
-
-### Execution Mode
-
-Enter this mode when the prompt says any of these:
-
-- `Phase: execution.`
-- `execution mode`
-- `执行模式`
-- the prompt explicitly says to perform edits now
-
-In execution mode:
-
-- Act quickly and decisively.
-- Read the latest plan document first if one exists.
-- Treat that plan as the contract for what to do now.
-- Reuse the `Steps` and `Execution focus` sections as the immediate execution checklist.
-- Prefer the smallest coherent batch of edits.
-- Prefer 1 to 4 precise tool calls over broad rewrites.
-- Prefer UI tools first.
-- Use `update_document` only when the requested structure is safer to express as one coherent document update.
-- After tool calls, briefly state what changed and what remains.
-
-### Plan To Execution Handoff
-
-The output of plan mode is the instruction document for execution mode.
-
-Execution mode should reuse the latest plan document and should not re-open the problem from scratch unless:
-
-- the plan is invalid
-- the scene changed in a way that breaks the plan
-- execution reveals a hard constraint that the plan missed
-
-If that happens:
-
-- compress the new situation
-- revise the plan briefly
-- then continue execution
+- do not repeatedly recompress unchanged context across consecutive turns
 
 ### Compression Rule
 
-Whenever context becomes long, the agent should compress:
+Whenever context becomes long enough to interfere with execution quality or prompt budget, the agent should compress:
 
 - old conversation
 - scene state
 - document state
-- prior planning text
+- prior working text
+
+Do not compress on every turn.
+Do not recompress unchanged skill instructions or unchanged AGENTS instructions unless they are part of the overlong context that must be reduced.
 
 Compression must preserve:
 
 - the user goal
-- the current mode
 - hard constraints
 - the minimal target structure
 - completed steps
@@ -146,6 +87,25 @@ Compression must preserve:
 - If the user asks for方案/思路/解法 around `fun`, prefer `functiontext`.
 - If the user asks for真实函数/真实shader/C++代码, prefer updating the `fun` node script.
 - For minimal demo algorithms, especially descriptor-driven single-point motion demos, read `tools/skills/algorithm-studio-minimal-demo/SKILL.md` first and follow its scope rules before editing the scene.
+
+### Standard Slot Alias Rule
+
+- Standard-slot aliases are tool-side semantics only.
+- The scene or working document may describe aliases such as `a1:vertex` or `v1,v2:pos` for readability.
+- Single-slot aliases still follow the underlying `v` or `a` slot rules.
+- Multi-slot aliases may be shown as higher-level grouped variables in `containerElement` details.
+- When emitting or editing package fields that are consumed by the current trunk runtime, always write the underlying `vN/aN` names instead of alias names.
+
+### Pipeline Mapping Rule
+
+- When preparing pipeline runtime mapping data, do not assume every stage exposes an identical standard container.
+- The tool should think in terms of:
+  - one shared compatible `v/a` prefix across all stages
+  - plus stage-local extra standard slots
+- Those extra standard slots must be summarized into the pipeline mapping metadata with cumulative offsets, so later bridge code can treat them as registered stage-local extensions instead of unnamed loose slots.
+- The current runtime is intentionally stricter: extra standard slots may only be extra `v` registers.
+- If a stage declares any extra standard `a` outside the shared prefix, the runtime should fail fast instead of trying to adapt it.
+- The implicit pipeline `stageBuffer` must stay inside the shared `a` prefix, not inside a stage-local extra `a`.
 
 ## UI Tools
 

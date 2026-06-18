@@ -1,0 +1,17 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="D:\gptsandbox\algorithmLib\.build_hot_gpuverify\CMakeFiles\679e53efd0651416cd37de79216187d5\v6a6_pbd_ball_collision_demo_package.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\gptsandbox\algorithmLib\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="D:\gptsandbox\algorithmLib\.build_hot_gpuverify\CMakeFiles\v6a6_pbd_ball_collision_demo_package" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{01C4B9B5-CC14-3E03-BAA0-C7FFA466D68D}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

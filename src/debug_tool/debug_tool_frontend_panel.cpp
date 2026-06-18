@@ -91,6 +91,64 @@ std::string _FormatAlgorithmRuntimeLabel(
     " stage " + std::to_string(algorithm_summary.pipeline_stage_index) + "]";
 }
 
+void _DrawReflectionSnapshot(
+  const char* title,
+  const debug_tool::AlgorithmReflectionSnapshot& snapshot) {
+  if (!snapshot.valid) {
+    return;
+  }
+
+  if (!title) {
+    title = "Reflection Snapshot";
+  }
+  ImGui::SeparatorText(title);
+  ImGui::Text("Variables: %zu", snapshot.variables.size());
+  for (const debug_tool::AlgorithmReflectionValue& value : snapshot.variables) {
+    if (value.bytes.size() >= sizeof(float) * 3u) {
+      float xyz[3]{};
+      std::memcpy(xyz, value.bytes.data(), sizeof(xyz));
+      ImGui::BulletText(
+        "%s -> %s [%s]: (%.3f, %.3f, %.3f)",
+        value.reflection_object_name.c_str(),
+        value.container_name.c_str(),
+        value.storage_kind.c_str(),
+        xyz[0],
+        xyz[1],
+        xyz[2]);
+    } else {
+      ImGui::BulletText(
+        "%s -> %s [%s]: %zu bytes",
+        value.reflection_object_name.c_str(),
+        value.container_name.c_str(),
+        value.storage_kind.c_str(),
+        value.bytes.size());
+    }
+  }
+
+  ImGui::Text("Variable Arrays: %zu", snapshot.variable_arrays.size());
+  for (const debug_tool::AlgorithmReflectionValue& value : snapshot.variable_arrays) {
+    if (value.bytes.size() >= sizeof(float) * 3u) {
+      float xyz[3]{};
+      std::memcpy(xyz, value.bytes.data(), sizeof(xyz));
+      ImGui::BulletText(
+        "%s -> %s [%s]: (%.3f, %.3f, %.3f)",
+        value.reflection_object_name.c_str(),
+        value.container_name.c_str(),
+        value.storage_kind.c_str(),
+        xyz[0],
+        xyz[1],
+        xyz[2]);
+    } else {
+      ImGui::BulletText(
+        "%s -> %s [%s]: %zu bytes",
+        value.reflection_object_name.c_str(),
+        value.container_name.c_str(),
+        value.storage_kind.c_str(),
+        value.bytes.size());
+    }
+  }
+}
+
 
 void _PopWindowToViewportOnAppear() {
   ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -301,6 +359,7 @@ void DebugToolFrontendPanel::InitializeAgentComposerDefaults() {
   agent_composer_ui_state_.reflected_algorithm_name.clear();
   agent_composer_ui_state_.reflection_error.clear();
   agent_composer_ui_state_.reflection_valid = false;
+  agent_composer_ui_state_.pipeline_run_from_stage0_to_end = true;
   agent_composer_defaults_initialized_ = true;
 }
 
@@ -1105,7 +1164,6 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
   const std::string selected_agent_header = selected_agent_summary.agent_name.empty()
     ? "Debug Agent"
     : ("Debug Agent  " + selected_agent_summary.agent_name);
-  ImGui::SeparatorText("Selected Algorithm");
   ImGui::Text("Target Agent: %s", selected_agent_header.c_str());
 
   int selected_algorithm_index = agent_composer_ui_state_.selected_algorithm_index;
@@ -1115,19 +1173,38 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
     agent_composer_ui_state_.selected_algorithm_index = selected_algorithm_index;
   }
 
-  if (!selected_agent_summary.algorithms.empty()) {
-    const std::string selected_algorithm_display = selected_algorithm_index >= 0
-      ? _FormatAlgorithmRuntimeLabel(
-          selected_agent_summary.algorithms[static_cast<size_t>(selected_algorithm_index)],
-          static_cast<size_t>(selected_algorithm_index))
-      : "Select algorithm...";
-    if (ImGui::BeginCombo("Selected Algorithm", selected_algorithm_display.c_str())) {
-      for (size_t i = 0; i < selected_agent_summary.algorithms.size(); ++i) {
-        const debug_tool::AlgorithmRuntimeSummary& candidate = selected_agent_summary.algorithms[i];
-        const std::string candidate_name = _FormatAlgorithmRuntimeLabel(candidate, i);
-        const bool is_selected = static_cast<int>(i) == selected_algorithm_index;
+  const debug_tool::AlgorithmRuntimeSummary* selected_algorithm_summary =
+    selected_algorithm_index >= 0
+      ? &selected_agent_summary.algorithms[static_cast<size_t>(selected_algorithm_index)]
+      : nullptr;
+  if (selected_algorithm_summary &&
+      selected_algorithm_summary->pipeline_stage &&
+      !selected_algorithm_summary->pipeline_name.empty()) {
+    ImGui::SeparatorText("Selected Pipeline Stage");
+    std::vector<size_t> pipeline_stage_indices{};
+    pipeline_stage_indices.reserve(selected_agent_summary.algorithms.size());
+    for (size_t i = 0; i < selected_agent_summary.algorithms.size(); ++i) {
+      const debug_tool::AlgorithmRuntimeSummary& candidate = selected_agent_summary.algorithms[i];
+      if (!candidate.pipeline_stage ||
+          candidate.pipeline_name != selected_algorithm_summary->pipeline_name) {
+        continue;
+      }
+      pipeline_stage_indices.push_back(i);
+    }
+
+    const std::string selected_algorithm_display =
+      _FormatAlgorithmRuntimeLabel(
+        *selected_algorithm_summary,
+        static_cast<size_t>(selected_algorithm_index));
+    if (ImGui::BeginCombo("Selected Stage", selected_algorithm_display.c_str())) {
+      for (size_t candidate_index : pipeline_stage_indices) {
+        const debug_tool::AlgorithmRuntimeSummary& candidate =
+          selected_agent_summary.algorithms[candidate_index];
+        const std::string candidate_name =
+          _FormatAlgorithmRuntimeLabel(candidate, candidate_index);
+        const bool is_selected = static_cast<int>(candidate_index) == selected_algorithm_index;
         if (ImGui::Selectable(candidate_name.c_str(), is_selected)) {
-          selected_algorithm_index = static_cast<int>(i);
+          selected_algorithm_index = static_cast<int>(candidate_index);
           agent_composer_ui_state_.selected_algorithm_index = selected_algorithm_index;
         }
         if (is_selected) {
@@ -1136,14 +1213,8 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
       }
       ImGui::EndCombo();
     }
-  } else {
-    ImGui::TextUnformatted("No algorithms available.");
   }
 
-  const debug_tool::AlgorithmRuntimeSummary* selected_algorithm_summary =
-    selected_algorithm_index >= 0
-      ? &selected_agent_summary.algorithms[static_cast<size_t>(selected_algorithm_index)]
-      : nullptr;
   const std::string selected_algorithm_name = selected_algorithm_summary
     ? _FormatAlgorithmRuntimeLabel(
         *selected_algorithm_summary,
@@ -1178,46 +1249,84 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
       }
     }
 
-    if (selected_algorithm_summary->reflection_snapshot.valid) {
-      ImGui::SeparatorText("Reflection Snapshot");
-      ImGui::Text("Variables: %zu", selected_algorithm_summary->reflection_snapshot.variables.size());
-      for (const debug_tool::AlgorithmReflectionValue& value : selected_algorithm_summary->reflection_snapshot.variables) {
-        if (value.bytes.size() >= sizeof(float) * 3u) {
-          float xyz[3]{};
-          std::memcpy(xyz, value.bytes.data(), sizeof(xyz));
+    _DrawReflectionSnapshot("Reflection Snapshot", selected_algorithm_summary->reflection_snapshot);
+
+    if (selected_algorithm_summary->bridge_debug_set.valid) {
+      ImGui::SeparatorText("Pipeline Bridge Debug");
+      ImGui::Text(
+        "Bridge: %s <- %s -> %s",
+        selected_algorithm_summary->bridge_debug_set.stage_name.empty()
+          ? "<stage>"
+          : selected_algorithm_summary->bridge_debug_set.stage_name.c_str(),
+        selected_algorithm_summary->bridge_debug_set.previous_stage_name.empty()
+          ? "<head>"
+          : selected_algorithm_summary->bridge_debug_set.previous_stage_name.c_str(),
+        selected_algorithm_summary->bridge_debug_set.next_stage_name.empty()
+          ? "<tail>"
+          : selected_algorithm_summary->bridge_debug_set.next_stage_name.c_str());
+
+      if (!selected_algorithm_summary->bridge_debug_set.ingress_bindings.empty()) {
+        ImGui::TextUnformatted("Ingress Bindings");
+        for (const debug_tool::PipelineStageBridgeDebugBinding& binding :
+             selected_algorithm_summary->bridge_debug_set.ingress_bindings) {
           ImGui::BulletText(
-            "%s -> %s: (%.3f, %.3f, %.3f)",
-            value.reflection_object_name.c_str(),
-            value.container_name.c_str(),
-            xyz[0],
-            xyz[1],
-            xyz[2]);
-        } else {
-          ImGui::BulletText(
-            "%s -> %s: %zu bytes",
-            value.reflection_object_name.c_str(),
-            value.container_name.c_str(),
-            value.bytes.size());
+            "%s.%s -> %s.%s%s",
+            binding.source_stage_name.c_str(),
+            binding.source_container_name.c_str(),
+            binding.target_stage_name.c_str(),
+            binding.target_container_name.c_str(),
+            binding.required ? "" : " (optional)");
         }
       }
-      ImGui::Text("Variable Arrays: %zu", selected_algorithm_summary->reflection_snapshot.variable_arrays.size());
-      for (const debug_tool::AlgorithmReflectionValue& value : selected_algorithm_summary->reflection_snapshot.variable_arrays) {
-        if (value.bytes.size() >= sizeof(float) * 3u) {
-          float xyz[3]{};
-          std::memcpy(xyz, value.bytes.data(), sizeof(xyz));
+      if (!selected_algorithm_summary->bridge_debug_set.egress_bindings.empty()) {
+        ImGui::TextUnformatted("Egress Bindings");
+        for (const debug_tool::PipelineStageBridgeDebugBinding& binding :
+             selected_algorithm_summary->bridge_debug_set.egress_bindings) {
           ImGui::BulletText(
-            "%s -> %s: (%.3f, %.3f, %.3f)",
-            value.reflection_object_name.c_str(),
-            value.container_name.c_str(),
-            xyz[0],
-            xyz[1],
-            xyz[2]);
+            "%s.%s -> %s.%s%s",
+            binding.source_stage_name.c_str(),
+            binding.source_container_name.c_str(),
+            binding.target_stage_name.c_str(),
+            binding.target_container_name.c_str(),
+            binding.required ? "" : " (optional)");
+        }
+      }
+
+      if (selected_algorithm_summary->bridge_debug_set.has_stage_input_reflection_snapshot) {
+        _DrawReflectionSnapshot(
+          "Stage Input After Ingress",
+          selected_algorithm_summary->bridge_debug_set.stage_input_reflection_snapshot);
+      }
+      if (selected_algorithm_summary->bridge_debug_set.has_stage_output_reflection_snapshot) {
+        _DrawReflectionSnapshot(
+          "Stage Output Before Egress",
+          selected_algorithm_summary->bridge_debug_set.stage_output_reflection_snapshot);
+      }
+      if (selected_algorithm_summary->bridge_debug_set.has_next_stage_input_reflection_snapshot) {
+        _DrawReflectionSnapshot(
+          "Next Stage Input After Egress",
+          selected_algorithm_summary->bridge_debug_set.next_stage_input_reflection_snapshot);
+      }
+      if (selected_algorithm_summary->bridge_debug_set.has_replay_output_reflection_snapshot) {
+        _DrawReflectionSnapshot(
+          "Replay Output Snapshot",
+          selected_algorithm_summary->bridge_debug_set.replay_output_reflection_snapshot);
+      }
+      _DrawReflectionSnapshot(
+        "Replay Reflection Snapshot",
+        selected_algorithm_summary->bridge_debug_set.replay_reflection_snapshot);
+
+      if (ImGui::Button("Replay Bridge Stage Once", ImVec2(220.0f, 0.0f))) {
+        std::string replay_error_message;
+        if (!host.ReplayPipelineStageBridgeDebug(
+              0u,
+              static_cast<size_t>(selected_algorithm_index),
+              &replay_error_message)) {
+          host.ui_status_message() = replay_error_message.empty()
+            ? "Pipeline bridge stage replay failed."
+            : std::move(replay_error_message);
         } else {
-          ImGui::BulletText(
-            "%s -> %s: %zu bytes",
-            value.reflection_object_name.c_str(),
-            value.container_name.c_str(),
-            value.bytes.size());
+          host.ui_status_message() = "Pipeline bridge stage replay executed once.";
         }
       }
     }
@@ -1286,83 +1395,6 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
         if (ImGui::Selectable(entry.display_name.c_str(), is_selected)) {
           const std::string new_algorithm_name = entry.algorithm_name;
           agent_composer_ui_state_.selected_algorithm_catalog_index = static_cast<int>(i);
-          if (selected_algorithm_summary &&
-              selected_algorithm_index >= 0 &&
-              new_algorithm_name != selected_algorithm_summary->algorithm_name) {
-            if (!RefreshAlgorithmComposerBindings(host, new_algorithm_name)) {
-              host.ui_status_message() = agent_composer_ui_state_.reflection_error.empty()
-                ? "Failed to load algorithm bindings."
-                : agent_composer_ui_state_.reflection_error;
-              ImGui::EndCombo();
-              ImGui::End();
-              return;
-            }
-
-            _SetTextBuffer(&agent_composer_ui_state_.algorithm_name, new_algorithm_name);
-
-            std::vector<debug_tool::AlgorithmResourceBinding> resource_bindings;
-            for (const auto& resource : agent_composer_ui_state_.resource_inputs) {
-              resource_bindings.push_back(debug_tool::AlgorithmResourceBinding{
-                .resource_name = resource.resource_name,
-                .resource_kind = resource.resource_kind,
-                .source_path = _TrimCopy(resource.resource_path.data()),
-              });
-            }
-            std::vector<debug_tool::AlgorithmDescriptorValue> descriptor_values;
-            for (const auto& descriptor : agent_composer_ui_state_.descriptor_inputs) {
-              descriptor_values.push_back(debug_tool::AlgorithmDescriptorValue{
-                .descriptor_name = descriptor.descriptor_name,
-                .scalar_value = descriptor.scalar_value,
-              });
-            }
-
-            std::string detach_error_message;
-            if (!host.DetachAlgorithmFromAgent(
-                  0u,
-                  static_cast<size_t>(selected_algorithm_index),
-                  &detach_error_message)) {
-              host.ui_status_message() = detach_error_message.empty()
-                ? "Failed to unload the selected algorithm."
-                : std::move(detach_error_message);
-              ImGui::EndCombo();
-              ImGui::End();
-              return;
-            }
-
-            host.ClearGpuExecutors();
-            size_t attached_algorithm_index = 0u;
-            std::string attach_error_message;
-            if (!host.AttachAlgorithmToAgent(
-                  0u,
-                  new_algorithm_name,
-                  resource_bindings,
-                  descriptor_values,
-                  &attached_algorithm_index,
-                  &attach_error_message,
-                  debug_tool::AlgorithmMountMode::Direct,
-                  agent_composer_ui_state_.execution_preference)) {
-              host.ui_status_message() = attach_error_message.empty()
-                ? "Failed to start algorithm on built-in agent."
-                : ("Failed to start algorithm on built-in agent: " + attach_error_message);
-              ImGui::EndCombo();
-              ImGui::End();
-              return;
-            }
-
-            agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(attached_algorithm_index);
-            std::string preview_error_message;
-            if (!build_and_apply_preview_for_algorithm(attached_algorithm_index, &preview_error_message)) {
-              host.ui_status_message() = preview_error_message.empty()
-                ? "Algorithm started, but no drawable result was produced."
-                : std::move(preview_error_message);
-            } else {
-              host.StartTicking();
-              host.ui_status_message() = "Algorithm swapped on built-in agent.";
-            }
-            ImGui::EndCombo();
-            ImGui::End();
-            return;
-          }
           _SetTextBuffer(&agent_composer_ui_state_.algorithm_name, new_algorithm_name);
         }
         if (is_selected) {
@@ -1590,198 +1622,268 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
     host.SetRenderPreviewRequest({});
   }
 
-  ImGui::SeparatorText("Start And Reset");
-  const bool algorithm_running = selected_algorithm_summary && selected_algorithm_index >= 0;
-  const char* action_label = algorithm_running ? "Reset Algorithm" : "Start Algorithm";
-  if (ImGui::Button(action_label, ImVec2(180.0f, 0.0f))) {
-    auto build_and_apply_preview_for_algorithm = [&](size_t algorithm_index, std::string* out_error_message) -> bool {
-      runtime_systems::RenderPreviewRequest mounted_preview_request{};
-      std::string mounted_preview_error_message;
-      if (!host.BuildRenderPreviewRequest(
-            0u,
-            algorithm_index,
-            &mounted_preview_request,
-            &mounted_preview_error_message)) {
-        DEBUG_TOOL_ASSERT(false, "Submitted algorithm did not produce a drawable preview.");
-        if (out_error_message) {
-          *out_error_message = mounted_preview_error_message.empty()
-            ? "Submitted algorithm did not produce a drawable preview."
-            : std::move(mounted_preview_error_message);
-        }
-        return false;
+  const bool selected_runtime_is_pipeline =
+    selected_algorithm_summary &&
+    selected_algorithm_summary->pipeline_stage &&
+    !selected_algorithm_summary->pipeline_name.empty();
+  const bool selected_runtime_is_normal =
+    selected_algorithm_summary && !selected_algorithm_summary->pipeline_stage;
+  std::string selected_runtime_pipeline_root_algorithm_name{};
+  if (selected_runtime_is_pipeline && selected_algorithm_summary) {
+    for (const debug_tool::AlgorithmRuntimeSummary& candidate : selected_agent_summary.algorithms) {
+      if (!candidate.pipeline_stage ||
+          candidate.pipeline_name != selected_algorithm_summary->pipeline_name ||
+          candidate.pipeline_stage_index != 0u) {
+        continue;
       }
-      if (!mounted_preview_request.valid) {
-        DEBUG_TOOL_ASSERT(false, "Submitted algorithm did not produce a drawable preview.");
-        if (out_error_message) {
-          *out_error_message = mounted_preview_error_message.empty()
-            ? "Submitted algorithm did not produce a drawable preview."
-            : std::move(mounted_preview_error_message);
-        }
-        return false;
-      }
-      if (out_error_message) {
-        out_error_message->clear();
-      }
-      host.SetRenderPreviewRequest(std::move(mounted_preview_request));
-      return true;
-    };
+      selected_runtime_pipeline_root_algorithm_name = candidate.algorithm_name;
+      break;
+    }
+  }
+  const bool selected_runtime_pipeline_matches_requested =
+    selected_runtime_is_pipeline &&
+    !selected_runtime_pipeline_root_algorithm_name.empty() &&
+    selected_runtime_pipeline_root_algorithm_name == algorithm_name;
+  const bool selected_runtime_normal_matches_requested =
+    selected_runtime_is_normal &&
+    selected_algorithm_summary &&
+    selected_algorithm_summary->algorithm_name == algorithm_name;
 
-    if (!algorithm_running) {
+  const auto apply_pipeline_run_policy = [&](const std::string& mounted_name, const char* mounted_state_text) {
+    if (agent_composer_ui_state_.pipeline_run_from_stage0_to_end) {
+      host.StartTicking();
+      host.ui_status_message() = std::string(mounted_state_text) + " '" + mounted_name + "' and started ticking.";
+    } else {
+      host.PauseTicking();
+      host.ui_status_message() = std::string(mounted_state_text) + " '" + mounted_name + "' for stage-by-stage debug.";
+    }
+  };
+
+  if (current_algorithm_is_pipeline) {
+    ImGui::SeparatorText("Pipeline Controls");
+    ImGui::Checkbox(
+      "Run From Stage0 To End",
+      &agent_composer_ui_state_.pipeline_run_from_stage0_to_end);
+    ImGui::TextUnformatted(
+      "Select a mounted stage in Agent Manager to inspect its reflection snapshot while the pipeline is paused.");
+
+    const char* mount_pipeline_label =
+      selected_runtime_pipeline_matches_requested ? "Reset Pipeline" : "Mount Pipeline";
+    if (ImGui::Button(mount_pipeline_label, ImVec2(180.0f, 0.0f))) {
       if (algorithm_name.empty()) {
         host.ui_status_message() = "Algorithm name must not be empty.";
       } else {
         const std::vector<debug_tool::AlgorithmResourceBinding> resource_bindings = build_current_resource_bindings();
         const std::vector<debug_tool::AlgorithmDescriptorValue> descriptor_values = build_current_descriptor_values();
+        std::string pipeline_instance_name = algorithm_name;
+        std::string pipeline_algorithm_name = algorithm_name;
+        std::string attach_error_message;
 
+        if (selected_runtime_is_pipeline) {
+          if (selected_runtime_pipeline_matches_requested) {
+            pipeline_instance_name = selected_algorithm_summary->pipeline_name;
+            pipeline_algorithm_name = selected_runtime_pipeline_root_algorithm_name;
+          }
+          if (!host.DetachAlgorithmFromAgent(
+                0u,
+                static_cast<size_t>(selected_algorithm_index),
+                &attach_error_message)) {
+            host.ui_status_message() = attach_error_message.empty()
+              ? "Failed to unload the selected pipeline."
+              : std::move(attach_error_message);
+          } else {
+            host.ClearGpuExecutors();
+            size_t attached_algorithm_index = 0u;
+            if (!host.AttachPipelinePackageToAgent(
+                  0u,
+                  pipeline_instance_name,
+                  pipeline_algorithm_name,
+                  resource_bindings,
+                  descriptor_values,
+                  &attached_algorithm_index,
+                  &attach_error_message,
+                  agent_composer_ui_state_.execution_preference)) {
+              DEBUG_TOOL_ASSERT(false, "Failed to mount pipeline package to the built-in agent.");
+              host.ui_status_message() = attach_error_message.empty()
+                ? "Failed to mount pipeline package."
+                : ("Failed to mount pipeline package: " + attach_error_message);
+            } else {
+              agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(attached_algorithm_index);
+              host.ClearGpuExecutors();
+              host.SetRenderPreviewRequest({});
+              host.PauseTicking();
+              host.ui_status_message() =
+                "Pipeline mounted as a render pipeline. Submit a resource batch to run it.";
+            }
+          }
+        } else {
+          size_t attached_algorithm_index = 0u;
+          if (!host.AttachPipelinePackageToAgent(
+                0u,
+                pipeline_instance_name,
+                pipeline_algorithm_name,
+                resource_bindings,
+                descriptor_values,
+                &attached_algorithm_index,
+                &attach_error_message,
+                agent_composer_ui_state_.execution_preference)) {
+            DEBUG_TOOL_ASSERT(false, "Failed to mount pipeline package to the built-in agent.");
+            host.ui_status_message() = attach_error_message.empty()
+              ? "Failed to mount pipeline package."
+              : ("Failed to mount pipeline package: " + attach_error_message);
+          } else {
+            agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(attached_algorithm_index);
+            host.ClearGpuExecutors();
+            host.SetRenderPreviewRequest({});
+            host.PauseTicking();
+            host.ui_status_message() =
+              "Pipeline mounted as a render pipeline. Submit a resource batch to run it.";
+          }
+        }
+      }
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("Submit Resource Batch", ImVec2(180.0f, 0.0f))) {
+      if (algorithm_name.empty()) {
+        host.ui_status_message() = "Algorithm name must not be empty.";
+      } else {
+        const std::vector<debug_tool::AlgorithmResourceBinding> resource_bindings = build_current_resource_bindings();
+        const std::vector<debug_tool::AlgorithmDescriptorValue> descriptor_values = build_current_descriptor_values();
+        const std::string pipeline_instance_name = build_testsubmit_pipeline_name(algorithm_name);
         size_t attached_algorithm_index = 0u;
         std::string attach_error_message;
-        if (!host.AttachAlgorithmToAgent(
+        if (!host.AttachPipelinePackageToAgent(
               0u,
+              pipeline_instance_name,
               algorithm_name,
               resource_bindings,
               descriptor_values,
               &attached_algorithm_index,
               &attach_error_message,
-              debug_tool::AlgorithmMountMode::Direct,
               agent_composer_ui_state_.execution_preference)) {
-          DEBUG_TOOL_ASSERT(false, "Failed to attach algorithm to the built-in agent.");
+          DEBUG_TOOL_ASSERT(false, "Failed to append a pipeline resource submission.");
           host.ui_status_message() = attach_error_message.empty()
-            ? "Failed to start algorithm on built-in agent."
-            : ("Failed to start algorithm on built-in agent: " + attach_error_message);
+            ? "Failed to append the pipeline resource submission."
+            : ("Failed to append the pipeline resource submission: " + attach_error_message);
         } else {
           agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(attached_algorithm_index);
           std::string preview_error_message;
           if (!build_and_apply_preview_for_algorithm(attached_algorithm_index, &preview_error_message)) {
-            DEBUG_TOOL_ASSERT(false, "Submitted algorithm failed preview validation.");
+            DEBUG_TOOL_ASSERT(false, "Pipeline resource submission preview validation failed.");
             host.ui_status_message() = preview_error_message.empty()
-              ? "Algorithm started, but no drawable result was produced."
+              ? "Pipeline resource submission mounted, but no drawable result was produced."
               : std::move(preview_error_message);
           } else {
-            host.StartTicking();
-            host.ui_status_message() = "Algorithm started on built-in agent.";
-          }
-        }
-      }
-    } else {
-      const bool reset_pipeline_algorithm =
-        selected_algorithm_summary->pipeline_stage && !selected_algorithm_summary->pipeline_name.empty();
-      std::string reset_algorithm_name = selected_algorithm_summary->algorithm_name;
-      std::vector<debug_tool::AlgorithmResourceBinding> reset_resource_bindings = selected_algorithm_summary->resource_bindings;
-      std::vector<debug_tool::AlgorithmDescriptorValue> reset_descriptor_values = selected_algorithm_summary->descriptor_values;
-      debug_tool::AlgorithmMountMode reset_mount_mode = selected_algorithm_summary->mount_mode;
-      debug_tool::AlgorithmExecutionPreference reset_execution_preference = selected_algorithm_summary->execution_preference;
-      if (reset_pipeline_algorithm) {
-        for (const debug_tool::AlgorithmRuntimeSummary& candidate : selected_agent_summary.algorithms) {
-          if (!candidate.pipeline_stage ||
-              candidate.pipeline_name != selected_algorithm_summary->pipeline_name ||
-              candidate.pipeline_stage_index != 0u) {
-            continue;
-          }
-          reset_algorithm_name = candidate.algorithm_name;
-          reset_resource_bindings = candidate.resource_bindings;
-          reset_descriptor_values = candidate.descriptor_values;
-          reset_mount_mode = candidate.mount_mode;
-          reset_execution_preference = candidate.execution_preference;
-          break;
-        }
-      }
-      std::string reset_error_message;
-      if (!host.DetachAlgorithmFromAgent(
-            0u,
-            static_cast<size_t>(selected_algorithm_index),
-            &reset_error_message)) {
-        host.ui_status_message() = reset_error_message.empty()
-          ? "Failed to unload the selected algorithm."
-          : std::move(reset_error_message);
-      } else {
-        host.ClearGpuExecutors();
-        size_t reset_attached_algorithm_index = 0u;
-        const bool reset_ok = reset_pipeline_algorithm
-          ? host.AttachPipelinePackageToAgent(
-              0u,
-              selected_algorithm_summary->pipeline_name,
-              reset_algorithm_name,
-              reset_resource_bindings,
-              reset_descriptor_values,
-              &reset_attached_algorithm_index,
-              &reset_error_message,
-              reset_execution_preference)
-          : host.AttachAlgorithmToAgent(
-              0u,
-              reset_algorithm_name,
-              reset_resource_bindings,
-              reset_descriptor_values,
-              &reset_attached_algorithm_index,
-              &reset_error_message,
-              reset_mount_mode,
-              reset_execution_preference);
-        if (!reset_ok) {
-          DEBUG_TOOL_ASSERT(false, "Failed to reattach the selected algorithm.");
-          host.ui_status_message() = reset_error_message.empty()
-            ? "Failed to reattach the selected algorithm."
-            : ("Failed to reattach the selected algorithm: " + reset_error_message);
-        } else {
-          agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(reset_attached_algorithm_index);
-          std::string preview_error_message;
-          if (!build_and_apply_preview_for_algorithm(reset_attached_algorithm_index, &preview_error_message)) {
-            DEBUG_TOOL_ASSERT(false, "Reset algorithm failed preview validation.");
-            host.ui_status_message() = preview_error_message.empty()
-              ? "Selected algorithm was reset, but no drawable result was produced."
-              : std::move(preview_error_message);
-          } else {
-            host.StartTicking();
-            host.ui_status_message() = "Selected algorithm was reset.";
+            apply_pipeline_run_policy(pipeline_instance_name, "Submitted pipeline resource batch");
           }
         }
       }
     }
-  }
-
-  ImGui::SameLine();
-  ImGui::BeginDisabled(!current_algorithm_is_pipeline);
-  if (ImGui::Button("testsubmit", ImVec2(180.0f, 0.0f))) {
-    if (algorithm_name.empty()) {
-      host.ui_status_message() = "Algorithm name must not be empty.";
-    } else if (!current_algorithm_is_pipeline) {
-      host.ui_status_message() = pipeline_query_error_message.empty()
-        ? "testsubmit only works for pipeline algorithms."
-        : std::move(pipeline_query_error_message);
-    } else {
-      const std::vector<debug_tool::AlgorithmResourceBinding> resource_bindings = build_current_resource_bindings();
-      const std::vector<debug_tool::AlgorithmDescriptorValue> descriptor_values = build_current_descriptor_values();
-      const std::string pipeline_instance_name = build_testsubmit_pipeline_name(algorithm_name);
-      size_t attached_algorithm_index = 0u;
-      std::string attach_error_message;
-      if (!host.AttachPipelinePackageToAgent(
-            0u,
-            pipeline_instance_name,
-            algorithm_name,
-            resource_bindings,
-            descriptor_values,
-            &attached_algorithm_index,
-            &attach_error_message,
-            agent_composer_ui_state_.execution_preference)) {
-        DEBUG_TOOL_ASSERT(false, "Failed to append a pipeline resource submission.");
-        host.ui_status_message() = attach_error_message.empty()
-          ? "Failed to append the pipeline resource submission."
-          : ("Failed to append the pipeline resource submission: " + attach_error_message);
+  } else {
+    ImGui::SeparatorText("Algorithm Controls");
+    const char* mount_algorithm_label =
+      selected_runtime_normal_matches_requested ? "Reset Mount" : "Mount Algorithm";
+    if (ImGui::Button(mount_algorithm_label, ImVec2(180.0f, 0.0f))) {
+      if (algorithm_name.empty()) {
+        host.ui_status_message() = "Algorithm name must not be empty.";
       } else {
-        agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(attached_algorithm_index);
+        const std::vector<debug_tool::AlgorithmResourceBinding> resource_bindings = build_current_resource_bindings();
+        const std::vector<debug_tool::AlgorithmDescriptorValue> descriptor_values = build_current_descriptor_values();
+        std::string attach_error_message;
+
+        if (selected_runtime_is_normal) {
+          if (!host.DetachAlgorithmFromAgent(
+                0u,
+                static_cast<size_t>(selected_algorithm_index),
+                &attach_error_message)) {
+            host.ui_status_message() = attach_error_message.empty()
+              ? "Failed to unload the selected algorithm."
+              : std::move(attach_error_message);
+          } else {
+            host.ClearGpuExecutors();
+            size_t attached_algorithm_index = 0u;
+            if (!host.AttachAlgorithmToAgent(
+                  0u,
+                  algorithm_name,
+                  resource_bindings,
+                  descriptor_values,
+                  &attached_algorithm_index,
+                  &attach_error_message,
+                  debug_tool::AlgorithmMountMode::Direct,
+                  agent_composer_ui_state_.execution_preference)) {
+              DEBUG_TOOL_ASSERT(false, "Failed to attach algorithm to the built-in agent.");
+              host.ui_status_message() = attach_error_message.empty()
+                ? "Failed to mount algorithm on built-in agent."
+                : ("Failed to mount algorithm on built-in agent: " + attach_error_message);
+            } else {
+              agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(attached_algorithm_index);
+              std::string preview_error_message;
+              if (!build_and_apply_preview_for_algorithm(attached_algorithm_index, &preview_error_message)) {
+                DEBUG_TOOL_ASSERT(false, "Mounted algorithm failed preview validation.");
+                host.ui_status_message() = preview_error_message.empty()
+                  ? "Algorithm mounted, but no drawable result was produced."
+                  : std::move(preview_error_message);
+              } else {
+                host.PauseTicking();
+                host.ui_status_message() = "Algorithm mounted. Press Start Tick to run it.";
+              }
+            }
+          }
+        } else {
+          size_t attached_algorithm_index = 0u;
+          if (!host.AttachAlgorithmToAgent(
+                0u,
+                algorithm_name,
+                resource_bindings,
+                descriptor_values,
+                &attached_algorithm_index,
+                &attach_error_message,
+                debug_tool::AlgorithmMountMode::Direct,
+                agent_composer_ui_state_.execution_preference)) {
+            DEBUG_TOOL_ASSERT(false, "Failed to attach algorithm to the built-in agent.");
+            host.ui_status_message() = attach_error_message.empty()
+              ? "Failed to mount algorithm on built-in agent."
+              : ("Failed to mount algorithm on built-in agent: " + attach_error_message);
+          } else {
+            agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(attached_algorithm_index);
+            std::string preview_error_message;
+            if (!build_and_apply_preview_for_algorithm(attached_algorithm_index, &preview_error_message)) {
+              DEBUG_TOOL_ASSERT(false, "Mounted algorithm failed preview validation.");
+              host.ui_status_message() = preview_error_message.empty()
+                ? "Algorithm mounted, but no drawable result was produced."
+                : std::move(preview_error_message);
+            } else {
+              host.PauseTicking();
+              host.ui_status_message() = "Algorithm mounted. Press Start Tick to run it.";
+            }
+          }
+        }
+      }
+    }
+
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!selected_algorithm_summary);
+    if (ImGui::Button("Start Tick", ImVec2(180.0f, 0.0f))) {
+      if (!selected_algorithm_summary) {
+        host.ui_status_message() = "Mount an algorithm first.";
+      } else {
         std::string preview_error_message;
-        if (!build_and_apply_preview_for_algorithm(attached_algorithm_index, &preview_error_message)) {
-          DEBUG_TOOL_ASSERT(false, "testsubmit pipeline preview validation failed.");
+        if (!build_and_apply_preview_for_algorithm(
+              static_cast<size_t>(selected_algorithm_index),
+              &preview_error_message)) {
+          DEBUG_TOOL_ASSERT(false, "Mounted algorithm failed preview validation before start.");
           host.ui_status_message() = preview_error_message.empty()
-            ? "Pipeline resource submission was mounted, but no drawable result was produced."
+            ? "Mounted algorithm did not produce a drawable preview."
             : std::move(preview_error_message);
         } else {
           host.StartTicking();
-          host.ui_status_message() =
-            "Pipeline resource submission mounted as '" + pipeline_instance_name + "'.";
+          host.ui_status_message() = "Mounted algorithm started.";
         }
       }
     }
+    ImGui::EndDisabled();
   }
-  ImGui::EndDisabled();
 
   ImGui::Spacing();
   ImGui::BeginDisabled(!selected_algorithm_summary);

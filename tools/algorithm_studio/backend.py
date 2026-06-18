@@ -30,6 +30,9 @@ class ContainerItem:
     view_offset: int = 0
     x: float = 0.0
     y: float = 0.0
+    width: float = 0.0
+    height: float = 0.0
+    expand: bool = False
     locked: bool = False
 
 
@@ -43,6 +46,7 @@ class ContainerGroupItem:
     y: float = 0.0
     width: float = 360.0
     height: float = 220.0
+    expand: bool = True
     locked: bool = False
 
 
@@ -59,6 +63,7 @@ class DecomposerRule:
     y: float = 0.0
     width: float = 360.0
     height: float = 220.0
+    expand: bool = True
 
 
 @dataclass
@@ -75,6 +80,7 @@ class ReflectorItem:
     y: float = 0.0
     width: float = 360.0
     height: float = 220.0
+    expand: bool = True
 
 
 @dataclass
@@ -87,6 +93,7 @@ class ResourceNodeItem:
     y: float = 0.0
     width: float = 360.0
     height: float = 220.0
+    expand: bool = True
 
 
 @dataclass
@@ -101,6 +108,7 @@ class FunctionFrameItem:
     y: float = 0.0
     width: float = 360.0
     height: float = 220.0
+    expand: bool = True
 
 
 @dataclass
@@ -112,6 +120,7 @@ class FunctionTextItem:
     y: float = 0.0
     width: float = 360.0
     height: float = 200.0
+    expand: bool = True
 
 
 @dataclass
@@ -138,6 +147,7 @@ class InterventionStage:
     y: float = 0.0
     width: float = 360.0
     height: float = 220.0
+    expand: bool = True
 
 
 @dataclass
@@ -168,10 +178,27 @@ class ProjectState:
                 return candidate
             index += 1
 
+    def next_resource_container_name(self, kind: str) -> str:
+        prefix = "resV" if kind == "variable" else "resA"
+        index = 1
+        while True:
+            candidate = f"{prefix}{index}"
+            if all(container.name != candidate for container in self.containers):
+                return candidate
+            index += 1
+
     def next_container_group_name(self) -> str:
         index = 1
         while True:
             candidate = f"containerElement_{index}"
+            if all(group.name != candidate for group in self.container_groups):
+                return candidate
+            index += 1
+
+    def next_resource_group_name(self) -> str:
+        index = 1
+        while True:
+            candidate = f"resContainerElement_{index}"
             if all(group.name != candidate for group in self.container_groups):
                 return candidate
             index += 1
@@ -229,6 +256,20 @@ class ProjectState:
 
     def next_stage_name(self) -> str:
         return self.next_intervention_name()
+
+    @staticmethod
+    def _expand_flag(value: Any, default: bool) -> bool:
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            lowered = value.strip().lower()
+            if lowered in {"true", "1"}:
+                return True
+            if lowered in {"false", "0"}:
+                return False
+        raise ValueError(f"expand must be a boolean, got {value!r}.")
 
     def _normalize_kind(self, kind: str) -> str:
         normalized = str(kind).strip()
@@ -399,6 +440,10 @@ class ProjectState:
             signature.append(self._structure_signature_from_group(child))
         return tuple(sorted(signature, key=repr))
 
+    def _structure_signature_from_container(self, container: ContainerItem) -> tuple[Any, ...]:
+        normalized_structure = tuple(str(value).strip() for value in container.structure if str(value).strip())
+        return (self._container_kind_code(container), normalized_structure)
+
     def _structure_signature_from_schema(self, schema: Any) -> tuple[Any, ...] | str:
         if isinstance(schema, dict):
             signature: list[Any] = []
@@ -493,6 +538,34 @@ class ProjectState:
             f"Decomposer connections only support container or containerElement targets, got {other_kind}:{other_name}."
         )
 
+    def _validate_container_structure_connection(self, connection: ConnectionItem) -> None:
+        container_like_kinds = {"container", "containerelement"}
+        if connection.source_kind not in container_like_kinds or connection.target_kind not in container_like_kinds:
+            return
+        if connection.source_kind != connection.target_kind:
+            raise ValueError(
+                f"Cannot connect {connection.source_kind}:{connection.source_name} to "
+                f"{connection.target_kind}:{connection.target_name} directly."
+            )
+        if connection.source_kind == "container":
+            source = self._resolve_node("container", connection.source_name)
+            target = self._resolve_node("container", connection.target_name)
+            if not isinstance(source, ContainerItem) or not isinstance(target, ContainerItem):
+                raise AssertionError("Container connection validation resolved a non-container node.")
+            if self._structure_signature_from_container(source) != self._structure_signature_from_container(target):
+                raise ValueError(
+                    f"Container structure mismatch: {source.name} cannot connect to {target.name}."
+                )
+            return
+        source_group = self._resolve_node("containerelement", connection.source_name)
+        target_group = self._resolve_node("containerelement", connection.target_name)
+        if not isinstance(source_group, ContainerGroupItem) or not isinstance(target_group, ContainerGroupItem):
+            raise AssertionError("containerElement connection validation resolved an invalid node.")
+        if self._structure_signature_from_group(source_group) != self._structure_signature_from_group(target_group):
+            raise ValueError(
+                f"containerElement structure mismatch: {source_group.name} cannot connect to {target_group.name}."
+            )
+
     def _rect_contains_rect(
         self,
         left_a: float,
@@ -507,88 +580,42 @@ class ProjectState:
         return left_a <= left_b and top_a <= top_b and right_a >= right_b and bottom_a >= bottom_b
 
     def sync_container_groups_from_geometry(self) -> None:
+        container_owner: dict[str, str] = {}
+        group_owner: dict[str, str] = {}
         for group in self.container_groups:
-            group.variables = []
-            group.arrays = []
-            group.groups = []
-
-        parent_group_for_container: dict[str, str] = {}
-        parent_group_for_group: dict[str, str] = {}
-
-        for container in self.containers:
-            c_left = container.x
-            c_top = container.y
-            c_right = container.x + 180
-            c_bottom = container.y + 76
-            parent_name: str | None = None
-            parent_area = float("inf")
-            for group in self.container_groups:
-                left = group.x
-                top = group.y
-                right = group.x + group.width
-                bottom = group.y + group.height
-                if not self._rect_contains_rect(left, top, right, bottom, c_left, c_top, c_right, c_bottom):
+            self.validate_container_group(group)
+        for group in self.container_groups:
+            dedup_variables: list[str] = []
+            dedup_arrays: list[str] = []
+            dedup_groups: list[str] = []
+            for name in group.variables:
+                if name in dedup_variables:
                     continue
-                area = group.width * group.height
-                if area < parent_area:
-                    parent_area = area
-                    parent_name = group.name
-            if parent_name:
-                parent_group_for_container[container.name] = parent_name
-
-        for group in self.container_groups:
-            left = group.x
-            top = group.y
-            right = group.x + group.width
-            bottom = group.y + group.height
-            parent_name = None
-            parent_area = float("inf")
-            for candidate in self.container_groups:
-                if candidate.name == group.name:
+                if name in container_owner:
+                    raise ValueError(f"Container {name} belongs to both {container_owner[name]} and {group.name}.")
+                container_owner[name] = group.name
+                dedup_variables.append(name)
+            for name in group.arrays:
+                if name in dedup_arrays:
                     continue
-                candidate_left = candidate.x
-                candidate_top = candidate.y
-                candidate_right = candidate.x + candidate.width
-                candidate_bottom = candidate.y + candidate.height
-                if not self._rect_contains_rect(left, top, right, bottom, candidate_left, candidate_top, candidate_right, candidate_bottom):
+                if name in container_owner:
+                    raise ValueError(f"Container {name} belongs to both {container_owner[name]} and {group.name}.")
+                container_owner[name] = group.name
+                dedup_arrays.append(name)
+            for name in group.groups:
+                if name in dedup_groups:
                     continue
-                area = candidate.width * candidate.height
-                if area < parent_area:
-                    parent_area = area
-                    parent_name = candidate.name
-            if parent_name:
-                parent_group_for_group[group.name] = parent_name
-
-        for container in self.containers:
-            parent_name = parent_group_for_container.get(container.name)
-            if not parent_name:
-                continue
-            parent_group = next((item for item in self.container_groups if item.name == parent_name), None)
-            if parent_group is None:
-                raise AssertionError(f"Missing parent group {parent_name} for container {container.name}.")
-            if container.kind == "variable":
-                parent_group.variables.append(container.name)
-            elif container.kind == "array":
-                parent_group.arrays.append(container.name)
-            else:
-                raise AssertionError(f"Unsupported container kind in group {parent_group.name}: {container.kind}")
-
-        for group in self.container_groups:
-            parent_name = parent_group_for_group.get(group.name)
-            if not parent_name:
-                continue
-            parent_group = next((item for item in self.container_groups if item.name == parent_name), None)
-            if parent_group is None:
-                raise AssertionError(f"Missing parent group {parent_name} for nested group {group.name}.")
-            parent_group.groups.append(group.name)
-
-        for group in self.container_groups:
-            group.variables.sort()
-            group.arrays.sort()
-            group.groups.sort()
+                if name in group_owner:
+                    raise ValueError(f"containerElement {name} belongs to both {group_owner[name]} and {group.name}.")
+                group_owner[name] = group.name
+                dedup_groups.append(name)
+            group.variables = dedup_variables
+            group.arrays = dedup_arrays
+            group.groups = dedup_groups
 
     def validate_connection(self, connection: ConnectionItem) -> None:
         self._validate_decomposer_connection(connection)
+        self._validate_container_structure_connection(connection)
         source_outputs = self.output_ports_for(connection.source_kind, connection.source_name)
         target_inputs = self.input_ports_for(connection.target_kind, connection.target_name)
         if connection.source_port not in source_outputs:
@@ -608,6 +635,7 @@ class ProjectState:
                 "name": name,
                 "x": float(getattr(item, "x", 0.0)),
                 "y": float(getattr(item, "y", 0.0)),
+                "expand": bool(getattr(item, "expand", True)),
             }
             if kind == "containerelement":
                 entry["width"] = float(getattr(item, "width", 360.0))
@@ -636,6 +664,7 @@ class ProjectState:
                 "y": group.y,
                 "width": group.width,
                 "height": group.height,
+                "expand": group.expand,
             }
         return container_group_section
 
@@ -699,6 +728,9 @@ class ProjectState:
                 "view_offset": container.view_offset,
                 "x": container.x,
                 "y": container.y,
+                "width": container.width,
+                "height": container.height,
+                "expand": container.expand,
             }
             if container.kind == "variable":
                 variable_section[container.name] = entry
@@ -716,6 +748,7 @@ class ProjectState:
                 "y": rule.y,
                 "width": rule.width,
                 "height": rule.height,
+                "expand": rule.expand,
             }
             if rule.map_kind == "filter":
                 entry["script"] = rule.descriptor_script
@@ -737,6 +770,7 @@ class ProjectState:
                         "y": item.y,
                         "width": item.width,
                         "height": item.height,
+                        "expand": item.expand,
                     }
                 )
             else:
@@ -757,6 +791,7 @@ class ProjectState:
                         "y": item.y,
                         "width": item.width,
                         "height": item.height,
+                        "expand": item.expand,
                     }
                 )
 
@@ -775,6 +810,7 @@ class ProjectState:
                     "y": item.y,
                     "width": item.width,
                     "height": item.height,
+                    "expand": item.expand,
                 }
             )
 
@@ -792,6 +828,7 @@ class ProjectState:
                     "y": item.y,
                     "width": item.width,
                     "height": item.height,
+                    "expand": item.expand,
                 }
             )
 
@@ -806,6 +843,7 @@ class ProjectState:
                     "y": item.y,
                     "width": item.width,
                     "height": item.height,
+                    "expand": item.expand,
                 }
             )
 
@@ -819,6 +857,7 @@ class ProjectState:
                 "y": stage.y,
                 "width": stage.width,
                 "height": stage.height,
+                "expand": stage.expand,
                 "used_algorithm_containers": {
                     "variables": [{"name": name, "kind": "variable", "tuple_width": 1, "required": True} for name in stage.used_variables],
                     "arrays": [{"name": name, "kind": "array", "tuple_width": 1, "required": True} for name in stage.used_arrays],
@@ -911,6 +950,9 @@ class ProjectState:
                         view_offset=int(entry.get("view_offset", 0)),
                         x=float(entry.get("x", 0.0)),
                         y=float(entry.get("y", 0.0)),
+                        width=float(entry.get("width", 0.0)),
+                        height=float(entry.get("height", 0.0)),
+                        expand=cls._expand_flag(entry.get("expand"), False),
                     )
                 )
 
@@ -938,6 +980,9 @@ class ProjectState:
                         view_offset=int(entry.get("view_offset", 0)),
                         x=float(entry.get("x", 0.0)),
                         y=float(entry.get("y", 0.0)),
+                        width=float(entry.get("width", 0.0)),
+                        height=float(entry.get("height", 0.0)),
+                        expand=cls._expand_flag(entry.get("expand"), False),
                     )
                 )
 
@@ -967,6 +1012,7 @@ class ProjectState:
                         y=float(entry.get("y", 0.0)),
                         width=float(entry.get("width", 360.0)),
                         height=float(entry.get("height", 220.0)),
+                        expand=cls._expand_flag(entry.get("expand"), True),
                     )
                 )
 
@@ -1000,6 +1046,7 @@ class ProjectState:
                         y=float(rule.get("y", 0.0)),
                         width=float(rule.get("width", 360.0)),
                         height=float(rule.get("height", 220.0)),
+                        expand=cls._expand_flag(rule.get("expand"), True),
                     )
                 )
 
@@ -1027,6 +1074,7 @@ class ProjectState:
                     y=float(item.get("y", 0.0)),
                     width=float(item.get("width", 360.0)),
                     height=float(item.get("height", 220.0)),
+                    expand=cls._expand_flag(item.get("expand"), True),
                 )
             )
 
@@ -1049,6 +1097,7 @@ class ProjectState:
                         y=float(item.get("y", 0.0)),
                         width=float(item.get("width", 360.0)),
                         height=float(item.get("height", 220.0)),
+                        expand=cls._expand_flag(item.get("expand"), True),
                     )
                 )
 
@@ -1068,6 +1117,7 @@ class ProjectState:
                         y=float(item.get("y", 0.0)),
                         width=float(item.get("width", 360.0)),
                         height=float(item.get("height", 220.0)),
+                        expand=cls._expand_flag(item.get("expand"), True),
                     )
                 )
 
@@ -1084,6 +1134,7 @@ class ProjectState:
                         y=float(item.get("y", 0.0)),
                         width=float(item.get("width", 360.0)),
                         height=float(item.get("height", 200.0)),
+                        expand=cls._expand_flag(item.get("expand"), True),
                     )
                 )
 
@@ -1105,6 +1156,7 @@ class ProjectState:
                         y=float(stage.get("y", 0.0)),
                         width=float(stage.get("width", 360.0)),
                         height=float(stage.get("height", 220.0)),
+                        expand=cls._expand_flag(stage.get("expand"), True),
                     )
                 )
 
@@ -1139,6 +1191,11 @@ class ProjectState:
                         item.width = float(entry.get("width", getattr(item, "width", 360.0)))
                     if hasattr(item, "height"):
                         item.height = float(entry.get("height", getattr(item, "height", 220.0)))
+                    if isinstance(item, ContainerItem):
+                        item.width = float(entry.get("width", getattr(item, "width", 0.0)))
+                        item.height = float(entry.get("height", getattr(item, "height", 0.0)))
+                    if hasattr(item, "expand") and "expand" in entry:
+                        item.expand = cls._expand_flag(entry.get("expand"), bool(getattr(item, "expand", True)))
 
             ui_connections = ui_section.get("connections", [])
             if ui_connections:
@@ -1339,7 +1396,7 @@ def generate_cpp_skeleton(project_name: str) -> str:
         [
             "#define ALGORITHM_LIBRARY_PLUGIN_BUILD 1",
             "",
-            "#include \"capabilities/algorithm_library/algorithm_plugin_api.h\"",
+            "#include \"../algorithm_plugin_api.h\"",
             "",
             "#include <memory>",
             "#include <string>",

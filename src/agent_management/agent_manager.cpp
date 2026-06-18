@@ -275,7 +275,8 @@ bool AgentManager::AttachPipelineAlgorithmToAgent(
   const std::vector<agent::AlgorithmPipelineStageSubmission>& stage_submissions,
   size_t* out_algorithm_index,
   std::string* out_error_message,
-  agent::AlgorithmExecutionPreference execution_preference) {
+  agent::AlgorithmExecutionPreference execution_preference,
+  agent::AlgorithmPipelineSubmissionMode submission_mode) {
   auto set_error = [&](const std::string& message) {
     if (out_error_message) {
       *out_error_message = message;
@@ -293,7 +294,8 @@ bool AgentManager::AttachPipelineAlgorithmToAgent(
         stage_submissions,
         &algorithm_index,
         out_error_message,
-        execution_preference)) {
+        execution_preference,
+        submission_mode)) {
     assert(false && "Failed to mount pipeline algorithm.");
     if (out_error_message && out_error_message->empty()) {
       set_error("Failed to mount pipeline algorithm.");
@@ -304,6 +306,42 @@ bool AgentManager::AttachPipelineAlgorithmToAgent(
 
   if (out_algorithm_index) {
     *out_algorithm_index = algorithm_index;
+  }
+  return true;
+}
+
+bool AgentManager::EnqueuePipelineStage0Submission(
+  size_t agent_index,
+  const std::string& pipeline_name,
+  const std::vector<agent::AlgorithmResourceBinding>& resource_bindings,
+  const std::vector<agent::AlgorithmDescriptorValue>& descriptor_values,
+  std::string* out_error_message) {
+  auto set_error = [&](const std::string& message) {
+    if (out_error_message) {
+      *out_error_message = message;
+    }
+  };
+
+  if (agent_index >= managed_agents_.size() || !managed_agents_[agent_index] || !managed_agents_[agent_index]->agent) {
+    set_error("Selected agent is unavailable.");
+    return false;
+  }
+
+  if (!managed_agents_[agent_index]->agent->EnqueuePipelineStage0Submission(
+        pipeline_name,
+        resource_bindings,
+        descriptor_values,
+        out_error_message)) {
+    assert(false && "Failed to enqueue pipeline stage0 submission.");
+    if (out_error_message && out_error_message->empty()) {
+      set_error("Failed to enqueue pipeline stage0 submission.");
+    }
+    return false;
+  }
+
+  managed_agents_[agent_index]->ResetTickBudget();
+  if (out_error_message) {
+    out_error_message->clear();
   }
   return true;
 }
@@ -329,6 +367,36 @@ bool AgentManager::DetachAlgorithmFromAgent(
     return false;
   }
   managed_agents_[agent_index]->ResetTickBudget();
+  return true;
+}
+
+bool AgentManager::ReplayPipelineStageBridgeDebug(
+  size_t agent_index,
+  size_t algorithm_index,
+  const agent::AgentTickContext& context,
+  std::string* out_error_message) {
+  auto set_error = [&](const std::string& message) {
+    if (out_error_message) {
+      *out_error_message = message;
+    }
+  };
+
+  if (agent_index >= managed_agents_.size() || !managed_agents_[agent_index] || !managed_agents_[agent_index]->agent) {
+    set_error("Selected agent is unavailable.");
+    return false;
+  }
+
+  if (!managed_agents_[agent_index]->agent->ReplayPipelineStageBridgeDebug(
+        algorithm_index,
+        context,
+        out_error_message)) {
+    assert(false && "Failed to replay pipeline stage bridge debug input.");
+    if (out_error_message && out_error_message->empty()) {
+      set_error("Failed to replay pipeline stage bridge debug input.");
+    }
+    return false;
+  }
+
   return true;
 }
 

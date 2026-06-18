@@ -5,6 +5,7 @@
 #include "common_data/common_data.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -48,7 +49,8 @@ class Agent {
     const std::vector<AlgorithmPipelineStageSubmission>& stage_submissions,
     size_t* out_index = nullptr,
     std::string* out_error_message = nullptr,
-    AlgorithmExecutionPreference execution_preference = AlgorithmExecutionPreference::Gpu);
+    AlgorithmExecutionPreference execution_preference = AlgorithmExecutionPreference::Gpu,
+    AlgorithmPipelineSubmissionMode submission_mode = AlgorithmPipelineSubmissionMode::NonCircular);
   bool AppendAlgorithmObject(AlgorithmObject object, size_t* out_index = nullptr);
   bool RemoveAlgorithm(size_t index);
   void RefreshInterventionSignals(const AgentTickContext& context);
@@ -60,6 +62,15 @@ class Agent {
     const AgentTickContext& context,
     const std::vector<bool>& allow_tick_mask,
     AgentTickResult* out_result);
+  bool ReplayPipelineStageBridgeDebug(
+    size_t index,
+    const AgentTickContext& context,
+    std::string* out_error_message = nullptr);
+  bool EnqueuePipelineStage0Submission(
+    const std::string& pipeline_name,
+    const std::vector<AlgorithmResourceBinding>& resource_bindings,
+    const std::vector<AlgorithmDescriptorValue>& descriptor_values,
+    std::string* out_error_message = nullptr);
   void Destroy();
 
   bool initialized() const { return initialized_; }
@@ -97,6 +108,11 @@ class Agent {
   }
   bool PipelineNameInUse(const std::string& pipeline_name) const;
 
+  using PendingPipelineStage0Submission = runtime_systems::CpuPendingPipelineStage0Submission;
+  using PipelineInterStageBufferRuntimeState = runtime_systems::CpuPipelineInterStageBufferRuntimeState;
+  using PipelineLaneRuntimeState = runtime_systems::CpuPipelineLaneRuntimeState;
+  using PipelineRuntimeState = runtime_systems::CpuPipelineRuntimeState;
+
  private:
   bool initialized_{false};
   std::string agent_name_{}; 
@@ -104,6 +120,7 @@ class Agent {
   std::vector<AgentAlgorithmRuntimeState> algorithm_runtime_states_{};
   std::vector<AlgorithmAssemblyState> algorithm_assembly_states_{};
   std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>> standard_shared_container_sets_{};
+  std::unordered_map<std::string, PipelineRuntimeState> pipeline_runtime_states_{};
 };
 
 }  // namespace agent

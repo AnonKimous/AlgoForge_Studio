@@ -4,7 +4,6 @@ setlocal EnableExtensions
 set "ROOT=%~dp0"
 set "ROOT=%ROOT:~0,-1%"
 set "CMAKE=D:\Program Files\CMake\bin\cmake.exe"
-set "SRC_LIBRARY_DIR=%ROOT%\src\capabilities\algorithm_library"
 set "ALGO_ROOT=%ROOT%\algorithmLib"
 set "ALGO_SRC_ROOT=%ALGO_ROOT%\algorithmSrc"
 set "ALGO_RUNTIME_ROOT=%ALGO_ROOT%\algorithmruntimeLib"
@@ -35,16 +34,8 @@ if errorlevel 1 (
   exit /b 1
 )
 
-if exist "%ALGO_SRC_ROOT%" (
-  rmdir /s /q "%ALGO_SRC_ROOT%"
-  if errorlevel 1 (
-    echo Failed to reset algorithm source root: "%ALGO_SRC_ROOT%"
-    exit /b 1
-  )
-)
-if not exist "%ALGO_SRC_ROOT%" mkdir "%ALGO_SRC_ROOT%"
-if errorlevel 1 (
-  echo Failed to create algorithm source root: "%ALGO_SRC_ROOT%"
+if not exist "%ALGO_SRC_ROOT%" (
+  echo Missing algorithm source root: "%ALGO_SRC_ROOT%"
   exit /b 1
 )
 
@@ -72,20 +63,6 @@ if not exist "%ALGO_BUILD%" mkdir "%ALGO_BUILD%"
 if errorlevel 1 (
   echo Failed to create temporary build root: "%ALGO_BUILD%"
   exit /b 1
-)
-
-call "%ROOT%\algorithm_build_common.bat" SyncLibraryRoot "%SRC_LIBRARY_DIR%" "%ALGO_SRC_ROOT%"
-if errorlevel 1 (
-  set "EXITCODE=1"
-  goto :cleanup
-)
-
-for /d %%D in ("%SRC_LIBRARY_DIR%\*") do (
-  call "%ROOT%\algorithm_build_common.bat" SyncAlgorithmFolder "%%~fD" "%ALGO_SRC_ROOT%\%%~nxD"
-  if errorlevel 1 (
-    set "EXITCODE=1"
-    goto :cleanup
-  )
 )
 
 pushd "%ROOT%"

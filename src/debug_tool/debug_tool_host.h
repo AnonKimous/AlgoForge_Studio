@@ -63,6 +63,11 @@ enum class AlgorithmExecutionPreference {
   Gpu = 1,
 };
 
+enum class AlgorithmPipelineSubmissionMode {
+  NonCircular = 0,
+  Circular = 1,
+};
+
 enum class AlgorithmAssemblyState {
   Pending = 0,
   Assembling = 1,
@@ -92,6 +97,54 @@ struct AlgorithmReflectionSnapshot {
   }
 };
 
+struct PipelineStageBridgeDebugBinding {
+  std::string source_stage_name;
+  std::string target_stage_name;
+  std::string source_container_name;
+  std::string target_container_name;
+  bool required{true};
+};
+
+struct PipelineStageBridgeDebugSummary {
+  std::string pipeline_name;
+  std::string stage_name;
+  std::string previous_stage_name;
+  std::string next_stage_name;
+  std::vector<PipelineStageBridgeDebugBinding> ingress_bindings;
+  std::vector<PipelineStageBridgeDebugBinding> egress_bindings;
+  AlgorithmReflectionSnapshot stage_input_reflection_snapshot{};
+  AlgorithmReflectionSnapshot stage_output_reflection_snapshot{};
+  AlgorithmReflectionSnapshot next_stage_input_reflection_snapshot{};
+  AlgorithmReflectionSnapshot replay_output_reflection_snapshot{};
+  AlgorithmReflectionSnapshot replay_reflection_snapshot{};
+  bool has_stage_input_reflection_snapshot{false};
+  bool has_stage_output_reflection_snapshot{false};
+  bool has_next_stage_input_reflection_snapshot{false};
+  bool has_replay_output_reflection_snapshot{false};
+  bool replay_valid{false};
+  bool valid{false};
+
+  void Clear() {
+    pipeline_name.clear();
+    stage_name.clear();
+    previous_stage_name.clear();
+    next_stage_name.clear();
+    ingress_bindings.clear();
+    egress_bindings.clear();
+    stage_input_reflection_snapshot.Clear();
+    stage_output_reflection_snapshot.Clear();
+    next_stage_input_reflection_snapshot.Clear();
+    replay_output_reflection_snapshot.Clear();
+    replay_reflection_snapshot.Clear();
+    has_stage_input_reflection_snapshot = false;
+    has_stage_output_reflection_snapshot = false;
+    has_next_stage_input_reflection_snapshot = false;
+    has_replay_output_reflection_snapshot = false;
+    replay_valid = false;
+    valid = false;
+  }
+};
+
 struct AlgorithmRuntimeSummary {
   std::string algorithm_name;
   AlgorithmAssemblyState assembly_state{AlgorithmAssemblyState::Failed};
@@ -99,6 +152,7 @@ struct AlgorithmRuntimeSummary {
   uint32_t pipeline_stage_index{0u};
   uint32_t pipeline_stage_count{0u};
   bool pipeline_stage{false};
+  AlgorithmPipelineSubmissionMode pipeline_submission_mode{AlgorithmPipelineSubmissionMode::NonCircular};
   std::vector<AlgorithmResourceBinding> resource_bindings;
   std::vector<AlgorithmDescriptorValue> descriptor_values;
   bool cpu_symbol{true};
@@ -108,6 +162,7 @@ struct AlgorithmRuntimeSummary {
   AgentToAlgorithmSignal agent_to_algorithm_signal{};
   AlgorithmToAgentSignal algorithm_to_agent_signal{};
   AlgorithmReflectionSnapshot reflection_snapshot{};
+  PipelineStageBridgeDebugSummary bridge_debug_set{};
 };
 
 struct AgentRuntimeSummary {
@@ -155,6 +210,10 @@ class IDebugToolHost {
     std::string* out_error_message = nullptr,
     AlgorithmExecutionPreference execution_preference = AlgorithmExecutionPreference::Gpu) = 0;
   virtual bool DetachAlgorithmFromAgent(
+    size_t agent_index,
+    size_t algorithm_index,
+    std::string* out_error_message = nullptr) = 0;
+  virtual bool ReplayPipelineStageBridgeDebug(
     size_t agent_index,
     size_t algorithm_index,
     std::string* out_error_message = nullptr) = 0;

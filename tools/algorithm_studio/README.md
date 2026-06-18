@@ -11,6 +11,7 @@ It provides:
 - package JSON export
 - `Container` includes `Variable` and `Array`
 - `container` boxes can wrap `Variable` and `Array` nodes into a named merged alias
+- standard-slot aliases such as `a1:vertex` or `v1,v2:pos` are allowed as authoring semantics
 - `ToolNodes` includes `container`, `decomposer`, `reflector`, and `interventioner`
 - `ResNode` palette inserts a single `mesh` node; `decomposer.res.mesh` can expand to `edge`, `vertex`, and `normal`
 - double-click `Variable` / `Array` nodes to edit temporary values
@@ -51,6 +52,7 @@ This is a UI-first prototype.
 - The runtime bridge should resolve `standard_layout` first and treat standard slots as the primary stage-to-stage carrier.
 - Non-standard containers must be transferred as same-name containers with identical structure, or the backend should fail fast.
 - Standard slots like `v1`, `v2`, `v3` may be grouped into higher-level aliases for readability, while the runtime still resolves the underlying standard slots.
+- Tool-side aliases are for authoring and debug readability only; exported runtime-facing package fields should still be written back as `vN/aN`.
 - Direct transfer for non-standard containers must keep the same container name on both sides and the same structure.
 
 ## Launch behavior

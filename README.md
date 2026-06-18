@@ -31,7 +31,7 @@ This project is a layered Vulkan + SDL3 sandbox for agent-driven physics and ren
 - `algorithm_management` owns container-manifest loading, runtime container creation, plugin loading, and the unified package loader entrypoint.
 - `algorithm_support` is now an internal source group under the `algorithm_management` build target; external code should include `algorithm_management/algorithm_manager.h`.
 - `agent` sits above `algorithm_management` and owns the runtime agent object, including mount and submit entry points.
-- `capabilities/algorithm_library` is legacy/deprecated package content. Do not add new capability bundles there; the packaged mirror is written to `algorithmLib/algorithmSrc` and `algorithmLib/algorithmruntimeLib`.
+- Algorithm package source lives in `algorithmLib/algorithmSrc`, and built DLL/SPV runtime artifacts live in `algorithmLib/algorithmruntimeLib`.
 - `capabilities/sidecar` hosts optional sidecar capabilities such as mesh import/export.
 - `agent_management` owns agent creation orchestration, mount/unmount, descriptor forwarding, and ticking. It does not create containers itself.
 - `debug_tool_frontend` provides the manual agent composer and live debug panel without keeping a mesh resident in app state.
@@ -56,7 +56,7 @@ This project is a layered Vulkan + SDL3 sandbox for agent-driven physics and ren
 
 ## Agent Composition
 
-- `capabilities/algorithm_library` is legacy/deprecated. Do not add new bundles there; keep active package work in the algorithm management loader path.
+- Build and submit active algorithm packages through `algorithmLib` and the normal algorithm management loader path.
 - Build the final agent by attaching one or more algorithm support groups, solver config, and lightweight algorithm profiles to one agent object.
 - Let upper layers assemble the agent creation spec, then let `agent_management` create and retain agents for runtime stepping while each `Agent` handles algorithm mount and submit work for its attached groups.
 - The runtime does not try to validate the full graph; missing or incompatible bindings should fail at the point of use.

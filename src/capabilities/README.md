@@ -8,10 +8,9 @@ main-trunk layer chain.
 - Capability modules may aggregate lower-level contracts for domain-specific work.
 - Capability modules must not create upward dependencies into strict trunk layers.
 - Optional capabilities must still be linked explicitly by any consumer.
-- `algorithm_library` is legacy/deprecated; do not add new package capability bundles there.
+- Algorithm package source does not live under `src/capabilities`; keep active package work in `algorithmLib/algorithmSrc`.
 
 ## Current Groups
 
 - `agent`: cross-layer agent data object and package hook contracts.
-- `algorithm_library`: legacy/deprecated package content.
 - `sidecar`: optional external-format and adapter capabilities.

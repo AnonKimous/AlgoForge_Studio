@@ -486,6 +486,22 @@ bool _LoadPackageRuntimeTransferMap(
     return false;
   }
 
+  const cJSON* circular_tick = cJSON_GetObjectItemCaseSensitive(pipeline, "supportsCircularTick");
+  if (!circular_tick) {
+    circular_tick = cJSON_GetObjectItemCaseSensitive(pipeline, "circularTick");
+  }
+  if (circular_tick) {
+    if (!cJSON_IsBool(circular_tick)) {
+      cJSON_Delete(root);
+      if (out_error_message) {
+        *out_error_message = "Package runtime pipeline supportsCircularTick must be boolean: " +
+          package_json_path.generic_string();
+      }
+      return false;
+    }
+    out_transfer_map->supports_circular_tick = cJSON_IsTrue(circular_tick);
+  }
+
   const cJSON* mappings = cJSON_GetObjectItemCaseSensitive(pipeline, "mappings");
   if (!mappings) {
     cJSON_Delete(root);

@@ -1,0 +1,421 @@
+Pipeline Runtime 开发草案
+状态：draft
+最后更新：2026-06-18
+
+1. 文档目的
+
+这份文档用于整理当前 pipeline runtime 的修改意见。
+它不是最终实现规范，而是给用户先确认目标模型、术语、边界和改造顺序。
+等这份文档被用户改到满意之后，后续代码再严格对照文档修改。
+
+需要特别说明：
+当前主干里 pipeline 的搭建方式本身是有问题的。
+这份文档描述的是目标方向，不是替当前主干实现辩护。
+
+2. 当前主干 pipeline 的主要问题
+
+当前主干已经有一些 pipeline 雏形，例如：
+
+- pipeline 算法可单独挂载
+- 支持 circular / non-circular 提交模式
+- 有 runtime transfer map
+- 有 stage bridge debug
+- 有 stage stall log
+
+但从目标语义看，当前主干仍然有几个结构性问题：
+
+2.1 bridge 仍然太像 CPU 侧的后处理
+- stage 先执行
+- bridge 再做转发或搬运
+- 这不符合目标执行模型
+
+2.2 standard container 还没有成为 lane 状态的绝对宿主
+- pipeline 里的状态应当跟随每一套资源流动
+- 每一套资源都必须带有自己的 standard container
+- 当前结构仍然偏 stage 中心，而不是 lane 中心
+
+2.3 stage 执行看到的容器仍然太像“独立私有 container set”
+- 目标模型更接近“映射”和“绑定”
+- 而不是长期维护一整套独立 stage 容器副本
+
+2.4 GPU 执行模型里还没有自然包含 bridge
+- 当前执行路径仍倾向于把 stage 本体和 bridge 看成两个运行时阶段
+- 目标语义要求 bridge 是 stage 执行体的一部分
+
+2.5 CPU bridge 和 GPU bridge 不应混为一谈
+- CPU bridge 和 GPU bridge 本来就是两套东西
+- 当前这份文档里，已经明确的部分主要描述 GPU 侧 bridge 应该怎么做
+- CPU 侧 bridge 先保留独立概念，但暂时不在本文中强行定义细节
+
+3. 已经确认的核心规则
+
+下面这些规则，本草案按“已经确认”处理。
+
+3.1 pipeline 的本质
+- pipeline 本质是一组算法被当成一个算法提交
+- agent 不理解 pipeline 的业务细节
+- agent 只知道这个对象有一个 tick
+- 一次 tick 到底意味着什么，由算法自己决定
+
+3.2 每一套资源都拥有自己的 standard container
+- 进入 pipeline 的每一套资源，必须拥有自己独立的一份 standard container
+- 这份 standard container 只属于这一套资源流
+- 不同资源流之间不能共享同一份 standard container
+
+3.3 bridge 不生成大块新内存
+- bridge 可以使用极细碎的临时 scratch 数据
+- bridge 不能生成一整套长期存在的 stage 私有 container 内存
+- bridge 的主要职责是映射、绑定、缓冲、写回、转发
+
+3.4 stage 本地名字不是底层状态真正的宿主
+- stage 内部看到的 a1、v1、v2 只是这个 stage 的视图名字
+- 真正长期存在的底层状态应该来自：
+  - lane 的 standard container
+  - stage 之间的 edge buffer
+
+3.5 bridge 是 stage 执行体的一部分
+- stageX 的运行时行为不应该是：
+  - 先执行 stageX
+  - 再由 CPU 做 bridge
+- stageX 的运行时行为应该是：
+  - bridge ingress
+  - stageX execute
+  - bridge egress
+
+4. 建议统一使用的术语
+
+为了避免后续代码和文档再次散掉，建议统一使用以下术语。
+
+4.1 PipelineAlgorithm
+- 一个支持 pipeline 运行时语义的算法包
+
+4.2 PipelineInstance
+- 一个已经挂载到 agent 上的 pipeline 运行时实例
+- 一个 instance 内可以同时承载多套资源流
+
+4.3 PipelineLane
+- PipelineInstance 内的一条资源流
+- 一次外部提交，对应一条 lane
+
+4.3.1 LoopLane
+- 仅对 circular pipeline 有意义
+- 表示由 pipeline 内部回灌形成的继续流动语义
+- 因为 circular pipeline 存在 stage-1 回灌 stage0，所以 lane 之外需要有一个 looplane 语义用于描述内部回流
+- looplane 不是普通外部提交出来的新资源流，而是已有 lane 在环形结构中的继续推进语义
+
+4.4 StandardContainer
+- 某条 lane 持有的主状态容器
+- 是这条 lane 的主要长期状态宿主
+
+4.5 InterStageBuffer / StageBuffer
+- 某条 lane 内，两个 stage 之间那条边上的运行时缓冲区
+- 只保存上一个 stage 写给当前 stage 的那部分碎数据
+- 本文后续默认优先使用 InterStageBuffer 这个名字
+- 如果后续用户觉得 StageBuffer 更顺手，可以整体替换
+
+4.6 StageBindingPlan
+- 由映射表预编译出来的绑定计划
+- 描述某个 stage 如何：
+  - 从 standard container 读取
+  - 从 ingress edge 读取
+  - 暴露本地 a/v 名字
+  - 写回 standard container
+  - 写入 egress edge
+
+4.7 StageBindingView
+- stage 在执行时真正看到的容器视图
+- 它应该表现得像 stage 平时使用的 a/v 容器
+- 但它本身不拥有大块长期内存
+
+4.8 PipelineStageBridge
+- 某个 stage 对应的运行时解释层
+- 负责：
+  - ingress 映射
+  - 本地绑定
+  - egress 路由
+  - standard container 写回
+
+5. 目标内存模型
+
+5.1 一条 lane 至少应当持有
+- lane id
+- 一份 standard container
+- 每条 stage 边对应的一份 interStageBuffer 语义
+- 每个 stage 的执行状态位
+- debug / stall / profiling 统计信息
+
+5.2 standard container 是主状态宿主
+- pipeline 的长期状态应当归属于 lane
+- 不应再把 stage 的 shared container set 当成 pipeline 长期状态的真正宿主
+
+5.3 interStageBuffer 只负责保存跨 stage 传递数据
+- interStageBuffer 不是另一份 standard container
+- interStageBuffer 也不是完整 stage 状态副本
+- interStageBuffer 只保留上一个 stage 写入给当前 stage 的碎数据
+
+5.4 GPU 侧不建议单独绑定 ingress buffer
+- 对 GPU 侧 bridge，不建议单独再绑定一份 ingress buffer
+- 更推荐在 standard container 内隐式指定一个统一的 a 作为公共 stage 间缓冲区
+- 各 stage 自己约定在这个统一 buffer 里的偏移量和布局
+- 这个统一 stageBuffer 必须落在所有 stage 共享的 standard array 前缀里，不能落到某个 stage 私有多出来的 a 槽位上
+- 这样 GPU bridge 读写的仍然是 standard container 内的一部分，而不是额外一套独立 ingress buffer
+- 这条规则不是推荐项，而是强制项
+
+5.5 bridge 应保持轻量
+- 负责绑定
+- 负责翻译
+- 负责转发
+- 负责写回
+- 只允许极小 scratch
+
+6. 目标数据流
+
+对于任意 stageX，目标数据流建议明确为：
+
+上一 stage 写入的 interStageBuffer + lane standard container
+-> bridgeX ingress
+-> stage binding view
+-> stageX execute
+-> bridgeX egress
+-> lane standard container + 下一 stage 可见的 interStageBuffer
+
+如果用更贴近用户描述的形式来写，就是：
+
+入边 + 标准容器
+-> bridgeX
+-> stageX
+-> 出边 + 标准容器
+-> bridgeX+1
+
+它真正表达的意思是：
+- 真正流动的是 lane 状态
+- 不是每个 stage 各自抱着一整套复制出来的完整状态往前传
+- 对 GPU 侧来说，这里的“入边”更偏向 standard container 内统一 stage buffer 的某一段，而不是单独绑定的新 ingress buffer
+
+7. 映射表语义
+
+映射表不应再被理解成单纯的 copy 规则，而应理解成绑定和解释规则。
+
+7.1 Standard Read Mapping
+- 把 standard container 里的 An / Vn
+- 映射成当前 stage 看到的 Ax / Vx
+
+7.2 Edge Ingress Mapping
+- 把上一个 stage 留给当前 stage 的 interStageBuffer 数据
+- 映射成当前 stage 使用的变量或数组
+
+7.3 Standard Writeback Mapping
+- 当前 stage 执行结束后
+- 哪些值要写回当前 lane 的 standard container
+
+7.4 Edge Egress Mapping
+- 当前 stage 执行结束后
+- 哪些值要写进下一段 interStageBuffer
+
+7.5 自定义变量规则
+- standard slot direct transfer 可支持：
+  - 变量 -> 变量
+  - 数组 -> 数组
+  - 变量 -> 数组
+- 这些 standard slot direct transfer 不要求同名
+- 开发者自定义变量要求同名
+- 结构不一致直接断言报错
+
+7.6 stage 标准槽共享前缀和额外槽偏移
+- pipeline 运行时不能假设每个 stage 声明的标准容器完全一样
+- 某些 stage 可以故意比共享前缀多声明几个 v，或者多声明几个 a
+- 当前实现先收紧为：只允许多声明 `v`，不允许多声明 `a`
+- 一旦某个 stage 出现共享前缀之外的额外 `a`，直接断言报错
+- 映射表里必须额外收集每个 stage 的布局摘要，至少包括：
+  - declared_variable_count
+  - declared_array_count
+  - shared_variable_count
+  - shared_array_count
+  - extra_variable_count
+  - extra_array_count
+  - extra_variable_offset
+  - extra_array_offset
+- shared 前缀的含义是：所有 stage 都至少拥有、并且结构兼容的那一段标准 v/a
+- extra 偏移按 stage 顺序累加，例如：
+  - stage0 多 1 个 v，则 offset = 0
+  - stage1 多 2 个 v，则 offset = 1
+  - stage2 多 0 个 v，则 offset = 3
+  - stage3 多 1 个 v，则 offset = 3
+- 后续 bridge / binding plan 看到的不是“这个 stage 自己随便多了几个槽”，而是“共享前缀 + 已登记偏移后的 stage 私有扩展槽”
+- 如果共享前缀范围内结构不兼容，直接断言报错
+
+8. tick 模型
+
+8.1 普通算法
+- 普通算法保持现有语义
+- 仍走普通挂载和普通 tick 路径
+
+8.2 pipeline 算法
+- pipeline 的一次 tick 建议定义为：
+  - 对当前 instance 内所有活跃 lane
+  - 让所有 stage 并发执行一轮
+  - 每个 stage 内部完成：
+    - bridge ingress
+    - stage execute
+    - bridge egress
+  - 然后 pipeline 状态整体向下一 stage 推进
+
+8.3 circular 和 non-circular
+
+non-circular：
+- 最后一个 stage 输出后直接离开 pipeline
+
+circular：
+- 最后一个 stage 输出后回灌 stage0
+- stage-1 和 stage0 之间也存在一层 bridge
+- circular pipeline 内部可理解为存在 looplane 语义
+- 当内部回灌和外部提交冲突时：
+  - 先响应内部回灌
+  - 外部提交可能被拒绝
+
+8.4 支持关系
+- 支持 circular 的 pipeline 算法，可以按 circular 或 non-circular 挂载
+- 不支持 circular 的 pipeline 算法，只能按 non-circular 挂载
+
+9. GPU 执行方向
+
+9.1 CPU bridge 和 GPU bridge 分开定义
+- CPU bridge 和 GPU bridge 不是同一套东西
+- 本文目前重点约束 GPU bridge
+- CPU bridge 先保留独立口子，后续再单独收紧
+
+9.2 GPU bridge 在执行里的目标定位
+- GPU bridge 应被视为 stage 执行体的一部分
+- 不应再只是 CPU 侧的事后搬运器
+
+9.3 GPU 侧第一版可行方向
+- runtime 在提交某个 stage 的 GPU 执行时
+- 一并绑定：
+  - lane standard container 对应的底层 buffer
+  - 该 stage 的 binding plan / mapping metadata
+- standard container 内隐式指定的统一 stage buffer
+- 各 stage 通过约定好的偏移量和布局访问这一块公共 buffer
+- 从语义上看，这次 stage 提交应同时完成：
+  - 读取 standard container
+  - 读取属于自己的 interStageBuffer 区段
+  - 暴露 stage 本地视图
+  - 执行 stage 本体
+  - 写回 standard container
+  - 写入下一 stage 使用的 interStageBuffer 区段
+
+9.4 GPU bridge 第一版不要过度追求的事情
+- 第一版不需要立刻解决完全自动的 bridge shader 生成
+- 第一版不需要把任意复杂映射直接压成通用 GPU DSL
+- 第一版应先把 runtime ownership 和提交语义改对
+
+10. debug 和 stall 方向
+
+10.1 debug 观察面建议改成 lane 视角
+- debug 至少应能看到：
+  - pipeline instance
+  - lanes
+  - looplane 语义状态
+  - lane standard container
+  - lane interStageBuffer / stage buffer
+  - stage ingress 视图
+  - stage 本地 binding 视图
+  - stage egress 输出
+
+10.2 stage 单步调试建议语义
+- 单步调试某个 stage 时，应能观察：
+  - lane standard container 提供了什么
+  - interStageBuffer 提供了什么
+  - 映射后 stage 实际读到了什么
+  - stage 写回了什么
+  - stage 输出给下一段 interStageBuffer 什么
+
+10.3 stall 判定方向
+- 区分正常空闲和异常无进展
+
+正常空闲：
+- non-circular 当前没有新资源
+- circular 当前没有可运行 lane
+
+异常无进展：
+- 当前至少存在一条活跃 lane
+- 某些 stage 理论上应当可以推进
+- 但可观察 pipeline 状态长时间不变
+
+10.4 stall 日志建议内容
+- pipeline instance 名字
+- lane 数量和每条 lane 当前停在什么 stage
+- looplane 是否处于活跃回灌状态
+- 每个 stage 耗时
+- 每个 stage 未推进的原因
+- standard container 和 interStageBuffer 摘要
+- 然后直接断言报错
+
+11. 建议改造顺序
+
+11.1 第一阶段
+- 先把 runtime 数据归属模型改对
+- 明确：
+  - PipelineInstance
+  - PipelineLane
+  - LoopLane
+  - StandardContainer
+  - InterStageBuffer
+  - StageBindingPlan
+
+11.2 第二阶段
+- 把 stage tick 语义改成：
+  - ingress
+  - execute
+  - egress
+
+11.3 第三阶段
+- 调整 GPU 提交语义
+- 让一次 stage 提交代表完整执行单元
+- 不再只提交一个“裸 stage 本体”
+
+11.4 第四阶段
+- 把 debug 和 stall 报告收口到 lane 中心模型
+
+12. 需要用户拍板的实现选项
+
+下面这些实现选项，建议由用户最终定档。
+
+12.1 lane 生命周期
+选项 A：动态创建 / 动态销毁
+选项 B：固定槽位池复用
+当前建议：A
+
+12.2 edge buffer 的归属
+选项 A：全局 interStageBuffer，用 lane id 索引
+选项 B：每条 lane 自己持有自己的 interStageBuffer
+当前建议：B
+
+12.3 binding plan 的生成时机
+选项 A：挂载 pipeline 时预编译
+选项 B：每次 tick 重新解释映射表
+当前建议：A
+
+12.4 pipeline stage 本地容器兼容策略
+选项 A：尽快移除 stage shared container ownership
+选项 B：暂时保留兼容层，再逐步把真实状态迁到 lane
+当前建议：B
+
+12.5 第一版 GPU bridge 边界
+选项 A：先把 bridge 语义并入 stage 提交，CPU 仍负责组织绑定
+选项 B：立刻做更激进的 bridge GPU 化
+当前建议：A
+
+12.6 GPU 侧 stage 间碎数据的承载方式
+这项不再保留为可选项，直接定为强制规则：
+- 在 standard container 内隐式指定统一 a 作为 stage buffer
+- 由 stage 自己约定偏移量和布局
+- 不再推荐单独为 ingress / egress 绑定独立 buffer
+
+13. 一句话总方向
+
+目标方向是：
+把当前以 stage 事后搬运为主的 pipeline 运行方式，改成以 lane 为中心的 runtime；
+每套资源拥有自己的 standard container；
+GPU bridge 只负责映射、绑定、写回、转发；
+并优先基于 standard container 内统一 stage buffer 组织 stage 间碎数据；
+每个 stage 的天然执行单元就是 bridge 加 stage 本体。

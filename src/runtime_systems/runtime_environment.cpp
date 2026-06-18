@@ -1,5 +1,6 @@
 #define RUNTIME_SYSTEMS_LAYER_INTERNAL_BUILD 1
 #include "runtime_environment.h"
+#include "algorithm_cpu_executor.h"
 #include "job_system.h"
 
 #include <SDL3/SDL.h>
@@ -136,6 +137,8 @@ void RuntimeEnvironment::Destroy() {
     imgui_runtime_.reset();
   }
   window_.reset();
+  AlgorithmCpuExecutor::Instance().Clear();
+  AlgorithmGpuExecutor::Instance().Clear();
   ShutdownJobSystem();
   execution_symbols_ = {};
   if (sdl_initialized_) {

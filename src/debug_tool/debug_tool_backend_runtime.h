@@ -62,6 +62,10 @@ class DebugToolBackendRuntime : public IDebugToolHost {
     std::string* out_error_message = nullptr) override {
     return agent_manager_.DetachAlgorithmFromAgent(agent_index, algorithm_index, out_error_message);
   }
+  bool ReplayPipelineStageBridgeDebug(
+    size_t agent_index,
+    size_t algorithm_index,
+    std::string* out_error_message = nullptr) override;
   bool HotReloadAlgorithmPackage(
     size_t agent_index,
     size_t algorithm_index,

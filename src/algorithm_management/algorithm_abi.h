@@ -71,6 +71,11 @@ enum class AlgorithmExecutionPreference {
   Gpu = 1,
 };
 
+enum class AlgorithmPipelineSubmissionMode {
+  NonCircular = 0,
+  Circular = 1,
+};
+
 enum class AlgorithmJobPriority {
   High = 0,
   Normal = 1,
@@ -115,6 +120,58 @@ struct AlgorithmPackageDebugState {
   std::vector<AdvancedAlgorithmDebugSignal> signals;
 };
 
+struct PipelineStageBridgeDebugBinding {
+  std::string source_stage_name;
+  std::string target_stage_name;
+  std::string source_container_name;
+  std::string target_container_name;
+  bool required{true};
+};
+
+struct PipelineStageBridgeDebugSet {
+  std::string pipeline_name;
+  std::string stage_name;
+  std::string previous_stage_name;
+  std::string next_stage_name;
+  std::vector<PipelineStageBridgeDebugBinding> ingress_bindings;
+  std::vector<PipelineStageBridgeDebugBinding> egress_bindings;
+  algorithm::AlgorithmContainerSet stage_input_container_set{};
+  algorithm::AlgorithmContainerSet stage_output_container_set{};
+  algorithm::AlgorithmContainerSet next_stage_input_container_set{};
+  algorithm::AlgorithmContainerSet replay_output_container_set{};
+  AlgorithmPackageDebugState replay_debug_state{};
+  AlgorithmReflectionSnapshot replay_reflection_snapshot{};
+  AlgorithmToAgentSignal replay_algorithm_to_agent_signal{};
+  bool has_stage_input_container_set{false};
+  bool has_stage_output_container_set{false};
+  bool has_next_stage_input_container_set{false};
+  bool has_replay_output_container_set{false};
+  bool replay_valid{false};
+  bool valid{false};
+
+  void Clear() {
+    pipeline_name.clear();
+    stage_name.clear();
+    previous_stage_name.clear();
+    next_stage_name.clear();
+    ingress_bindings.clear();
+    egress_bindings.clear();
+    stage_input_container_set = {};
+    stage_output_container_set = {};
+    next_stage_input_container_set = {};
+    replay_output_container_set = {};
+    replay_debug_state = {};
+    replay_reflection_snapshot.Clear();
+    replay_algorithm_to_agent_signal = {};
+    has_stage_input_container_set = false;
+    has_stage_output_container_set = false;
+    has_next_stage_input_container_set = false;
+    has_replay_output_container_set = false;
+    replay_valid = false;
+    valid = false;
+  }
+};
+
 struct AlgorithmInterventionPackageDebugState {
   std::vector<AdvancedAlgorithmDebugSignal> signals;
   AlgorithmToAgentSignal algorithm_to_agent_signal{};
@@ -144,6 +201,7 @@ struct AgentAlgorithmRuntimeState {
   bool pipeline_stall_reported{false};
   std::string pipeline_stall_reason;
   std::vector<AlgorithmPipelineStageRuntimeStat> pipeline_stage_runtime_stats;
+  PipelineStageBridgeDebugSet bridge_debug_set{};
 };
 
 enum class AlgorithmAssemblyState {
@@ -194,6 +252,7 @@ class AlgorithmObject {
   std::string pipeline_name;
   uint32_t pipeline_stage_index{0u};
   uint32_t pipeline_stage_count{0u};
+  AlgorithmPipelineSubmissionMode pipeline_submission_mode{AlgorithmPipelineSubmissionMode::NonCircular};
   std::vector<AlgorithmResourceBinding> resource_bindings;
   std::vector<AlgorithmDescriptorValue> descriptor_values;
   bool cpu_symbol{true};
@@ -327,6 +386,7 @@ using algorithm_management::AlgorithmAssemblyState;
 using algorithm_management::AlgorithmDescriptorValue;
 using algorithm_management::AlgorithmExecutionPhase;
 using algorithm_management::AlgorithmExecutionPreference;
+using algorithm_management::AlgorithmPipelineSubmissionMode;
 using algorithm_management::AlgorithmJobPriority;
 using algorithm_management::AlgorithmInterventionContainerBinding;
 using algorithm_management::AlgorithmInterventionPackageDebugState;
@@ -338,6 +398,8 @@ using algorithm_management::AlgorithmPipelineStageSubmission;
 using algorithm_management::AlgorithmPipelineStageRuntimeStat;
 using algorithm_management::AlgorithmObject;
 using algorithm_management::AlgorithmPackageDebugState;
+using algorithm_management::PipelineStageBridgeDebugBinding;
+using algorithm_management::PipelineStageBridgeDebugSet;
 using algorithm_management::AlgorithmReflectionSnapshot;
 using algorithm_management::AlgorithmReflectionValue;
 using algorithm_management::AlgorithmTickLifetime;

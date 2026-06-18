@@ -87,10 +87,22 @@ class AgentManager {
     const std::vector<agent::AlgorithmPipelineStageSubmission>& stage_submissions,
     size_t* out_algorithm_index = nullptr,
     std::string* out_error_message = nullptr,
-    agent::AlgorithmExecutionPreference execution_preference = agent::AlgorithmExecutionPreference::Gpu);
+    agent::AlgorithmExecutionPreference execution_preference = agent::AlgorithmExecutionPreference::Gpu,
+    agent::AlgorithmPipelineSubmissionMode submission_mode = agent::AlgorithmPipelineSubmissionMode::NonCircular);
+  bool EnqueuePipelineStage0Submission(
+    size_t agent_index,
+    const std::string& pipeline_name,
+    const std::vector<agent::AlgorithmResourceBinding>& resource_bindings,
+    const std::vector<agent::AlgorithmDescriptorValue>& descriptor_values,
+    std::string* out_error_message = nullptr);
   bool DetachAlgorithmFromAgent(
     size_t agent_index,
     size_t algorithm_index,
+    std::string* out_error_message = nullptr);
+  bool ReplayPipelineStageBridgeDebug(
+    size_t agent_index,
+    size_t algorithm_index,
+    const agent::AgentTickContext& context,
     std::string* out_error_message = nullptr);
   bool DestroyAgent(size_t agent_index);
   void ClearAgents();

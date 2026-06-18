@@ -1,12 +1,18 @@
 # Build outputs
 build/
 build_algorithms/
-algorithmLib/
 build_algorithms_v6a6/
 out/
 bin/
 lib/
-/sdk/
+/algorithmLib/**/*.lib
+/algorithmLib/**/*.dll
+/algorithmLib/**/*.pdb
+/algorithmLib/**/*.exp
+/algorithmLib/**/*.ilk
+/algorithmLib/**/*.obj
+/algorithmLib/**/*.exe
+/sdk/*.lib
 app/**/*.dll
 app/**/*.pdb
 app/**/*.lib

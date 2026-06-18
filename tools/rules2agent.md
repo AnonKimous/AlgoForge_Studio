@@ -1,5 +1,11 @@
 # rules2agent
 
+## Standard Slot Alias Note
+
+- `a1:vertex` and `v1,v2:pos` may appear in tool-side container semantics.
+- These aliases are only for readability, grouping, and authoring.
+- When a package field will be parsed by the current trunk runtime, the tool must emit the underlying `vN/aN` names instead of alias names.
+
 请严格遵守下面的 UI 规则：
 
 1. `containerElement` 的右键详情必须支持递归嵌套展示，使用括号树风格表达层级。

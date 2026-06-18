@@ -45,6 +45,7 @@ z = 0
 - `a1` stores one xyz point
 - `afterTick` transforms `v1 -> a1`
 - `resultRender` displays `a1`
+- If a readable alias is shown in the tool, keep it tool-side only and still write `v1` / `a1` into runtime-facing package fields.
 
 ## Preferred Authoring Choice
 

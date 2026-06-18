@@ -16,6 +16,11 @@ enum class AlgorithmReflectionRefreshMode {
   CaptureOnceAfterCompletion = 1,
 };
 
+enum class AlgorithmPipelineTickMode {
+  NonCircular = 0,
+  Circular = 1,
+};
+
 enum class AlgorithmContainerStorageKind {
   Array,
   TemporaryRegister,
@@ -91,10 +96,29 @@ struct AlgorithmRuntimeTransferEdge {
   std::vector<AlgorithmRuntimeTransferBinding> bindings;
 };
 
+struct AlgorithmRuntimeTransferStageLayout {
+  std::string stage_name;
+  uint32_t declared_variable_count{0u};
+  uint32_t declared_array_count{0u};
+  uint32_t shared_variable_count{0u};
+  uint32_t shared_array_count{0u};
+  uint32_t extra_variable_count{0u};
+  uint32_t extra_array_count{0u};
+  uint32_t extra_variable_offset{0u};
+  uint32_t extra_array_offset{0u};
+};
+
 struct AlgorithmRuntimeTransferMap {
   std::string algorithm_name;
   // Linear pipeline map: each stage may have at most one successor and one predecessor.
   std::vector<AlgorithmRuntimeTransferEdge> stage_links;
+  std::vector<AlgorithmRuntimeTransferStageLayout> stage_layouts;
+  uint32_t pipeline_shared_variable_count{0u};
+  uint32_t pipeline_shared_array_count{0u};
+  uint32_t pipeline_total_extra_variable_count{0u};
+  uint32_t pipeline_total_extra_array_count{0u};
+  std::string pipeline_shared_stage_buffer_slot_name;
+  bool supports_circular_tick{false};
   bool valid{false};
 
   bool empty() const {
@@ -104,7 +128,18 @@ struct AlgorithmRuntimeTransferMap {
   void Clear() {
     algorithm_name.clear();
     stage_links.clear();
+    stage_layouts.clear();
+    pipeline_shared_variable_count = 0u;
+    pipeline_shared_array_count = 0u;
+    pipeline_total_extra_variable_count = 0u;
+    pipeline_total_extra_array_count = 0u;
+    pipeline_shared_stage_buffer_slot_name.clear();
+    supports_circular_tick = false;
     valid = false;
+  }
+
+  bool SupportsCircularTick() const {
+    return supports_circular_tick;
   }
 
   const AlgorithmRuntimeTransferEdge* FindEdge(
@@ -113,6 +148,16 @@ struct AlgorithmRuntimeTransferMap {
     for (const AlgorithmRuntimeTransferEdge& edge : stage_links) {
       if (edge.source_stage_name == source_stage_name && edge.target_stage_name == target_stage_name) {
         return &edge;
+      }
+    }
+    return nullptr;
+  }
+
+  const AlgorithmRuntimeTransferStageLayout* FindStageLayout(
+    const std::string& stage_name) const {
+    for (const AlgorithmRuntimeTransferStageLayout& stage_layout : stage_layouts) {
+      if (stage_layout.stage_name == stage_name) {
+        return &stage_layout;
       }
     }
     return nullptr;
@@ -159,6 +204,16 @@ struct AlgorithmStandardContainerLayout {
 
   std::string MakeArrayName(uint32_t index) const {
     return array_prefix + std::to_string(index + 1u);
+  }
+
+  bool HasMandatoryPipelineStageBuffer() const {
+    return array_count > 0u;
+  }
+
+  std::string MakeMandatoryPipelineStageBufferName() const {
+    return HasMandatoryPipelineStageBuffer()
+      ? MakeArrayName(array_count - 1u)
+      : std::string{};
   }
 
   bool TryResolveContainerName(
@@ -222,6 +277,63 @@ struct AlgorithmContainerSet {
   std::vector<AlgorithmContainer> temporary_caches;
   std::vector<AlgorithmContainer> hidden_containers;
 };
+
+inline void CopyAlgorithmContainer(
+  const AlgorithmContainer& source_container,
+  AlgorithmContainer* out_target_container) {
+  if (!out_target_container) {
+    return;
+  }
+  out_target_container->name = source_container.name;
+  out_target_container->storage_kind = source_container.storage_kind;
+  out_target_container->element_count = source_container.element_count;
+  out_target_container->element_stride = source_container.element_stride;
+  out_target_container->hidden = source_container.hidden;
+  out_target_container->bytes.assign(source_container.bytes.begin(), source_container.bytes.end());
+}
+
+inline void CopyAlgorithmContainerSet(
+  const AlgorithmContainerSet& source_container_set,
+  AlgorithmContainerSet* out_target_container_set) {
+  if (!out_target_container_set) {
+    return;
+  }
+
+  out_target_container_set->algorithm_name = source_container_set.algorithm_name;
+  out_target_container_set->standard_layout = source_container_set.standard_layout;
+
+  out_target_container_set->arrays.clear();
+  out_target_container_set->arrays.reserve(source_container_set.arrays.size());
+  for (const AlgorithmContainer& container : source_container_set.arrays) {
+    AlgorithmContainer copied_container{};
+    CopyAlgorithmContainer(container, &copied_container);
+    out_target_container_set->arrays.push_back(std::move(copied_container));
+  }
+
+  out_target_container_set->temporary_registers.clear();
+  out_target_container_set->temporary_registers.reserve(source_container_set.temporary_registers.size());
+  for (const AlgorithmContainer& container : source_container_set.temporary_registers) {
+    AlgorithmContainer copied_container{};
+    CopyAlgorithmContainer(container, &copied_container);
+    out_target_container_set->temporary_registers.push_back(std::move(copied_container));
+  }
+
+  out_target_container_set->temporary_caches.clear();
+  out_target_container_set->temporary_caches.reserve(source_container_set.temporary_caches.size());
+  for (const AlgorithmContainer& container : source_container_set.temporary_caches) {
+    AlgorithmContainer copied_container{};
+    CopyAlgorithmContainer(container, &copied_container);
+    out_target_container_set->temporary_caches.push_back(std::move(copied_container));
+  }
+
+  out_target_container_set->hidden_containers.clear();
+  out_target_container_set->hidden_containers.reserve(source_container_set.hidden_containers.size());
+  for (const AlgorithmContainer& container : source_container_set.hidden_containers) {
+    AlgorithmContainer copied_container{};
+    CopyAlgorithmContainer(container, &copied_container);
+    out_target_container_set->hidden_containers.push_back(std::move(copied_container));
+  }
+}
 
 inline bool IsStandardContainerSlotName(
   const AlgorithmContainerSet& container_set,
@@ -300,6 +412,34 @@ inline const AlgorithmContainer* FindAlgorithmContainer(
       return index < container_set.temporary_caches.size() ? &container_set.temporary_caches[index] : nullptr;
   }
   return nullptr;
+}
+
+inline bool HasMandatoryPipelineStageBuffer(
+  const AlgorithmContainerSet& container_set) {
+  return container_set.standard_layout.HasMandatoryPipelineStageBuffer() &&
+    FindAlgorithmContainer(
+      container_set,
+      container_set.standard_layout.MakeMandatoryPipelineStageBufferName()) != nullptr;
+}
+
+inline AlgorithmContainer* FindMandatoryPipelineStageBuffer(
+  AlgorithmContainerSet* container_set) {
+  if (!container_set || !container_set->standard_layout.HasMandatoryPipelineStageBuffer()) {
+    return nullptr;
+  }
+  return FindAlgorithmContainer(
+    container_set,
+    container_set->standard_layout.MakeMandatoryPipelineStageBufferName());
+}
+
+inline const AlgorithmContainer* FindMandatoryPipelineStageBuffer(
+  const AlgorithmContainerSet& container_set) {
+  if (!container_set.standard_layout.HasMandatoryPipelineStageBuffer()) {
+    return nullptr;
+  }
+  return FindAlgorithmContainer(
+    container_set,
+    container_set.standard_layout.MakeMandatoryPipelineStageBufferName());
 }
 
 inline AlgorithmContainer* FindAlgorithmHiddenContainer(

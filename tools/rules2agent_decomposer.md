@@ -39,5 +39,7 @@
 3. `PipelineStageBridge` should resolve `standard_layout` first and prefer standard-slot interpretation.
 4. Non-standard containers are not a soft fallback: they must be transferred as same-name containers with identical structure, or the runtime should fail fast.
 5. Standard slots like `v1`, `v2`, `v3` may be grouped into more readable logical names, but runtime should still resolve the underlying standard slots.
-6. Direct transfer for non-standard containers must keep the same container name on both sides and the same structure.
-7. If an algorithm depends heavily on non-standard containers, the toolchain should warn the developer to move back toward standard containers.
+6. Tool-side alias declarations such as `a1:vertex` and `v1,v2:pos` are allowed for authoring, display, and planning.
+7. When the tool emits package fields that the current trunk runtime will parse, it must write the underlying `vN/aN` names instead of alias names.
+8. Direct transfer for non-standard containers must keep the same container name on both sides and the same structure.
+9. If an algorithm depends heavily on non-standard containers, the toolchain should warn the developer to move back toward standard containers.

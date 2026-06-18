@@ -213,11 +213,24 @@ bool TryResolveAlgorithmPackageLocation(
   out_location->manifest_path = manifest_path;
   out_location->package_root = manifest_path.parent_path();
 
-  const fs::path project_root = library_paths::ResolveProjectRootFromAlgorithmLibraryRoot(
-    library_paths::ResolveAlgorithmLibrarySourceRoot());
+  const fs::path source_root = library_paths::ResolveAlgorithmLibrarySourceRoot();
+  const fs::path runtime_root = library_paths::ResolveAlgorithmLibraryRuntimeRoot();
+  out_location->runtime_package_root = library_paths::ResolveRuntimePackageRoot(
+    out_location->package_root,
+    source_root,
+    runtime_root);
+  if (out_location->runtime_package_root.empty()) {
+    if (out_error_message) {
+      *out_error_message =
+        "Failed to resolve runtime package root for '" + trimmed_name + "' from source package path '" +
+        out_location->package_root.generic_string() + "'.";
+    }
+    return false;
+  }
+
   const fs::path plugin_candidates[] = {
-    project_root / "algorithmLib" / "algorithmruntimeLib" / trimmed_name / (trimmed_name + ".dll"),
-    project_root / "algorithmLib" / "algorithmruntimeLib" / (trimmed_name + ".dll"),
+    out_location->runtime_package_root / "Debug" / (trimmed_name + ".dll"),
+    out_location->runtime_package_root / (trimmed_name + ".dll"),
   };
 
   std::error_code ec;

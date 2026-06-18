@@ -291,8 +291,6 @@ if(NOT SDL3_LINK_LIBS)
   )
 endif()
 
-file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/src/capabilities/algorithm_library" ALGORITHM_MANAGEMENT_MANIFEST_SEARCH_ROOT)
-
 add_library(common_data STATIC
   src/common_data/mesh.cpp
 )
@@ -309,7 +307,6 @@ add_library(algorithm_management STATIC
 target_include_directories(algorithm_management PUBLIC ${PROJECT_INCLUDE_DIRS})
 target_compile_definitions(algorithm_management PRIVATE
   ALGORITHM_MANAGEMENT_LAYER_INTERNAL_BUILD=1
-  ALGORITHM_MANAGEMENT_MANIFEST_SEARCH_ROOT="${ALGORITHM_MANAGEMENT_MANIFEST_SEARCH_ROOT}"
 )
 target_link_libraries(algorithm_management PUBLIC common_data runtime_systems)
 

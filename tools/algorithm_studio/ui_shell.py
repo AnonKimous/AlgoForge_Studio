@@ -52,6 +52,44 @@ def build_toolbar(app: object) -> None:
         if label == "Build":
             app.build_button = button
 
+    toolbar.columnconfigure(len(buttons), weight=1)
+    algorithm_shell = ttk.Frame(toolbar)
+    algorithm_shell.grid(row=0, column=len(buttons), sticky="ew", padx=(12, 0))
+    algorithm_shell.columnconfigure(1, weight=1)
+    ttk.Label(algorithm_shell, text="Algorithm").grid(row=0, column=0, sticky="w", padx=(0, 8))
+
+    algorithm_box = tk.Frame(
+        algorithm_shell,
+        bg=COLORS["panel_alt"],
+        highlightbackground=COLORS["accent"],
+        highlightcolor=COLORS["accent"],
+        highlightthickness=1,
+        bd=0,
+    )
+    algorithm_box.grid(row=0, column=1, sticky="ew")
+    prefix_label = tk.Label(
+        algorithm_box,
+        textvariable=app.algorithm_prefix_var,
+        bg=COLORS["accent"],
+        fg=COLORS["window"],
+        padx=10,
+        pady=6,
+        font=("Segoe UI", 10, "bold"),
+    )
+    prefix_label.pack(side="left")
+    name_entry = tk.Entry(
+        algorithm_box,
+        textvariable=app.algorithm_suffix_var,
+        bg=COLORS["panel_alt"],
+        fg=COLORS["text"],
+        insertbackground=COLORS["text"],
+        relief="flat",
+        borderwidth=0,
+        highlightthickness=0,
+        font=("Segoe UI", 10),
+    )
+    name_entry.pack(side="left", fill="x", expand=True, padx=(8, 10), pady=4)
+
 
 def build_main_area(app: object) -> None:
     main = ttk.Frame(app.root, padding=(12, 0, 12, 12))

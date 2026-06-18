@@ -10,6 +10,7 @@ struct AlgorithmPackageLocation {
   std::string manifest_name;
   std::filesystem::path manifest_path;
   std::filesystem::path package_root;
+  std::filesystem::path runtime_package_root;
   std::filesystem::path plugin_module_path;
   bool has_plugin_module{false};
   bool valid{false};
@@ -19,6 +20,7 @@ struct AlgorithmPackageLocation {
     manifest_name.clear();
     manifest_path.clear();
     package_root.clear();
+    runtime_package_root.clear();
     plugin_module_path.clear();
     has_plugin_module = false;
     valid = false;

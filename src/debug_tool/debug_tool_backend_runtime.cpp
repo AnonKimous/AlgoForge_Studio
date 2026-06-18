@@ -96,9 +96,22 @@ std::string _ResolveAlgorithmShaderPath(
     return path.string();
   }
 
+  ::algorithm::AlgorithmPackageLocation package_location{};
+  std::string error_message;
+  const bool resolved = algorithm_management::TryResolveAlgorithmPackageLocation(
+    algorithm_name,
+    &package_location,
+    &error_message);
+  DEBUG_TOOL_ASSERT(resolved, "Failed to resolve algorithm package location for shader path.");
+  if (!resolved || package_location.runtime_package_root.empty()) {
+    return {};
+  }
+
   return algorithm::library_paths::ResolveAlgorithmRelativePath(
     algorithm::library_paths::ResolveAlgorithmLibraryRuntimeRoot(),
-    algorithm_name,
+    algorithm::library_paths::ResolvePackageRelativePath(
+      package_location.package_root,
+      algorithm::library_paths::ResolveAlgorithmLibrarySourceRoot()),
     shader_path).string();
 }
 
@@ -163,6 +176,121 @@ debug_tool::AlgorithmReflectionSnapshot _ToDebugToolReflectionSnapshot(
   return out_snapshot;
 }
 
+void _AppendBridgeReflectionValue(
+  const algorithm::AlgorithmContainer& container,
+  const std::string& filter_name,
+  agent::AlgorithmReflectionSnapshot* out_snapshot) {
+  if (!out_snapshot) {
+    return;
+  }
+
+  agent::AlgorithmReflectionValue value{};
+  value.reflection_object_name = container.name;
+  value.container_name = container.name;
+  value.filter_name = filter_name;
+  value.storage_kind = container.storage_kind;
+  value.bytes.assign(container.bytes.begin(), container.bytes.end());
+
+  if (container.storage_kind == algorithm::AlgorithmContainerStorageKind::Array) {
+    out_snapshot->variable_arrays.push_back(std::move(value));
+    return;
+  }
+  out_snapshot->variables.push_back(std::move(value));
+}
+
+agent::AlgorithmReflectionSnapshot _BuildBridgeReflectionSnapshot(
+  const algorithm::AlgorithmContainerSet& container_set,
+  const std::string& filter_name) {
+  agent::AlgorithmReflectionSnapshot snapshot{};
+  snapshot.algorithm_name = container_set.algorithm_name;
+  snapshot.variables.reserve(
+    container_set.temporary_registers.size() +
+    container_set.temporary_caches.size() +
+    container_set.hidden_containers.size());
+  snapshot.variable_arrays.reserve(container_set.arrays.size());
+
+  for (const algorithm::AlgorithmContainer& container : container_set.arrays) {
+    _AppendBridgeReflectionValue(container, filter_name, &snapshot);
+  }
+  for (const algorithm::AlgorithmContainer& container : container_set.temporary_registers) {
+    _AppendBridgeReflectionValue(container, filter_name, &snapshot);
+  }
+  for (const algorithm::AlgorithmContainer& container : container_set.temporary_caches) {
+    _AppendBridgeReflectionValue(container, filter_name, &snapshot);
+  }
+  for (const algorithm::AlgorithmContainer& container : container_set.hidden_containers) {
+    _AppendBridgeReflectionValue(container, filter_name, &snapshot);
+  }
+
+  snapshot.valid = !snapshot.variables.empty() || !snapshot.variable_arrays.empty();
+  return snapshot;
+}
+
+debug_tool::PipelineStageBridgeDebugSummary _ToDebugToolPipelineStageBridgeDebugSummary(
+  const agent::PipelineStageBridgeDebugSet& debug_set) {
+  debug_tool::PipelineStageBridgeDebugSummary out_summary{};
+  if (!debug_set.valid) {
+    return out_summary;
+  }
+
+  out_summary.pipeline_name = debug_set.pipeline_name;
+  out_summary.stage_name = debug_set.stage_name;
+  out_summary.previous_stage_name = debug_set.previous_stage_name;
+  out_summary.next_stage_name = debug_set.next_stage_name;
+  out_summary.ingress_bindings.reserve(debug_set.ingress_bindings.size());
+  for (const agent::PipelineStageBridgeDebugBinding& binding : debug_set.ingress_bindings) {
+    out_summary.ingress_bindings.push_back(debug_tool::PipelineStageBridgeDebugBinding{
+      .source_stage_name = binding.source_stage_name,
+      .target_stage_name = binding.target_stage_name,
+      .source_container_name = binding.source_container_name,
+      .target_container_name = binding.target_container_name,
+      .required = binding.required,
+    });
+  }
+  out_summary.egress_bindings.reserve(debug_set.egress_bindings.size());
+  for (const agent::PipelineStageBridgeDebugBinding& binding : debug_set.egress_bindings) {
+    out_summary.egress_bindings.push_back(debug_tool::PipelineStageBridgeDebugBinding{
+      .source_stage_name = binding.source_stage_name,
+      .target_stage_name = binding.target_stage_name,
+      .source_container_name = binding.source_container_name,
+      .target_container_name = binding.target_container_name,
+      .required = binding.required,
+    });
+  }
+
+  if (debug_set.has_stage_input_container_set) {
+    out_summary.stage_input_reflection_snapshot =
+      _ToDebugToolReflectionSnapshot(
+        _BuildBridgeReflectionSnapshot(debug_set.stage_input_container_set, "bridge_stage_input"));
+    out_summary.has_stage_input_reflection_snapshot = true;
+  }
+  if (debug_set.has_stage_output_container_set) {
+    out_summary.stage_output_reflection_snapshot =
+      _ToDebugToolReflectionSnapshot(
+        _BuildBridgeReflectionSnapshot(debug_set.stage_output_container_set, "bridge_stage_output"));
+    out_summary.has_stage_output_reflection_snapshot = true;
+  }
+  if (debug_set.has_next_stage_input_container_set) {
+    out_summary.next_stage_input_reflection_snapshot =
+      _ToDebugToolReflectionSnapshot(
+        _BuildBridgeReflectionSnapshot(debug_set.next_stage_input_container_set, "bridge_next_stage_input"));
+    out_summary.has_next_stage_input_reflection_snapshot = true;
+  }
+  if (debug_set.has_replay_output_container_set) {
+    out_summary.replay_output_reflection_snapshot =
+      _ToDebugToolReflectionSnapshot(
+        _BuildBridgeReflectionSnapshot(debug_set.replay_output_container_set, "bridge_replay_output"));
+    out_summary.has_replay_output_reflection_snapshot = true;
+  }
+  if (debug_set.replay_reflection_snapshot.valid) {
+    out_summary.replay_reflection_snapshot =
+      _ToDebugToolReflectionSnapshot(debug_set.replay_reflection_snapshot);
+  }
+  out_summary.replay_valid = debug_set.replay_valid;
+  out_summary.valid = true;
+  return out_summary;
+}
+
 debug_tool::AlgorithmRuntimeSummary _ToDebugToolAlgorithmRuntimeSummary(
   const agent::Agent& managed_agent,
   size_t algorithm_index) {
@@ -179,6 +307,9 @@ debug_tool::AlgorithmRuntimeSummary _ToDebugToolAlgorithmRuntimeSummary(
   summary.pipeline_stage_index = object->pipeline_stage_index;
   summary.pipeline_stage_count = object->pipeline_stage_count;
   summary.pipeline_stage = object->pipeline_stage;
+  summary.pipeline_submission_mode =
+    static_cast<debug_tool::AlgorithmPipelineSubmissionMode>(
+      static_cast<int>(object->pipeline_submission_mode));
   summary.resource_bindings.reserve(object->resource_bindings.size());
   for (const agent::AlgorithmResourceBinding& binding : object->resource_bindings) {
     summary.resource_bindings.push_back(debug_tool::AlgorithmResourceBinding{
@@ -206,6 +337,9 @@ debug_tool::AlgorithmRuntimeSummary _ToDebugToolAlgorithmRuntimeSummary(
   }
   if (runtime_state && runtime_state->reflection_snapshot.valid) {
     summary.reflection_snapshot = _ToDebugToolReflectionSnapshot(runtime_state->reflection_snapshot);
+  }
+  if (runtime_state && runtime_state->bridge_debug_set.valid) {
+    summary.bridge_debug_set = _ToDebugToolPipelineStageBridgeDebugSummary(runtime_state->bridge_debug_set);
   }
   return summary;
 }
@@ -264,6 +398,74 @@ std::vector<debug_tool::AlgorithmPipelineStageSubmission> _MakeSingleStagePipeli
   return stage_submissions;
 }
 
+bool _IsPipelineResourceBatchSubmissionName(const std::string& pipeline_name) {
+  return pipeline_name.find("::testsubmit") != std::string::npos;
+}
+
+bool _FindMountedPipelineInstanceName(
+  const std::shared_ptr<agent::Agent>& managed_agent,
+  const std::string& pipeline_algorithm_name,
+  std::string* out_pipeline_name,
+  size_t* out_pipeline_index,
+  std::string* out_error_message) {
+  if (!managed_agent) {
+    if (out_error_message) {
+      *out_error_message = "Mounted pipeline agent is unavailable.";
+    }
+    return false;
+  }
+  if (!out_pipeline_name) {
+    if (out_error_message) {
+      *out_error_message = "Mounted pipeline name output pointer is null.";
+    }
+    return false;
+  }
+
+  out_pipeline_name->clear();
+  if (out_pipeline_index) {
+    *out_pipeline_index = 0u;
+  }
+
+  size_t matched_index = 0u;
+  bool matched = false;
+  for (size_t i = 0u; i < managed_agent->algorithm_count(); ++i) {
+    const agent::AlgorithmObject* object = managed_agent->algorithm_object(i);
+    if (!object ||
+        !object->pipeline_stage ||
+        object->pipeline_stage_index != 0u ||
+        object->algorithm_profile.algorithm_name != pipeline_algorithm_name ||
+        object->pipeline_submission_mode != agent::AlgorithmPipelineSubmissionMode::Circular ||
+        _IsPipelineResourceBatchSubmissionName(object->pipeline_name)) {
+      continue;
+    }
+    if (matched) {
+      if (out_error_message) {
+        *out_error_message =
+          "Multiple mounted pipeline instances match the selected algorithm. Reset to a single mounted pipeline first.";
+      }
+      return false;
+    }
+    matched = true;
+    matched_index = i;
+    *out_pipeline_name = object->pipeline_name;
+  }
+
+  if (!matched) {
+    if (out_error_message) {
+      *out_error_message = "Mount the pipeline before submitting a resource batch.";
+    }
+    return false;
+  }
+
+  if (out_pipeline_index) {
+    *out_pipeline_index = matched_index;
+  }
+  if (out_error_message) {
+    out_error_message->clear();
+  }
+  return true;
+}
+
 std::vector<debug_tool::AlgorithmResourceBinding> _ToDebugToolResourceBindings(
   const std::vector<agent::AlgorithmResourceBinding>& bindings) {
   std::vector<debug_tool::AlgorithmResourceBinding> result;
@@ -296,6 +498,7 @@ bool _BuildPipelineStageSubmissionsFromPackage(
   const std::string& pipeline_algorithm_name,
   const std::vector<debug_tool::AlgorithmResourceBinding>& stage0_resource_bindings,
   const std::vector<debug_tool::AlgorithmDescriptorValue>& stage0_descriptor_values,
+  bool include_stage0_bindings,
   std::vector<debug_tool::AlgorithmPipelineStageSubmission>* out_stage_submissions,
   std::string* out_error_message) {
   if (!out_stage_submissions) {
@@ -346,8 +549,8 @@ bool _BuildPipelineStageSubmissionsFromPackage(
   if (!has_transfer_map || !transfer_map || transfer_map->empty()) {
     *out_stage_submissions = _MakeSingleStagePipelineSubmissions(
       pipeline_algorithm_name,
-      stage0_resource_bindings,
-      stage0_descriptor_values);
+      include_stage0_bindings ? stage0_resource_bindings : std::vector<debug_tool::AlgorithmResourceBinding>{},
+      include_stage0_bindings ? stage0_descriptor_values : std::vector<debug_tool::AlgorithmDescriptorValue>{});
     if (out_error_message) {
       out_error_message->clear();
     }
@@ -356,8 +559,8 @@ bool _BuildPipelineStageSubmissionsFromPackage(
 
   out_stage_submissions->push_back(debug_tool::AlgorithmPipelineStageSubmission{
     .stage_name = pipeline_algorithm_name,
-    .resource_bindings = stage0_resource_bindings,
-    .descriptor_values = stage0_descriptor_values,
+    .resource_bindings = include_stage0_bindings ? stage0_resource_bindings : std::vector<debug_tool::AlgorithmResourceBinding>{},
+    .descriptor_values = include_stage0_bindings ? stage0_descriptor_values : std::vector<debug_tool::AlgorithmDescriptorValue>{},
   });
 
   std::unordered_set<std::string> visited_stage_names{};
@@ -625,43 +828,35 @@ bool DebugToolBackendRuntime::AttachAlgorithmToAgent(
   std::string* out_error_message,
   debug_tool::AlgorithmMountMode mount_mode,
   debug_tool::AlgorithmExecutionPreference execution_preference) {
-  const bool explicit_pipeline_mount = mount_mode == debug_tool::AlgorithmMountMode::Pipeline;
-  bool is_pipeline = explicit_pipeline_mount;
-  std::string pipeline_error_message;
-  if (!is_pipeline && !algorithm_name.empty()) {
-    if (!IsPipelineAlgorithm(algorithm_name, &is_pipeline, &pipeline_error_message)) {
-      if (out_error_message) {
-        *out_error_message = pipeline_error_message.empty()
-          ? ("Failed to resolve algorithm type for '" + algorithm_name + "'.")
-          : std::move(pipeline_error_message);
-      }
-      DEBUG_TOOL_ASSERT(false, "Failed to resolve algorithm type for algorithm attachment.");
-      return false;
+  if (mount_mode == debug_tool::AlgorithmMountMode::Pipeline) {
+    if (out_error_message) {
+      *out_error_message =
+        "Pipeline algorithms must be mounted through the dedicated pipeline path, not AttachAlgorithmToAgent.";
     }
+    DEBUG_TOOL_ASSERT(false, "Pipeline mount was routed through the normal algorithm attach path.");
+    return false;
+  }
+
+  bool is_pipeline = false;
+  std::string pipeline_error_message;
+  if (!algorithm_name.empty() &&
+      !IsPipelineAlgorithm(algorithm_name, &is_pipeline, &pipeline_error_message)) {
+    if (out_error_message) {
+      *out_error_message = pipeline_error_message.empty()
+        ? ("Failed to resolve algorithm type for '" + algorithm_name + "'.")
+        : std::move(pipeline_error_message);
+    }
+    DEBUG_TOOL_ASSERT(false, "Failed to resolve algorithm type for algorithm attachment.");
+    return false;
   }
 
   if (is_pipeline) {
-    std::vector<debug_tool::AlgorithmPipelineStageSubmission> stage_submissions{};
-    if (!_BuildPipelineStageSubmissionsFromPackage(
-          algorithm_name,
-          resource_bindings,
-          descriptor_values,
-          &stage_submissions,
-          out_error_message)) {
-      DEBUG_TOOL_ASSERT(false, "Failed to expand pipeline stage submissions.");
-      return false;
+    if (out_error_message) {
+      *out_error_message =
+        "Pipeline algorithms must use pipeline mount + resource submission, not the normal algorithm attach path.";
     }
-    const bool attached = agent_manager_.AttachPipelineAlgorithmToAgent(
-      agent_index,
-      algorithm_name,
-      _ToAgentPipelineStageSubmissions(stage_submissions),
-      out_algorithm_index,
-      out_error_message,
-      static_cast<agent::AlgorithmExecutionPreference>(static_cast<int>(execution_preference)));
-    if (!attached) {
-      DEBUG_TOOL_ASSERT(false, "Failed to attach pipeline algorithm to the built-in agent.");
-    }
-    return attached;
+    DEBUG_TOOL_ASSERT(false, "Pipeline algorithm was submitted through the normal algorithm attach path.");
+    return false;
   }
 
   const bool attached = agent_manager_.AttachAlgorithmToAgent(
@@ -688,26 +883,97 @@ bool DebugToolBackendRuntime::AttachPipelinePackageToAgent(
   size_t* out_algorithm_index,
   std::string* out_error_message,
   debug_tool::AlgorithmExecutionPreference execution_preference) {
+  const bool include_stage0_bindings = _IsPipelineResourceBatchSubmissionName(pipeline_name);
+  if (include_stage0_bindings) {
+    const std::shared_ptr<agent::Agent> managed_agent = agent_manager_.agent(agent_index);
+    std::string mounted_pipeline_name{};
+    size_t mounted_pipeline_index = 0u;
+    if (!_FindMountedPipelineInstanceName(
+          managed_agent,
+          pipeline_algorithm_name,
+          &mounted_pipeline_name,
+          &mounted_pipeline_index,
+          out_error_message)) {
+      DEBUG_TOOL_ASSERT(false, "Failed to resolve the mounted pipeline instance for resource submission.");
+      return false;
+    }
+    if (!agent_manager_.EnqueuePipelineStage0Submission(
+          agent_index,
+          mounted_pipeline_name,
+          _ToAgentResourceBindings(resource_bindings),
+          _ToAgentDescriptorValues(descriptor_values),
+          out_error_message)) {
+      DEBUG_TOOL_ASSERT(false, "Failed to enqueue the pipeline resource batch.");
+      return false;
+    }
+    if (out_algorithm_index) {
+      *out_algorithm_index = mounted_pipeline_index;
+    }
+    return true;
+  }
+
   std::vector<debug_tool::AlgorithmPipelineStageSubmission> stage_submissions{};
   if (!_BuildPipelineStageSubmissionsFromPackage(
         pipeline_algorithm_name,
         resource_bindings,
         descriptor_values,
+        include_stage0_bindings,
         &stage_submissions,
         out_error_message)) {
     DEBUG_TOOL_ASSERT(false, "Failed to expand pipeline stage submissions.");
     return false;
   }
 
+  size_t attached_algorithm_index = 0u;
   const bool attached = agent_manager_.AttachPipelineAlgorithmToAgent(
     agent_index,
     pipeline_name,
     _ToAgentPipelineStageSubmissions(stage_submissions),
-    out_algorithm_index,
+    &attached_algorithm_index,
     out_error_message,
-    static_cast<agent::AlgorithmExecutionPreference>(static_cast<int>(execution_preference)));
+    static_cast<agent::AlgorithmExecutionPreference>(static_cast<int>(execution_preference)),
+    agent::AlgorithmPipelineSubmissionMode::Circular);
   if (!attached) {
     DEBUG_TOOL_ASSERT(false, "Failed to attach pipeline package to the built-in agent.");
+    return false;
+  }
+
+  if (out_algorithm_index) {
+    *out_algorithm_index = attached_algorithm_index;
+  }
+
+  if (!include_stage0_bindings) {
+    const std::shared_ptr<agent::Agent> managed_agent = agent_manager_.agent(agent_index);
+    DEBUG_TOOL_ASSERT(managed_agent != nullptr, "Mounted pipeline agent is unavailable.");
+    if (!managed_agent) {
+      if (out_error_message) {
+        *out_error_message = "Mounted pipeline agent is unavailable.";
+      }
+      return false;
+    }
+    const agent::AlgorithmObject* root_stage =
+      managed_agent->algorithm_object(attached_algorithm_index);
+    DEBUG_TOOL_ASSERT(root_stage != nullptr, "Mounted pipeline root stage is unavailable.");
+    if (!root_stage) {
+      if (out_error_message) {
+        *out_error_message = "Mounted pipeline root stage is unavailable.";
+      }
+      return false;
+    }
+    const uint32_t pipeline_stage_count = root_stage->pipeline_stage_count;
+    for (uint32_t stage_offset = 0u; stage_offset < pipeline_stage_count; ++stage_offset) {
+      const size_t stage_index = attached_algorithm_index + static_cast<size_t>(stage_offset);
+      const bool marked_waiting = managed_agent->BeginAlgorithmAssembly(stage_index);
+      DEBUG_TOOL_ASSERT(
+        marked_waiting,
+        "Failed to mark mounted pipeline stage as waiting for resource submission.");
+      if (!marked_waiting) {
+        if (out_error_message) {
+          *out_error_message = "Failed to mark mounted pipeline stage as waiting for resource submission.";
+        }
+        return false;
+      }
+    }
   }
   return attached;
 }
@@ -732,11 +998,29 @@ bool DebugToolBackendRuntime::AttachPipelineAlgorithmToAgent(
     _ToAgentPipelineStageSubmissions(stage_submissions),
     out_algorithm_index,
     out_error_message,
-    static_cast<agent::AlgorithmExecutionPreference>(static_cast<int>(execution_preference)));
+    static_cast<agent::AlgorithmExecutionPreference>(static_cast<int>(execution_preference)),
+    agent::AlgorithmPipelineSubmissionMode::NonCircular);
   if (!attached) {
     DEBUG_TOOL_ASSERT(false, "Failed to attach pipeline algorithm to the built-in agent.");
   }
   return attached;
+}
+
+bool DebugToolBackendRuntime::ReplayPipelineStageBridgeDebug(
+  size_t agent_index,
+  size_t algorithm_index,
+  std::string* out_error_message) {
+  const agent::AgentTickContext context{
+    .input = &runtime_environment_.input(),
+    .mouse_pixel = runtime_environment_.MousePosition(),
+    .dt_seconds = frame_dt_,
+    .intervention_request = nullptr,
+  };
+  return agent_manager_.ReplayPipelineStageBridgeDebug(
+    agent_index,
+    algorithm_index,
+    context,
+    out_error_message);
 }
 
 bool DebugToolBackendRuntime::HotReloadAlgorithmPackage(
@@ -833,7 +1117,8 @@ bool DebugToolBackendRuntime::HotReloadAlgorithmPackage(
           _ToAgentPipelineStageSubmissions(pipeline_stage_submissions),
           &restored_algorithm_index,
           &restore_error_message,
-          static_cast<agent::AlgorithmExecutionPreference>(static_cast<int>(algorithm_summary.execution_preference)))
+          static_cast<agent::AlgorithmExecutionPreference>(static_cast<int>(algorithm_summary.execution_preference)),
+          static_cast<agent::AlgorithmPipelineSubmissionMode>(static_cast<int>(algorithm_summary.pipeline_submission_mode)))
       : agent_manager_.AttachAlgorithmToAgent(
           agent_index,
           algorithm_summary.algorithm_name,
@@ -878,7 +1163,8 @@ bool DebugToolBackendRuntime::HotReloadAlgorithmPackage(
         _ToAgentPipelineStageSubmissions(pipeline_stage_submissions),
         &rebuilt_algorithm_index,
         &attach_error_message,
-        static_cast<agent::AlgorithmExecutionPreference>(static_cast<int>(algorithm_summary.execution_preference)))
+        static_cast<agent::AlgorithmExecutionPreference>(static_cast<int>(algorithm_summary.execution_preference)),
+        static_cast<agent::AlgorithmPipelineSubmissionMode>(static_cast<int>(algorithm_summary.pipeline_submission_mode)))
     : agent_manager_.AttachAlgorithmToAgent(
         agent_index,
         algorithm_summary.algorithm_name,

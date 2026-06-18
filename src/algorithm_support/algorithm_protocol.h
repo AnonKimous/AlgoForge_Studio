@@ -92,6 +92,24 @@ bool PipelineStageBridgeEgress(
   std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>* stage_container_sets,
   std::string* out_error_message = nullptr);
 
+bool PipelineStageBridgeCaptureIngressDebugSet(
+  const algorithm::AlgorithmRuntimeTransferMap& transfer_map,
+  const std::string& pipeline_name,
+  const std::string& target_stage_name,
+  const std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>& stage_container_sets,
+  const algorithm::AlgorithmContainerSet& target_container_set,
+  algorithm_management::PipelineStageBridgeDebugSet* out_debug_set,
+  std::string* out_error_message = nullptr);
+
+bool PipelineStageBridgeCaptureEgressDebugSet(
+  const algorithm::AlgorithmRuntimeTransferMap& transfer_map,
+  const std::string& pipeline_name,
+  const std::string& source_stage_name,
+  const algorithm::AlgorithmContainerSet& source_container_set,
+  const std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>& stage_container_sets,
+  algorithm_management::PipelineStageBridgeDebugSet* in_out_debug_set,
+  std::string* out_error_message = nullptr);
+
 bool QueryAlgorithmPackageRequestedBindingsFromLocation(
   const algorithm::AlgorithmPackageLocation& package_location,
   algorithm_management::AlgorithmRequestedResources* out_requested_resources,
@@ -174,6 +192,52 @@ class PipelineStageBridge {
       out_error_message);
   }
 
+  bool CaptureIngressDebugSet(
+    const std::string& pipeline_name,
+    const std::string& target_stage_name,
+    const std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>& stage_container_sets,
+    const algorithm::AlgorithmContainerSet& target_container_set,
+    algorithm_management::PipelineStageBridgeDebugSet* out_debug_set,
+    std::string* out_error_message = nullptr) const {
+    if (!transfer_map_) {
+      if (out_error_message) {
+        *out_error_message = "Algorithm runtime transfer map is unavailable.";
+      }
+      return false;
+    }
+    return PipelineStageBridgeCaptureIngressDebugSet(
+      *transfer_map_,
+      pipeline_name,
+      target_stage_name,
+      stage_container_sets,
+      target_container_set,
+      out_debug_set,
+      out_error_message);
+  }
+
+  bool CaptureEgressDebugSet(
+    const std::string& pipeline_name,
+    const std::string& source_stage_name,
+    const algorithm::AlgorithmContainerSet& source_container_set,
+    const std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>& stage_container_sets,
+    algorithm_management::PipelineStageBridgeDebugSet* in_out_debug_set,
+    std::string* out_error_message = nullptr) const {
+    if (!transfer_map_) {
+      if (out_error_message) {
+        *out_error_message = "Algorithm runtime transfer map is unavailable.";
+      }
+      return false;
+    }
+    return PipelineStageBridgeCaptureEgressDebugSet(
+      *transfer_map_,
+      pipeline_name,
+      source_stage_name,
+      source_container_set,
+      stage_container_sets,
+      in_out_debug_set,
+      out_error_message);
+  }
+
  private:
   std::shared_ptr<algorithm::AlgorithmRuntimeTransferMap> transfer_map_{};
 };
@@ -194,6 +258,8 @@ using ::algorithm::AlgorithmRuntimeTransferEdge;
 using ::algorithm::AlgorithmRuntimeTransferMap;
 using algorithm_support::PipelineStageBridgeIngress;
 using algorithm_support::PipelineStageBridgeEgress;
+using algorithm_support::PipelineStageBridgeCaptureIngressDebugSet;
+using algorithm_support::PipelineStageBridgeCaptureEgressDebugSet;
 using algorithm_support::LoadAlgorithmPackageTransferMapFromLocation;
 }  // namespace algorithm_management
 

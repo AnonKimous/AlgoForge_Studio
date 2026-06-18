@@ -1,4 +1,4 @@
-# Layer Readme
+﻿# Layer Readme
 
 ## Purpose
 
@@ -33,7 +33,7 @@ When code and docs disagree, follow the code and update the docs.
 - Modules under `src/capabilities` are capability modules, not strict main-trunk hops.
 - Capability modules may aggregate lower-level contracts, but they must not introduce upward dependencies into strict trunk layers.
 - Optional capabilities must be linked explicitly by any consumer.
-- `capabilities/algorithm_library` is legacy/deprecated. Do not add new work there; the packaged mirror lives in `algorithmLib/algorithmSrc`, and built DLL/SPV artifacts live in `algorithmLib/algorithmruntimeLib`.
+- Algorithm package source lives in `algorithmLib/algorithmSrc`, and built DLL/SPV runtime artifacts live in `algorithmLib/algorithmruntimeLib`.
 
 ## Current Module Graph
 
@@ -75,7 +75,6 @@ UI path:
 Capability modules grouped under `src/capabilities`:
 
 - `agent`
-- `algorithm_library` (legacy/deprecated)
 - `sidecar`
 
 Current project-library dependency graph from `CMakeLists.txt`:
@@ -103,29 +102,27 @@ but it is a capability carrier rather than one strict hop in the layering path.
 
 ```text
 src/
-├─ algorithm_management/
-│  ├─ algorithm_manager.h
-│  ├─ algorithm_container_manifest.h/.cpp
-│  ├─ algorithm_package_location.h
-│  ├─ algorithm_types.h
-│  └─ README.md
-├─ capabilities/
-│  ├─ README.md
-│  ├─ agent/
-│  │  ├─ agent.h/.cpp
-│  │  └─ README.md
-│  ├─ algorithm_library/ (legacy/deprecated)
-│  │  └─ README.md
-│  └─ sidecar/
-│     ├─ mesh_io.h/.cpp
-│     └─ README.md
-├─ common_data/
-├─ algorithm_support/
-│  ├─ algorithm_intervention.h
-│  └─ algorithm_protocol.h
-├─ runtime_systems/
-├─ sdk/
-└─ debug_tool/
+鈹溾攢 algorithm_management/
+鈹? 鈹溾攢 algorithm_manager.h
+鈹? 鈹溾攢 algorithm_container_manifest.h/.cpp
+鈹? 鈹溾攢 algorithm_package_location.h
+鈹? 鈹溾攢 algorithm_types.h
+鈹? 鈹斺攢 README.md
+鈹溾攢 capabilities/
+鈹? 鈹溾攢 README.md
+鈹? 鈹溾攢 agent/
+鈹? 鈹? 鈹溾攢 agent.h/.cpp
+鈹? 鈹? 鈹斺攢 README.md
+鈹? 鈹斺攢 sidecar/
+鈹?    鈹溾攢 mesh_io.h/.cpp
+鈹?    鈹斺攢 README.md
+鈹溾攢 common_data/
+鈹溾攢 algorithm_support/
+鈹? 鈹溾攢 algorithm_intervention.h
+鈹? 鈹斺攢 algorithm_protocol.h
+鈹溾攢 runtime_systems/
+鈹溾攢 sdk/
+鈹斺攢 debug_tool/
 ```
 
 ## Public Interfaces
@@ -180,19 +177,6 @@ It should not:
 - own outer runtime scheduling
 - own the runtime shell
 - become a hidden execution graph manager
-
-### `capabilities/algorithm_library` (legacy/deprecated)
-
-Reserved home for concrete algorithm package capability bundles.
-
-Keep:
-
-- package-local contracts
-- package-local container manifests
-- package-local hook bundles
-
-Do not move manager responsibilities out of `algorithm_management` into this
-directory. The generated package mirror should go to `algorithmLib/algorithmSrc`, not into `src/` or `app/`.
 
 ### `capabilities/sidecar`
 

@@ -1,5 +1,6 @@
 #include "algorithm_gpu_executor.h"
 
+#include "algorithm_management/algorithm_manager.h"
 #include "algorithm_support/algorithm_library_paths.h"
 #include "runtime_systems/algorithm_gpu_context.h"
 
@@ -121,6 +122,8 @@ std::string _ResolveShaderBinaryPath(const std::string& path) {
   return std::filesystem::path(source_path.string() + ".spv").string();
 }
 
+[[noreturn]] void _AbortGpuTick(std::string message);
+
 std::string _ResolveAlgorithmShaderPath(
   const std::string& algorithm_name,
   const std::string& shader_path) {
@@ -133,9 +136,27 @@ std::string _ResolveAlgorithmShaderPath(
     return path.string();
   }
 
+  ::algorithm::AlgorithmPackageLocation package_location{};
+  std::string error_message;
+  const bool resolved = algorithm_management::TryResolveAlgorithmPackageLocation(
+    algorithm_name,
+    &package_location,
+    &error_message);
+  if (!resolved) {
+    _AbortGpuTick(
+      error_message.empty()
+        ? ("Failed to resolve algorithm package location for '" + algorithm_name + "'.")
+        : std::move(error_message));
+  }
+  if (package_location.runtime_package_root.empty()) {
+    _AbortGpuTick("Algorithm runtime package root is empty for '" + algorithm_name + "'.");
+  }
+
   return algorithm::library_paths::ResolveAlgorithmRelativePath(
     algorithm::library_paths::ResolveAlgorithmLibraryRuntimeRoot(),
-    algorithm_name,
+    algorithm::library_paths::ResolvePackageRelativePath(
+      package_location.package_root,
+      algorithm::library_paths::ResolveAlgorithmLibrarySourceRoot()),
     shader_path).string();
 }
 

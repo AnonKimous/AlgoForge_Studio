@@ -26,6 +26,8 @@ MAX_INLINE_ATTACHMENT_BYTES = 4 * 1024 * 1024
 PLAN_SUMMARY_PROMPT_CHAR_THRESHOLD = 6000
 PLAN_SUMMARY_MANIFEST_CHAR_THRESHOLD = 12000
 PLAN_SUMMARY_COMBINED_CHAR_THRESHOLD = 18000
+OPENAI_RESPONSES_COMPACT_THRESHOLD = 64000
+DEEPSEEK_HISTORY_COMPACTION_INTERVAL = 100
 AgentEventCallback = Callable[[dict[str, str]], None]
 LOCAL_AGENTS_PATH = Path(__file__).resolve().parents[1] / "AGENTS.md"
 
@@ -47,8 +49,58 @@ class MockAgentClient:
         self.api_key = ""
         self.codex_command = "codex"
         self.timeout_seconds: float | None = None
-        self.staged_execution_enabled = True
+        self.staged_execution_enabled = False
         self.context_compression_enabled = True
+        self._provider_session_signature: tuple[str, str, str] | None = None
+        self._openai_previous_response_id: str | None = None
+
+    def reset_session_state(self) -> None:
+        self._provider_session_signature = None
+        self._openai_previous_response_id = None
+
+    def _provider_signature(self) -> tuple[str, str, str]:
+        return (
+            self.provider.strip().lower(),
+            self.base_url.strip(),
+            self.model.strip(),
+        )
+
+    def _sync_provider_session_state(self) -> None:
+        signature = self._provider_signature()
+        if signature != self._provider_session_signature:
+            self._provider_session_signature = signature
+            self._openai_previous_response_id = None
+
+    def _api_provider_kind(self) -> str:
+        base_url = self.base_url.strip()
+        if not base_url:
+            return "generic"
+        parsed = urlparse(base_url)
+        host = (parsed.netloc or parsed.path or "").strip().lower()
+        if host.endswith("openai.com") or ".openai.com" in host:
+            return "openai"
+        if "deepseek.com" in host:
+            return "deepseek"
+        return "generic"
+
+    def conversation_history_mode(self) -> str:
+        mode = self.provider.strip().lower()
+        if mode != "api":
+            return "local_adaptive"
+        api_kind = self._api_provider_kind()
+        if api_kind == "openai":
+            return "server_managed"
+        if api_kind == "deepseek":
+            return "checkpoint_summary"
+        return "local_adaptive"
+
+    def should_compact_deepseek_history(self, completed_request_count: int) -> bool:
+        return (
+            self.provider.strip().lower() == "api"
+            and self._api_provider_kind() == "deepseek"
+            and completed_request_count > 0
+            and completed_request_count % DEEPSEEK_HISTORY_COMPACTION_INTERVAL == 0
+        )
 
     def _project_snapshot(self, project: ProjectState) -> str:
         lines = [
@@ -137,6 +189,7 @@ class MockAgentClient:
         return combined_size >= PLAN_SUMMARY_COMBINED_CHAR_THRESHOLD
 
     def _should_stage_request(self, selection: str, prompt: str) -> bool:
+        return False
         if not self.staged_execution_enabled:
             return False
         if self.provider.strip().lower() not in {"api", "codex"}:
@@ -340,6 +393,58 @@ class MockAgentClient:
             + "\n\n".join(section for section in prompt_sections if section)
         )
 
+    def _build_openai_system_message(self, project: ProjectState, selection: str) -> str:
+        return (
+            "You are the Algorithm Studio agent.\n"
+            "Use strict failures. Do not silently ignore invalid state.\n"
+            f"Selection: {selection}\n"
+            f"approval_mode={self.approval_mode}\n"
+            f"containers={len(project.containers)}, "
+            f"container_groups={len(project.container_groups)}, "
+            f"rules={len(project.decomposer_rules)}, "
+            f"reflectors={len(project.reflector_items)}, "
+            f"res={len(project.res_nodes)}, "
+            f"functions={len(project.function_frames)}, "
+            f"stages={len(project.intervention_stages)}\n\n"
+            f"{self._workspace_agent_instructions()}\n\n"
+            f"{self._document_tool_instructions()}"
+        )
+
+    def _build_openai_prompt_blocks(
+        self,
+        project: ProjectState,
+        prompt: str,
+        attachments: list[dict[str, str]],
+        *,
+        document_mode: str = "full",
+        extra_sections: list[str] | None = None,
+    ) -> list[str]:
+        project_snapshot = self._project_snapshot(project).strip()
+        prompt_blocks = [prompt.strip()]
+        if extra_sections:
+            prompt_blocks.extend(section.strip() for section in extra_sections if str(section).strip())
+        if document_mode in {"summary", "full"} and project_snapshot:
+            prompt_blocks.append(
+                "\n".join(
+                    [
+                        "Compressed project snapshot:",
+                        project_snapshot,
+                    ]
+                )
+            )
+        manifest_text = project.current_manifest_text().strip()
+        if document_mode == "full" and manifest_text:
+            prompt_blocks.append(
+                "\n".join(
+                    [
+                        "Current document:",
+                        manifest_text,
+                    ]
+                )
+            )
+        prompt_blocks.extend(block for block in self._attachment_prompt_blocks(attachments) if block)
+        return [block for block in prompt_blocks if block]
+
     def _build_openai_user_content(self, prompt: str, attachments: list[dict[str, str]]) -> str | list[dict[str, Any]]:
         if not attachments:
             return prompt.strip()
@@ -364,6 +469,33 @@ class MockAgentClient:
             )
         return content
 
+    def _build_openai_responses_input(
+        self,
+        prompt: str,
+        attachments: list[dict[str, str]],
+    ) -> list[dict[str, Any]]:
+        content: list[dict[str, Any]] = [{"type": "input_text", "text": prompt.strip()}]
+        for attachment in attachments:
+            if attachment["kind"] == "image":
+                data = self._read_attachment_bytes(Path(attachment["path"]))
+                encoded = base64.b64encode(data).decode("ascii")
+                content.append(
+                    {
+                        "type": "input_image",
+                        "image_url": f"data:{attachment['mime_type']};base64,{encoded}",
+                        "detail": "auto",
+                    }
+                )
+                continue
+            text = self._read_text_attachment(attachment)
+            content.append(
+                {
+                    "type": "input_text",
+                    "text": f"[Attached file] {attachment['name']}\n{text.strip()}",
+                }
+            )
+        return [{"role": "user", "content": content}]
+
     def _build_openai_messages(
         self,
         project: ProjectState,
@@ -374,48 +506,135 @@ class MockAgentClient:
         document_mode: str = "full",
         extra_sections: list[str] | None = None,
     ) -> list[dict[str, Any]]:
-        project_snapshot = self._project_snapshot(project).strip()
-        prompt_blocks = [prompt.strip()]
-        if extra_sections:
-            prompt_blocks.extend(section.strip() for section in extra_sections if str(section).strip())
-        if document_mode in {"summary", "full"} and project_snapshot:
-            prompt_blocks.append(
-                "\n".join(
-                    [
-                        "Compressed project snapshot:",
-                        project_snapshot,
-                    ]
-                )
-            )
-        manifest_text = project.current_manifest_text().strip()
-        if document_mode == "full" and manifest_text:
-            prompt_blocks.append(
-                "\n".join(
-                    [
-                        "Current document:",
-                        manifest_text,
-                    ]
-                )
-            )
-        system_message = (
-            "You are the Algorithm Studio agent.\n"
-            "Use strict failures. Do not silently ignore invalid state.\n"
-            f"Selection: {selection}\n"
-            f"approval_mode={self.approval_mode}\n"
-            f"containers={len(project.containers)}, "
-            f"container_groups={len(project.container_groups)}, "
-            f"rules={len(project.decomposer_rules)}, "
-            f"reflectors={len(project.reflector_items)}, "
-            f"res={len(project.res_nodes)}, "
-            f"functions={len(project.function_frames)}, "
-            f"stages={len(project.intervention_stages)}\n\n"
-            f"{self._workspace_agent_instructions()}\n\n"
-            f"{self._document_tool_instructions()}"
+        prompt_blocks = self._build_openai_prompt_blocks(
+            project,
+            prompt,
+            attachments,
+            document_mode=document_mode,
+            extra_sections=extra_sections,
         )
         return [
-            {"role": "system", "content": system_message},
+            {"role": "system", "content": self._build_openai_system_message(project, selection)},
             {"role": "user", "content": self._build_openai_user_content("\n\n".join(block for block in prompt_blocks if block), attachments)},
         ]
+
+    def _post_json(
+        self,
+        url: str,
+        body: dict[str, Any],
+        *,
+        event_callback: AgentEventCallback | None = None,
+        waiting_detail: str | None = None,
+    ) -> dict[str, Any]:
+        payload = json.dumps(body).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        if self.api_key.strip():
+            headers["Authorization"] = f"Bearer {self.api_key.strip()}"
+        request = Request(url, data=payload, headers=headers, method="POST")
+        if waiting_detail:
+            _emit_agent_event(event_callback, "activity.update", detail=waiting_detail, tag="reasoning")
+        try:
+            if self.timeout_seconds is None:
+                response = urlopen(request)
+            else:
+                response = urlopen(request, timeout=self.timeout_seconds)
+            with response:
+                response_text = response.read().decode("utf-8", errors="replace")
+        except HTTPError as exc:
+            error_body = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
+            error_text = " ".join(
+                part.strip()
+                for part in [f"{exc.code} {exc.reason}".strip(), error_body.splitlines()[0].strip() if error_body else ""]
+                if part
+            )
+            raise RuntimeError(f"API request failed: {error_text or exc.reason}") from exc
+        except URLError as exc:
+            raise RuntimeError(f"API request failed: {exc.reason}") from exc
+        return json.loads(response_text)
+
+    def _build_openai_responses_url(self) -> str:
+        base_url = self.base_url.strip()
+        if base_url.endswith("/responses"):
+            return base_url
+        if base_url.endswith("/chat/completions"):
+            return base_url[: -len("/chat/completions")] + "/responses"
+        if base_url.endswith("/v1"):
+            return base_url + "/responses"
+        return base_url.rstrip("/") + "/v1/responses"
+
+    def _build_chat_completions_url(self) -> str:
+        base_url = self.base_url.strip()
+        parsed = urlparse(base_url)
+        if base_url.endswith("/chat/completions"):
+            return base_url
+        if base_url.endswith("/v1"):
+            return base_url + "/chat/completions"
+        if parsed.netloc.endswith("deepseek.com") and parsed.path in {"", "/"}:
+            return base_url.rstrip("/") + "/chat/completions"
+        return base_url.rstrip("/") + "/v1/chat/completions"
+
+    def _extract_chat_completion_content(self, data: dict[str, Any]) -> str:
+        choices = data.get("choices", [])
+        if not choices:
+            raise RuntimeError("API response did not contain choices.")
+        message = choices[0].get("message", {})
+        content = str(message.get("content") or "").strip()
+        if not content:
+            raise RuntimeError("API response did not contain assistant content.")
+        return content
+
+    def _extract_openai_responses_content(self, data: dict[str, Any]) -> str:
+        output_text = str(data.get("output_text") or "").strip()
+        if output_text:
+            return output_text
+        parts: list[str] = []
+        for item in data.get("output", []):
+            if str(item.get("type") or "").strip() != "message":
+                continue
+            for content in item.get("content", []):
+                content_type = str(content.get("type") or "").strip()
+                if content_type == "output_text":
+                    text = str(content.get("text") or "").strip()
+                    if text:
+                        parts.append(text)
+                elif content_type == "refusal":
+                    refusal = str(content.get("refusal") or "").strip()
+                    if refusal:
+                        parts.append(refusal)
+        joined = "\n".join(part for part in parts if part).strip()
+        if not joined:
+            raise RuntimeError("Responses API response did not contain assistant content.")
+        return joined
+
+    def compact_history(self, history_text: str) -> str:
+        if self.provider.strip().lower() != "api" or self._api_provider_kind() != "deepseek":
+            raise RuntimeError("History compaction is only supported for the DeepSeek API path.")
+        compact_prompt = "\n".join(
+            [
+                "Compress the conversation into a stable working summary.",
+                "Return plain text only.",
+                "Preserve the active user goal, hard constraints, current scene/document state, concrete decisions, unresolved risks, and the immediate next action.",
+                "Do not invent details. Do not omit constraints that still matter.",
+                "",
+                "Conversation to compact:",
+                history_text.strip(),
+            ]
+        ).strip()
+        body = {
+            "model": self.model.strip() or "gpt-5.4-mini",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "You maintain conversation state for an Algorithm Studio assistant. "
+                        "Use strict failures and preserve only relevant facts."
+                    ),
+                },
+                {"role": "user", "content": compact_prompt},
+            ],
+        }
+        data = self._post_json(self._build_chat_completions_url(), body)
+        return self._extract_chat_completion_content(data)
 
     def _build_plan_prompt(self, prompt: str) -> str:
         return "\n".join(
@@ -680,15 +899,41 @@ class MockAgentClient:
         base_url = self.base_url.strip()
         if not base_url:
             raise ValueError("API base_url is required when provider is api.")
-        parsed = urlparse(base_url)
-        if base_url.endswith("/chat/completions"):
-            url = base_url
-        elif base_url.endswith("/v1"):
-            url = base_url + "/chat/completions"
-        elif parsed.netloc.endswith("deepseek.com") and parsed.path in {"", "/"}:
-            url = base_url.rstrip("/") + "/chat/completions"
-        else:
-            url = base_url.rstrip("/") + "/v1/chat/completions"
+        if self._api_provider_kind() == "openai":
+            self._sync_provider_session_state()
+            prompt_blocks = self._build_openai_prompt_blocks(
+                project,
+                prompt,
+                attachments,
+                document_mode=document_mode,
+                extra_sections=extra_sections,
+            )
+            if emit_start:
+                _emit_agent_event(event_callback, "activity.start", title="chat", summary="Start API", detail="POST /responses")
+            body: dict[str, Any] = {
+                "model": self.model.strip() or "gpt-5.4-mini",
+                "instructions": self._build_openai_system_message(project, selection),
+                "input": self._build_openai_responses_input("\n\n".join(prompt_blocks), attachments),
+                "context_management": [
+                    {
+                        "type": "compaction",
+                        "compact_threshold": OPENAI_RESPONSES_COMPACT_THRESHOLD,
+                    }
+                ],
+            }
+            if self._openai_previous_response_id:
+                body["previous_response_id"] = self._openai_previous_response_id
+            data = self._post_json(
+                self._build_openai_responses_url(),
+                body,
+                event_callback=event_callback,
+                waiting_detail="Waiting for OpenAI Responses API",
+            )
+            response_id = str(data.get("id") or "").strip()
+            if not response_id:
+                raise RuntimeError("Responses API response did not contain an id.")
+            self._openai_previous_response_id = response_id
+            return self._extract_openai_responses_content(data)
         if emit_start:
             _emit_agent_event(event_callback, "activity.start", title="chat", summary="开始请求 API", detail="POST /chat/completions")
         body = {
@@ -702,11 +947,13 @@ class MockAgentClient:
                 extra_sections=extra_sections,
             ),
         }
-        payload = json.dumps(body).encode("utf-8")
-        headers = {"Content-Type": "application/json"}
-        if self.api_key.strip():
-            headers["Authorization"] = f"Bearer {self.api_key.strip()}"
-        request = Request(url, data=payload, headers=headers, method="POST")
+        data = self._post_json(
+            self._build_chat_completions_url(),
+            body,
+            event_callback=event_callback,
+            waiting_detail="Waiting for API response",
+        )
+        return self._extract_chat_completion_content(data)
         _emit_agent_event(event_callback, "activity.update", detail="等待 API 返回结果", tag="reasoning")
         try:
             if self.timeout_seconds is None:
@@ -895,7 +1142,7 @@ class MockAgentClient:
         event_callback: AgentEventCallback | None = None,
     ) -> str:
         normalized_attachments = self._normalize_attachments(attachments)
-        if self._should_stage_request(selection, prompt):
+        if False and self._should_stage_request(selection, prompt):
             compress_context = self._should_compress_planning_context(project, prompt, normalized_attachments)
             detail = "上下文较长，先压缩关键信息再整理方案。" if compress_context else "保留当前上下文，先整理执行方案。"
             _emit_agent_event(event_callback, "activity.start", title="chat", summary="开始整理方案", detail=detail)
@@ -950,7 +1197,7 @@ def generate_cpp_skeleton(project_name: str) -> str:
         [
             "#define ALGORITHM_LIBRARY_PLUGIN_BUILD 1",
             "",
-            "#include \"capabilities/algorithm_library/algorithm_plugin_api.h\"",
+            "#include \"../algorithm_plugin_api.h\"",
             "",
             "#include <memory>",
             "#include <string>",

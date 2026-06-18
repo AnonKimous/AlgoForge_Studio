@@ -7,34 +7,17 @@ description: Build the smallest valid Algorithm Studio demo bundle with strict s
 
 Build the minimum valid scene that satisfies the request. Prefer fewer nodes, fewer stages, and fewer files over flexibility.
 
-## Mode Contract
+## Execution Contract
 
-If the prompt says `Phase: planning only.`, use plan mode:
-
-- do not edit the scene
-- do not emit tool calls
-- write a short execution document for the later execution pass
-- compress long context and long document state before planning further
-- prefer this structure:
-  - `Goal`
-  - `Constraints`
-  - `Minimal structure`
-  - `Steps`
-  - `Execution focus`
-
-If the prompt says `Phase: execution.`, use execution mode:
-
-- read the latest plan first
-- perform only the smallest coherent batch of edits
-- avoid reopening the whole design unless the plan is clearly broken
-- report what changed and what remains
-
-For this skill, the plan document should preserve:
-
-- the target minimal motion shape
-- the exact containers and stages allowed
-- the descriptor binding intent
-- the nodes and files that must not be added
+- First check whether the request is short and whether there is a direct matching UI tool or document-editing path.
+- If there is a direct path, execute it immediately in one pass.
+- Do not force a separate planning phase and execution phase.
+- If the request is genuinely complex and needs a checklist, keep that checklist short and continue execution in the same pass whenever possible.
+- Any short checklist should preserve:
+  - the target minimal motion shape
+  - the exact containers and stages allowed
+  - the descriptor binding intent
+  - the nodes and files that must not be added
 
 ## Workflow
 
@@ -47,6 +30,7 @@ For this skill, the plan document should preserve:
 ## Hard Rules
 
 - Do not invent extra `v`, `a`, `meshNode`, `reflector`, `decomposer`, `interventioner`, or `fun` nodes unless the request cannot work without them.
+- If the scene uses standard-slot aliases for readability, treat them as authoring semantics only and emit underlying `vN/aN` names in runtime-facing package fields.
 - Keep `algorithm_name` and `package_name` identical if the user will likely build the result.
 - Prefer one `afterTick` stage and one `resultRender` stage for motion demos.
 - Use one `fun` only when real plugin C++ is explicitly requested.

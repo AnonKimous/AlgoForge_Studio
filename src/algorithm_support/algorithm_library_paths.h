@@ -62,9 +62,39 @@ inline fs::path ResolveProjectRootFromAlgorithmLibraryRoot(const fs::path& algor
   return algorithm_library_root.parent_path().parent_path();
 }
 
+inline fs::path ResolvePackageRelativePath(
+  const fs::path& package_root,
+  const fs::path& source_root) {
+  if (package_root.empty() || source_root.empty()) {
+    return {};
+  }
+
+  const fs::path relative_path = package_root.lexically_relative(source_root);
+  const std::string relative_text = relative_path.generic_string();
+  if (relative_path.empty() || relative_path == "." || relative_text.rfind("..", 0u) == 0u) {
+    return {};
+  }
+  return relative_path;
+}
+
+inline fs::path ResolveRuntimePackageRoot(
+  const fs::path& package_root,
+  const fs::path& source_root,
+  const fs::path& runtime_root) {
+  if (package_root.empty() || source_root.empty() || runtime_root.empty()) {
+    return {};
+  }
+
+  const fs::path relative_path = ResolvePackageRelativePath(package_root, source_root);
+  if (relative_path.empty()) {
+    return {};
+  }
+  return runtime_root / relative_path;
+}
+
 inline fs::path ResolveAlgorithmRelativePath(
   const fs::path& root,
-  const std::string& algorithm_name,
+  const fs::path& package_relative_root,
   const std::string& relative_path) {
   if (relative_path.empty()) {
     return {};
@@ -75,7 +105,7 @@ inline fs::path ResolveAlgorithmRelativePath(
     return path;
   }
 
-  return root / algorithm_name / relative_path;
+  return root / package_relative_root / relative_path;
 }
 
 }  // namespace library_paths

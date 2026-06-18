@@ -41,14 +41,10 @@ def _resolve_codex_command(command: str) -> str:
 
 
 def _resolve_default_template_path() -> Path:
-    candidates = [
-        PROJECT_ROOT / "algorithmLib" / "algorithmSrc" / "algorithm_package_example.json",
-        PROJECT_ROOT / "src" / "capabilities" / "algorithm_library" / "algorithm_package_example.json",
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    return candidates[0]
+    candidate = PROJECT_ROOT / "algorithmLib" / "algorithmSrc" / "algorithm_package_example.json"
+    if candidate.exists():
+        return candidate
+    return candidate
 
 
 DEFAULT_TEMPLATE_PATH = _resolve_default_template_path()

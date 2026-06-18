@@ -132,6 +132,20 @@ inline bool LoadAlgorithmPackageDefaultBindings(
     out_error_message);
 }
 
+inline bool LoadAlgorithmPackageDefaultBindingsFromLocation(
+  const ::algorithm::AlgorithmPackageLocation& package_location,
+  std::vector<AlgorithmResourceBinding>* out_resource_bindings,
+  std::vector<AlgorithmDescriptorValue>* out_descriptor_values,
+  bool* out_has_default_file = nullptr,
+  std::string* out_error_message = nullptr) {
+  return algorithm_support::LoadAlgorithmPackageDefaultBindingsFromLocation(
+    package_location,
+    out_resource_bindings,
+    out_descriptor_values,
+    out_has_default_file,
+    out_error_message);
+}
+
 inline bool FinalizeAlgorithmObject(
   const ::agent::AlgorithmObject& algorithm_object,
   ::algorithm::AlgorithmContainerSet* container_set,
@@ -167,6 +181,73 @@ inline bool FinalizeAlgorithmObject(
     out_error_message->clear();
   }
   return ok;
+}
+
+inline bool PrepareAlgorithmObjectByName(
+  const std::string& algorithm_name,
+  const std::vector<AlgorithmResourceBinding>& resource_bindings,
+  const std::vector<AlgorithmDescriptorValue>& descriptor_values,
+  ::agent::AlgorithmObject* out_object,
+  std::string* out_error_message = nullptr) {
+  if (!out_object) {
+    if (out_error_message) {
+      *out_error_message = "Prepared algorithm object output pointer is null.";
+    }
+    return false;
+  }
+
+  ::algorithm::AlgorithmPackageLocation package_location{};
+  std::string location_error_message;
+  if (!TryResolveAlgorithmPackageLocation(
+        algorithm_name,
+        &package_location,
+        &location_error_message)) {
+    if (out_error_message) {
+      *out_error_message = location_error_message.empty()
+        ? ("Failed to resolve algorithm package location for '" + algorithm_name + "'.")
+        : std::move(location_error_message);
+    }
+    return false;
+  }
+
+  ::agent::AlgorithmObject prepared_object{};
+  std::string create_error_message;
+  if (!CreateAlgorithmObjectFromLocation(package_location, &prepared_object, &create_error_message)) {
+    if (out_error_message) {
+      *out_error_message = create_error_message.empty()
+        ? ("Failed to create algorithm object for '" + algorithm_name + "'.")
+        : std::move(create_error_message);
+    }
+    return false;
+  }
+
+  prepared_object.resource_bindings = resource_bindings;
+  prepared_object.descriptor_values = descriptor_values;
+  if (!prepared_object.mutable_container_set()) {
+    if (out_error_message) {
+      *out_error_message = "Prepared algorithm container set is unavailable.";
+    }
+    return false;
+  }
+
+  std::string finalize_error_message;
+  if (!FinalizeAlgorithmObject(
+        prepared_object,
+        prepared_object.mutable_container_set(),
+        &finalize_error_message)) {
+    if (out_error_message) {
+      *out_error_message = finalize_error_message.empty()
+        ? ("Failed to finalize prepared algorithm object for '" + algorithm_name + "'.")
+        : std::move(finalize_error_message);
+    }
+    return false;
+  }
+
+  *out_object = std::move(prepared_object);
+  if (out_error_message) {
+    out_error_message->clear();
+  }
+  return true;
 }
 
 inline bool SubmitAlgorithmObject(
@@ -221,7 +302,7 @@ inline bool SubmitAlgorithmObject(
     return false;
   }
 
-  const bool ok = runtime_systems::job_cpu::Execute(
+  const bool ok = runtime_systems::TryExecuteCpuTick(
     object,
     context,
     agent_to_algorithm_signal,
@@ -277,11 +358,15 @@ using algorithm_management::AlgorithmPackageLocation;
 using algorithm_management::FindAlgorithmContainer;
 using algorithm_management::CreateAlgorithmObjectFromLocation;
 using algorithm_management::FinalizeAlgorithmObject;
+using algorithm_management::PrepareAlgorithmObjectByName;
 using algorithm_management::PipelineStageBridgeIngress;
 using algorithm_management::PipelineStageBridgeEgress;
+using algorithm_management::PipelineStageBridgeCaptureIngressDebugSet;
+using algorithm_management::PipelineStageBridgeCaptureEgressDebugSet;
 using algorithm_management::LoadAlgorithmPackageTransferMapFromLocation;
 using algorithm_management::QueryAlgorithmRequestedBindings;
 using algorithm_management::LoadAlgorithmPackageDefaultBindings;
+using algorithm_management::LoadAlgorithmPackageDefaultBindingsFromLocation;
 using algorithm_management::SubmitAlgorithmObject;
 using algorithm_management::TryResolveAlgorithmPackageLocation;
 using agent_management::AlgorithmPipelineStallReport;
