@@ -60,6 +60,20 @@ struct AlgorithmPipelineStageRuntimeStat {
   std::string reason;
 };
 
+struct PipelineLaneTimingStat {
+  uint64_t lane_id{0u};
+  float elapsed_seconds{0.0f};
+  bool valid{false};
+};
+
+struct PipelineTimingSnapshot {
+  std::string pipeline_name;
+  float total_elapsed_seconds{0.0f};
+  std::vector<AlgorithmPipelineStageRuntimeStat> stage_timings;
+  std::vector<PipelineLaneTimingStat> lane_timings;
+  bool valid{false};
+};
+
 enum class AlgorithmMountMode {
   Direct = 0,
   StandardContainer = 1,
@@ -71,10 +85,17 @@ enum class AlgorithmExecutionPreference {
   Gpu = 1,
 };
 
-enum class AlgorithmPipelineSubmissionMode {
+enum class AlgorithmPipelineTopology {
   NonCircular = 0,
   Circular = 1,
 };
+
+enum class AlgorithmPipelineSyncMode {
+  Forced = 0,
+  NonForced = 1,
+};
+
+using AlgorithmPipelineSubmissionMode = AlgorithmPipelineTopology;
 
 enum class AlgorithmJobPriority {
   High = 0,
@@ -200,6 +221,9 @@ struct AgentAlgorithmRuntimeState {
   bool pipeline_stall_report_requested{false};
   bool pipeline_stall_reported{false};
   std::string pipeline_stall_reason;
+  uint32_t pipeline_active_stage_index{0u};
+  bool pipeline_active_stage_index_valid{false};
+  float pipeline_total_elapsed_seconds{0.0f};
   std::vector<AlgorithmPipelineStageRuntimeStat> pipeline_stage_runtime_stats;
   PipelineStageBridgeDebugSet bridge_debug_set{};
 };
@@ -252,7 +276,10 @@ class AlgorithmObject {
   std::string pipeline_name;
   uint32_t pipeline_stage_index{0u};
   uint32_t pipeline_stage_count{0u};
-  AlgorithmPipelineSubmissionMode pipeline_submission_mode{AlgorithmPipelineSubmissionMode::NonCircular};
+  bool pipeline_stage_debug_all{true};
+  uint32_t pipeline_stage_debug_index{0u};
+  AlgorithmPipelineTopology pipeline_topology{AlgorithmPipelineTopology::NonCircular};
+  AlgorithmPipelineSyncMode pipeline_sync_mode{AlgorithmPipelineSyncMode::Forced};
   std::vector<AlgorithmResourceBinding> resource_bindings;
   std::vector<AlgorithmDescriptorValue> descriptor_values;
   bool cpu_symbol{true};
@@ -387,6 +414,8 @@ using algorithm_management::AlgorithmDescriptorValue;
 using algorithm_management::AlgorithmExecutionPhase;
 using algorithm_management::AlgorithmExecutionPreference;
 using algorithm_management::AlgorithmPipelineSubmissionMode;
+using algorithm_management::AlgorithmPipelineTopology;
+using algorithm_management::AlgorithmPipelineSyncMode;
 using algorithm_management::AlgorithmJobPriority;
 using algorithm_management::AlgorithmInterventionContainerBinding;
 using algorithm_management::AlgorithmInterventionPackageDebugState;

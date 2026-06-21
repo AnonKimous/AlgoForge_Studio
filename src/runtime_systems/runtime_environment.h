@@ -46,7 +46,7 @@ class RuntimeEnvironment {
   void SetDrawCallback(DrawCallback callback);
   void SetRenderPreviewRequest(RenderPreviewRequest request);
   void SetRenderPreviewExtent(ImVec2 extent);
-  void ClearGpuExecutors();
+  void ClearGpuRuntimeCaches();
   bool HasRenderPreviewTexture() const;
   std::string RenderPreviewDebugSummary() const;
   ImTextureID RenderPreviewTextureId() const;

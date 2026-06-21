@@ -5,7 +5,7 @@
     "defaultPrecision": "fp32"
   },
   "container": {
-    "variable": 2,
+    "variable": 3,
     "variableArray": {
       "a1": {
         "count": 3
@@ -66,8 +66,8 @@
         },
         "shader": {
           "pipeline": "graphics",
-          "vertex": "v2a0_pipeline_square_vertex_demo_gpu_tick.vert",
-          "fragment": "v2a0_pipeline_square_vertex_demo_gpu_tick.frag"
+          "vertex": "v2a0_pipeline_square_vertex_demo_stage0/v2a0_pipeline_square_vertex_demo_stage0_gpu_tick.vert",
+          "fragment": "v2a0_pipeline_square_vertex_demo_stage0/v2a0_pipeline_square_vertex_demo_stage0_gpu_tick.frag"
         }
       },
       "resultRender": {
@@ -91,8 +91,8 @@
         },
         "shader": {
           "pipeline": "graphics",
-          "vertex": "v2a0_pipeline_square_vertex_demo_result_render.vert",
-          "fragment": "v2a0_pipeline_square_vertex_demo_result_render.frag"
+          "vertex": "v2a0_pipeline_square_vertex_demo_stage0/v2a0_pipeline_square_vertex_demo_stage0_result_render.vert",
+          "fragment": "v2a0_pipeline_square_vertex_demo_stage0/v2a0_pipeline_square_vertex_demo_stage0_result_render.frag"
         }
       }
     }

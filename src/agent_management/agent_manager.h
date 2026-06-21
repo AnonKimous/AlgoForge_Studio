@@ -6,6 +6,7 @@
 
 #include "agent/agent.h"
 #include "common_data/common_data.h"
+#include "common_data/kernel_cfg.h"
 
 #include <cstddef>
 #include <memory>
@@ -17,7 +18,7 @@ namespace agent_management {
 struct AgentCreateSpec {
   std::string agent_name;
   // 0 means "tick once and then hold"; otherwise this is the maximum tick rate in Hz.
-  uint32_t limit_fps_flag{120u};
+  uint32_t limit_fps_flag{common_data::DefaultAgentLimitFpsFlag()};
   struct AlgorithmMountSpec {
     std::string algorithm_name;
     std::vector<agent::AlgorithmResourceBinding> resource_bindings;
@@ -88,7 +89,8 @@ class AgentManager {
     size_t* out_algorithm_index = nullptr,
     std::string* out_error_message = nullptr,
     agent::AlgorithmExecutionPreference execution_preference = agent::AlgorithmExecutionPreference::Gpu,
-    agent::AlgorithmPipelineSubmissionMode submission_mode = agent::AlgorithmPipelineSubmissionMode::NonCircular);
+    agent::AlgorithmPipelineTopology topology = agent::AlgorithmPipelineTopology::NonCircular,
+    agent::AlgorithmPipelineSyncMode sync_mode = agent::AlgorithmPipelineSyncMode::Forced);
   bool EnqueuePipelineStage0Submission(
     size_t agent_index,
     const std::string& pipeline_name,

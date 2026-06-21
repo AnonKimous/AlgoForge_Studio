@@ -50,7 +50,8 @@ class Agent {
     size_t* out_index = nullptr,
     std::string* out_error_message = nullptr,
     AlgorithmExecutionPreference execution_preference = AlgorithmExecutionPreference::Gpu,
-    AlgorithmPipelineSubmissionMode submission_mode = AlgorithmPipelineSubmissionMode::NonCircular);
+    AlgorithmPipelineTopology topology = AlgorithmPipelineTopology::NonCircular,
+    AlgorithmPipelineSyncMode sync_mode = AlgorithmPipelineSyncMode::Forced);
   bool AppendAlgorithmObject(AlgorithmObject object, size_t* out_index = nullptr);
   bool RemoveAlgorithm(size_t index);
   void RefreshInterventionSignals(const AgentTickContext& context);
@@ -65,6 +66,11 @@ class Agent {
   bool ReplayPipelineStageBridgeDebug(
     size_t index,
     const AgentTickContext& context,
+    std::string* out_error_message = nullptr);
+  bool SetPipelineStageDebugSelection(
+    const std::string& pipeline_name,
+    bool select_all,
+    uint32_t stage_index,
     std::string* out_error_message = nullptr);
   bool EnqueuePipelineStage0Submission(
     const std::string& pipeline_name,
@@ -120,7 +126,6 @@ class Agent {
   std::vector<AgentAlgorithmRuntimeState> algorithm_runtime_states_{};
   std::vector<AlgorithmAssemblyState> algorithm_assembly_states_{};
   std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>> standard_shared_container_sets_{};
-  std::unordered_map<std::string, PipelineRuntimeState> pipeline_runtime_states_{};
 };
 
 }  // namespace agent

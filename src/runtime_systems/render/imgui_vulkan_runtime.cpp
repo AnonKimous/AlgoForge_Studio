@@ -1,7 +1,7 @@
 #include "imgui_vulkan_runtime.h"
 
 #include "runtime_systems/algorithm_gpu_context.h"
-#include "runtime_systems/algorithm_gpu_executor.h"
+#include "runtime_systems/job_system.h"
 
 #include <algorithm>
 #include <cassert>
@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 
+#define VMA_IMPLEMENTATION
 #include <vk_mem_alloc.h>
 
 namespace runtime_systems {
@@ -449,11 +450,11 @@ void ImGuiVulkanRuntime::SetRenderPreviewExtent(ImVec2 extent) {
   }
 }
 
-void ImGuiVulkanRuntime::ClearGpuExecutors() {
+void ImGuiVulkanRuntime::ClearGpuRuntimeCaches() {
   if (device_ != VK_NULL_HANDLE) {
     CheckVkResult(vkDeviceWaitIdle(device_));
   }
-  AlgorithmGpuExecutor::Instance().Clear();
+  job_gpu::Clear();
 }
 
 bool ImGuiVulkanRuntime::Tick(SDL_Window* window) {
@@ -538,7 +539,7 @@ void ImGuiVulkanRuntime::Destroy() {
   }
 
   try {
-    ClearGpuExecutors();
+    ClearGpuRuntimeCaches();
   } catch (...) {
     // Shutdown should keep going even if the device was already lost.
   }

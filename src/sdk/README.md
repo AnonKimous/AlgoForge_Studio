@@ -13,6 +13,7 @@ This directory is the external agent and algorithm submission surface.
 - submit a draft algorithm
 - decomposer creation and request/binding helper types
 - agent creation accepts a `limit_fps_flag`:
+  - the default value comes from `config/kernelCfg.json`
   - `120` means the agent will be ticked at up to 120 Hz
   - `0` means the agent is ticked once and then held until reconfigured
 

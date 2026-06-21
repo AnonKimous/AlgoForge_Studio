@@ -5,13 +5,16 @@
 #endif
 
 #include "common_data/common_data.h"
-#include "runtime_systems/window/window_handle.h"
 
 #include <SDL3/SDL.h>
 
 #include <string>
 
 namespace runtime_systems {
+
+struct WindowHandle {
+  SDL_Window* window{};
+};
 
 class SdlWindow {
  public:

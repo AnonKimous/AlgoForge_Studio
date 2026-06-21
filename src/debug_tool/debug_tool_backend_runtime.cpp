@@ -2,6 +2,7 @@
 
 #include "algorithm_management/algorithm_manager.h"
 #include "algorithm_support/algorithm_library_paths.h"
+#include "common_data/kernel_cfg.h"
 #include "cJSON.h"
 
 #include <algorithm>
@@ -79,7 +80,7 @@ std::string _MakeCIdentifier(const std::string& text) {
 
 std::string _HotReloadBuildCommand(const std::string& algorithm_name) {
   const std::string root = _ProjectRootPath();
-  const std::string script_path = (std::filesystem::path(root) / "build_algorithm_hot.bat").string();
+  const std::string script_path = (std::filesystem::path(root) / "build_algorithm.bat").string();
   const std::string target_name = _MakeCIdentifier(algorithm_name);
   return "\"" + script_path + "\" \"" + target_name + "\"";
 }
@@ -307,9 +308,12 @@ debug_tool::AlgorithmRuntimeSummary _ToDebugToolAlgorithmRuntimeSummary(
   summary.pipeline_stage_index = object->pipeline_stage_index;
   summary.pipeline_stage_count = object->pipeline_stage_count;
   summary.pipeline_stage = object->pipeline_stage;
-  summary.pipeline_submission_mode =
-    static_cast<debug_tool::AlgorithmPipelineSubmissionMode>(
-      static_cast<int>(object->pipeline_submission_mode));
+  summary.pipeline_topology =
+    static_cast<debug_tool::AlgorithmPipelineTopology>(
+      static_cast<int>(object->pipeline_topology));
+  summary.pipeline_sync_mode =
+    static_cast<debug_tool::AlgorithmPipelineSyncMode>(
+      static_cast<int>(object->pipeline_sync_mode));
   summary.resource_bindings.reserve(object->resource_bindings.size());
   for (const agent::AlgorithmResourceBinding& binding : object->resource_bindings) {
     summary.resource_bindings.push_back(debug_tool::AlgorithmResourceBinding{
@@ -334,9 +338,29 @@ debug_tool::AlgorithmRuntimeSummary _ToDebugToolAlgorithmRuntimeSummary(
   if (runtime_state) {
     summary.agent_to_algorithm_signal = runtime_state->agent_to_algorithm_signal;
     summary.algorithm_to_agent_signal = runtime_state->algorithm_to_agent_signal;
+    summary.pipeline_active_stage_index = runtime_state->pipeline_active_stage_index;
+    summary.pipeline_active_stage_index_valid = runtime_state->pipeline_active_stage_index_valid;
+    if (object->pipeline_sync_mode == agent::AlgorithmPipelineSyncMode::Forced) {
+      summary.pipeline_total_elapsed_seconds = runtime_state->pipeline_total_elapsed_seconds;
+      summary.pipeline_stage_runtime_stats = runtime_state->pipeline_stage_runtime_stats;
+    }
   }
-  if (runtime_state && runtime_state->reflection_snapshot.valid) {
-    summary.reflection_snapshot = _ToDebugToolReflectionSnapshot(runtime_state->reflection_snapshot);
+  const agent::AlgorithmReflectionSnapshot* reflection_snapshot = nullptr;
+  runtime_systems::CpuPipelineRuntimeState pipeline_runtime_state{};
+  if (object->pipeline_stage &&
+      object->pipeline_stage_index == 0u &&
+      !object->pipeline_name.empty() &&
+      algorithm_management::AlgorithmScheduler::Instance().TryGetPipelineRuntime(
+        object->pipeline_name,
+        managed_agent.agent_name(),
+        &pipeline_runtime_state) &&
+      pipeline_runtime_state.exit_reflection_snapshot_valid) {
+    reflection_snapshot = &pipeline_runtime_state.exit_reflection_snapshot;
+  } else if (runtime_state && runtime_state->reflection_snapshot.valid) {
+    reflection_snapshot = &runtime_state->reflection_snapshot;
+  }
+  if (reflection_snapshot) {
+    summary.reflection_snapshot = _ToDebugToolReflectionSnapshot(*reflection_snapshot);
   }
   if (runtime_state && runtime_state->bridge_debug_set.valid) {
     summary.bridge_debug_set = _ToDebugToolPipelineStageBridgeDebugSummary(runtime_state->bridge_debug_set);
@@ -434,7 +458,7 @@ bool _FindMountedPipelineInstanceName(
         !object->pipeline_stage ||
         object->pipeline_stage_index != 0u ||
         object->algorithm_profile.algorithm_name != pipeline_algorithm_name ||
-        object->pipeline_submission_mode != agent::AlgorithmPipelineSubmissionMode::Circular ||
+        object->pipeline_topology != agent::AlgorithmPipelineTopology::Circular ||
         _IsPipelineResourceBatchSubmissionName(object->pipeline_name)) {
       continue;
     }
@@ -769,7 +793,7 @@ bool DebugToolBackendRuntime::Init(const char* window_title, int width, int heig
 
   AgentCreateSpec default_agent_spec{};
   default_agent_spec.agent_name = "debug_agent";
-  default_agent_spec.limit_fps_flag = 120u;
+  default_agent_spec.limit_fps_flag = common_data::DefaultAgentLimitFpsFlag();
   if (!CreateAgent(default_agent_spec.agent_name.c_str(), default_agent_spec.limit_fps_flag)) {
     runtime_environment_.Destroy();
     return false;
@@ -932,7 +956,8 @@ bool DebugToolBackendRuntime::AttachPipelinePackageToAgent(
     &attached_algorithm_index,
     out_error_message,
     static_cast<agent::AlgorithmExecutionPreference>(static_cast<int>(execution_preference)),
-    agent::AlgorithmPipelineSubmissionMode::Circular);
+    agent::AlgorithmPipelineTopology::Circular,
+    agent::AlgorithmPipelineSyncMode::Forced);
   if (!attached) {
     DEBUG_TOOL_ASSERT(false, "Failed to attach pipeline package to the built-in agent.");
     return false;
@@ -999,7 +1024,8 @@ bool DebugToolBackendRuntime::AttachPipelineAlgorithmToAgent(
     out_algorithm_index,
     out_error_message,
     static_cast<agent::AlgorithmExecutionPreference>(static_cast<int>(execution_preference)),
-    agent::AlgorithmPipelineSubmissionMode::NonCircular);
+    agent::AlgorithmPipelineTopology::NonCircular,
+    agent::AlgorithmPipelineSyncMode::Forced);
   if (!attached) {
     DEBUG_TOOL_ASSERT(false, "Failed to attach pipeline algorithm to the built-in agent.");
   }
@@ -1021,6 +1047,31 @@ bool DebugToolBackendRuntime::ReplayPipelineStageBridgeDebug(
     algorithm_index,
     context,
     out_error_message);
+}
+
+bool DebugToolBackendRuntime::SetPipelineStageDebugSelection(
+  size_t agent_index,
+  const std::string& pipeline_name,
+  bool select_all,
+  uint32_t stage_index,
+  std::string* out_error_message) {
+  const std::shared_ptr<agent::Agent> managed_agent = agent_manager_.agent(agent_index);
+  if (!managed_agent) {
+    if (out_error_message) {
+      *out_error_message = "Pipeline stage debug selection failed because the agent was not found.";
+    }
+    DEBUG_TOOL_ASSERT(false, "Pipeline stage debug selection failed because the agent was not found.");
+    return false;
+  }
+  if (!managed_agent->SetPipelineStageDebugSelection(
+        pipeline_name,
+        select_all,
+        stage_index,
+        out_error_message)) {
+    DEBUG_TOOL_ASSERT(false, "Failed to update pipeline stage debug selection.");
+    return false;
+  }
+  return true;
 }
 
 bool DebugToolBackendRuntime::HotReloadAlgorithmPackage(
@@ -1102,7 +1153,7 @@ bool DebugToolBackendRuntime::HotReloadAlgorithmPackage(
     return false;
   }
 
-  runtime_environment_.ClearGpuExecutors();
+  runtime_environment_.ClearGpuRuntimeCaches();
   runtime_environment_.SetRenderPreviewRequest({});
 
   const std::string build_command = _HotReloadBuildCommand(algorithm_summary.algorithm_name);
@@ -1118,7 +1169,8 @@ bool DebugToolBackendRuntime::HotReloadAlgorithmPackage(
           &restored_algorithm_index,
           &restore_error_message,
           static_cast<agent::AlgorithmExecutionPreference>(static_cast<int>(algorithm_summary.execution_preference)),
-          static_cast<agent::AlgorithmPipelineSubmissionMode>(static_cast<int>(algorithm_summary.pipeline_submission_mode)))
+          static_cast<agent::AlgorithmPipelineTopology>(static_cast<int>(algorithm_summary.pipeline_topology)),
+          static_cast<agent::AlgorithmPipelineSyncMode>(static_cast<int>(algorithm_summary.pipeline_sync_mode)))
       : agent_manager_.AttachAlgorithmToAgent(
           agent_index,
           algorithm_summary.algorithm_name,
@@ -1140,7 +1192,7 @@ bool DebugToolBackendRuntime::HotReloadAlgorithmPackage(
         "Hot reload build failed for '" + algorithm_summary.algorithm_name + "'.";
     }
 
-    runtime_environment_.ClearGpuExecutors();
+    runtime_environment_.ClearGpuRuntimeCaches();
     runtime_environment_.SetRenderPreviewRequest({});
 
     if (out_algorithm_index) {
@@ -1164,7 +1216,8 @@ bool DebugToolBackendRuntime::HotReloadAlgorithmPackage(
         &rebuilt_algorithm_index,
         &attach_error_message,
         static_cast<agent::AlgorithmExecutionPreference>(static_cast<int>(algorithm_summary.execution_preference)),
-        static_cast<agent::AlgorithmPipelineSubmissionMode>(static_cast<int>(algorithm_summary.pipeline_submission_mode)))
+        static_cast<agent::AlgorithmPipelineTopology>(static_cast<int>(algorithm_summary.pipeline_topology)),
+        static_cast<agent::AlgorithmPipelineSyncMode>(static_cast<int>(algorithm_summary.pipeline_sync_mode)))
     : agent_manager_.AttachAlgorithmToAgent(
         agent_index,
         algorithm_summary.algorithm_name,
@@ -1181,7 +1234,7 @@ bool DebugToolBackendRuntime::HotReloadAlgorithmPackage(
           (pipeline_algorithm ? algorithm_summary.pipeline_name : algorithm_summary.algorithm_name) + "'.")
         : std::move(attach_error_message);
     }
-    runtime_environment_.ClearGpuExecutors();
+    runtime_environment_.ClearGpuRuntimeCaches();
     runtime_environment_.SetRenderPreviewRequest({});
     if (was_ticking) {
       agent_manager_.StartTicking();
@@ -1189,7 +1242,7 @@ bool DebugToolBackendRuntime::HotReloadAlgorithmPackage(
     return false;
   }
 
-  runtime_environment_.ClearGpuExecutors();
+  runtime_environment_.ClearGpuRuntimeCaches();
   runtime_environment_.SetRenderPreviewRequest({});
 
   if (out_algorithm_index) {
@@ -1533,11 +1586,21 @@ bool DebugToolBackendRuntime::BuildRenderPreviewRequest(
     return false;
   }
 
-  const agent::AlgorithmReflectionSnapshot* reflection_snapshot =
-    managed_agent->algorithm_runtime_state(algorithm_index) &&
-      managed_agent->algorithm_runtime_state(algorithm_index)->reflection_snapshot.valid
-    ? &managed_agent->algorithm_runtime_state(algorithm_index)->reflection_snapshot
-    : nullptr;
+  const agent::AlgorithmReflectionSnapshot* reflection_snapshot = nullptr;
+  runtime_systems::CpuPipelineRuntimeState pipeline_runtime_state{};
+  if (object->pipeline_stage &&
+      object->pipeline_stage_index == 0u &&
+      !object->pipeline_name.empty() &&
+      algorithm_management::AlgorithmScheduler::Instance().TryGetPipelineRuntime(
+        object->pipeline_name,
+        managed_agent->agent_name(),
+        &pipeline_runtime_state) &&
+      pipeline_runtime_state.exit_reflection_snapshot_valid) {
+    reflection_snapshot = &pipeline_runtime_state.exit_reflection_snapshot;
+  } else if (managed_agent->algorithm_runtime_state(algorithm_index) &&
+      managed_agent->algorithm_runtime_state(algorithm_index)->reflection_snapshot.valid) {
+    reflection_snapshot = &managed_agent->algorithm_runtime_state(algorithm_index)->reflection_snapshot;
+  }
 
   out_request->stage_name = result_stage->stage_name;
   out_request->vertex_shader_path = _ResolveAlgorithmShaderPath(algorithm_name, result_stage->shader.vertex_shader_path);

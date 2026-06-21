@@ -15,8 +15,19 @@ It provides:
 - `ToolNodes` includes `container`, `decomposer`, `reflector`, and `interventioner`
 - `ResNode` palette inserts a single `mesh` node; `decomposer.res.mesh` can expand to `edge`, `vertex`, and `normal`
 - double-click `Variable` / `Array` nodes to edit temporary values
-- double-click `Function` nodes to draft plan/code with the right-side model and write the result back into the function body
+- double-click `Function` nodes to draft plan/code with the right-side model; plan mode writes solution text, code mode stages text back into the editor and waits for `Save`
 - mouse-wheel zoom scales the canvas and node text together; wheel over an `Array` node slides its preview window
+- the internal agent now talks through `agents.py` and `interface4agents.py`
+- `interface4agents` uses command scripts with one `cmd arg arg arg` line per command
+- `highlight` flashes the UI location for a command, such as `highlight v add` or `highlight scene container`
+- the first command set covers `v`, `a`, `scene`, `createCosNode`, `hang`, `integrateChild`, and `hotReview`
+- `createCosNode cosNode` creates a nested `containerElement`
+- `hang v1 cosNode` inserts `v1` into `cosNode`
+- `integrateChild cosNode` repacks the `cosNode` tree after insertion; `intergrateChild` is accepted as an alias
+- `hotReview` jumps the canvas view to the first visible node or the current selection
+- palette drags now follow the mouse on the canvas until release
+- dragging a node above the canvas turns on a red waste-area warning and deletes the node on release
+- right-dragging a container duplicates it, keeps its custom data, and draws a dashed reuse line between copies
 
 ## Run
 
@@ -44,6 +55,7 @@ This is a UI-first prototype.
 - `accessRules.md` in `tools\` controls rule-based chat approval.
 - The project can be extended later to generate C++ and trigger hot builds.
 - The launcher expects Python 3.10 or newer.
+- The agent command layer is intentionally separate from raw script editing.
 
 ## Pipeline Bridge Notes
 

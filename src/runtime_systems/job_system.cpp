@@ -4,8 +4,6 @@
 
 #include "algorithm_management/algorithm_manager.h"
 #include "algorithm_support/algorithm_protocol.h"
-#include "runtime_systems/algorithm_cpu_executor.h"
-#include "runtime_systems/algorithm_gpu_executor.h"
 
 #include <algorithm>
 #include <cassert>
@@ -26,6 +24,17 @@
 #include <vector>
 
 namespace runtime_systems {
+
+void ClearGpuRuntime();
+bool TryExecuteGpuTick(
+  const agent::AlgorithmObject& object,
+  algorithm::AlgorithmContainerSet* container_set,
+  const agent::AgentTickContext& context,
+  std::string* out_error_message);
+bool TrySynchronizeGpuTickState(
+  const agent::AlgorithmObject& object,
+  algorithm::AlgorithmContainerSet* container_set,
+  std::string* out_error_message);
 
 namespace {
 
@@ -146,7 +155,7 @@ uint64_t _HashPipelineGroupState(
   size_t valid_lane_count,
   const std::vector<bool>& stage_has_data,
   size_t pending_stage0_submission_count,
-  bool circular_stage0_saturated,
+  bool stage0_saturated,
   const std::vector<algorithm_management::AgentAlgorithmRuntimeState>& runtime_states,
   size_t begin_index,
   size_t end_index) {
@@ -171,7 +180,7 @@ uint64_t _HashPipelineGroupState(
   hash = _HashU64(hash, current_lane_id);
   hash = _HashU64(hash, static_cast<uint64_t>(valid_lane_count));
   hash = _HashU64(hash, static_cast<uint64_t>(pending_stage0_submission_count));
-  hash = _HashBool(hash, circular_stage0_saturated);
+  hash = _HashBool(hash, stage0_saturated);
   for (size_t index : executable_indices) {
     hash = _HashU64(hash, static_cast<uint64_t>(index));
   }
@@ -185,6 +194,7 @@ struct PipelineGroupProgressState {
   bool stall_report_requested{false};
   bool stall_reported{false};
   std::string stall_reason;
+  float total_elapsed_seconds{0.0f};
   std::vector<algorithm_management::AlgorithmPipelineStageRuntimeStat> stage_runtime_stats;
 };
 
@@ -306,6 +316,58 @@ bool _CollectReflectionSnapshot(
   return out_snapshot->valid;
 }
 
+bool _CollectPipelineExitReflectionSnapshot(
+  const std::string& algorithm_name,
+  const algorithm::AlgorithmContainerSet& container_set,
+  algorithm_management::AlgorithmReflectionSnapshot* out_snapshot) {
+  if (!out_snapshot) {
+    return false;
+  }
+
+  out_snapshot->Clear();
+  out_snapshot->algorithm_name = algorithm_name.empty() ? container_set.algorithm_name : algorithm_name;
+
+  for (const algorithm::AlgorithmContainer& container : container_set.arrays) {
+    algorithm_management::AlgorithmReflectionValue value{};
+    value.reflection_object_name = container.name;
+    value.container_name = container.name;
+    value.filter_name = "pipeline_exit";
+    value.storage_kind = container.storage_kind;
+    value.bytes.assign(container.bytes.begin(), container.bytes.end());
+    out_snapshot->variable_arrays.push_back(std::move(value));
+  }
+  for (const algorithm::AlgorithmContainer& container : container_set.temporary_registers) {
+    algorithm_management::AlgorithmReflectionValue value{};
+    value.reflection_object_name = container.name;
+    value.container_name = container.name;
+    value.filter_name = "pipeline_exit";
+    value.storage_kind = container.storage_kind;
+    value.bytes.assign(container.bytes.begin(), container.bytes.end());
+    out_snapshot->variables.push_back(std::move(value));
+  }
+  for (const algorithm::AlgorithmContainer& container : container_set.temporary_caches) {
+    algorithm_management::AlgorithmReflectionValue value{};
+    value.reflection_object_name = container.name;
+    value.container_name = container.name;
+    value.filter_name = "pipeline_exit";
+    value.storage_kind = container.storage_kind;
+    value.bytes.assign(container.bytes.begin(), container.bytes.end());
+    out_snapshot->variables.push_back(std::move(value));
+  }
+  for (const algorithm::AlgorithmContainer& container : container_set.hidden_containers) {
+    algorithm_management::AlgorithmReflectionValue value{};
+    value.reflection_object_name = container.name;
+    value.container_name = container.name;
+    value.filter_name = "pipeline_exit";
+    value.storage_kind = container.storage_kind;
+    value.bytes.assign(container.bytes.begin(), container.bytes.end());
+    out_snapshot->variables.push_back(std::move(value));
+  }
+
+  out_snapshot->valid = !out_snapshot->variables.empty() || !out_snapshot->variable_arrays.empty();
+  return out_snapshot->valid;
+}
+
 bool _SignalBlocksTick(
   const algorithm_management::AlgorithmObject& object,
   const common_data::AgentToAlgorithmSignal& signal) {
@@ -328,6 +390,7 @@ void _UpdatePipelineGroupProgressState(
     return;
   }
   *out_state = previous_state;
+  out_state->total_elapsed_seconds = previous_state.total_elapsed_seconds + dt_seconds;
   out_state->stall_report_requested = false;
   if (!signature_valid) {
     return;
@@ -381,6 +444,7 @@ size_t _CountValidPipelineLanes(const CpuPipelineRuntimeState& pipeline_state) {
 bool _TryBuildInitialPipelineLaneRuntimeState(
   const algorithm_management::AlgorithmObject& stage0_object,
   size_t pipeline_stage_count,
+  const std::string& owner_agent_name,
   bool loop_lane_active,
   uint64_t lane_id,
   const std::string& stage_buffer_slot_name,
@@ -408,6 +472,7 @@ bool _TryBuildInitialPipelineLaneRuntimeState(
     return false;
   }
 
+  out_lane_state->owner_agent_name = owner_agent_name;
   out_lane_state->lane_id = lane_id;
   out_lane_state->loop_lane_active = loop_lane_active;
   out_lane_state->standard_container_set = stage0_object.shared_container_set;
@@ -1216,10 +1281,10 @@ class CpuJobSystem {
   std::vector<std::thread> workers_{};
 };
 
-class AlgorithmCpuExecutorImpl {
+class CpuJobRuntimeSystem {
  public:
-  static AlgorithmCpuExecutorImpl& Instance() {
-    static AlgorithmCpuExecutorImpl instance{};
+  static CpuJobRuntimeSystem& Instance() {
+    static CpuJobRuntimeSystem instance{};
     return instance;
   }
 
@@ -1308,7 +1373,8 @@ class AlgorithmCpuExecutorImpl {
     if (found != pipeline_registrations_.end()) {
       if (found->second.root_stage_name != registration.root_stage_name ||
           found->second.stage_count != registration.stage_count ||
-          found->second.submission_mode != registration.submission_mode ||
+          found->second.topology != registration.topology ||
+          found->second.max_concurrent_stage0_submissions != registration.max_concurrent_stage0_submissions ||
           found->second.mandatory_stage_buffer_slot_name != registration.mandatory_stage_buffer_slot_name) {
         if (out_error_message) {
           *out_error_message =
@@ -1331,6 +1397,7 @@ class AlgorithmCpuExecutorImpl {
 
   bool RegisterPipelineRuntime(
     const std::string& pipeline_name,
+    const std::string& owner_agent_name,
     const CpuPipelineRuntimeState& runtime_state,
     std::string* out_error_message) {
     if (pipeline_name.empty()) {
@@ -1349,7 +1416,9 @@ class AlgorithmCpuExecutorImpl {
       return false;
     }
 
-    pipeline_runtime_states_[pipeline_name] = runtime_state;
+    CpuPipelineRuntimeState owner_runtime_state = runtime_state;
+    owner_runtime_state.owner_agent_name = owner_agent_name;
+    pipeline_runtime_states_[pipeline_name][owner_agent_name] = std::move(owner_runtime_state);
     if (out_error_message) {
       out_error_message->clear();
     }
@@ -1358,6 +1427,7 @@ class AlgorithmCpuExecutorImpl {
 
   bool EnqueuePipelineStage0Submission(
     const std::string& pipeline_name,
+    const std::string& owner_agent_name,
     const std::string& stage0_algorithm_name,
     const std::vector<algorithm_management::AlgorithmResourceBinding>& resource_bindings,
     const std::vector<algorithm_management::AlgorithmDescriptorValue>& descriptor_values,
@@ -1394,35 +1464,40 @@ class AlgorithmCpuExecutorImpl {
         return false;
       }
       registration = registration_it->second;
-      pipeline_runtime_state = runtime_it->second;
+      const auto owner_found = runtime_it->second.find(owner_agent_name);
+      if (owner_found == runtime_it->second.end()) {
+        if (out_error_message) {
+          *out_error_message = "Mounted CPU pipeline runtime state is unavailable for the selected agent.";
+        }
+        return false;
+      }
+      pipeline_runtime_state = owner_found->second;
     }
 
     if (pipeline_runtime_state.stage_has_data.size() != registration.stage_count) {
       pipeline_runtime_state.stage_has_data.assign(registration.stage_count, false);
     }
-    if (pipeline_runtime_state.submission_mode !=
-        algorithm_management::AlgorithmPipelineSubmissionMode::Circular) {
-      if (out_error_message) {
-        *out_error_message =
-          "The selected mounted CPU pipeline instance does not accept circular stage0 submissions.";
+    size_t valid_lane_count = 0u;
+    for (const CpuPipelineLaneRuntimeState& lane_state : pipeline_runtime_state.lanes) {
+      if (lane_state.valid) {
+        ++valid_lane_count;
       }
-      return false;
     }
-
-    const size_t live_stage_count = _CountLiveCpuPipelineStages(pipeline_runtime_state.stage_has_data);
-    if (live_stage_count + pipeline_runtime_state.pending_stage0_submissions.size() >=
-        static_cast<size_t>(registration.stage_count)) {
-      pipeline_runtime_state.circular_stage0_saturated = true;
+    if (valid_lane_count + pipeline_runtime_state.pending_stage0_submissions.size() >=
+        static_cast<size_t>(pipeline_runtime_state.max_concurrent_stage0_submissions)) {
+      pipeline_runtime_state.stage0_saturated = true;
       std::lock_guard<std::mutex> lock(mutex_);
-      pipeline_runtime_states_[pipeline_name] = pipeline_runtime_state;
+      pipeline_runtime_states_[pipeline_name][owner_agent_name] = pipeline_runtime_state;
       if (out_error_message) {
-        *out_error_message = "Circular pipeline stage0 is saturated and cannot accept more resource batches.";
+        *out_error_message = "Pipeline stage0 is saturated and cannot accept more resource batches.";
       }
       return false;
     }
-    pipeline_runtime_state.circular_stage0_saturated = false;
+    pipeline_runtime_state.stage0_saturated = false;
+    pipeline_runtime_state.owner_agent_name = owner_agent_name;
 
     CpuPendingPipelineStage0Submission submission{};
+    submission.owner_agent_name = owner_agent_name;
     std::string prepare_error_message;
     if (!_PrepareCpuPipelineStage0Submission(
           stage0_algorithm_name,
@@ -1442,6 +1517,7 @@ class AlgorithmCpuExecutorImpl {
     submission.lane_id = pipeline_runtime_state.next_lane_id;
     submission.loop_lane_active = false;
     CpuPipelineLaneRuntimeState queued_lane_state{};
+    queued_lane_state.owner_agent_name = owner_agent_name;
     queued_lane_state.lane_id = submission.lane_id;
     queued_lane_state.loop_lane_active = false;
     queued_lane_state.standard_container_set = submission.prepared_container_set;
@@ -1458,7 +1534,7 @@ class AlgorithmCpuExecutorImpl {
     pipeline_runtime_state.pending_stage0_submissions.push_back(std::move(submission));
     {
       std::lock_guard<std::mutex> lock(mutex_);
-      pipeline_runtime_states_[pipeline_name] = std::move(pipeline_runtime_state);
+      pipeline_runtime_states_[pipeline_name][owner_agent_name] = std::move(pipeline_runtime_state);
     }
     if (out_error_message) {
       out_error_message->clear();
@@ -1470,6 +1546,7 @@ class AlgorithmCpuExecutorImpl {
     std::vector<algorithm_management::AlgorithmObject>* mounted_objects,
     size_t begin_index,
     size_t end_index,
+    const std::string& owner_agent_name,
     const algorithm_management::AgentTickContext& context,
     const std::vector<bool>& allow_tick_mask,
     const std::vector<algorithm_management::AlgorithmAssemblyState>& assembly_states,
@@ -1503,6 +1580,8 @@ class AlgorithmCpuExecutorImpl {
       set_error("CPU pipeline tick received a non-CPU pipeline root.");
       return false;
     }
+    const bool pipeline_stage_debug_all = root_object.pipeline_stage_debug_all;
+    const uint32_t pipeline_stage_debug_index = root_object.pipeline_stage_debug_index;
 
     CpuPipelineRuntimeState pipeline_state{};
     {
@@ -1512,11 +1591,16 @@ class AlgorithmCpuExecutorImpl {
         set_error("CPU pipeline runtime state is unavailable.");
         return false;
       }
-      pipeline_state = runtime_it->second;
+      const auto owner_it = runtime_it->second.find(owner_agent_name);
+      if (owner_it == runtime_it->second.end()) {
+        set_error("CPU pipeline runtime state is unavailable for the selected agent.");
+        return false;
+      }
+      pipeline_state = owner_it->second;
     }
     const auto flush_pipeline_state = [&]() {
       std::lock_guard<std::mutex> lock(mutex_);
-      pipeline_runtime_states_[root_object.pipeline_name] = pipeline_state;
+      pipeline_runtime_states_[root_object.pipeline_name][owner_agent_name] = pipeline_state;
     };
     const struct PipelineRuntimeFlushScope {
       const decltype(flush_pipeline_state)& flush;
@@ -1530,8 +1614,9 @@ class AlgorithmCpuExecutorImpl {
       if (!_TryBuildInitialPipelineLaneRuntimeState(
             algorithm_objects[begin_index],
             pipeline_stage_count,
-            pipeline_state.submission_mode ==
-              algorithm_management::AlgorithmPipelineSubmissionMode::Circular,
+            owner_agent_name,
+            pipeline_state.topology ==
+              algorithm_management::AlgorithmPipelineTopology::Circular,
             pipeline_state.next_lane_id,
             pipeline_state.mandatory_stage_buffer_slot_name,
             &fallback_lane_state,
@@ -1578,13 +1663,24 @@ class AlgorithmCpuExecutorImpl {
         updated_runtime_states[begin_index].pipeline_stall_reported;
       previous_progress_state.stall_reason =
         updated_runtime_states[begin_index].pipeline_stall_reason;
-      previous_progress_state.stage_runtime_stats =
-        updated_runtime_states[begin_index].pipeline_stage_runtime_stats;
+      if (pipeline_state.sync_mode ==
+          algorithm_management::AlgorithmPipelineSyncMode::Forced) {
+        previous_progress_state.stage_runtime_stats =
+          updated_runtime_states[begin_index].pipeline_stage_runtime_stats;
+      }
     }
     PipelineGroupProgressState progress_state = previous_progress_state;
     progress_state.stall_reason.clear();
-    progress_state.stage_runtime_stats.clear();
-    progress_state.stage_runtime_stats.reserve(end_index - begin_index);
+    const bool collect_pipeline_timing =
+      pipeline_state.sync_mode == algorithm_management::AlgorithmPipelineSyncMode::Forced;
+    std::vector<algorithm_management::AlgorithmPipelineStageRuntimeStat>* pipeline_stage_runtime_stats =
+      collect_pipeline_timing ? &progress_state.stage_runtime_stats : nullptr;
+    if (collect_pipeline_timing) {
+      progress_state.stage_runtime_stats.clear();
+      progress_state.stage_runtime_stats.reserve(end_index - begin_index);
+    } else {
+      progress_state.stage_runtime_stats.clear();
+    }
 
     algorithm_objects[begin_index].SetContainerSet(primary_lane_state->standard_container_set);
     algorithm_objects[begin_index].resource_bindings = primary_lane_state->resource_bindings;
@@ -1597,11 +1693,12 @@ class AlgorithmCpuExecutorImpl {
     const bool stage0_is_ready =
       begin_index < assembly_states.size() &&
       assembly_states[begin_index] == algorithm_management::AlgorithmAssemblyState::Ready;
-    if (!current_stage_has_data.empty() &&
+      if (!current_stage_has_data.empty() &&
         !current_stage_has_data.front() &&
         stage0_allow_tick &&
         stage0_is_ready &&
-        !pipeline_state.pending_stage0_submissions.empty()) {
+        !pipeline_state.pending_stage0_submissions.empty() &&
+        (pipeline_stage_debug_all || pipeline_stage_debug_index == 0u)) {
       algorithm_management::AlgorithmObject& stage0_object = algorithm_objects[begin_index];
       CpuPendingPipelineStage0Submission submission =
         std::move(pipeline_state.pending_stage0_submissions.front());
@@ -1614,6 +1711,7 @@ class AlgorithmCpuExecutorImpl {
           previous_lane_state->valid = false;
         }
       }
+      submission.owner_agent_name = owner_agent_name;
       pipeline_state.current_lane_id = submission.lane_id;
       primary_lane_state = _FindPrimaryPipelineLaneRuntimeState(&pipeline_state);
       DEBUG_TOOL_ASSERT(primary_lane_state != nullptr, "Submitted pipeline lane runtime state is unavailable.");
@@ -1626,6 +1724,7 @@ class AlgorithmCpuExecutorImpl {
       stage0_object.resource_bindings = submission.resource_bindings;
       stage0_object.descriptor_values = submission.descriptor_values;
       stage0_object.SetContainerSet(primary_lane_state->standard_container_set);
+      primary_lane_state->owner_agent_name = owner_agent_name;
       primary_lane_state->lane_id = submission.lane_id;
       primary_lane_state->loop_lane_active = submission.loop_lane_active;
       primary_lane_state->standard_container_set = stage0_object.shared_container_set;
@@ -1633,7 +1732,7 @@ class AlgorithmCpuExecutorImpl {
       primary_lane_state->descriptor_values = stage0_object.descriptor_values;
       primary_lane_state->stage_has_data.assign(pipeline_stage_count, false);
       current_stage_has_data.front() = true;
-      pipeline_state.circular_stage0_saturated = false;
+      pipeline_state.stage0_saturated = false;
     }
 
     std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>> stage_container_sets{};
@@ -1673,11 +1772,13 @@ class AlgorithmCpuExecutorImpl {
       _ResetRuntimeStateBase(runtime_state, &runtime_state);
       updated_runtime_states[index] = std::move(runtime_state);
 
-      progress_state.stage_runtime_stats.push_back(algorithm_management::AlgorithmPipelineStageRuntimeStat{
-        .stage_name = object.algorithm_profile.algorithm_name,
-        .elapsed_seconds = 0.0f,
-        .reason = {},
-      });
+      if (collect_pipeline_timing) {
+        progress_state.stage_runtime_stats.push_back(algorithm_management::AlgorithmPipelineStageRuntimeStat{
+          .stage_name = object.algorithm_profile.algorithm_name,
+          .elapsed_seconds = 0.0f,
+          .reason = {},
+        });
+      }
 
       stage_allow_tick[stage_offset] = index < allow_tick_mask.size() ? allow_tick_mask[index] : true;
       stage_is_ready[stage_offset] =
@@ -1692,7 +1793,8 @@ class AlgorithmCpuExecutorImpl {
         has_data &&
         stage_allow_tick[stage_offset] &&
         stage_is_ready[stage_offset] &&
-        !stage_launch_once_completed[stage_offset];
+        !stage_launch_once_completed[stage_offset] &&
+        (pipeline_stage_debug_all || stage_offset == pipeline_stage_debug_index);
     }
 
     for (size_t pass = 0u; pass < pipeline_stage_count; ++pass) {
@@ -1700,26 +1802,6 @@ class AlgorithmCpuExecutorImpl {
       for (size_t stage_offset = 0u; stage_offset < pipeline_stage_count; ++stage_offset) {
         if (!stage_execute_mask[stage_offset]) {
           continue;
-        }
-        bool has_target = false;
-        size_t target_offset = 0u;
-        if (stage_offset + 1u < pipeline_stage_count) {
-          has_target = true;
-          target_offset = stage_offset + 1u;
-        } else if (pipeline_state.submission_mode ==
-                   algorithm_management::AlgorithmPipelineSubmissionMode::Circular) {
-          has_target = true;
-          target_offset = 0u;
-        }
-        if (!has_target) {
-          continue;
-        }
-        const bool target_holds_data =
-          target_offset < current_stage_has_data.size() && current_stage_has_data[target_offset];
-        const bool target_vacates = target_offset < stage_execute_mask.size() && stage_execute_mask[target_offset];
-        if (target_holds_data && !target_vacates) {
-          stage_execute_mask[stage_offset] = false;
-          changed = true;
         }
       }
       if (!changed) {
@@ -1735,7 +1817,7 @@ class AlgorithmCpuExecutorImpl {
       const bool execute_now = stage_offset < stage_execute_mask.size() && stage_execute_mask[stage_offset];
       if (!execute_now) {
         _SetPipelineStageRuntimeReason(
-          &progress_state.stage_runtime_stats,
+          pipeline_stage_runtime_stats,
           object.algorithm_profile.algorithm_name,
           !has_data
             ? _BuildPipelineStageNoInputReason(
@@ -1765,7 +1847,7 @@ class AlgorithmCpuExecutorImpl {
         continue;
       }
       _SetPipelineStageRuntimeReason(
-        &progress_state.stage_runtime_stats,
+        pipeline_stage_runtime_stats,
         object.algorithm_profile.algorithm_name,
         "Stage executed.");
       executable_indices.push_back(index);
@@ -1782,7 +1864,7 @@ class AlgorithmCpuExecutorImpl {
           _CountValidPipelineLanes(pipeline_state),
           pipeline_state.stage_has_data,
           pipeline_state.pending_stage0_submissions.size(),
-          pipeline_state.circular_stage0_saturated,
+          pipeline_state.stage0_saturated,
           updated_runtime_states,
           begin_index,
           end_index);
@@ -1810,8 +1892,15 @@ class AlgorithmCpuExecutorImpl {
           progress_state.stall_report_requested;
         updated_runtime_states[begin_index].pipeline_stall_reported = progress_state.stall_reported;
         updated_runtime_states[begin_index].pipeline_stall_reason = std::move(progress_state.stall_reason);
-        updated_runtime_states[begin_index].pipeline_stage_runtime_stats =
-          std::move(progress_state.stage_runtime_stats);
+        if (collect_pipeline_timing) {
+          updated_runtime_states[begin_index].pipeline_total_elapsed_seconds =
+            progress_state.total_elapsed_seconds;
+          updated_runtime_states[begin_index].pipeline_stage_runtime_stats =
+            std::move(progress_state.stage_runtime_stats);
+        } else {
+          updated_runtime_states[begin_index].pipeline_total_elapsed_seconds = 0.0f;
+          updated_runtime_states[begin_index].pipeline_stage_runtime_stats.clear();
+        }
       }
       if (out_error_message) {
         out_error_message->clear();
@@ -1838,7 +1927,7 @@ class AlgorithmCpuExecutorImpl {
         DEBUG_TOOL_ASSERT(false, failure_message.c_str());
         runtime_state.algorithm_to_agent_signal.stop_requested = true;
         _SetPipelineStageRuntimeReason(
-          &progress_state.stage_runtime_stats,
+          pipeline_stage_runtime_stats,
           object.algorithm_profile.algorithm_name,
           "Ingress debug capture failed: " + failure_message);
         _MergeAlgorithmToAgentSignal(runtime_state.algorithm_to_agent_signal, out_pipeline_signal);
@@ -1848,7 +1937,7 @@ class AlgorithmCpuExecutorImpl {
       }
       const auto stage_end = std::chrono::steady_clock::now();
       _AddPipelineStageRuntimeElapsed(
-        &progress_state.stage_runtime_stats,
+        pipeline_stage_runtime_stats,
         object.algorithm_profile.algorithm_name,
         std::chrono::duration<float>(stage_end - stage_begin).count());
     }
@@ -1864,7 +1953,7 @@ class AlgorithmCpuExecutorImpl {
       if (!_TickAlgorithmObject(object, context, allow_tick, is_ready, true, &runtime_state)) {
         runtime_state.algorithm_to_agent_signal.stop_requested = true;
         _SetPipelineStageRuntimeReason(
-          &progress_state.stage_runtime_stats,
+          pipeline_stage_runtime_stats,
           object.algorithm_profile.algorithm_name,
           "Execution failed.");
         _MergeAlgorithmToAgentSignal(runtime_state.algorithm_to_agent_signal, out_pipeline_signal);
@@ -1874,7 +1963,7 @@ class AlgorithmCpuExecutorImpl {
       }
       const auto stage_end = std::chrono::steady_clock::now();
       _AddPipelineStageRuntimeElapsed(
-        &progress_state.stage_runtime_stats,
+        pipeline_stage_runtime_stats,
         object.algorithm_profile.algorithm_name,
         std::chrono::duration<float>(stage_end - stage_begin).count());
       _MergeAlgorithmToAgentSignal(runtime_state.algorithm_to_agent_signal, out_pipeline_signal);
@@ -1887,7 +1976,7 @@ class AlgorithmCpuExecutorImpl {
         DEBUG_TOOL_ASSERT(false, "Pipeline stage source container set is unavailable.");
         updated_runtime_states[index].algorithm_to_agent_signal.stop_requested = true;
         _SetPipelineStageRuntimeReason(
-          &progress_state.stage_runtime_stats,
+          pipeline_stage_runtime_stats,
           object.algorithm_profile.algorithm_name,
           "Egress failed: source container set is unavailable.");
         _MergeAlgorithmToAgentSignal(updated_runtime_states[index].algorithm_to_agent_signal, out_pipeline_signal);
@@ -1902,8 +1991,20 @@ class AlgorithmCpuExecutorImpl {
       const size_t stage_offset = index - begin_index;
       const bool is_last_stage = stage_offset + 1u == pipeline_stage_count;
       if (is_last_stage) {
-        if (pipeline_state.submission_mode ==
-            algorithm_management::AlgorithmPipelineSubmissionMode::Circular) {
+        if (_CollectPipelineExitReflectionSnapshot(
+              object.pipeline_name.empty() ? object.algorithm_profile.algorithm_name : object.pipeline_name,
+              *source_container_set,
+              &updated_runtime_states[index].reflection_snapshot)) {
+          updated_runtime_states[index].reflection_snapshot_cached = false;
+          pipeline_state.exit_reflection_snapshot = updated_runtime_states[index].reflection_snapshot;
+          pipeline_state.exit_reflection_snapshot_valid = true;
+        } else {
+          updated_runtime_states[index].reflection_snapshot.Clear();
+          pipeline_state.exit_reflection_snapshot.Clear();
+          pipeline_state.exit_reflection_snapshot_valid = false;
+        }
+        if (pipeline_state.topology ==
+            algorithm_management::AlgorithmPipelineTopology::Circular) {
           std::string loopback_error_message;
           if (!_CopyPipelineCircularLoopback(
                 *source_container_set,
@@ -1915,7 +2016,7 @@ class AlgorithmCpuExecutorImpl {
             DEBUG_TOOL_ASSERT(false, failure_message.c_str());
             updated_runtime_states[index].algorithm_to_agent_signal.stop_requested = true;
             _SetPipelineStageRuntimeReason(
-              &progress_state.stage_runtime_stats,
+              pipeline_stage_runtime_stats,
               object.algorithm_profile.algorithm_name,
               "Egress failed: " + failure_message);
             _MergeAlgorithmToAgentSignal(
@@ -1939,7 +2040,7 @@ class AlgorithmCpuExecutorImpl {
           DEBUG_TOOL_ASSERT(false, failure_message.c_str());
           updated_runtime_states[index].algorithm_to_agent_signal.stop_requested = true;
           _SetPipelineStageRuntimeReason(
-            &progress_state.stage_runtime_stats,
+            pipeline_stage_runtime_stats,
             object.algorithm_profile.algorithm_name,
             "Egress failed: " + failure_message);
           _MergeAlgorithmToAgentSignal(
@@ -1966,7 +2067,7 @@ class AlgorithmCpuExecutorImpl {
         DEBUG_TOOL_ASSERT(false, failure_message.c_str());
         updated_runtime_states[index].algorithm_to_agent_signal.stop_requested = true;
         _SetPipelineStageRuntimeReason(
-          &progress_state.stage_runtime_stats,
+          pipeline_stage_runtime_stats,
           object.algorithm_profile.algorithm_name,
           "Egress debug capture failed: " + failure_message);
         _MergeAlgorithmToAgentSignal(
@@ -1978,7 +2079,7 @@ class AlgorithmCpuExecutorImpl {
       }
       const auto stage_end = std::chrono::steady_clock::now();
       _AddPipelineStageRuntimeElapsed(
-        &progress_state.stage_runtime_stats,
+        pipeline_stage_runtime_stats,
         object.algorithm_profile.algorithm_name,
         std::chrono::duration<float>(stage_end - stage_begin).count());
     }
@@ -1992,7 +2093,7 @@ class AlgorithmCpuExecutorImpl {
         _CountValidPipelineLanes(pipeline_state),
         pipeline_state.stage_has_data,
         pipeline_state.pending_stage0_submissions.size(),
-        pipeline_state.circular_stage0_saturated,
+          pipeline_state.stage0_saturated,
         updated_runtime_states,
         begin_index,
         end_index);
@@ -2010,7 +2111,7 @@ class AlgorithmCpuExecutorImpl {
       for (size_t index : executable_indices) {
         algorithm_management::AlgorithmObject& object = algorithm_objects[index];
         _SetPipelineStageRuntimeReason(
-          &progress_state.stage_runtime_stats,
+          pipeline_stage_runtime_stats,
           object.algorithm_profile.algorithm_name,
           "Stage executed, but the observable pipeline state did not change.");
       }
@@ -2023,8 +2124,15 @@ class AlgorithmCpuExecutorImpl {
         progress_state.stall_report_requested;
       updated_runtime_states[begin_index].pipeline_stall_reported = progress_state.stall_reported;
       updated_runtime_states[begin_index].pipeline_stall_reason = std::move(progress_state.stall_reason);
-      updated_runtime_states[begin_index].pipeline_stage_runtime_stats =
-        std::move(progress_state.stage_runtime_stats);
+      if (collect_pipeline_timing) {
+        updated_runtime_states[begin_index].pipeline_total_elapsed_seconds =
+          progress_state.total_elapsed_seconds;
+        updated_runtime_states[begin_index].pipeline_stage_runtime_stats =
+          std::move(progress_state.stage_runtime_stats);
+      } else {
+        updated_runtime_states[begin_index].pipeline_total_elapsed_seconds = 0.0f;
+        updated_runtime_states[begin_index].pipeline_stage_runtime_stats.clear();
+      }
     }
 
     if (out_error_message) {
@@ -2033,13 +2141,19 @@ class AlgorithmCpuExecutorImpl {
     return true;
   }
 
-  void UnregisterPipeline(const std::string& pipeline_name) {
+  void UnregisterPipeline(const std::string& pipeline_name, const std::string& owner_agent_name) {
     if (pipeline_name.empty()) {
       return;
     }
     std::lock_guard<std::mutex> lock(mutex_);
     pipeline_registrations_.erase(pipeline_name);
-    pipeline_runtime_states_.erase(pipeline_name);
+    const auto runtime_states_it = pipeline_runtime_states_.find(pipeline_name);
+    if (runtime_states_it != pipeline_runtime_states_.end()) {
+      runtime_states_it->second.erase(owner_agent_name);
+      if (runtime_states_it->second.empty()) {
+        pipeline_runtime_states_.erase(runtime_states_it);
+      }
+    }
   }
 
   bool TryGetPipelineRegistration(
@@ -2060,6 +2174,7 @@ class AlgorithmCpuExecutorImpl {
 
   bool TryGetPipelineRuntime(
     const std::string& pipeline_name,
+    const std::string& owner_agent_name,
     CpuPipelineRuntimeState* out_runtime_state) const {
     if (!out_runtime_state || pipeline_name.empty()) {
       return false;
@@ -2070,12 +2185,17 @@ class AlgorithmCpuExecutorImpl {
     if (found == pipeline_runtime_states_.end()) {
       return false;
     }
-    *out_runtime_state = found->second;
+    const auto owner_found = found->second.find(owner_agent_name);
+    if (owner_found == found->second.end()) {
+      return false;
+    }
+    *out_runtime_state = owner_found->second;
     return true;
   }
 
   bool UpdatePipelineRuntime(
     const std::string& pipeline_name,
+    const std::string& owner_agent_name,
     const CpuPipelineRuntimeState& runtime_state,
     std::string* out_error_message) {
     if (pipeline_name.empty()) {
@@ -2094,7 +2214,9 @@ class AlgorithmCpuExecutorImpl {
       return false;
     }
 
-    pipeline_runtime_states_[pipeline_name] = runtime_state;
+    CpuPipelineRuntimeState owner_runtime_state = runtime_state;
+    owner_runtime_state.owner_agent_name = owner_agent_name;
+    pipeline_runtime_states_[pipeline_name][owner_agent_name] = std::move(owner_runtime_state);
     if (out_error_message) {
       out_error_message->clear();
     }
@@ -2104,7 +2226,7 @@ class AlgorithmCpuExecutorImpl {
  private:
   mutable std::mutex mutex_{};
   std::unordered_map<std::string, CpuPipelineRegistration> pipeline_registrations_{};
-  std::unordered_map<std::string, CpuPipelineRuntimeState> pipeline_runtime_states_{};
+  std::unordered_map<std::string, std::unordered_map<std::string, CpuPipelineRuntimeState>> pipeline_runtime_states_{};
 };
 
 }  // namespace
@@ -2123,6 +2245,10 @@ bool IsJobSystemInitialized() {
 
 namespace job_cpu {
 
+void Clear() {
+  CpuJobRuntimeSystem::Instance().Clear();
+}
+
 bool Execute(
   const algorithm_management::AlgorithmObject& object,
   const algorithm_management::AgentTickContext& context,
@@ -2131,7 +2257,7 @@ bool Execute(
   common_data::AlgorithmToAgentSignal* out_algorithm_to_agent_signal,
   algorithm_management::AlgorithmPackageDebugState* out_debug_state,
   std::string* out_error_message) {
-  return TryExecuteCpuTick(
+  return CpuJobRuntimeSystem::Instance().ExecuteCpuTick(
     object,
     context,
     agent_to_algorithm_signal,
@@ -2141,69 +2267,45 @@ bool Execute(
     out_error_message);
 }
 
-}  // namespace job_cpu
-
-AlgorithmCpuExecutor& AlgorithmCpuExecutor::Instance() {
-  static AlgorithmCpuExecutor instance{};
-  return instance;
-}
-
-void AlgorithmCpuExecutor::Clear() {
-  AlgorithmCpuExecutorImpl::Instance().Clear();
-}
-
-bool AlgorithmCpuExecutor::ExecuteCpuTick(
-  const algorithm_management::AlgorithmObject& object,
-  const algorithm_management::AgentTickContext& context,
-  const common_data::AgentToAlgorithmSignal& agent_to_algorithm_signal,
-  algorithm::AlgorithmContainerSet* container_set,
-  common_data::AlgorithmToAgentSignal* out_algorithm_to_agent_signal,
-  algorithm_management::AlgorithmPackageDebugState* out_debug_state,
-  std::string* out_error_message) {
-  return AlgorithmCpuExecutorImpl::Instance().ExecuteCpuTick(
-    object,
-    context,
-    agent_to_algorithm_signal,
-    container_set,
-    out_algorithm_to_agent_signal,
-    out_debug_state,
-    out_error_message);
-}
-
-bool AlgorithmCpuExecutor::RegisterPipeline(
+bool RegisterPipeline(
   const CpuPipelineRegistration& registration,
   std::string* out_error_message) {
-  return AlgorithmCpuExecutorImpl::Instance().RegisterPipeline(registration, out_error_message);
+  return CpuJobRuntimeSystem::Instance().RegisterPipeline(registration, out_error_message);
 }
 
-bool AlgorithmCpuExecutor::RegisterPipelineRuntime(
+bool RegisterPipelineRuntime(
   const std::string& pipeline_name,
+  const std::string& owner_agent_name,
   const CpuPipelineRuntimeState& runtime_state,
   std::string* out_error_message) {
-  return AlgorithmCpuExecutorImpl::Instance().RegisterPipelineRuntime(
+  return CpuJobRuntimeSystem::Instance().RegisterPipelineRuntime(
     pipeline_name,
+    owner_agent_name,
     runtime_state,
     out_error_message);
 }
 
-bool AlgorithmCpuExecutor::EnqueuePipelineStage0Submission(
+bool EnqueuePipelineStage0Submission(
   const std::string& pipeline_name,
+  const std::string& owner_agent_name,
   const std::string& stage0_algorithm_name,
   const std::vector<algorithm_management::AlgorithmResourceBinding>& resource_bindings,
   const std::vector<algorithm_management::AlgorithmDescriptorValue>& descriptor_values,
   std::string* out_error_message) {
-  return AlgorithmCpuExecutorImpl::Instance().EnqueuePipelineStage0Submission(
+  return CpuJobRuntimeSystem::Instance().EnqueuePipelineStage0Submission(
     pipeline_name,
+    owner_agent_name,
     stage0_algorithm_name,
     resource_bindings,
     descriptor_values,
     out_error_message);
 }
 
-bool AlgorithmCpuExecutor::TickMountedPipeline(
+bool TickMountedPipeline(
   std::vector<algorithm_management::AlgorithmObject>* mounted_objects,
   size_t begin_index,
   size_t end_index,
+  const std::string& owner_agent_name,
   const algorithm_management::AgentTickContext& context,
   const std::vector<bool>& allow_tick_mask,
   const std::vector<algorithm_management::AlgorithmAssemblyState>& assembly_states,
@@ -2211,10 +2313,11 @@ bool AlgorithmCpuExecutor::TickMountedPipeline(
   common_data::AlgorithmToAgentSignal* out_pipeline_signal,
   bool* out_pipeline_processing_failed,
   std::string* out_error_message) {
-  return AlgorithmCpuExecutorImpl::Instance().TickMountedPipeline(
+  return CpuJobRuntimeSystem::Instance().TickMountedPipeline(
     mounted_objects,
     begin_index,
     end_index,
+    owner_agent_name,
     context,
     allow_tick_mask,
     assembly_states,
@@ -2224,55 +2327,47 @@ bool AlgorithmCpuExecutor::TickMountedPipeline(
     out_error_message);
 }
 
-void AlgorithmCpuExecutor::UnregisterPipeline(const std::string& pipeline_name) {
-  AlgorithmCpuExecutorImpl::Instance().UnregisterPipeline(pipeline_name);
+void UnregisterPipeline(const std::string& pipeline_name, const std::string& owner_agent_name) {
+  CpuJobRuntimeSystem::Instance().UnregisterPipeline(pipeline_name, owner_agent_name);
 }
 
-bool AlgorithmCpuExecutor::TryGetPipelineRegistration(
+bool TryGetPipelineRegistration(
   const std::string& pipeline_name,
-  CpuPipelineRegistration* out_registration) const {
-  return AlgorithmCpuExecutorImpl::Instance().TryGetPipelineRegistration(
+  CpuPipelineRegistration* out_registration) {
+  return CpuJobRuntimeSystem::Instance().TryGetPipelineRegistration(
     pipeline_name,
     out_registration);
 }
 
-bool AlgorithmCpuExecutor::TryGetPipelineRuntime(
+bool TryGetPipelineRuntime(
   const std::string& pipeline_name,
-  CpuPipelineRuntimeState* out_runtime_state) const {
-  return AlgorithmCpuExecutorImpl::Instance().TryGetPipelineRuntime(
+  const std::string& owner_agent_name,
+  CpuPipelineRuntimeState* out_runtime_state) {
+  return CpuJobRuntimeSystem::Instance().TryGetPipelineRuntime(
     pipeline_name,
+    owner_agent_name,
     out_runtime_state);
 }
 
-bool AlgorithmCpuExecutor::UpdatePipelineRuntime(
+bool UpdatePipelineRuntime(
   const std::string& pipeline_name,
+  const std::string& owner_agent_name,
   const CpuPipelineRuntimeState& runtime_state,
   std::string* out_error_message) {
-  return AlgorithmCpuExecutorImpl::Instance().UpdatePipelineRuntime(
+  return CpuJobRuntimeSystem::Instance().UpdatePipelineRuntime(
     pipeline_name,
+    owner_agent_name,
     runtime_state,
     out_error_message);
 }
 
-bool TryExecuteCpuTick(
-  const algorithm_management::AlgorithmObject& object,
-  const algorithm_management::AgentTickContext& context,
-  const common_data::AgentToAlgorithmSignal& agent_to_algorithm_signal,
-  algorithm::AlgorithmContainerSet* container_set,
-  common_data::AlgorithmToAgentSignal* out_algorithm_to_agent_signal,
-  algorithm_management::AlgorithmPackageDebugState* out_debug_state,
-  std::string* out_error_message) {
-  return AlgorithmCpuExecutor::Instance().ExecuteCpuTick(
-    object,
-    context,
-    agent_to_algorithm_signal,
-    container_set,
-    out_algorithm_to_agent_signal,
-    out_debug_state,
-    out_error_message);
-}
+}  // namespace job_cpu
 
 namespace job_gpu {
+
+void Clear() {
+  ClearGpuRuntime();
+}
 
 bool Execute(
   const algorithm_management::AlgorithmObject& object,

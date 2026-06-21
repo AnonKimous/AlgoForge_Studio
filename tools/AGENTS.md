@@ -146,6 +146,12 @@ Rules:
 - Use the `fun` node script for real code such as C++ and shader content.
 - Prefer these tools over `update_document` whenever possible.
 
+### Agent UI Commands
+
+- When the task is about teaching the user to operate Algorithm Studio, prefer the `interface4agents` command script layer instead of raw document edits.
+- Use `highlight` to point at the UI location of a command before explaining it.
+- Start with the `v`, `a`, and `scene` command families.
+
 ## Document Editing Fallback
 
 - `Document` remains the source of truth, but full document rewriting is a fallback path.

@@ -4,6 +4,7 @@ project(debugTool LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "Minimum policy version accepted by fetched dependencies" FORCE)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -52,7 +53,7 @@ set(SDL3_DLL_RELEASE "" CACHE FILEPATH "SDL3 release runtime DLL")
 set(EIGEN_INCLUDE_DIR "" CACHE PATH "Eigen include directory")
 set(IMGUI_SOURCE_DIR "" CACHE PATH "Dear ImGui source directory")
 set(VKB_SOURCE_DIR "" CACHE PATH "VkBootstrap source directory")
-set(VKB_GITHUB_ARCHIVE_URL "https://github.com/charles-lunarg/vk-bootstrap/archive/refs/heads/main.zip" CACHE STRING "VkBootstrap GitHub archive URL")
+set(VKB_GITHUB_ARCHIVE_URL "https://github.com/charles-lunarg/vk-bootstrap/archive/refs/tags/v1.4.353.zip" CACHE STRING "VkBootstrap GitHub archive URL")
 set(VMA_INCLUDE_DIR "" CACHE PATH "VMA include directory")
 set(SPIRV_REFLECT_SOURCE_DIR "" CACHE PATH "SPIRV-Reflect source directory")
 set(CJSON_SOURCE_DIR "" CACHE PATH "cJSON source directory")
@@ -72,39 +73,49 @@ set(EASTL_DISABLE_APRIL_2025_DEPRECATIONS OFF CACHE BOOL "Enable use of API mark
 
 resolve_existing_path(_SDL3_INCLUDE_DIR SDL3/SDL.h
   "${CMAKE_CURRENT_SOURCE_DIR}/third_party/SDL-main/include"
-  "D:/VulkanSDK/1.4.341.1/Include"
-  "D:/VulkanSDK/1.4.328.1/Include"
+  "$ENV{VULKAN_SDK}/Include"
+  "$ENV{VULKAN_SDK}/include"
 )
 if(_SDL3_INCLUDE_DIR)
   set(SDL3_INCLUDE_DIR "${_SDL3_INCLUDE_DIR}" CACHE PATH "SDL3 include directory" FORCE)
   resolve_existing_file(_SDL3_LIBRARY_DEBUG
-    "D:/VulkanSDK/1.4.341.1/Lib/SDL3.lib"
-    "D:/VulkanSDK/1.4.328.1/Lib/SDL3.lib"
+    "$ENV{VULKAN_SDK}/Lib/SDL3.lib"
+    "$ENV{VULKAN_SDK}/lib/SDL3.lib"
   )
   resolve_existing_file(_SDL3_LIBRARY_RELEASE
-    "D:/VulkanSDK/1.4.341.1/Lib/SDL3.lib"
-    "D:/VulkanSDK/1.4.328.1/Lib/SDL3.lib"
+    "$ENV{VULKAN_SDK}/Lib/SDL3.lib"
+    "$ENV{VULKAN_SDK}/lib/SDL3.lib"
   )
   resolve_existing_file(_SDL3_DLL_DEBUG
-    "D:/VulkanSDK/1.4.341.1/Bin/SDL3d.dll"
-    "D:/VulkanSDK/1.4.328.1/Bin/SDL3d.dll"
+    "$ENV{VULKAN_SDK}/Bin/SDL3d.dll"
+    "$ENV{VULKAN_SDK}/bin/SDL3d.dll"
   )
   resolve_existing_file(_SDL3_DLL_RELEASE
-    "D:/VulkanSDK/1.4.341.1/Bin/SDL3.dll"
-    "D:/VulkanSDK/1.4.328.1/Bin/SDL3.dll"
+    "$ENV{VULKAN_SDK}/Bin/SDL3.dll"
+    "$ENV{VULKAN_SDK}/bin/SDL3.dll"
   )
-  set(SDL3_LIBRARY_DEBUG "${_SDL3_LIBRARY_DEBUG}" CACHE FILEPATH "SDL3 debug import/static library" FORCE)
-  set(SDL3_LIBRARY_RELEASE "${_SDL3_LIBRARY_RELEASE}" CACHE FILEPATH "SDL3 release import/static library" FORCE)
-  set(SDL3_DLL_DEBUG "${_SDL3_DLL_DEBUG}" CACHE FILEPATH "SDL3 debug runtime DLL" FORCE)
-  set(SDL3_DLL_RELEASE "${_SDL3_DLL_RELEASE}" CACHE FILEPATH "SDL3 release runtime DLL" FORCE)
-  set(SDL3_LINK_LIBS
-    debug "${SDL3_LIBRARY_DEBUG}"
-    optimized "${SDL3_LIBRARY_RELEASE}"
-  )
+  if(_SDL3_LIBRARY_DEBUG AND _SDL3_LIBRARY_RELEASE)
+    set(SDL3_LIBRARY_DEBUG "${_SDL3_LIBRARY_DEBUG}" CACHE FILEPATH "SDL3 debug import/static library" FORCE)
+    set(SDL3_LIBRARY_RELEASE "${_SDL3_LIBRARY_RELEASE}" CACHE FILEPATH "SDL3 release import/static library" FORCE)
+    set(SDL3_DLL_DEBUG "${_SDL3_DLL_DEBUG}" CACHE FILEPATH "SDL3 debug runtime DLL" FORCE)
+    set(SDL3_DLL_RELEASE "${_SDL3_DLL_RELEASE}" CACHE FILEPATH "SDL3 release runtime DLL" FORCE)
+    set(SDL3_LINK_LIBS
+      debug "${SDL3_LIBRARY_DEBUG}"
+      optimized "${SDL3_LIBRARY_RELEASE}"
+    )
+  else()
+    message(STATUS "SDL3 library not found locally; fetching SDL3 from GitHub.")
+    FetchContent_Declare(sdl3_source
+      URL "https://github.com/libsdl-org/SDL/archive/refs/tags/release-3.4.8.zip"
+    )
+    FetchContent_MakeAvailable(sdl3_source)
+    set(SDL3_INCLUDE_DIR "${sdl3_source_SOURCE_DIR}/include" CACHE PATH "SDL3 include directory" FORCE)
+    set(SDL3_LINK_LIBS SDL3::SDL3)
+  endif()
 else()
   message(STATUS "SDL3 not found locally; fetching SDL3 from GitHub.")
   FetchContent_Declare(sdl3_source
-    URL "https://github.com/libsdl-org/SDL/archive/refs/heads/main.zip"
+    URL "https://github.com/libsdl-org/SDL/archive/refs/tags/release-3.4.8.zip"
   )
   FetchContent_MakeAvailable(sdl3_source)
   set(SDL3_INCLUDE_DIR "${sdl3_source_SOURCE_DIR}/include" CACHE PATH "SDL3 include directory" FORCE)
@@ -113,10 +124,6 @@ endif()
 
 resolve_existing_path(_EIGEN_INCLUDE_DIR Eigen/Dense
   "${CMAKE_CURRENT_SOURCE_DIR}/third_party/eigen"
-  "D:/aaamyprj/physBased-render/build/_deps/eigen-src"
-  "D:/tools/eigen-3.4.0"
-  "D:/relyingResourse/vcpkg-master/vcpkg-master/installed/x64-windows/include/eigen3"
-  "D:/relyingResourse/vcpkg-master/vcpkg-master/installed/x64-windows/include"
 )
 if(_EIGEN_INCLUDE_DIR)
   set(EIGEN_INCLUDE_DIR "${_EIGEN_INCLUDE_DIR}" CACHE PATH "Eigen include directory" FORCE)
@@ -131,14 +138,13 @@ endif()
 
 resolve_existing_path(_IMGUI_SOURCE_DIR imgui.h
   "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui-1.92.8-docking"
-  "D:/aaamyprj/physBased-render/build/_deps/imgui-src"
 )
 if(_IMGUI_SOURCE_DIR)
   set(IMGUI_SOURCE_DIR "${_IMGUI_SOURCE_DIR}" CACHE PATH "Dear ImGui source directory" FORCE)
 else()
   message(STATUS "ImGui not found locally; fetching ImGui from GitHub.")
   FetchContent_Declare(imgui_source
-    URL "https://github.com/ocornut/imgui/archive/refs/heads/docking.zip"
+    URL "https://github.com/ocornut/imgui/archive/refs/tags/v1.92.6-docking.zip"
   )
   FetchContent_Populate(imgui_source)
   set(IMGUI_SOURCE_DIR "${imgui_source_SOURCE_DIR}" CACHE PATH "Dear ImGui source directory" FORCE)
@@ -146,14 +152,13 @@ endif()
 
 resolve_existing_path(_VKB_SOURCE_DIR src/VkBootstrap.h
   "${CMAKE_CURRENT_SOURCE_DIR}/third_party/vkb"
-  "D:/aaamyprj/physBased-render/build/_deps/vk_bootstrap-src"
 )
 if(_VKB_SOURCE_DIR)
   set(VKB_SOURCE_DIR "${_VKB_SOURCE_DIR}" CACHE PATH "VkBootstrap source directory" FORCE)
 else()
   message(STATUS "VkBootstrap not found locally; fetching from GitHub.")
   FetchContent_Declare(vkb_source
-    URL "${VKB_GITHUB_ARCHIVE_URL}"
+    URL "https://github.com/charles-lunarg/vk-bootstrap/archive/refs/tags/v1.4.353.zip"
   )
   FetchContent_GetProperties(vkb_source)
   if(NOT vkb_source_POPULATED)
@@ -164,8 +169,6 @@ endif()
 
 resolve_existing_path(_VMA_INCLUDE_DIR vk_mem_alloc.h
   "${CMAKE_CURRENT_SOURCE_DIR}/third_party/VulkanMemoryAllocator-3.3.0/include"
-  "D:/VulkanSDK/1.4.341.1/Include/vma"
-  "D:/aaamyprj/physBased-render/build/_deps/vma-src/include"
 )
 if(_VMA_INCLUDE_DIR)
   set(VMA_INCLUDE_DIR "${_VMA_INCLUDE_DIR}" CACHE PATH "VMA include directory" FORCE)
@@ -178,25 +181,15 @@ else()
   set(VMA_INCLUDE_DIR "${vma_source_SOURCE_DIR}/include" CACHE PATH "VMA include directory" FORCE)
 endif()
 
-resolve_existing_path(_SPIRV_REFLECT_SOURCE_DIR spirv_reflect.h
-  "${CMAKE_CURRENT_SOURCE_DIR}/third_party/SPIRV-Reflect-vulkan-sdk-1.4.350.0"
-  "D:/VulkanSDK/1.4.341.1/Source/SPIRV-Reflect"
-  "D:/aaamyprj/physBased-render/build/_deps/spirv_reflect-src"
+message(STATUS "Fetching SPIRV-Reflect from GitHub.")
+FetchContent_Declare(spirv_reflect_source
+  URL "https://github.com/KhronosGroup/SPIRV-Reflect/archive/c90b7b781cdcff63cf1b409ffc7ca0a714e0425e.zip"
 )
-if(_SPIRV_REFLECT_SOURCE_DIR)
-  set(SPIRV_REFLECT_SOURCE_DIR "${_SPIRV_REFLECT_SOURCE_DIR}" CACHE PATH "SPIRV-Reflect source directory" FORCE)
-else()
-  message(STATUS "SPIRV-Reflect not found locally; fetching SPIRV-Reflect from GitHub.")
-  FetchContent_Declare(spirv_reflect_source
-    URL "https://github.com/KhronosGroup/SPIRV-Reflect/archive/refs/heads/vulkan-sdk-1.4.350.0.zip"
-  )
-  FetchContent_Populate(spirv_reflect_source)
-  set(SPIRV_REFLECT_SOURCE_DIR "${spirv_reflect_source_SOURCE_DIR}" CACHE PATH "SPIRV-Reflect source directory" FORCE)
-endif()
+FetchContent_Populate(spirv_reflect_source)
+set(SPIRV_REFLECT_SOURCE_DIR "${spirv_reflect_source_SOURCE_DIR}" CACHE PATH "SPIRV-Reflect source directory" FORCE)
 
 resolve_existing_path(_CJSON_SOURCE_DIR cJSON.c
   "${CMAKE_CURRENT_SOURCE_DIR}/third_party/cjson"
-  "D:/relyingResourse/vcpkg-master/vcpkg-master/buildtrees/cjson/src/v1.7.18-66cc8df541.clean"
 )
 if(_CJSON_SOURCE_DIR)
   set(CJSON_SOURCE_DIR "${_CJSON_SOURCE_DIR}" CACHE PATH "cJSON source directory" FORCE)
@@ -293,14 +286,15 @@ endif()
 
 add_library(common_data STATIC
   src/common_data/mesh.cpp
+  src/common_data/kernel_cfg.cpp
 )
 target_include_directories(common_data PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_compile_definitions(common_data PRIVATE PROJECT_ROOT_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
 add_library(algorithm_management STATIC
   src/algorithm_support/algorithm_package_location.cpp
   src/algorithm_support/algorithm_intervention.cpp
   src/algorithm_support/algorithm_package_decomposer.cpp
-  src/algorithm_support/algorithm_plugin_loader.cpp
   src/algorithm_support/algorithm_package_loader.cpp
   ${CJSON_SOURCE_DIR}/cJSON.c
 )
@@ -315,7 +309,6 @@ add_library(runtime_systems STATIC
   src/runtime_systems/algorithm_gpu_context.cpp
   src/runtime_systems/algorithm_gpu_executor.cpp
   src/runtime_systems/job_system.cpp
-  src/runtime_systems/render/vma_impl.cpp
   src/runtime_systems/render/preview_renderer.cpp
   src/runtime_systems/render/imgui_vulkan_runtime.cpp
   src/runtime_systems/runtime_environment.cpp
@@ -340,7 +333,6 @@ target_include_directories(agent PUBLIC ${PROJECT_INCLUDE_DIRS})
 target_link_libraries(agent PUBLIC common_data algorithm_management)
 
 add_library(agent_management STATIC
-  src/agent_management/agent_ticker.cpp
   src/agent_management/agent_manager.cpp
 )
 target_include_directories(agent_management PUBLIC ${PROJECT_INCLUDE_DIRS})
@@ -367,7 +359,7 @@ add_library(sdk STATIC
   src/sdk/sdk_decomposer.cpp
 )
 target_include_directories(sdk PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(sdk PUBLIC agent_management)
+target_link_libraries(sdk PUBLIC EASTL agent_management)
 
 set(SDK_PACKAGE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/sdk")
 set(SDK_PACKAGE_INCLUDE_DIR "${SDK_PACKAGE_ROOT}/include")
@@ -424,20 +416,22 @@ if(WIN32)
     VERBATIM
   )
 
-  add_custom_command(TARGET debugTool PRE_BUILD
-    COMMAND ${CMAKE_COMMAND}
-      "-DREQUIRED_FILE=$<IF:$<CONFIG:Debug>,${SDL3_LIBRARY_DEBUG},${SDL3_LIBRARY_RELEASE}>"
-      "-DHINT_TEXT=$<IF:$<CONFIG:Debug>,Provide the SDL3 Debug library for Debug builds.,Provide the SDL3 Release library for non-Debug builds.>"
-      -P "${CMAKE_HELPER_DIR}/require_generated_file.cmake"
-    COMMAND ${CMAKE_COMMAND}
-      "-DREQUIRED_FILE=$<IF:$<CONFIG:Debug>,${SDL3_DLL_DEBUG},${SDL3_DLL_RELEASE}>"
-      "-DHINT_TEXT=$<IF:$<CONFIG:Debug>,Provide the SDL3 Debug runtime DLL for Debug builds.,Provide the SDL3 Release runtime DLL for non-Debug builds.>"
-      -P "${CMAKE_HELPER_DIR}/require_generated_file.cmake"
-  )
+  if(NOT TARGET SDL3::SDL3)
+    add_custom_command(TARGET debugTool PRE_BUILD
+      COMMAND ${CMAKE_COMMAND}
+        "-DREQUIRED_FILE=$<IF:$<CONFIG:Debug>,${SDL3_LIBRARY_DEBUG},${SDL3_LIBRARY_RELEASE}>"
+        "-DHINT_TEXT=$<IF:$<CONFIG:Debug>,Provide the SDL3 Debug library for Debug builds.,Provide the SDL3 Release library for non-Debug builds.>"
+        -P "${CMAKE_HELPER_DIR}/require_generated_file.cmake"
+      COMMAND ${CMAKE_COMMAND}
+        "-DREQUIRED_FILE=$<IF:$<CONFIG:Debug>,${SDL3_DLL_DEBUG},${SDL3_DLL_RELEASE}>"
+        "-DHINT_TEXT=$<IF:$<CONFIG:Debug>,Provide the SDL3 Debug runtime DLL for Debug builds.,Provide the SDL3 Release runtime DLL for non-Debug builds.>"
+        -P "${CMAKE_HELPER_DIR}/require_generated_file.cmake"
+    )
 
-  add_custom_command(TARGET debugTool POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-    "$<IF:$<CONFIG:Debug>,${SDL3_DLL_DEBUG},${SDL3_DLL_RELEASE}>"
-    "$<TARGET_FILE_DIR:debugTool>"
-  )
+    add_custom_command(TARGET debugTool POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      "$<IF:$<CONFIG:Debug>,${SDL3_DLL_DEBUG},${SDL3_DLL_RELEASE}>"
+      "$<TARGET_FILE_DIR:debugTool>"
+    )
+  endif()
 endif()

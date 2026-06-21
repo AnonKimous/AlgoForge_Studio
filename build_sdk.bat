@@ -3,7 +3,7 @@ setlocal EnableExtensions
 
 set "ROOT=%~dp0"
 set "ROOT=%ROOT:~0,-1%"
-set "CMAKE=D:\Program Files\CMake\bin\cmake.exe"
+set "CMAKE=cmake"
 set "ORIG_PATH=%Path%"
 set "PATH="
 set "Path=%ORIG_PATH%"
@@ -15,7 +15,7 @@ if errorlevel 1 (
   popd
   exit /b %EXITCODE%
 )
-"%CMAKE%" --build "%ROOT%\build" --config Debug --target sdk -j 2
+"%CMAKE%" --build "%ROOT%\build" --config Debug --target sdk --parallel
 set "EXITCODE=%ERRORLEVEL%"
 popd
 exit /b %EXITCODE%

@@ -1,4 +1,4 @@
-#include "algorithm_gpu_executor.h"
+#include "runtime_systems/job_system.h"
 
 #include "algorithm_management/algorithm_manager.h"
 #include "algorithm_support/algorithm_library_paths.h"
@@ -202,10 +202,10 @@ bool _StageLooksLikeGpuTick(const agent::AlgorithmInterventionStageSpec& stage) 
 
 }  // namespace
 
-class AlgorithmGpuExecutorImpl {
+class GpuJobRuntimeSystem {
  public:
-  static AlgorithmGpuExecutorImpl& Instance() {
-    static AlgorithmGpuExecutorImpl instance{};
+  static GpuJobRuntimeSystem& Instance() {
+    static GpuJobRuntimeSystem instance{};
     return instance;
   }
 
@@ -1055,28 +1055,8 @@ class AlgorithmGpuExecutorImpl {
   std::unordered_map<std::string, GpuExecutionState> execution_state_cache_{};
 };
 
-AlgorithmGpuExecutor& AlgorithmGpuExecutor::Instance() {
-  static AlgorithmGpuExecutor instance{};
-  return instance;
-}
-
-void AlgorithmGpuExecutor::Clear() {
-  AlgorithmGpuExecutorImpl::Instance().Clear();
-}
-
-bool AlgorithmGpuExecutor::ExecuteGpuTick(
-  const agent::AlgorithmObject& object,
-  algorithm::AlgorithmContainerSet* container_set,
-  const agent::AgentTickContext& context,
-  std::string* out_error_message) {
-  return AlgorithmGpuExecutorImpl::Instance().ExecuteGpuTick(object, container_set, context, out_error_message);
-}
-
-bool AlgorithmGpuExecutor::SynchronizeGpuTickState(
-  const agent::AlgorithmObject& object,
-  algorithm::AlgorithmContainerSet* container_set,
-  std::string* out_error_message) {
-  return AlgorithmGpuExecutorImpl::Instance().SynchronizeGpuTickState(object, container_set, out_error_message);
+void ClearGpuRuntime() {
+  GpuJobRuntimeSystem::Instance().Clear();
 }
 
 bool TryExecuteGpuTick(
@@ -1084,14 +1064,14 @@ bool TryExecuteGpuTick(
   algorithm::AlgorithmContainerSet* container_set,
   const agent::AgentTickContext& context,
   std::string* out_error_message) {
-  return AlgorithmGpuExecutor::Instance().ExecuteGpuTick(object, container_set, context, out_error_message);
+  return GpuJobRuntimeSystem::Instance().ExecuteGpuTick(object, container_set, context, out_error_message);
 }
 
 bool TrySynchronizeGpuTickState(
   const agent::AlgorithmObject& object,
   algorithm::AlgorithmContainerSet* container_set,
   std::string* out_error_message) {
-  return AlgorithmGpuExecutor::Instance().SynchronizeGpuTickState(object, container_set, out_error_message);
+  return GpuJobRuntimeSystem::Instance().SynchronizeGpuTickState(object, container_set, out_error_message);
 }
 
 }  // namespace runtime_systems

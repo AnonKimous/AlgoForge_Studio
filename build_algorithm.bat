@@ -3,11 +3,11 @@ setlocal EnableExtensions
 
 set "ROOT=%~dp0"
 set "ROOT=%ROOT:~0,-1%"
-set "CMAKE=D:\Program Files\CMake\bin\cmake.exe"
+set "CMAKE=cmake"
 set "ALGO_ROOT=%ROOT%\algorithmLib"
 set "ALGO_SRC_ROOT=%ALGO_ROOT%\algorithmSrc"
 set "ALGO_RUNTIME_ROOT=%ALGO_ROOT%\algorithmruntimeLib"
-set "HOT_BUILD_DIR=%ALGO_ROOT%\.build_hot"
+set "ALGO_BUILD_DIR=%ALGO_ROOT%\.build"
 set "ORIG_PATH=%Path%"
 set "PATH="
 set "Path=%ORIG_PATH%"
@@ -44,16 +44,16 @@ if errorlevel 1 (
   exit /b 1
 )
 
-if exist "%HOT_BUILD_DIR%" (
-  rmdir /s /q "%HOT_BUILD_DIR%"
+if exist "%ALGO_BUILD_DIR%" (
+  rmdir /s /q "%ALGO_BUILD_DIR%"
   if errorlevel 1 (
-    echo Failed to reset temporary build root: "%HOT_BUILD_DIR%"
+    echo Failed to reset temporary build root: "%ALGO_BUILD_DIR%"
     exit /b 1
   )
 )
-if not exist "%HOT_BUILD_DIR%" mkdir "%HOT_BUILD_DIR%"
+if not exist "%ALGO_BUILD_DIR%" mkdir "%ALGO_BUILD_DIR%"
 if errorlevel 1 (
-  echo Failed to create temporary build root: "%HOT_BUILD_DIR%"
+  echo Failed to create temporary build root: "%ALGO_BUILD_DIR%"
   exit /b 1
 )
 
@@ -68,18 +68,18 @@ if exist "%ALGO_RUNTIME_ROOT%\%ALGO_TARGET%" (
 
 pushd "%ROOT%"
 set "PUSHD_DONE=1"
-"%CMAKE%" -S "%ALGO_ROOT%" -B "%HOT_BUILD_DIR%" --fresh -DBUILD_ALGORITHM_SAMPLE_PLUGIN=ON -DCORE_BUILD_DIR="%ROOT%\build" -DALGORITHM_LIBRARY_SOURCE_ROOT="%ALGO_SRC_ROOT%" -DALGORITHM_LIBRARY_RUNTIME_OUTPUT_ROOT="%ALGO_RUNTIME_ROOT%"
+"%CMAKE%" -S "%ALGO_ROOT%" -B "%ALGO_BUILD_DIR%" --fresh -DBUILD_ALGORITHM_SAMPLE_PLUGIN=ON -DCORE_BUILD_DIR="%ROOT%\build" -DALGORITHM_LIBRARY_SOURCE_ROOT="%ALGO_SRC_ROOT%" -DALGORITHM_LIBRARY_RUNTIME_OUTPUT_ROOT="%ALGO_RUNTIME_ROOT%"
 if errorlevel 1 (
   set "EXITCODE=1"
   goto :cleanup
 )
-"%CMAKE%" --build "%HOT_BUILD_DIR%" --config Debug --target "%ALGO_TARGET%_package" -j 2
+"%CMAKE%" --build "%ALGO_BUILD_DIR%" --config Debug --target "%ALGO_TARGET%_package" --parallel
 if errorlevel 1 (
   set "EXITCODE=1"
   goto :cleanup
 )
 
-call "%ROOT%\algorithm_build_common.bat" PruneRuntimeOutput "%ALGO_RUNTIME_ROOT%\%ALGO_TARGET%"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference = 'Stop'; $root = '%ALGO_RUNTIME_ROOT%\%ALGO_TARGET%'; if (Test-Path -LiteralPath $root) { Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object { $_.Extension -in '.exp','.lib','.pdb','.ilk','.obj','.manifest' } | Remove-Item -Force; Get-ChildItem -LiteralPath $root -Recurse -Directory | Sort-Object FullName -Descending | Where-Object { -not (Get-ChildItem -LiteralPath $_.FullName -Force) } | Remove-Item -Force }"
 if errorlevel 1 (
   set "EXITCODE=1"
   goto :cleanup
@@ -89,7 +89,7 @@ set "EXITCODE=0"
 
 :cleanup
 if "%PUSHD_DONE%"=="1" popd
-if exist "%HOT_BUILD_DIR%" (
-  rmdir /s /q "%HOT_BUILD_DIR%"
+if exist "%ALGO_BUILD_DIR%" (
+  rmdir /s /q "%ALGO_BUILD_DIR%"
 )
 exit /b %EXITCODE%

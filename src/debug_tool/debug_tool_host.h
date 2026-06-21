@@ -63,10 +63,37 @@ enum class AlgorithmExecutionPreference {
   Gpu = 1,
 };
 
-enum class AlgorithmPipelineSubmissionMode {
+enum class AlgorithmPipelineTopology {
   NonCircular = 0,
   Circular = 1,
 };
+
+using AlgorithmPipelineSubmissionMode = AlgorithmPipelineTopology;
+
+enum class AlgorithmPipelineSyncMode {
+  Forced = 0,
+  NonForced = 1,
+};
+
+inline const char* AlgorithmPipelineTopologyDisplayName(AlgorithmPipelineTopology mode) {
+  switch (mode) {
+    case AlgorithmPipelineTopology::NonCircular: return "非环形";
+    case AlgorithmPipelineTopology::Circular: return "环形";
+  }
+  return "非环形";
+}
+
+inline const char* AlgorithmPipelineSubmissionModeDisplayName(AlgorithmPipelineSubmissionMode mode) {
+  return AlgorithmPipelineTopologyDisplayName(mode);
+}
+
+inline const char* AlgorithmPipelineSyncModeDisplayName(AlgorithmPipelineSyncMode mode) {
+  switch (mode) {
+    case AlgorithmPipelineSyncMode::Forced: return "强制同步";
+    case AlgorithmPipelineSyncMode::NonForced: return "非强制同步";
+  }
+  return "强制同步";
+}
 
 enum class AlgorithmAssemblyState {
   Pending = 0,
@@ -152,7 +179,10 @@ struct AlgorithmRuntimeSummary {
   uint32_t pipeline_stage_index{0u};
   uint32_t pipeline_stage_count{0u};
   bool pipeline_stage{false};
-  AlgorithmPipelineSubmissionMode pipeline_submission_mode{AlgorithmPipelineSubmissionMode::NonCircular};
+  AlgorithmPipelineTopology pipeline_topology{AlgorithmPipelineTopology::NonCircular};
+  AlgorithmPipelineSyncMode pipeline_sync_mode{AlgorithmPipelineSyncMode::Forced};
+  uint32_t pipeline_active_stage_index{0u};
+  bool pipeline_active_stage_index_valid{false};
   std::vector<AlgorithmResourceBinding> resource_bindings;
   std::vector<AlgorithmDescriptorValue> descriptor_values;
   bool cpu_symbol{true};
@@ -162,6 +192,8 @@ struct AlgorithmRuntimeSummary {
   AgentToAlgorithmSignal agent_to_algorithm_signal{};
   AlgorithmToAgentSignal algorithm_to_agent_signal{};
   AlgorithmReflectionSnapshot reflection_snapshot{};
+  float pipeline_total_elapsed_seconds{0.0f};
+  std::vector<algorithm_management::AlgorithmPipelineStageRuntimeStat> pipeline_stage_runtime_stats;
   PipelineStageBridgeDebugSummary bridge_debug_set{};
 };
 
@@ -217,6 +249,12 @@ class IDebugToolHost {
     size_t agent_index,
     size_t algorithm_index,
     std::string* out_error_message = nullptr) = 0;
+  virtual bool SetPipelineStageDebugSelection(
+    size_t agent_index,
+    const std::string& pipeline_name,
+    bool select_all,
+    uint32_t stage_index,
+    std::string* out_error_message = nullptr) = 0;
   virtual bool HotReloadAlgorithmPackage(
     size_t agent_index,
     size_t algorithm_index,
@@ -227,7 +265,7 @@ class IDebugToolHost {
   virtual bool tick_enabled() const = 0;
   virtual bool TickManagedAgents() = 0;
   virtual void ClearAgents() = 0;
-  virtual void ClearGpuExecutors() = 0;
+  virtual void ClearGpuRuntimeCaches() = 0;
   virtual bool LoadAlgorithmCatalog(
     std::vector<AlgorithmCatalogEntry>* out_entries,
     std::string* out_error_message = nullptr) const = 0;

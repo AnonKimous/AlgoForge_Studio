@@ -63,6 +63,8 @@ try:
         welcome_import_existing_agent,
         welcome_use_codex,
     )
+    from .agents import MockAgentClient, generate_cpp_skeleton
+    from .interface4agents import execute_interface4agents_command, extract_interface4agents_script
 except ImportError:
     from shared import (
         BLUEPRINT_NODE_MIN_HEIGHT,
@@ -93,6 +95,8 @@ except ImportError:
         welcome_import_existing_agent,
         welcome_use_codex,
     )
+    from agents import MockAgentClient, generate_cpp_skeleton
+    from interface4agents import execute_interface4agents_command, extract_interface4agents_script
 
 try:
     from .backend import (
@@ -107,7 +111,6 @@ try:
         ResourceNodeItem,
         ReflectorItem,
     )
-    from .agent_client import MockAgentClient, generate_cpp_skeleton
     from .app_identity_mixin import AlgorithmStudioIdentityMixin
     from .app_palette_mixin import AlgorithmStudioPaletteMixin
 except ImportError:
@@ -123,7 +126,6 @@ except ImportError:
         ResourceNodeItem,
         ReflectorItem,
     )
-    from agent_client import MockAgentClient, generate_cpp_skeleton
     from app_identity_mixin import AlgorithmStudioIdentityMixin
     from app_palette_mixin import AlgorithmStudioPaletteMixin
 
@@ -162,6 +164,7 @@ class AlgorithmStudioApp(AlgorithmStudioIdentityMixin, AlgorithmStudioPaletteMix
         self.container_group_drag_state: dict[str, Any] | None = None
         self.container_group_resize_state: dict[str, Any] | None = None
         self.toolnode_resize_state: dict[str, Any] | None = None
+        self.container_copy_drag_state: dict[str, Any] | None = None
         self.canvas_nodes: dict[str, int] = {}
         self.canvas_container_group_nodes: dict[str, int] = {}
         self.canvas_port_positions: dict[str, tuple[float, float]] = {}
@@ -170,6 +173,9 @@ class AlgorithmStudioApp(AlgorithmStudioIdentityMixin, AlgorithmStudioPaletteMix
         self.palette_shell: ttk.Frame | None = None
         self.palette_canvas: tk.Canvas | None = None
         self.palette_inner_frame: ttk.Frame | None = None
+        self.interface4agents_highlight_targets: dict[str, list[tuple[tk.Widget, dict[str, Any]]]] = {}
+        self.interface4agents_highlight_after_id: str | None = None
+        self.interface4agents_highlight_restore: list[tuple[tk.Widget, dict[str, Any]]] = []
         self.drag_palette_body_frame: ttk.Frame | None = None
         self.drag_palette_toggle_button: ttk.Button | None = None
         self.node_drag_state: dict[str, Any] | None = None
@@ -252,6 +258,12 @@ class AlgorithmStudioApp(AlgorithmStudioIdentityMixin, AlgorithmStudioPaletteMix
         self.selection_panel_collapsed_var = tk.BooleanVar(value=False)
         self.selection_value_text: tk.Text | None = None
         self.selection_value_entry: ttk.Entry | None = None
+        self.selection_name_entry: ttk.Entry | None = None
+        self.selection_copy_button: ttk.Button | None = None
+        self.selection_merge_button: ttk.Button | None = None
+        self.selection_arrange_button: ttk.Button | None = None
+        self.selection_delete_button: ttk.Button | None = None
+        self.selection_paste_button: ttk.Button | None = None
         self.selection_apply_button: ttk.Button | None = None
         self.agent_text: tk.Text | None = None
         self.agent_output_box: tk.Text | None = None
@@ -390,6 +402,18 @@ class AlgorithmStudioApp(AlgorithmStudioIdentityMixin, AlgorithmStudioPaletteMix
             button.bind("<Button-4>", self._on_scene_tabs_mouse_wheel)
             button.bind("<Button-5>", self._on_scene_tabs_mouse_wheel)
             self.scene_tab_buttons[tab_key] = button
+            self.interface4agents_highlight_targets[f"scene:{tab_key}"] = [
+                (
+                    button,
+                    {
+                        "bg": COLORS["accent"],
+                        "fg": COLORS["window"],
+                        "highlightbackground": COLORS["accent"],
+                        "highlightcolor": COLORS["accent"],
+                        "highlightthickness": 2,
+                    },
+                )
+            ]
         self._refresh_scene_tabs()
 
         self.canvas = tk.Canvas(
@@ -401,12 +425,24 @@ class AlgorithmStudioApp(AlgorithmStudioIdentityMixin, AlgorithmStudioPaletteMix
             relief="flat",
         )
         self.canvas.grid(row=1, column=0, sticky="nsew")
+        self.interface4agents_highlight_targets["canvas"] = [
+            (
+                self.canvas,
+                {
+                    "highlightbackground": COLORS["accent"],
+                    "highlightcolor": COLORS["accent"],
+                    "highlightthickness": 2,
+                },
+            )
+        ]
         self.canvas.bind("<Button-1>", self._on_canvas_click)
         self.canvas.bind("<ButtonPress-3>", self._on_canvas_right_press)
         self.canvas.bind("<B3-Motion>", self._on_canvas_right_drag)
         self.canvas.bind("<ButtonRelease-3>", self._on_canvas_right_release)
         self.canvas.bind("<B1-Motion>", self._on_canvas_drag)
         self.canvas.bind("<ButtonRelease-1>", self._on_canvas_release)
+        self.root.bind_all("<B1-Motion>", self._on_canvas_drag, add="+")
+        self.root.bind_all("<ButtonRelease-1>", self._on_canvas_release, add="+")
         self.canvas.bind("<Double-Button-1>", self._on_canvas_double_click)
         self.canvas.bind("<MouseWheel>", self._on_canvas_mouse_wheel)
         self.canvas.bind("<Button-4>", self._on_canvas_mouse_wheel)
@@ -771,6 +807,7 @@ class AlgorithmStudioApp(AlgorithmStudioIdentityMixin, AlgorithmStudioPaletteMix
         self.container_group_drag_state = None
         self.container_group_resize_state = None
         self.toolnode_resize_state = None
+        self.container_copy_drag_state = None
 
     def _on_model_selection_changed(self, _event: tk.Event | None = None) -> None:
         self._sync_agent_client_settings()
@@ -1051,7 +1088,7 @@ class AlgorithmStudioApp(AlgorithmStudioIdentityMixin, AlgorithmStudioPaletteMix
         return " | ".join(self._compact_activity_text(line, limit=72) for line in preview)
 
     def _run_build_command(self, algorithm_name: str) -> str:
-        build_script = PROJECT_ROOT / "build_algorithm_hot.bat"
+        build_script = PROJECT_ROOT / "build_algorithm.bat"
         if not build_script.exists():
             raise RuntimeError(f"Build script is missing: {build_script}")
         completed = subprocess.run(
@@ -1218,24 +1255,45 @@ class AlgorithmStudioApp(AlgorithmStudioIdentityMixin, AlgorithmStudioPaletteMix
         return "Document updated."
 
     def _consume_agent_tool_response(self, response: str) -> str:
-        tool_calls, visible_text = self._extract_agent_tool_calls(response)
-        if not tool_calls:
-            return visible_text
+        command_calls, response_without_commands = extract_interface4agents_script(response)
+        tool_calls, visible_text = self._extract_agent_tool_calls(response_without_commands)
         summaries: list[str] = []
+        failures: list[str] = []
+        for tokens in command_calls:
+            command_text = " ".join(tokens).strip()
+            try:
+                summaries.append(execute_interface4agents_command(self, tokens))
+            except Exception as exc:  # noqa: BLE001
+                failure_text = self._compact_activity_text(str(exc), limit=120) or "未知原因"
+                failures.append(f"命令 {command_text} 执行失败：{failure_text}")
+                self._log(f"interface4agents failed: {command_text} -> {failure_text}")
+                continue
         for payload in tool_calls:
             tool_name = str(payload.get("tool") or "").strip()
-            if tool_name in {"ui_add_node", "ui_update_node", "ui_delete_node", "ui_add_rule"}:
-                summaries.append(self._apply_agent_ui_tool(payload))
+            try:
+                if tool_name in {"ui_add_node", "ui_update_node", "ui_delete_node", "ui_add_rule"}:
+                    summaries.append(self._apply_agent_ui_tool(payload))
+                    continue
+                if tool_name == "update_document":
+                    summaries.append(self._apply_agent_update_document_tool(payload))
+                    continue
+                raise RuntimeError(f"Unsupported agent tool: {tool_name or '(empty)'}")
+            except Exception as exc:  # noqa: BLE001
+                failure_text = self._compact_activity_text(str(exc), limit=120) or "未知原因"
+                failures.append(f"工具 {tool_name or '(empty)'} 执行失败：{failure_text}")
+                self._log(f"agent tool failed: {tool_name or '(empty)'} -> {failure_text}")
                 continue
-            if tool_name == "update_document":
-                summaries.append(self._apply_agent_update_document_tool(payload))
-                continue
-            raise RuntimeError(f"Unsupported agent tool: {tool_name or '(empty)'}")
+        parts: list[str] = []
         if visible_text:
-            return visible_text
+            parts.append(visible_text)
         summary_text = "\n".join(part for part in summaries if part)
         if summary_text:
-            return summary_text
+            parts.append(summary_text)
+        if failures:
+            failure_block = "\n".join(f"- {item}" for item in failures)
+            parts.append("执行失败，已继续尝试其他可用方法：\n" + failure_block + "\n请确认是否需要改用别的命令或补充参数。")
+        if parts:
+            return "\n\n".join(parts)
         raise AssertionError("Agent tool response produced no visible message.")
 
     def _agent_tool_int(self, payload: dict[str, Any], key: str, default: int) -> int:
@@ -1358,13 +1416,13 @@ class AlgorithmStudioApp(AlgorithmStudioIdentityMixin, AlgorithmStudioPaletteMix
                 self.project.validate_container_group(existing_group)
                 self.selected_container_group_name = name
                 self._refresh_all()
-                return f"Reused container {name}."
+                return f"Reused containerElement {name}."
             group = ContainerGroupItem(name=name, x=self._agent_tool_float(payload, "x", x_default), y=self._agent_tool_float(payload, "y", y_default), width=self._agent_tool_float(payload, "width", 360.0), height=self._agent_tool_float(payload, "height", 220.0))
             self.project.validate_container_group(group)
             self.project.container_groups.append(group)
             self.selected_container_group_name = name
             self._refresh_all()
-            return f"Added container {name}."
+            return f"Added containerElement {name}."
         if kind in {"variable", "array"}:
             name = str(payload.get("name") or self.project.next_container_name(kind)).strip()
             if not name:
@@ -1551,7 +1609,7 @@ class AlgorithmStudioApp(AlgorithmStudioIdentityMixin, AlgorithmStudioPaletteMix
             self.project.validate_container_group(item)
             self.selected_container_group_name = name
             self._refresh_all()
-            return f"Updated container {name}."
+            return f"Updated containerElement {name}."
         if kind in {"variable", "array"}:
             item = self._find_container(name)
             if item is None:
@@ -1638,7 +1696,7 @@ class AlgorithmStudioApp(AlgorithmStudioIdentityMixin, AlgorithmStudioPaletteMix
                 raise RuntimeError("Root container cannot be deleted.")
             self.selected_container_group_name = name
             self._delete_selected_container_group()
-            return f"Deleted container {name}."
+            return f"Deleted containerElement {name}."
         if kind in {"variable", "array"}:
             if self._find_container(name) is None:
                 raise RuntimeError(f"Container not found: {name}")
@@ -1714,6 +1772,43 @@ class AlgorithmStudioApp(AlgorithmStudioIdentityMixin, AlgorithmStudioPaletteMix
             return self._apply_agent_ui_add_rule(payload)
         raise RuntimeError(f"Unsupported UI tool: {tool_name or '(empty)'}")
 
+    def _interface4agents_create_cos_node(self, name: str) -> str:
+        payload = {
+            "tool": "ui_add_node",
+            "kind": "containerelement",
+            "name": str(name).strip(),
+        }
+        return self._apply_agent_ui_add_node(payload)
+
+    def _interface4agents_hang(self, child_name: str, parent_name: str) -> str:
+        child = str(child_name).strip()
+        parent = str(parent_name).strip()
+        if self._find_container(child) is not None:
+            self._add_container_to_group(child, parent)
+        elif self._find_container_group(child) is not None:
+            self._add_group_to_parent_group(child, parent)
+        else:
+            raise RuntimeError(f"hang child not found: {child}")
+        self._interface4agents_integrate_child(parent)
+        return f"Attached {child} into {parent}."
+
+    def _interface4agents_integrate_child(self, group_name: str) -> str:
+        group = self._find_container_group(str(group_name).strip())
+        if not group:
+            raise RuntimeError(f"containerElement not found: {group_name}")
+        pack_names: list[str] = [group.name]
+        parent_name = self._group_parent_group_name(group.name)
+        while parent_name:
+            pack_names.append(parent_name)
+            parent_name = self._group_parent_group_name(parent_name)
+        for pack_name in pack_names:
+            pack_group = self._find_container_group(pack_name)
+            if not pack_group:
+                raise RuntimeError(f"containerElement not found: {pack_name}")
+            self._pack_container_group_contents(pack_group)
+        self._refresh_all()
+        return f"Integrated child layout for {group.name}."
+
     def _set_document_text(self, text: str) -> None:
         if not self.preview_text:
             return
@@ -1759,6 +1854,7 @@ class AlgorithmStudioApp(AlgorithmStudioIdentityMixin, AlgorithmStudioPaletteMix
         self.container_group_drag_state = None
         self.container_group_resize_state = None
         self.toolnode_resize_state = None
+        self.container_copy_drag_state = None
         self.node_drag_state = None
         self.palette_drag_state = None
         self.selection_state = None
@@ -2652,9 +2748,9 @@ class AlgorithmStudioApp(AlgorithmStudioIdentityMixin, AlgorithmStudioPaletteMix
             return False
         if kind in {"container", "containerelement"} and self._node_has_collapsed_ancestor(kind, name):
             return False
+        if kind == "decomposer":
+            return False
         if self.canvas_view_mode == "graph":
-            if kind == "decomposer":
-                return False
             if kind == "resnode":
                 return False
         if kind == "containerelement":
@@ -2908,14 +3004,36 @@ class AlgorithmStudioApp(AlgorithmStudioIdentityMixin, AlgorithmStudioPaletteMix
         container = self._current_container()
         if not container:
             return
-        duplicate = copy.deepcopy(container)
-        duplicate.name = self.project.next_resource_container_name(container.kind) if self._is_resource_container_name(container.name) else self.project.next_container_name(container.kind)
-        duplicate.x += 36
-        duplicate.y += 36
-        self.project.containers.append(duplicate)
+        duplicate = self._duplicate_container_with_reuse(container)
         self.selected_container_name = duplicate.name
         self._refresh_all()
         self._log(f"Duplicated container to {duplicate.name}.")
+
+    def _container_reuse_chain_next_index(self, chain_id: str) -> int:
+        return max(
+            (item.reuse_chain_index for item in self.project.containers if item.reuse_chain_id == chain_id),
+            default=-1,
+        ) + 1
+
+    def _duplicate_container_with_reuse(
+        self,
+        container: ContainerItem,
+        *,
+        x: float | None = None,
+        y: float | None = None,
+    ) -> ContainerItem:
+        source_chain_id = container.reuse_chain_id or self.project.next_container_reuse_chain_id()
+        if not container.reuse_chain_id:
+            container.reuse_chain_id = source_chain_id
+            container.reuse_chain_index = 0
+        duplicate = copy.deepcopy(container)
+        duplicate.name = self.project.next_resource_container_name(container.kind) if self._is_resource_container_name(container.name) else self.project.next_container_name(container.kind)
+        duplicate.reuse_chain_id = source_chain_id
+        duplicate.reuse_chain_index = self._container_reuse_chain_next_index(source_chain_id)
+        duplicate.x = container.x + 36 if x is None else x
+        duplicate.y = container.y + 36 if y is None else y
+        self.project.containers.append(duplicate)
+        return duplicate
 
     def _delete_selected_container(self) -> None:
         container = self._current_container()
@@ -4394,11 +4512,163 @@ class AlgorithmStudioApp(AlgorithmStudioIdentityMixin, AlgorithmStudioPaletteMix
         self._refresh_inspector()
 
     def _focus_selected_container_on_canvas(self) -> None:
-        container = self._current_container()
-        if not container or not self.canvas:
+        self._interface4agents_hot_review()
+
+    def _canvas_node_item_id(self, kind: str, name: str) -> int | None:
+        if kind == "containerelement":
+            return self.canvas_container_group_nodes.get(name)
+        return self.canvas_nodes.get(name)
+
+    def _interface4agents_flash_canvas_item(self, item_id: int) -> None:
+        if not self.canvas:
             return
-        self.canvas.tag_raise(f"node:container:{container.name}")
-        self._log(f"Focused {container.name} on canvas.")
+        bbox = self.canvas.bbox(item_id)
+        if bbox is None:
+            return
+        left, top, right, bottom = bbox
+        overlays = [
+            (left - 6, top - 6, right + 6, bottom + 6, "#6b0000", 3),
+            (left - 3, top - 3, right + 3, bottom + 3, "#c81e1e", 2),
+            (left, bottom - 4, right, bottom + 4, "#ff6b6b", 3),
+        ]
+        flash_ids: list[int] = []
+        for x0, y0, x1, y1, color, width in overlays:
+            flash_ids.append(
+                self.canvas.create_rectangle(
+                    x0,
+                    y0,
+                    x1,
+                    y1,
+                    outline=color,
+                    width=width,
+                    tags=("interface4agents_flash",),
+                )
+            )
+        self.canvas.tag_raise("interface4agents_flash")
+
+        def _clear_flash() -> None:
+            if not self.canvas:
+                return
+            for flash_id in flash_ids:
+                try:
+                    self.canvas.delete(flash_id)
+                except tk.TclError:
+                    pass
+
+        self.canvas.after(900, _clear_flash)
+
+    def _interface4agents_highlight_node(self, kind: str, name: str) -> str:
+        normalized_kind = str(kind).strip().lower()
+        normalized_name = str(name).strip()
+        item_id = self._canvas_node_item_id(normalized_kind, normalized_name)
+        if item_id is None:
+            raise RuntimeError(f"Node not visible on canvas: {normalized_kind}:{normalized_name}")
+        self._interface4agents_flash_canvas_item(item_id)
+        return f"Highlight: {normalized_kind}:{normalized_name}"
+
+    def _interface4agents_highlight_named_node(self, name: str) -> str:
+        normalized_name = str(name).strip()
+        for kind, node_name, _item in self.project.iter_nodes():
+            if node_name != normalized_name:
+                continue
+            try:
+                return self._interface4agents_highlight_node(kind, node_name)
+            except RuntimeError:
+                continue
+        raise RuntimeError(f"Node not visible on canvas: {normalized_name}")
+
+    def _interface4agents_hot_review(self) -> str:
+        if not self.canvas:
+            return "Canvas is not ready."
+        kind = None
+        name = None
+        if self.selected_container_group_name:
+            kind = "containerelement"
+            name = self.selected_container_group_name
+        elif self.selected_container_name:
+            kind = "container"
+            name = self.selected_container_name
+        elif self.selected_rule_name:
+            kind = "decomposer"
+            name = self.selected_rule_name
+        elif self.selected_reflector_name:
+            kind = "reflector"
+            name = self.selected_reflector_name
+        elif self.selected_res_node_name:
+            kind = "resnode"
+            name = self.selected_res_node_name
+        elif self.selected_function_name:
+            kind = "function"
+            name = self.selected_function_name
+        elif self.selected_function_text_name:
+            kind = "functiontext"
+            name = self.selected_function_text_name
+        elif self.selected_stage_name:
+            kind = "interventioner"
+            name = self.selected_stage_name
+        if kind and name:
+            item_id = self._canvas_node_item_id(kind, name)
+            if item_id is not None:
+                bbox = self.canvas.bbox(item_id)
+                if bbox is not None:
+                    left, top, right, bottom = bbox
+                    self._restore_canvas_anchor(
+                        ((left + right) / 2) / self._canvas_zoom_factor(),
+                        ((top + bottom) / 2) / self._canvas_zoom_factor(),
+                        float(self.canvas.winfo_width()) / 2,
+                        float(self.canvas.winfo_height()) / 2,
+                    )
+                    self._redraw_canvas()
+                self._log(f"Hot reviewed {kind}:{name}.")
+                return f"Hot reviewed {kind}:{name}."
+        for kind, node_name, _item in self.project.iter_nodes():
+            if not self._is_node_visible_in_current_view(kind, node_name):
+                continue
+            item_id = self._canvas_node_item_id(kind, node_name)
+            if item_id is None:
+                continue
+            bbox = self.canvas.bbox(item_id)
+            if bbox is None:
+                continue
+            left, top, right, bottom = bbox
+            self._restore_canvas_anchor(
+                ((left + right) / 2) / self._canvas_zoom_factor(),
+                ((top + bottom) / 2) / self._canvas_zoom_factor(),
+                float(self.canvas.winfo_width()) / 2,
+                float(self.canvas.winfo_height()) / 2,
+            )
+            self._redraw_canvas()
+            self._log(f"Hot reviewed {kind}:{node_name}.")
+            return f"Hot reviewed {kind}:{node_name}."
+        return "No visible nodes to review."
+
+    def _drag_delete_warning_target(self) -> tuple[str, str] | None:
+        if self.node_drag_state and bool(self.node_drag_state.get("waste_area")):
+            return str(self.node_drag_state.get("kind") or ""), str(self.node_drag_state.get("name") or "")
+        if self.palette_drag_state and bool(self.palette_drag_state.get("waste_area")) and bool(self.palette_drag_state.get("active")):
+            return str(self.palette_drag_state.get("kind") or ""), str(self.palette_drag_state.get("name") or "")
+        return None
+
+    def _draw_drag_delete_warning(self, canvas: tk.Canvas) -> None:
+        warning = self._drag_delete_warning_target()
+        if not warning:
+            return
+        kind, name = warning
+        item_id = self._canvas_node_item_id(kind, name)
+        if item_id is None:
+            return
+        bbox = canvas.bbox(item_id)
+        if bbox is None:
+            return
+        left, top, right, bottom = bbox
+        overlays = [
+            (left - 8, top - 8, right + 8, bottom + 8, "#7f1d1d", 4),
+            (left - 4, top - 4, right + 4, bottom + 4, "#ef4444", 2),
+            (left - 2, bottom - 6, right + 2, bottom + 2, "#fca5a5", 2),
+        ]
+        for x0, y0, x1, y1, color, width in overlays:
+            canvas.create_rectangle(x0, y0, x1, y1, outline=color, width=width, tags=("drag_delete_warning",))
+        canvas.tag_raise("drag_delete_warning")
 
     def _apply_inspector_edits(self) -> None:
         self._apply_project_vars()
@@ -4700,6 +4970,7 @@ class AlgorithmStudioApp(AlgorithmStudioIdentityMixin, AlgorithmStudioPaletteMix
             if item:
                 item.x += dx
                 item.y += dy
+        self.node_drag_state["waste_area"] = event.y < 0
         self._redraw_canvas()
 
     def _on_canvas_release(self, event: tk.Event) -> None:
@@ -4773,6 +5044,39 @@ class AlgorithmStudioApp(AlgorithmStudioIdentityMixin, AlgorithmStudioPaletteMix
             self._refresh_canvas_interaction_state()
             return
         if self.node_drag_state:
+            if bool(self.node_drag_state.get("waste_area")):
+                kind = str(self.node_drag_state.get("kind") or "")
+                name = str(self.node_drag_state.get("name") or "")
+                if kind == "container":
+                    self.selected_container_name = name
+                    self._delete_selected_container()
+                elif kind == "containerelement" and name != "container":
+                    self.selected_container_group_name = name
+                    self._delete_selected_container_group()
+                elif kind == "decomposer":
+                    self.selected_rule_name = name
+                    self._delete_selected_rule()
+                elif kind == "reflector":
+                    self.selected_reflector_name = name
+                    self._delete_selected_reflector()
+                elif kind == "resnode":
+                    self.selected_res_node_name = name
+                    self._delete_selected_res_node()
+                elif kind == "function":
+                    self.selected_function_name = name
+                    self._delete_selected_function()
+                elif kind == "functiontext":
+                    self.selected_function_text_name = name
+                    self._delete_selected_function_text()
+                elif kind in {"interventioner", "stage"}:
+                    self.selected_stage_name = name
+                    self._delete_selected_stage()
+                self.node_drag_state = None
+                self.container_group_drag_state = None
+                self.container_group_resize_state = None
+                self.toolnode_resize_state = None
+                self._refresh_canvas_interaction_state(schedule_manifest_refresh=False)
+                return
             attached_to_new_parent = self._attach_dragged_node_to_group_if_inside(self.node_drag_state)
             if not attached_to_new_parent:
                 self._detach_dragged_node_if_outside_parent(self.node_drag_state)
@@ -4830,7 +5134,19 @@ class AlgorithmStudioApp(AlgorithmStudioIdentityMixin, AlgorithmStudioPaletteMix
     def _on_canvas_right_press(self, event: tk.Event) -> None:
         if not self.canvas:
             return
-        if self._canvas_item_hit(event.x, event.y) is not None:
+        item_id = self._canvas_item_hit(event.x, event.y)
+        if item_id is not None:
+            tags = self.canvas.gettags(item_id)
+            kind, node_name = self._node_info_from_tags(tags)
+            if kind == "container":
+                self._select_item_on_canvas(kind, node_name)
+                self.container_copy_drag_state = {
+                    "source_name": node_name,
+                    "start_x": event.x,
+                    "start_y": event.y,
+                    "started": False,
+                    "duplicate_name": "",
+                }
             return
         self.canvas_pan_state = {
             "x": event.x,
@@ -4839,15 +5155,77 @@ class AlgorithmStudioApp(AlgorithmStudioIdentityMixin, AlgorithmStudioPaletteMix
         self.canvas.scan_mark(event.x, event.y)
 
     def _on_canvas_right_drag(self, event: tk.Event) -> None:
+        if self.container_copy_drag_state:
+            self._drag_container_copy(event)
+            return
         if not self.canvas_pan_state:
             return
         self._drag_canvas_pan(event.x, event.y)
 
     def _on_canvas_right_release(self, event: tk.Event) -> None:
+        if self.container_copy_drag_state:
+            if self._finish_container_copy_drag(event):
+                return
+            self.container_copy_drag_state = None
+            self._show_canvas_context_menu(event)
+            return
         if self.canvas_pan_state:
             self._finish_canvas_pan()
             return
         self._show_canvas_context_menu(event)
+
+    def _drag_container_copy(self, event: tk.Event) -> None:
+        if not self.container_copy_drag_state or not self.canvas:
+            return
+        source_name = str(self.container_copy_drag_state["source_name"])
+        source = self._find_container(source_name)
+        if not source:
+            raise AssertionError(f"Missing container {source_name}")
+        dx = event.x - int(self.container_copy_drag_state["start_x"])
+        dy = event.y - int(self.container_copy_drag_state["start_y"])
+        if not bool(self.container_copy_drag_state.get("started")):
+            if abs(dx) + abs(dy) < 6:
+                return
+            duplicate = self._duplicate_container_with_reuse(
+                source,
+                x=source.x + self._scene_delta(dx),
+                y=source.y + self._scene_delta(dy),
+            )
+            self.container_copy_drag_state["started"] = True
+            self.container_copy_drag_state["duplicate_name"] = duplicate.name
+            self.selected_container_name = duplicate.name
+            self._refresh_canvas_interaction_state(schedule_manifest_refresh=False)
+            self._redraw_canvas()
+            return
+        duplicate_name = str(self.container_copy_drag_state["duplicate_name"])
+        duplicate = self._find_container(duplicate_name)
+        if not duplicate:
+            raise AssertionError(f"Missing duplicated container {duplicate_name}")
+        duplicate.x = source.x + self._scene_delta(dx)
+        duplicate.y = source.y + self._scene_delta(dy)
+        self.selected_container_name = duplicate.name
+        self._refresh_canvas_interaction_state(schedule_manifest_refresh=False)
+        self._redraw_canvas()
+
+    def _finish_container_copy_drag(self, event: tk.Event) -> bool:
+        if not self.container_copy_drag_state:
+            return False
+        if not bool(self.container_copy_drag_state.get("started")):
+            return False
+        duplicate_name = str(self.container_copy_drag_state["duplicate_name"])
+        if not duplicate_name:
+            return False
+        duplicate = self._find_container(duplicate_name)
+        if not duplicate:
+            raise AssertionError(f"Missing duplicated container {duplicate_name}")
+        self.selected_container_name = duplicate.name
+        self._attach_dragged_node_to_group_if_inside({"kind": "container", "name": duplicate.name})
+        self._sync_all_container_groups()
+        if self.canvas_view_mode == "container_overview":
+            self._pack_all_container_groups()
+        self.container_copy_drag_state = None
+        self._refresh_canvas_interaction_state()
+        return True
 
     def _show_canvas_context_menu(self, event: tk.Event) -> None:
         if not self.canvas:
@@ -5322,7 +5700,7 @@ class AlgorithmStudioApp(AlgorithmStudioIdentityMixin, AlgorithmStudioPaletteMix
                 [
                     "You are helping complete a single fun node inside Algorithm Studio.",
                     "Return plain text only.",
-                    "Do not emit algorithm-studio-tool blocks.",
+                    "Do not emit interface4agents blocks.",
                     "",
                     f"Function name: {item.name}",
                     f"Input port: {item.input_name}",
@@ -5386,7 +5764,6 @@ class AlgorithmStudioApp(AlgorithmStudioIdentityMixin, AlgorithmStudioPaletteMix
                 else:
                     script_text.delete("1.0", tk.END)
                     script_text.insert("1.0", content)
-                    item.script = content
                     self.selected_function_name = item.name
                     self.selected_function_text_name = None
                 self._refresh_all()
@@ -6505,6 +6882,33 @@ class AlgorithmStudioApp(AlgorithmStudioIdentityMixin, AlgorithmStudioPaletteMix
             f"->{connection.target_kind}:{connection.target_name}:{connection.target_port}"
         )
 
+    def _draw_container_reuse_links(self, canvas: tk.Canvas) -> None:
+        chains: dict[str, list[ContainerItem]] = {}
+        for container in self.project.containers:
+            chain_id = container.reuse_chain_id.strip()
+            if not chain_id:
+                continue
+            if not self._is_node_visible_in_current_view("container", container.name):
+                continue
+            chains.setdefault(chain_id, []).append(container)
+        for chain in chains.values():
+            if len(chain) < 2:
+                continue
+            chain.sort(key=lambda item: item.reuse_chain_index)
+            for prev, curr in zip(chain, chain[1:]):
+                x0, y0 = self._container_center(prev)
+                x1, y1 = self._container_center(curr)
+                canvas.create_line(
+                    x0,
+                    y0,
+                    x1,
+                    y1,
+                    fill=COLORS["edge"],
+                    width=2,
+                    dash=(8, 5),
+                    tags=("reuse_connection",),
+                )
+
     def _remove_connections_for_node(self, kind: str, name: str) -> None:
         before = len(self.project.connections)
         self.project.connections = [
@@ -6536,6 +6940,7 @@ class AlgorithmStudioApp(AlgorithmStudioIdentityMixin, AlgorithmStudioPaletteMix
         width = max(canvas.winfo_width(), 1)
         height = max(canvas.winfo_height(), 1)
         self._draw_grid(canvas, width, height)
+        self._draw_container_reuse_links(canvas)
         self.canvas_container_group_nodes.clear()
         self.canvas_nodes.clear()
         self.canvas_item_to_name.clear()
@@ -6553,12 +6958,6 @@ class AlgorithmStudioApp(AlgorithmStudioIdentityMixin, AlgorithmStudioPaletteMix
             item_id = self._draw_container_node(canvas, container)
             self.canvas_nodes[container.name] = item_id
             self.canvas_item_to_name[item_id] = container.name
-        for rule in self.project.decomposer_rules:
-            if not self._is_node_visible_in_current_view("decomposer", rule.name):
-                continue
-            item_id = self._draw_decomposer_node(canvas, rule)
-            self.canvas_nodes[rule.name] = item_id
-            self.canvas_item_to_name[item_id] = rule.name
         for item in self.project.res_nodes:
             if not self._is_node_visible_in_current_view("resnode", item.name):
                 continue
@@ -6602,6 +7001,7 @@ class AlgorithmStudioApp(AlgorithmStudioIdentityMixin, AlgorithmStudioPaletteMix
             self._scale_canvas_rendering(canvas, zoom)
         canvas.tag_raise("connection")
         canvas.tag_raise("connection_preview")
+        self._draw_drag_delete_warning(canvas)
         left, top, right, bottom = self._expanded_scrollregion(canvas)
         canvas.configure(scrollregion=(left, top, right, bottom))
 
@@ -7331,8 +7731,8 @@ class AlgorithmStudioApp(AlgorithmStudioIdentityMixin, AlgorithmStudioPaletteMix
 
         canvas.create_text(x + 14, body_top + 8, anchor="nw", fill=COLORS["muted"], text="IN", font=("Segoe UI", 10, "bold"), tags=(node_tag,))
         canvas.create_text(x + width - 14, body_top + 8, anchor="ne", fill=COLORS["muted"], text="OUT", font=("Segoe UI", 10, "bold"), tags=(node_tag,))
-        canvas.create_text(middle_left + 8, middle_top + 8, anchor="nw", fill=COLORS["muted"], text="DESCRIPTOR", font=("Segoe UI", 10, "bold"), tags=(node_tag,))
-        canvas.create_text(split_x + 8, middle_top + 8, anchor="nw", fill=COLORS["muted"], text="RESOURCE", font=("Segoe UI", 10, "bold"), tags=(node_tag,))
+        canvas.create_text(middle_left + 8, middle_top + 8, anchor="nw", fill=COLORS["descriptor"], text="DESCRIPTOR", font=("Segoe UI", 10, "bold"), tags=(node_tag,))
+        canvas.create_text(split_x + 8, middle_top + 8, anchor="nw", fill=COLORS["resource"], text="RESOURCE", font=("Segoe UI", 10, "bold"), tags=(node_tag,))
 
         input_ports = inputs or ["in"]
         for index, port_name in enumerate(input_ports):
@@ -7366,76 +7766,24 @@ class AlgorithmStudioApp(AlgorithmStudioIdentityMixin, AlgorithmStudioPaletteMix
             middle_left + 10,
             middle_top + 30,
             anchor="nw",
-            fill=COLORS["text"],
+            fill=COLORS["descriptor"],
             text=descriptor_text,
             font=("Segoe UI", 10),
             width=max(split_x - middle_left - 20, 80),
             justify="left",
             tags=(f"text_of_{item_id}", node_tag, "node_body"),
         )
-        structured_mesh = self.project.decomposer_res.get("mesh") if isinstance(self.project.decomposer_res, dict) else None
-        if isinstance(structured_mesh, dict):
-            resource_box_left = split_x + 10
-            resource_box_right = middle_right - 10
-            resource_box_top = middle_top + 24
-            resource_box_bottom = middle_bottom - 14
-            canvas.create_rectangle(
-                resource_box_left,
-                resource_box_top,
-                resource_box_right,
-                resource_box_bottom,
-                fill="#141a22",
-                outline=COLORS["grid"],
-                width=1,
-                tags=(node_tag, "node_body"),
-            )
-            canvas.create_text(
-                resource_box_left + 10,
-                resource_box_top + 8,
-                anchor="nw",
-                fill=COLORS["muted"],
-                text="mesh",
-                font=("Segoe UI", 10, "bold"),
-                tags=(f"text_of_{item_id}", node_tag, "node_body"),
-            )
-            block_left = resource_box_left + 16
-            block_right = resource_box_right - 16
-            block_width = max(block_right - block_left, 1)
-            block_height = 18
-            block_gap = 8
-            for index, label in enumerate(["vertex", "edge", "normal"]):
-                block_top = resource_box_top + 30 + index * (block_height + block_gap)
-                canvas.create_rectangle(
-                    block_left,
-                    block_top,
-                    block_left + block_width,
-                    block_top + block_height,
-                    fill=COLORS["agent"],
-                    outline=COLORS["agent"],
-                    width=1,
-                    tags=(node_tag, "node_body"),
-                )
-                canvas.create_text(
-                    block_left + 10,
-                    block_top + 2,
-                    anchor="nw",
-                    fill=COLORS["window"],
-                    text=label,
-                    font=("Segoe UI", 10, "bold"),
-                    tags=(f"text_of_{item_id}", node_tag, "node_body"),
-                )
-        else:
-            canvas.create_text(
-                split_x + 10,
-                middle_top + 30,
-                anchor="nw",
-                fill=COLORS["text"],
-                text=resource_text,
-                font=("Segoe UI", 10),
-                width=max(middle_right - split_x - 20, 80),
-                justify="left",
-                tags=(f"text_of_{item_id}", node_tag, "node_body"),
-            )
+        canvas.create_text(
+            split_x + 10,
+            middle_top + 30,
+            anchor="nw",
+            fill=COLORS["resource"],
+            text=resource_text,
+            font=("Segoe UI", 10),
+            width=max(middle_right - split_x - 20, 80),
+            justify="left",
+            tags=(f"text_of_{item_id}", node_tag, "node_body"),
+        )
 
         output_ports = outputs or ["out"]
         for index, output in enumerate(output_ports):

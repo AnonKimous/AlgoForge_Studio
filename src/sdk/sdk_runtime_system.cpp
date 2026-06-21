@@ -3,6 +3,7 @@
 #undef SDK_LAYER_INTERNAL_BUILD
 
 #include "agent_management/agent_management.h"
+#include "common_data/kernel_cfg.h"
 
 #include <algorithm>
 #include <utility>
@@ -17,9 +18,9 @@ void _SetError(std::string* out_error_message, std::string message) {
   }
 }
 
-eastl::vector<agent::AlgorithmResourceBinding, eastl::RuntimeSystemAllocator> _ToAgentResourceBindings(
+std::vector<agent::AlgorithmResourceBinding> _ToAgentResourceBindings(
   const eastl::vector<ResourceBinding, eastl::RuntimeSystemAllocator>& bindings) {
-  eastl::vector<agent::AlgorithmResourceBinding, eastl::RuntimeSystemAllocator> result;
+  std::vector<agent::AlgorithmResourceBinding> result;
   result.reserve(bindings.size());
   for (const ResourceBinding& binding : bindings) {
     result.push_back(agent::AlgorithmResourceBinding{
@@ -31,9 +32,9 @@ eastl::vector<agent::AlgorithmResourceBinding, eastl::RuntimeSystemAllocator> _T
   return result;
 }
 
-eastl::vector<agent::AlgorithmDescriptorValue, eastl::RuntimeSystemAllocator> _ToAgentDescriptorValues(
+std::vector<agent::AlgorithmDescriptorValue> _ToAgentDescriptorValues(
   const eastl::vector<DescriptorValue, eastl::RuntimeSystemAllocator>& values) {
-  eastl::vector<agent::AlgorithmDescriptorValue, eastl::RuntimeSystemAllocator> result;
+  std::vector<agent::AlgorithmDescriptorValue> result;
   result.reserve(values.size());
   for (const DescriptorValue& value : values) {
     result.push_back(agent::AlgorithmDescriptorValue{
@@ -120,6 +121,15 @@ void SdkRuntimeSystem::ShiftSubmittedAlgorithmIndicesAfterErase(AgentHandle agen
       --draft.submitted_algorithm_index;
     }
   }
+}
+
+AgentHandle SdkRuntimeSystem::CreateAgent(
+  std::string agent_name,
+  std::string* out_error_message) {
+  return CreateAgent(
+    std::move(agent_name),
+    common_data::DefaultAgentLimitFpsFlag(),
+    out_error_message);
 }
 
 AgentHandle SdkRuntimeSystem::CreateAgent(
@@ -353,9 +363,9 @@ bool SdkRuntimeSystem::SubmitAlgorithm(
     return false;
   }
 
-  eastl::vector<agent::AlgorithmResourceBinding, eastl::RuntimeSystemAllocator> resource_bindings =
+  std::vector<agent::AlgorithmResourceBinding> resource_bindings =
     _ToAgentResourceBindings(draft->resource_bindings);
-  eastl::vector<agent::AlgorithmDescriptorValue, eastl::RuntimeSystemAllocator> descriptor_values =
+  std::vector<agent::AlgorithmDescriptorValue> descriptor_values =
     _ToAgentDescriptorValues(draft->descriptor_values);
   size_t submitted_algorithm_index = 0u;
   if (!agent_manager_->AttachAlgorithmToAgent(

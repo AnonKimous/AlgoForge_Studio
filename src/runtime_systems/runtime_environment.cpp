@@ -1,11 +1,10 @@
 #define RUNTIME_SYSTEMS_LAYER_INTERNAL_BUILD 1
 #include "runtime_environment.h"
-#include "algorithm_cpu_executor.h"
 #include "job_system.h"
+#include "algorithm_management/algorithm_manager.h"
 
 #include <SDL3/SDL.h>
 
-#include "runtime_systems/algorithm_gpu_executor.h"
 #include "runtime_systems/render/imgui_vulkan_runtime.h"
 #include "runtime_systems/window/sdl_window.h"
 
@@ -100,9 +99,9 @@ void RuntimeEnvironment::SetRenderPreviewExtent(ImVec2 extent) {
   }
 }
 
-void RuntimeEnvironment::ClearGpuExecutors() {
+void RuntimeEnvironment::ClearGpuRuntimeCaches() {
   if (imgui_runtime_) {
-    imgui_runtime_->ClearGpuExecutors();
+    imgui_runtime_->ClearGpuRuntimeCaches();
   }
 }
 
@@ -137,8 +136,7 @@ void RuntimeEnvironment::Destroy() {
     imgui_runtime_.reset();
   }
   window_.reset();
-  AlgorithmCpuExecutor::Instance().Clear();
-  AlgorithmGpuExecutor::Instance().Clear();
+  algorithm_management::AlgorithmScheduler::Instance().Clear();
   ShutdownJobSystem();
   execution_symbols_ = {};
   if (sdl_initialized_) {

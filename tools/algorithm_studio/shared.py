@@ -83,6 +83,8 @@ COLORS = {
     "accent_2": "#f59e0b",
     "good": "#34d399",
     "bad": "#f87171",
+    "descriptor": "#60a5fa",
+    "resource": "#ef4444",
     "container": "#1d4ed8",
     "container_array": "#7c3aed",
     "stage": "#0f766e",

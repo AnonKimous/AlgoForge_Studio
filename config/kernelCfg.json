@@ -1,0 +1,8 @@
+{
+  "agent": {
+    "limit_fps_flag": 120
+  },
+  "pipeline": {
+    "max_concurrent_stage0_submissions": 8
+  }
+}

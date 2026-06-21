@@ -66,6 +66,12 @@ class DebugToolBackendRuntime : public IDebugToolHost {
     size_t agent_index,
     size_t algorithm_index,
     std::string* out_error_message = nullptr) override;
+  bool SetPipelineStageDebugSelection(
+    size_t agent_index,
+    const std::string& pipeline_name,
+    bool select_all,
+    uint32_t stage_index,
+    std::string* out_error_message = nullptr) override;
   bool HotReloadAlgorithmPackage(
     size_t agent_index,
     size_t algorithm_index,
@@ -87,8 +93,8 @@ class DebugToolBackendRuntime : public IDebugToolHost {
   void ClearAgents() override {
     agent_manager_.ClearAgents();
   }
-  void ClearGpuExecutors() override {
-    runtime_environment_.ClearGpuExecutors();
+  void ClearGpuRuntimeCaches() override {
+    runtime_environment_.ClearGpuRuntimeCaches();
   }
   bool LoadAlgorithmCatalog(
     std::vector<debug_tool::AlgorithmCatalogEntry>* out_entries,

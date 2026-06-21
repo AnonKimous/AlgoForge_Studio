@@ -42,7 +42,10 @@ class SdkKernel {
 
   AgentHandle CreateAgent(
     std::string agent_name,
-    uint32_t limit_fps_flag = 120u,
+    std::string* out_error_message = nullptr);
+  AgentHandle CreateAgent(
+    std::string agent_name,
+    uint32_t limit_fps_flag,
     std::string* out_error_message = nullptr);
   bool DestroyAgent(AgentHandle agent_handle, std::string* out_error_message = nullptr);
 

@@ -1,79 +1,152 @@
-﻿# physBased-render
+# physBased-render
 
-This project is a layered Vulkan + SDL3 sandbox for agent-driven physics and rendering experiments.
+## 中文
 
-## Runtime Model
+`small-algorithm-kernel` 是一个面向多阶段算法流水线执行、验证和可视化的分层内核，同时提供 AI agent 辅助的低代码算法开发环境。
 
-- `debugTool` is the debug executable.
-- `debug_tool_backend` is the non-UI debug host backend.
-- `debug_tool_frontend` is the editor-facing debug tool surface.
-- `debugTool` links the backend and frontend targets together.
-- `sdk` is the external agent/algorithm submission surface and reaches algorithm assembly through `agent_management` and `agent`; it does not touch `algorithm_management` internals directly.
-- An `agent` is the unit that carries algorithm packages, solver metadata, and intervention state.
-- The current default workflow is: choose resource descriptors -> keep the draft prefilled -> create an agent -> run immediately.
-- Algorithm packages are built by the dedicated batch tool `check_sdk.bat`; they are not compiled as part of the `debugTool` build. The checked-out package mirror lives under `algorithmLib/algorithmSrc`, and runtime DLL/SPV artifacts live under `algorithmLib/algorithmruntimeLib`.
+它的核心不是单个算法，而是一条可以被拆分、组装、执行和调试的算法流水线：
 
-## Terminology Rule
+- 从资源描述出发，将 mesh、描述符和其他输入拆解成算法可消费的标准形式
+- 用 `manifest + CPU cpp + GPU shader + container` 描述一个可执行算法包
+- 把一个算法拆成多个 stage，并按流水线方式串联起来
+- 支持 CPU 和 GPU 两条执行路径
+- 支持结果反射回传、规则检查和异常信号上报
+- 支持介入器干预，便于调试、验证和回放
+- 支持 `debugTool` 挂载调试，直接查看资源、运行状态和反射结果
+- 支持流水线资源流转、阶段衔接和运行时状态追踪
 
-- If a developer writes `实例` in Chinese, treat it as `agent` unless the context explicitly says otherwise.
-- This rule applies to docs, comments, UI labels, and algorithm composition notes.
+### 流水线能力
 
-## Encoding Rule
+- 一个算法可以按多个 stage 组织成流水线
+- 每个 stage 都有明确的输入、输出和资源绑定
+- 流水线可以按顺序执行，也可以按约定进入循环式提交路径
+- 流水线运行时可以回传中间状态、最终结果和异常信号
+- debugTool 可以直接观察流水线当前跑到哪一段、哪一个 stage 卡住、哪一段数据没有推进
+- 介入器可以参与流水线的检查和修正，而不是只看最终结果
 
-- The project uses UTF-8 for source files, comments, UI text, and build output.
-- Windows builds pass `/utf-8` through the compiler so source and execution text use UTF-8 consistently.
+### 项目能做什么
 
-## Current Layering
+- 构建和运行算法包
+- 管理容器、资源绑定和执行状态
+- 在 CPU 和 GPU 两侧执行同一套算法逻辑
+- 把算法结果反射回宿主环境
+- 通过 debugTool 观察、调试和验证运行过程
+- 通过 AI agent 接入算法工具链，辅助结构组织、资源检查和文本生成
 
-- `common_data` holds shared mesh, math, input, and interaction types.
-- `runtime_systems` owns windowing, ImGui, and Vulkan runtime support.
-- `common_data` also carries the shared packet structs used for algorithm support and intervention payloads.
-- `algorithm_management` owns container-manifest loading, runtime container creation, plugin loading, and the unified package loader entrypoint.
-- `algorithm_support` is now an internal source group under the `algorithm_management` build target; external code should include `algorithm_management/algorithm_manager.h`.
-- `agent` sits above `algorithm_management` and owns the runtime agent object, including mount and submit entry points.
-- Algorithm package source lives in `algorithmLib/algorithmSrc`, and built DLL/SPV runtime artifacts live in `algorithmLib/algorithmruntimeLib`.
-- `capabilities/sidecar` hosts optional sidecar capabilities such as mesh import/export.
-- `agent_management` owns agent creation orchestration, mount/unmount, descriptor forwarding, and ticking. It does not create containers itself.
-- `debug_tool_frontend` provides the manual agent composer and live debug panel without keeping a mesh resident in app state.
-- `debugTool` is the executable entry point for interactive debugging.
-- `sdk` talks directly to `agent_management`, then flows into `agent`, `algorithm_management`, and `runtime_systems` through the normal layer chain. It does not depend on the debug tool frontend.
-- `sdk` exposes the external agent/algorithm submission entry points.
+### 项目的优点
 
-## Execution Workflow
+- 协议统一，算法定义、资源拆解、容器组织和执行结果都遵循同一套约定
+- 数据模型极简，底层只保留 `v` 和 `a` 这类标准单元，减少多余封装
+- 工具链闭环，从算法生成、批量构建、挂载、执行到结果反射都能串起来
+- CPU / GPU 双路径并行支持，便于对比验证和能力扩展
+- AI agent 可以进入同一条生产链路，承担结构组织、检查和辅助输出任务
 
-- The debug tool frontend and SDK create agents from resource descriptors and algorithm bindings.
-- The project does not yet have a formal algorithm execution engine.
-- Current algorithm execution is still a temporary bring-up path: the main thread temporarily executes algorithm work through explicitly marked `temporaryTest` hooks.
-- Physics owns the evolving algorithm-side state.
-- Rendering reads the current algorithm-side data to draw points and edges.
-- The default preset is prefilled so the user only needs to create the agent to start work.
+### 项目怎么组织
 
-## SDK Boundary
+- `common_data`：共享数据、数学、输入和交互类型
+- `runtime_systems`：窗口、ImGui 和 Vulkan 运行时支持
+- `algorithm_management`：算法包加载、容器创建、插件装配和统一入口
+- `agent`：运行时 agent 对象，负责挂载和提交
+- `agent_management`：agent 创建编排、挂载/卸载、描述符转发和 tick
+- `debugTool`：交互式调试入口
+- `sdk`：外部开发者提交算法和 agent 的入口
+- `algorithmLib/algorithmSrc`：算法包源码镜像
+- `algorithmLib/algorithmruntimeLib`：构建后的运行时产物
 
-- External SDK users should include `src/sdk/sdk.h`.
-- The SDK should not create UI.
-- The SDK should not touch reflector or intervention hooks.
+### 工作流
 
-## Agent Composition
+1. 通过工具或编辑器准备算法资源和描述信息
+2. 按约定组织成算法包
+3. 构建生成 CPU / GPU 对应产物
+4. 挂载到 `debugTool` 或 SDK 入口
+5. 执行后查看反射结果、异常信号和调试信息
+6. 需要时通过介入器和 AI agent 继续检查与辅助修正
 
-- Build and submit active algorithm packages through `algorithmLib` and the normal algorithm management loader path.
-- Build the final agent by attaching one or more algorithm support groups, solver config, and lightweight algorithm profiles to one agent object.
-- Let upper layers assemble the agent creation spec, then let `agent_management` create and retain agents for runtime stepping while each `Agent` handles algorithm mount and submit work for its attached groups.
-- The runtime does not try to validate the full graph; missing or incompatible bindings should fail at the point of use.
+### Demo
 
-## Coordinate Convention
+- `v6a6_pbd_ball_collision_demo`：用于验证刚体球碰撞、BVH 检查、连续碰撞检测、反射与介入链路
+- `temporary_test_line_motion`：用于验证基础的 GPU / 数据流执行路径
 
-- The project uses a left-handed coordinate system.
-- The origin `[0,0,0]` is at the lower-left near corner.
-- `+X` points to the right.
-- `+Y` points upward.
-- `+Z` points into the screen.
-- Vulkan viewport setup in the runtime flips framebuffer coordinates to match this convention.
-- Render Preview shaders interpret `x` and `y` as preview-page pixel coordinates.
-- In Render Preview, `[0,0]` is the lower-left corner of the ImGui content region below the title bar.
+### 约定
 
-## Logs
+- 项目使用左手坐标系
+- 原点 `[0,0,0]` 位于左下近角
+- `+X` 向右，`+Y` 向上，`+Z` 指向屏幕内
+- Render Preview 中的 `x` 和 `y` 表示预览页像素坐标
+- `实例` 统一按 `agent` 理解
 
-- `DEVlog/2026-06-01_devlog.md` records the second June 1 modification pass.
-- Older architecture notes live under `DEVlog/`.
+## English
 
+`small-algorithm-kernel` is a layered kernel for multi-stage algorithm pipeline execution, validation, and visualization, with an additional low-code development environment for AI agents.
+
+Its core is not a single algorithm, but a pipeline that can be split, assembled, executed, and debugged:
+
+- Start from resource descriptions and split mesh, descriptors, and other inputs into algorithm-ready forms
+- Describe an executable package with `manifest + CPU cpp + GPU shader + container`
+- Break one algorithm into multiple stages and connect them as a pipeline
+- Support both CPU and GPU execution paths
+- Reflect execution results back to the host, with rule checks and error reporting
+- Allow intervention hooks for debugging, validation, and replay
+- Attach packages to `debugTool` for direct inspection of resources, runtime state, and reflection data
+- Track pipeline resource flow, stage handoff, and runtime state
+- Expose forced sync and non-forced sync modes, with timing statistics only in forced sync
+
+### Pipeline Capabilities
+
+- An algorithm can be organized into multiple stages as a pipeline
+- Each stage has explicit inputs, outputs, and resource bindings
+- The pipeline can run sequentially or enter a circular submission path by convention
+- The runtime can report intermediate state, final results, and error signals
+- `debugTool` can show which stage is active, which stage is stalled, and which data has not advanced
+- Intervention hooks can inspect and correct the pipeline, not just the final output
+
+### What it can do
+
+- Build and run algorithm packages
+- Manage containers, resource bindings, and execution state
+- Execute the same algorithm logic on both CPU and GPU
+- Reflect algorithm output back into the host environment
+- Inspect, debug, and validate runtime behavior through `debugTool`
+- Bring AI agents into the same toolchain for structure organization, resource checks, and text generation
+
+### Why it stands out
+
+- Unified protocol across algorithm definition, resource decomposition, container layout, and result reflection
+- Minimal data model, with `v` and `a` as the base units to reduce unnecessary abstraction
+- End-to-end tooling from generation and batch build to mounting, execution, and reflection
+- Native support for both CPU and GPU execution paths
+- AI agents can participate in the same production flow for structure, checking, and assisted output
+
+### Architecture
+
+- `common_data`: shared data, math, input, and interaction types
+- `runtime_systems`: windowing, ImGui, and Vulkan runtime support
+- `algorithm_management`: package loading, container creation, plugin assembly, and unified entrypoints
+- `agent`: runtime agent objects that handle mounting and submission
+- `agent_management`: agent orchestration, mount/unmount, descriptor forwarding, and ticking
+- `debugTool`: interactive debugging entrypoint
+- `sdk`: external entrypoint for submitting algorithms and agents
+- `algorithmLib/algorithmSrc`: mirrored algorithm source packages
+- `algorithmLib/algorithmruntimeLib`: built runtime artifacts
+
+### Workflow
+
+1. Prepare algorithm resources and descriptions through tools or the editor
+2. Package them according to the project conventions
+3. Build CPU / GPU artifacts
+4. Mount the results into `debugTool` or submit through the SDK
+5. Inspect reflection data, error signals, and debugging information after execution
+6. Use intervention hooks and AI agents to continue checking and refinement when needed
+
+### Demos
+
+- `v6a6_pbd_ball_collision_demo`: validates rigid ball collision, BVH checks, continuous collision detection, reflection, and intervention flow
+- `temporary_test_line_motion`: validates the basic GPU/data flow execution path
+
+### Conventions
+
+- The project uses a left-handed coordinate system
+- The origin `[0,0,0]` is at the lower-left near corner
+- `+X` points to the right, `+Y` points upward, and `+Z` points into the screen
+- In Render Preview, `x` and `y` refer to preview-page pixel coordinates
+- `实例` is treated as `agent`

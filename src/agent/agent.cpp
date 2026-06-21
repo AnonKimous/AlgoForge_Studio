@@ -1,6 +1,7 @@
 #include "agent/agent.h"
 
 #include "algorithm_management/algorithm_manager.h"
+#include "common_data/kernel_cfg.h"
 #define RUNTIME_SYSTEMS_LAYER_PUBLIC_FACADE_INCLUDE 1
 #include "runtime_systems/runtime_systems.h"
 #undef RUNTIME_SYSTEMS_LAYER_PUBLIC_FACADE_INCLUDE
@@ -113,7 +114,7 @@ uint64_t _HashPipelineGroupState(
   size_t valid_lane_count,
   const std::vector<bool>& stage_has_data,
   size_t pending_stage0_submission_count,
-  bool circular_stage0_saturated,
+  bool stage0_saturated,
   const std::vector<AgentAlgorithmRuntimeState>& runtime_states,
   size_t begin_index,
   size_t end_index) {
@@ -138,7 +139,7 @@ uint64_t _HashPipelineGroupState(
   hash = _HashU64(hash, current_lane_id);
   hash = _HashU64(hash, static_cast<uint64_t>(valid_lane_count));
   hash = _HashU64(hash, static_cast<uint64_t>(pending_stage0_submission_count));
-  hash = _HashBool(hash, circular_stage0_saturated);
+  hash = _HashBool(hash, stage0_saturated);
   for (size_t index : executable_indices) {
     hash = _HashU64(hash, static_cast<uint64_t>(index));
   }
@@ -152,6 +153,7 @@ struct PipelineGroupProgressState {
   bool stall_report_requested{false};
   bool stall_reported{false};
   std::string stall_reason;
+  float total_elapsed_seconds{0.0f};
   std::vector<AlgorithmPipelineStageRuntimeStat> stage_runtime_stats;
 };
 
@@ -267,6 +269,58 @@ bool _CollectReflectionSnapshot(
         out_snapshot->variables.push_back(std::move(value));
       }
     }
+  }
+
+  out_snapshot->valid = !out_snapshot->variables.empty() || !out_snapshot->variable_arrays.empty();
+  return out_snapshot->valid;
+}
+
+bool _CollectPipelineExitReflectionSnapshot(
+  const std::string& algorithm_name,
+  const AlgorithmContainerSet& container_set,
+  AlgorithmReflectionSnapshot* out_snapshot) {
+  if (!out_snapshot) {
+    return false;
+  }
+
+  out_snapshot->Clear();
+  out_snapshot->algorithm_name = algorithm_name.empty() ? container_set.algorithm_name : algorithm_name;
+
+  for (const AlgorithmContainer& container : container_set.arrays) {
+    AlgorithmReflectionValue value{};
+    value.reflection_object_name = container.name;
+    value.container_name = container.name;
+    value.filter_name = "pipeline_exit";
+    value.storage_kind = container.storage_kind;
+    value.bytes.assign(container.bytes.begin(), container.bytes.end());
+    out_snapshot->variable_arrays.push_back(std::move(value));
+  }
+  for (const AlgorithmContainer& container : container_set.temporary_registers) {
+    AlgorithmReflectionValue value{};
+    value.reflection_object_name = container.name;
+    value.container_name = container.name;
+    value.filter_name = "pipeline_exit";
+    value.storage_kind = container.storage_kind;
+    value.bytes.assign(container.bytes.begin(), container.bytes.end());
+    out_snapshot->variables.push_back(std::move(value));
+  }
+  for (const AlgorithmContainer& container : container_set.temporary_caches) {
+    AlgorithmReflectionValue value{};
+    value.reflection_object_name = container.name;
+    value.container_name = container.name;
+    value.filter_name = "pipeline_exit";
+    value.storage_kind = container.storage_kind;
+    value.bytes.assign(container.bytes.begin(), container.bytes.end());
+    out_snapshot->variables.push_back(std::move(value));
+  }
+  for (const AlgorithmContainer& container : container_set.hidden_containers) {
+    AlgorithmReflectionValue value{};
+    value.reflection_object_name = container.name;
+    value.container_name = container.name;
+    value.filter_name = "pipeline_exit";
+    value.storage_kind = container.storage_kind;
+    value.bytes.assign(container.bytes.begin(), container.bytes.end());
+    out_snapshot->variables.push_back(std::move(value));
   }
 
   out_snapshot->valid = !out_snapshot->variables.empty() || !out_snapshot->variable_arrays.empty();
@@ -470,6 +524,7 @@ void _UpdatePipelineGroupProgressState(
     return;
   }
   *out_state = previous_state;
+  out_state->total_elapsed_seconds = previous_state.total_elapsed_seconds + dt_seconds;
   out_state->stall_report_requested = false;
   if (!signature_valid) {
     return;
@@ -1344,7 +1399,8 @@ bool Agent::MountPipelineAlgorithm(
   size_t* out_index,
   std::string* out_error_message,
   AlgorithmExecutionPreference execution_preference,
-  AlgorithmPipelineSubmissionMode submission_mode) {
+  AlgorithmPipelineTopology topology,
+  AlgorithmPipelineSyncMode sync_mode) {
   auto set_error = [&](const std::string& message) {
     if (out_error_message) {
       *out_error_message = message;
@@ -1411,7 +1467,8 @@ bool Agent::MountPipelineAlgorithm(
     built_mount.object.pipeline_name = pipeline_name;
     built_mount.object.pipeline_stage_index = static_cast<uint32_t>(stage_index);
     built_mount.object.pipeline_stage_count = static_cast<uint32_t>(stage_submissions.size());
-    built_mount.object.pipeline_submission_mode = submission_mode;
+    built_mount.object.pipeline_topology = topology;
+    built_mount.object.pipeline_sync_mode = sync_mode;
     if (stage_index == 0u &&
         built_mount.object.runtime_transfer_map &&
         built_mount.object.runtime_transfer_map->SupportsCircularTick()) {
@@ -1439,7 +1496,7 @@ bool Agent::MountPipelineAlgorithm(
     built_stage.object.runtime_transfer_map = shared_pipeline_transfer_map;
   }
 
-  if (submission_mode == AlgorithmPipelineSubmissionMode::Circular &&
+  if (topology == AlgorithmPipelineTopology::Circular &&
       !pipeline_supports_circular_submission) {
     set_error("This pipeline algorithm does not support circular pipeline submission.");
     return false;
@@ -1468,16 +1525,21 @@ bool Agent::MountPipelineAlgorithm(
     algorithm_objects_[stage_index].pipeline_name = pipeline_name;
     algorithm_objects_[stage_index].pipeline_stage_index = static_cast<uint32_t>(i);
     algorithm_objects_[stage_index].pipeline_stage_count = static_cast<uint32_t>(built_stages.size());
-    algorithm_objects_[stage_index].pipeline_submission_mode = submission_mode;
+    algorithm_objects_[stage_index].pipeline_topology = topology;
+    algorithm_objects_[stage_index].pipeline_sync_mode = sync_mode;
     MarkAlgorithmAssemblyReady(stage_index);
   }
 
   PipelineRuntimeState pipeline_runtime_state{};
-  pipeline_runtime_state.submission_mode = submission_mode;
+  pipeline_runtime_state.owner_agent_name = agent_name_;
+  pipeline_runtime_state.topology = topology;
+  pipeline_runtime_state.sync_mode = sync_mode;
+  pipeline_runtime_state.max_concurrent_stage0_submissions =
+    common_data::DefaultPipelineMaxConcurrentStage0Submissions();
   pipeline_runtime_state.mandatory_stage_buffer_slot_name =
     shared_pipeline_transfer_map->pipeline_shared_stage_buffer_slot_name;
   pipeline_runtime_state.stage_has_data.assign(built_stages.size(), false);
-  if (submission_mode == AlgorithmPipelineSubmissionMode::NonCircular &&
+  if (topology == AlgorithmPipelineTopology::NonCircular &&
       !pipeline_runtime_state.stage_has_data.empty()) {
     pipeline_runtime_state.stage_has_data.front() = true;
   }
@@ -1486,7 +1548,7 @@ bool Agent::MountPipelineAlgorithm(
   if (!_TryBuildInitialPipelineLaneRuntimeState(
         algorithm_objects_[pipeline_begin_index],
         built_stages.size(),
-        submission_mode == AlgorithmPipelineSubmissionMode::Circular,
+        topology == AlgorithmPipelineTopology::Circular,
         pipeline_runtime_state.next_lane_id,
         pipeline_runtime_state.mandatory_stage_buffer_slot_name,
         &initial_lane_state,
@@ -1499,7 +1561,8 @@ bool Agent::MountPipelineAlgorithm(
       : std::move(lane_error_message));
     return false;
   }
-  if (submission_mode == AlgorithmPipelineSubmissionMode::NonCircular &&
+  initial_lane_state.owner_agent_name = agent_name_;
+  if (topology == AlgorithmPipelineTopology::NonCircular &&
       !initial_lane_state.stage_has_data.empty()) {
     initial_lane_state.stage_has_data.front() = true;
   }
@@ -1508,12 +1571,14 @@ bool Agent::MountPipelineAlgorithm(
   ++pipeline_runtime_state.next_lane_id;
 
   if (execution_preference == AlgorithmExecutionPreference::Cpu) {
-    const bool registered = runtime_systems::AlgorithmCpuExecutor::Instance().RegisterPipeline(
+    const bool registered = algorithm_management::AlgorithmScheduler::Instance().RegisterPipeline(
       runtime_systems::CpuPipelineRegistration{
         .pipeline_name = pipeline_name,
         .root_stage_name = algorithm_objects_[pipeline_begin_index].algorithm_profile.algorithm_name,
         .stage_count = static_cast<uint32_t>(built_stages.size()),
-        .submission_mode = submission_mode,
+        .topology = topology,
+        .max_concurrent_stage0_submissions =
+          common_data::DefaultPipelineMaxConcurrentStage0Submissions(),
         .mandatory_stage_buffer_slot_name =
           shared_pipeline_transfer_map->pipeline_shared_stage_buffer_slot_name,
       },
@@ -1524,8 +1589,9 @@ bool Agent::MountPipelineAlgorithm(
       }
       return false;
     }
-    const bool runtime_registered = runtime_systems::AlgorithmCpuExecutor::Instance().RegisterPipelineRuntime(
+    const bool runtime_registered = algorithm_management::AlgorithmScheduler::Instance().RegisterPipelineRuntime(
       pipeline_name,
+      agent_name_,
       pipeline_runtime_state,
       out_error_message);
     if (!runtime_registered) {
@@ -1535,7 +1601,17 @@ bool Agent::MountPipelineAlgorithm(
       return false;
     }
   } else {
-    pipeline_runtime_states_[pipeline_name] = std::move(pipeline_runtime_state);
+    const bool runtime_registered = algorithm_management::AlgorithmScheduler::Instance().RegisterPipelineRuntime(
+      pipeline_name,
+      agent_name_,
+      pipeline_runtime_state,
+      out_error_message);
+    if (!runtime_registered) {
+      while (algorithm_objects_.size() > pipeline_begin_index) {
+        RemoveAlgorithm(algorithm_objects_.size() - 1u);
+      }
+      return false;
+    }
   }
 
   if (out_index) {
@@ -1584,11 +1660,8 @@ bool Agent::RemoveAlgorithm(size_t index) {
   size_t erase_begin = index;
   size_t erase_end = index + 1u;
   std::string pipeline_name_to_remove{};
-  bool removed_pipeline_is_cpu = false;
   if (_IsPipelineStage(algorithm_objects_[index])) {
     pipeline_name_to_remove = algorithm_objects_[index].pipeline_name;
-    removed_pipeline_is_cpu =
-      algorithm_objects_[index].execution_preference == AlgorithmExecutionPreference::Cpu;
     if (!_FindPipelineGroupRange(algorithm_objects_, index, &erase_begin, &erase_end)) {
       return false;
     }
@@ -1604,10 +1677,9 @@ bool Agent::RemoveAlgorithm(size_t index) {
     algorithm_assembly_states_.begin() + static_cast<std::ptrdiff_t>(erase_begin),
     algorithm_assembly_states_.begin() + static_cast<std::ptrdiff_t>(erase_end));
   if (!pipeline_name_to_remove.empty()) {
-    pipeline_runtime_states_.erase(pipeline_name_to_remove);
-    if (removed_pipeline_is_cpu) {
-      runtime_systems::AlgorithmCpuExecutor::Instance().UnregisterPipeline(pipeline_name_to_remove);
-    }
+        algorithm_management::AlgorithmScheduler::Instance().UnregisterPipeline(
+          pipeline_name_to_remove,
+          agent_name_);
   }
   return true;
 }
@@ -1687,10 +1759,11 @@ bool Agent::SubmitAlgorithm(
       AlgorithmToAgentSignal pipeline_signal{};
       std::string cpu_pipeline_error_message;
       bool cpu_pipeline_processing_failed = false;
-      if (!runtime_systems::AlgorithmCpuExecutor::Instance().TickMountedPipeline(
+      if (!algorithm_management::AlgorithmScheduler::Instance().TickMountedPipeline(
             &algorithm_objects_,
             begin_index,
             end_index,
+            agent_name_,
             context,
             allow_tick_mask,
             algorithm_assembly_states_,
@@ -1714,9 +1787,21 @@ bool Agent::SubmitAlgorithm(
     }
 
     PipelineRuntimeState pipeline_state{};
-    pipeline_state = pipeline_runtime_states_[root_object.pipeline_name];
+    if (!algorithm_management::AlgorithmScheduler::Instance().TryGetPipelineRuntime(
+          root_object.pipeline_name,
+          agent_name_,
+          &pipeline_state)) {
+      DEBUG_TOOL_ASSERT(false, "Pipeline runtime state is unavailable.");
+      out_result->algorithm_to_agent_signal.stop_requested = true;
+      pipeline_processing_failed = true;
+      return;
+    }
     const auto flush_pipeline_state = [&]() {
-      pipeline_runtime_states_[root_object.pipeline_name] = pipeline_state;
+      algorithm_management::AlgorithmScheduler::Instance().UpdatePipelineRuntime(
+        root_object.pipeline_name,
+        agent_name_,
+        pipeline_state,
+        nullptr);
     };
     const struct PipelineRuntimeFlushScope {
       const decltype(flush_pipeline_state)& flush;
@@ -1729,7 +1814,7 @@ bool Agent::SubmitAlgorithm(
       if (!_TryBuildInitialPipelineLaneRuntimeState(
             algorithm_objects_[begin_index],
             pipeline_stage_count,
-            pipeline_state.submission_mode == AlgorithmPipelineSubmissionMode::Circular,
+            pipeline_state.topology == AlgorithmPipelineTopology::Circular,
             pipeline_state.next_lane_id,
             pipeline_state.mandatory_stage_buffer_slot_name,
             &fallback_lane_state,
@@ -1742,6 +1827,7 @@ bool Agent::SubmitAlgorithm(
         pipeline_processing_failed = true;
         return;
       }
+      fallback_lane_state.owner_agent_name = agent_name_;
       pipeline_state.current_lane_id = fallback_lane_state.lane_id;
       pipeline_state.lanes.push_back(std::move(fallback_lane_state));
       ++pipeline_state.next_lane_id;
@@ -1767,19 +1853,74 @@ bool Agent::SubmitAlgorithm(
       previous_progress_state.stall_report_requested = updated_runtime_states[begin_index].pipeline_stall_report_requested;
       previous_progress_state.stall_reported = updated_runtime_states[begin_index].pipeline_stall_reported;
       previous_progress_state.stall_reason = updated_runtime_states[begin_index].pipeline_stall_reason;
-      previous_progress_state.stage_runtime_stats = updated_runtime_states[begin_index].pipeline_stage_runtime_stats;
+      if (pipeline_state.sync_mode == AlgorithmPipelineSyncMode::Forced) {
+        previous_progress_state.stage_runtime_stats =
+          updated_runtime_states[begin_index].pipeline_stage_runtime_stats;
+      }
     }
     PipelineGroupProgressState progress_state = previous_progress_state;
     progress_state.stall_reason.clear();
-    progress_state.stage_runtime_stats.clear();
-    progress_state.stage_runtime_stats.reserve(end_index - begin_index);
+    const bool collect_pipeline_timing =
+      pipeline_state.sync_mode == AlgorithmPipelineSyncMode::Forced;
+    std::vector<AlgorithmPipelineStageRuntimeStat>* pipeline_stage_runtime_stats =
+      collect_pipeline_timing ? &progress_state.stage_runtime_stats : nullptr;
+    if (collect_pipeline_timing) {
+      progress_state.stage_runtime_stats.clear();
+      progress_state.stage_runtime_stats.reserve(end_index - begin_index);
+    } else {
+      progress_state.stage_runtime_stats.clear();
+    }
 
     algorithm_objects_[begin_index].SetContainerSet(primary_lane_state->standard_container_set);
     algorithm_objects_[begin_index].resource_bindings = primary_lane_state->resource_bindings;
     algorithm_objects_[begin_index].descriptor_values = primary_lane_state->descriptor_values;
+    const bool pipeline_stage_debug_all = algorithm_objects_[begin_index].pipeline_stage_debug_all;
+    const uint32_t pipeline_stage_debug_index = algorithm_objects_[begin_index].pipeline_stage_debug_index;
 
     std::vector<bool> current_stage_has_data = primary_lane_state->stage_has_data;
     std::vector<bool> next_stage_has_data(end_index - begin_index, false);
+    const auto resolve_pipeline_active_stage = [&](
+      const std::vector<bool>& stage_has_data,
+      const std::vector<size_t>& executable_stage_indices,
+      size_t* out_active_stage_index,
+      bool* out_active_stage_valid) {
+      *out_active_stage_index = 0u;
+      *out_active_stage_valid = false;
+      for (size_t stage_offset = stage_has_data.size(); stage_offset > 0u; --stage_offset) {
+        if (stage_has_data[stage_offset - 1u]) {
+          *out_active_stage_index = stage_offset - 1u;
+          *out_active_stage_valid = true;
+          return;
+        }
+      }
+      if (!executable_stage_indices.empty()) {
+        *out_active_stage_index = executable_stage_indices.back() - begin_index;
+        *out_active_stage_valid = true;
+      }
+    };
+    const auto apply_pipeline_progress_state = [&](
+      const PipelineGroupProgressState& applied_progress_state,
+      size_t active_stage_index,
+      bool active_stage_valid) {
+      for (size_t index = begin_index; index < end_index; ++index) {
+        AgentAlgorithmRuntimeState& runtime_state = updated_runtime_states[index];
+        runtime_state.pipeline_progress_signature = applied_progress_state.signature;
+        runtime_state.pipeline_progress_signature_valid = applied_progress_state.signature_valid;
+        runtime_state.pipeline_no_progress_seconds = applied_progress_state.no_progress_seconds;
+        runtime_state.pipeline_stall_report_requested = applied_progress_state.stall_report_requested;
+        runtime_state.pipeline_stall_reported = applied_progress_state.stall_reported;
+        runtime_state.pipeline_stall_reason = applied_progress_state.stall_reason;
+        runtime_state.pipeline_active_stage_index = static_cast<uint32_t>(active_stage_index);
+        runtime_state.pipeline_active_stage_index_valid = active_stage_valid;
+        if (collect_pipeline_timing) {
+          runtime_state.pipeline_total_elapsed_seconds = applied_progress_state.total_elapsed_seconds;
+          runtime_state.pipeline_stage_runtime_stats = applied_progress_state.stage_runtime_stats;
+        } else {
+          runtime_state.pipeline_total_elapsed_seconds = 0.0f;
+          runtime_state.pipeline_stage_runtime_stats.clear();
+        }
+      }
+    };
 
     const bool stage0_allow_tick = begin_index < allow_tick_mask.size() ? allow_tick_mask[begin_index] : true;
     const bool stage0_is_ready =
@@ -1788,7 +1929,8 @@ bool Agent::SubmitAlgorithm(
         !current_stage_has_data.front() &&
         stage0_allow_tick &&
         stage0_is_ready &&
-        !pipeline_state.pending_stage0_submissions.empty()) {
+        !pipeline_state.pending_stage0_submissions.empty() &&
+        (pipeline_stage_debug_all || pipeline_stage_debug_index == 0u)) {
       AlgorithmObject& stage0_object = algorithm_objects_[begin_index];
       Agent::PendingPipelineStage0Submission submission =
         std::move(pipeline_state.pending_stage0_submissions.front());
@@ -1819,7 +1961,7 @@ bool Agent::SubmitAlgorithm(
       primary_lane_state->descriptor_values = stage0_object.descriptor_values;
       primary_lane_state->stage_has_data.assign(pipeline_stage_count, false);
       current_stage_has_data.front() = true;
-      pipeline_state.circular_stage0_saturated = false;
+      pipeline_state.stage0_saturated = false;
     }
 
     std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>> stage_container_sets{};
@@ -1858,11 +2000,13 @@ bool Agent::SubmitAlgorithm(
       _ResetRuntimeStateBase(runtime_state, &runtime_state);
       updated_runtime_states[index] = std::move(runtime_state);
 
-      progress_state.stage_runtime_stats.push_back(AlgorithmPipelineStageRuntimeStat{
-        .stage_name = object.algorithm_profile.algorithm_name,
-        .elapsed_seconds = 0.0f,
-        .reason = {},
-      });
+      if (collect_pipeline_timing) {
+        progress_state.stage_runtime_stats.push_back(AlgorithmPipelineStageRuntimeStat{
+          .stage_name = object.algorithm_profile.algorithm_name,
+          .elapsed_seconds = 0.0f,
+          .reason = {},
+        });
+      }
 
       stage_allow_tick[stage_offset] = index < allow_tick_mask.size() ? allow_tick_mask[index] : true;
       stage_is_ready[stage_offset] =
@@ -1875,7 +2019,8 @@ bool Agent::SubmitAlgorithm(
         has_data &&
         stage_allow_tick[stage_offset] &&
         stage_is_ready[stage_offset] &&
-        !stage_launch_once_completed[stage_offset];
+        !stage_launch_once_completed[stage_offset] &&
+        (pipeline_stage_debug_all || stage_offset == pipeline_stage_debug_index);
     }
 
     for (size_t pass = 0u; pass < pipeline_stage_count; ++pass) {
@@ -1883,27 +2028,6 @@ bool Agent::SubmitAlgorithm(
       for (size_t stage_offset = 0u; stage_offset < pipeline_stage_count; ++stage_offset) {
         if (!stage_execute_mask[stage_offset]) {
           continue;
-        }
-
-        bool has_target = false;
-        size_t target_offset = 0u;
-        if (stage_offset + 1u < pipeline_stage_count) {
-          has_target = true;
-          target_offset = stage_offset + 1u;
-        } else if (pipeline_state.submission_mode == AlgorithmPipelineSubmissionMode::Circular) {
-          has_target = true;
-          target_offset = 0u;
-        }
-        if (!has_target) {
-          continue;
-        }
-
-        const bool target_holds_data =
-          target_offset < current_stage_has_data.size() && current_stage_has_data[target_offset];
-        const bool target_vacates = target_offset < stage_execute_mask.size() && stage_execute_mask[target_offset];
-        if (target_holds_data && !target_vacates) {
-          stage_execute_mask[stage_offset] = false;
-          changed = true;
         }
       }
       if (!changed) {
@@ -1919,7 +2043,7 @@ bool Agent::SubmitAlgorithm(
       const bool execute_now = stage_offset < stage_execute_mask.size() && stage_execute_mask[stage_offset];
       if (!execute_now) {
         _SetPipelineStageRuntimeReason(
-          &progress_state.stage_runtime_stats,
+          pipeline_stage_runtime_stats,
           object.algorithm_profile.algorithm_name,
           !has_data
             ? _BuildPipelineStageNoInputReason(
@@ -1950,7 +2074,7 @@ bool Agent::SubmitAlgorithm(
       }
 
       _SetPipelineStageRuntimeReason(
-        &progress_state.stage_runtime_stats,
+        pipeline_stage_runtime_stats,
         object.algorithm_profile.algorithm_name,
         "Stage executed.");
       executable_indices.push_back(index);
@@ -1958,6 +2082,13 @@ bool Agent::SubmitAlgorithm(
 
     if (!_PipelineGroupIsExecutable(executable_indices)) {
       _CommitPipelineStageStateToPrimaryLane(&pipeline_state, next_stage_has_data);
+      size_t active_stage_index = 0u;
+      bool active_stage_valid = false;
+      resolve_pipeline_active_stage(
+        pipeline_state.stage_has_data,
+        executable_indices,
+        &active_stage_index,
+        &active_stage_valid);
       const bool pipeline_has_live_token = _CountLivePipelineStages(pipeline_state.stage_has_data) > 0u;
       const uint64_t current_signature =
         _HashPipelineGroupState(
@@ -1967,7 +2098,7 @@ bool Agent::SubmitAlgorithm(
           _CountValidPipelineLanes(pipeline_state),
           pipeline_state.stage_has_data,
           pipeline_state.pending_stage0_submissions.size(),
-          pipeline_state.circular_stage0_saturated,
+          pipeline_state.stage0_saturated,
           updated_runtime_states,
           begin_index,
           end_index);
@@ -1987,15 +2118,7 @@ bool Agent::SubmitAlgorithm(
           &progress_state);
         progress_state.stall_reason = "No pipeline stage was executable during this tick.";
       }
-      if (begin_index < updated_runtime_states.size()) {
-        updated_runtime_states[begin_index].pipeline_progress_signature = progress_state.signature;
-        updated_runtime_states[begin_index].pipeline_progress_signature_valid = progress_state.signature_valid;
-        updated_runtime_states[begin_index].pipeline_no_progress_seconds = progress_state.no_progress_seconds;
-        updated_runtime_states[begin_index].pipeline_stall_report_requested = progress_state.stall_report_requested;
-        updated_runtime_states[begin_index].pipeline_stall_reported = progress_state.stall_reported;
-        updated_runtime_states[begin_index].pipeline_stall_reason = std::move(progress_state.stall_reason);
-        updated_runtime_states[begin_index].pipeline_stage_runtime_stats = std::move(progress_state.stage_runtime_stats);
-      }
+      apply_pipeline_progress_state(progress_state, active_stage_index, active_stage_valid);
       return;
     }
 
@@ -2018,7 +2141,7 @@ bool Agent::SubmitAlgorithm(
         DEBUG_TOOL_ASSERT(false, failure_message.c_str());
         runtime_state.algorithm_to_agent_signal.stop_requested = true;
         _SetPipelineStageRuntimeReason(
-          &progress_state.stage_runtime_stats,
+          pipeline_stage_runtime_stats,
           object.algorithm_profile.algorithm_name,
           "Ingress debug capture failed: " + failure_message);
         _MergeAlgorithmToAgentSignal(runtime_state.algorithm_to_agent_signal, &out_result->algorithm_to_agent_signal);
@@ -2029,7 +2152,7 @@ bool Agent::SubmitAlgorithm(
       const float stage_elapsed_seconds =
         std::chrono::duration<float>(stage_end - stage_begin).count();
       _AddPipelineStageRuntimeElapsed(
-        &progress_state.stage_runtime_stats,
+        pipeline_stage_runtime_stats,
         object.algorithm_profile.algorithm_name,
         stage_elapsed_seconds);
     }
@@ -2044,7 +2167,7 @@ bool Agent::SubmitAlgorithm(
       if (!_TickAlgorithmObject(object, context, allow_tick, is_ready, true, &runtime_state)) {
         runtime_state.algorithm_to_agent_signal.stop_requested = true;
         _SetPipelineStageRuntimeReason(
-          &progress_state.stage_runtime_stats,
+          pipeline_stage_runtime_stats,
           object.algorithm_profile.algorithm_name,
           "Execution failed.");
         _MergeAlgorithmToAgentSignal(runtime_state.algorithm_to_agent_signal, &out_result->algorithm_to_agent_signal);
@@ -2055,7 +2178,7 @@ bool Agent::SubmitAlgorithm(
       const float stage_elapsed_seconds =
         std::chrono::duration<float>(stage_end - stage_begin).count();
       _AddPipelineStageRuntimeElapsed(
-        &progress_state.stage_runtime_stats,
+        pipeline_stage_runtime_stats,
         object.algorithm_profile.algorithm_name,
         stage_elapsed_seconds);
 
@@ -2069,7 +2192,7 @@ bool Agent::SubmitAlgorithm(
         DEBUG_TOOL_ASSERT(false, "Pipeline stage source container set is unavailable.");
         updated_runtime_states[index].algorithm_to_agent_signal.stop_requested = true;
         _SetPipelineStageRuntimeReason(
-          &progress_state.stage_runtime_stats,
+          pipeline_stage_runtime_stats,
           object.algorithm_profile.algorithm_name,
           "Egress failed: source container set is unavailable.");
         _MergeAlgorithmToAgentSignal(updated_runtime_states[index].algorithm_to_agent_signal, &out_result->algorithm_to_agent_signal);
@@ -2083,7 +2206,19 @@ bool Agent::SubmitAlgorithm(
       const size_t stage_offset = index - begin_index;
       const bool is_last_stage = stage_offset + 1u == pipeline_stage_count;
       if (is_last_stage) {
-        if (pipeline_state.submission_mode == AlgorithmPipelineSubmissionMode::Circular) {
+        if (_CollectPipelineExitReflectionSnapshot(
+              object.pipeline_name.empty() ? object.algorithm_profile.algorithm_name : object.pipeline_name,
+              *source_container_set,
+              &updated_runtime_states[index].reflection_snapshot)) {
+          updated_runtime_states[index].reflection_snapshot_cached = false;
+          pipeline_state.exit_reflection_snapshot = updated_runtime_states[index].reflection_snapshot;
+          pipeline_state.exit_reflection_snapshot_valid = true;
+        } else {
+          updated_runtime_states[index].reflection_snapshot.Clear();
+          pipeline_state.exit_reflection_snapshot.Clear();
+          pipeline_state.exit_reflection_snapshot_valid = false;
+        }
+        if (pipeline_state.topology == AlgorithmPipelineTopology::Circular) {
           std::string loopback_error_message;
           if (!_CopyPipelineCircularLoopback(
                 *source_container_set,
@@ -2095,7 +2230,7 @@ bool Agent::SubmitAlgorithm(
             DEBUG_TOOL_ASSERT(false, failure_message.c_str());
             updated_runtime_states[index].algorithm_to_agent_signal.stop_requested = true;
             _SetPipelineStageRuntimeReason(
-              &progress_state.stage_runtime_stats,
+              pipeline_stage_runtime_stats,
               object.algorithm_profile.algorithm_name,
               "Egress failed: " + failure_message);
             _MergeAlgorithmToAgentSignal(updated_runtime_states[index].algorithm_to_agent_signal, &out_result->algorithm_to_agent_signal);
@@ -2116,7 +2251,7 @@ bool Agent::SubmitAlgorithm(
           DEBUG_TOOL_ASSERT(false, failure_message.c_str());
           updated_runtime_states[index].algorithm_to_agent_signal.stop_requested = true;
           _SetPipelineStageRuntimeReason(
-            &progress_state.stage_runtime_stats,
+            pipeline_stage_runtime_stats,
             object.algorithm_profile.algorithm_name,
             "Egress failed: " + failure_message);
           _MergeAlgorithmToAgentSignal(updated_runtime_states[index].algorithm_to_agent_signal, &out_result->algorithm_to_agent_signal);
@@ -2139,7 +2274,7 @@ bool Agent::SubmitAlgorithm(
         DEBUG_TOOL_ASSERT(false, failure_message.c_str());
         updated_runtime_states[index].algorithm_to_agent_signal.stop_requested = true;
         _SetPipelineStageRuntimeReason(
-          &progress_state.stage_runtime_stats,
+          pipeline_stage_runtime_stats,
           object.algorithm_profile.algorithm_name,
           "Egress debug capture failed: " + failure_message);
         _MergeAlgorithmToAgentSignal(updated_runtime_states[index].algorithm_to_agent_signal, &out_result->algorithm_to_agent_signal);
@@ -2150,12 +2285,19 @@ bool Agent::SubmitAlgorithm(
       const float stage_elapsed_seconds =
         std::chrono::duration<float>(stage_end - stage_begin).count();
       _AddPipelineStageRuntimeElapsed(
-        &progress_state.stage_runtime_stats,
+        pipeline_stage_runtime_stats,
         object.algorithm_profile.algorithm_name,
         stage_elapsed_seconds);
     }
 
     _CommitPipelineStageStateToPrimaryLane(&pipeline_state, next_stage_has_data);
+    size_t active_stage_index = 0u;
+    bool active_stage_valid = false;
+    resolve_pipeline_active_stage(
+      pipeline_state.stage_has_data,
+      executable_indices,
+      &active_stage_index,
+      &active_stage_valid);
     const uint64_t current_signature =
       _HashPipelineGroupState(
         algorithm_objects_,
@@ -2164,7 +2306,7 @@ bool Agent::SubmitAlgorithm(
         _CountValidPipelineLanes(pipeline_state),
         pipeline_state.stage_has_data,
         pipeline_state.pending_stage0_submissions.size(),
-        pipeline_state.circular_stage0_saturated,
+        pipeline_state.stage0_saturated,
         updated_runtime_states,
         begin_index,
         end_index);
@@ -2182,20 +2324,12 @@ bool Agent::SubmitAlgorithm(
       for (size_t index : executable_indices) {
         AlgorithmObject& object = algorithm_objects_[index];
         _SetPipelineStageRuntimeReason(
-          &progress_state.stage_runtime_stats,
+          pipeline_stage_runtime_stats,
           object.algorithm_profile.algorithm_name,
           "Stage executed, but the observable pipeline state did not change.");
       }
     }
-    if (begin_index < updated_runtime_states.size()) {
-      updated_runtime_states[begin_index].pipeline_progress_signature = progress_state.signature;
-      updated_runtime_states[begin_index].pipeline_progress_signature_valid = progress_state.signature_valid;
-      updated_runtime_states[begin_index].pipeline_no_progress_seconds = progress_state.no_progress_seconds;
-      updated_runtime_states[begin_index].pipeline_stall_report_requested = progress_state.stall_report_requested;
-      updated_runtime_states[begin_index].pipeline_stall_reported = progress_state.stall_reported;
-      updated_runtime_states[begin_index].pipeline_stall_reason = std::move(progress_state.stall_reason);
-      updated_runtime_states[begin_index].pipeline_stage_runtime_stats = std::move(progress_state.stage_runtime_stats);
-    }
+    apply_pipeline_progress_state(progress_state, active_stage_index, active_stage_valid);
   };
 
   size_t index = 0u;
@@ -2281,8 +2415,9 @@ bool Agent::EnqueuePipelineStage0Submission(
   }
 
   if (algorithm_objects_[pipeline_begin_index].execution_preference == AlgorithmExecutionPreference::Cpu) {
-    if (!runtime_systems::AlgorithmCpuExecutor::Instance().EnqueuePipelineStage0Submission(
+    if (!algorithm_management::AlgorithmScheduler::Instance().EnqueuePipelineStage0Submission(
           pipeline_name,
+          agent_name_,
           algorithm_objects_[pipeline_begin_index].algorithm_profile.algorithm_name,
           resource_bindings,
           descriptor_values,
@@ -2298,9 +2433,20 @@ bool Agent::EnqueuePipelineStage0Submission(
     return true;
   }
 
-  PipelineRuntimeState pipeline_state = pipeline_runtime_states_[pipeline_name];
+  PipelineRuntimeState pipeline_state{};
+  if (!algorithm_management::AlgorithmScheduler::Instance().TryGetPipelineRuntime(
+        pipeline_name,
+        agent_name_,
+        &pipeline_state)) {
+    set_error("Mounted pipeline is unavailable.");
+    return false;
+  }
   const auto flush_pipeline_state = [&]() {
-    pipeline_runtime_states_[pipeline_name] = pipeline_state;
+    algorithm_management::AlgorithmScheduler::Instance().UpdatePipelineRuntime(
+      pipeline_name,
+      agent_name_,
+      pipeline_state,
+      nullptr);
   };
   const struct PipelineRuntimeFlushScope {
     const decltype(flush_pipeline_state)& flush;
@@ -2311,17 +2457,19 @@ bool Agent::EnqueuePipelineStage0Submission(
   if (pipeline_state.stage_has_data.size() != pipeline_stage_count) {
     pipeline_state.stage_has_data.assign(pipeline_stage_count, false);
   }
-  if (pipeline_state.submission_mode != AlgorithmPipelineSubmissionMode::Circular) {
-    set_error("The selected mounted pipeline instance does not accept circular stage0 submissions.");
+  size_t valid_lane_count = 0u;
+  for (const PipelineLaneRuntimeState& lane_state : pipeline_state.lanes) {
+    if (lane_state.valid) {
+      ++valid_lane_count;
+    }
+  }
+  if (valid_lane_count + pipeline_state.pending_stage0_submissions.size() >=
+      static_cast<size_t>(pipeline_state.max_concurrent_stage0_submissions)) {
+    pipeline_state.stage0_saturated = true;
+    set_error("Pipeline stage0 is saturated and cannot accept more resource batches.");
     return false;
   }
-  const size_t live_stage_count = _CountLivePipelineStages(pipeline_state.stage_has_data);
-  if (live_stage_count + pipeline_state.pending_stage0_submissions.size() >= pipeline_stage_count) {
-    pipeline_state.circular_stage0_saturated = true;
-    set_error("Circular pipeline stage0 is saturated and cannot accept more resource batches.");
-    return false;
-  }
-  pipeline_state.circular_stage0_saturated = false;
+  pipeline_state.stage0_saturated = false;
 
   const std::string& stage0_algorithm_name = algorithm_objects_[pipeline_begin_index].algorithm_profile.algorithm_name;
   PendingPipelineStage0Submission submission{};
@@ -2452,6 +2600,41 @@ bool Agent::ReplayPipelineStageBridgeDebug(
   return true;
 }
 
+bool Agent::SetPipelineStageDebugSelection(
+  const std::string& pipeline_name,
+  bool select_all,
+  uint32_t stage_index,
+  std::string* out_error_message) {
+  if (pipeline_name.empty()) {
+    if (out_error_message) {
+      *out_error_message = "Pipeline stage debug selection requires a pipeline name.";
+    }
+    return false;
+  }
+
+  bool found_pipeline = false;
+  for (AlgorithmObject& object : algorithm_objects_) {
+    if (!object.pipeline_stage || object.pipeline_name != pipeline_name) {
+      continue;
+    }
+    found_pipeline = true;
+    object.pipeline_stage_debug_all = select_all;
+    object.pipeline_stage_debug_index = stage_index;
+  }
+
+  if (!found_pipeline) {
+    if (out_error_message) {
+      *out_error_message = "Pipeline stage debug selection failed because the pipeline was not found.";
+    }
+    return false;
+  }
+
+  if (out_error_message) {
+    out_error_message->clear();
+  }
+  return true;
+}
+
 bool Agent::BeginAlgorithmAssembly(size_t index) {
   if (index >= algorithm_assembly_states_.size()) {
     return false;
@@ -2501,9 +2684,10 @@ void Agent::Destroy() {
   for (const AlgorithmObject& object : algorithm_objects_) {
     if (object.pipeline_stage &&
         object.pipeline_stage_index == 0u &&
-        object.execution_preference == AlgorithmExecutionPreference::Cpu &&
         !object.pipeline_name.empty()) {
-      runtime_systems::AlgorithmCpuExecutor::Instance().UnregisterPipeline(object.pipeline_name);
+      algorithm_management::AlgorithmScheduler::Instance().UnregisterPipeline(
+        object.pipeline_name,
+        agent_name_);
     }
   }
   initialized_ = false;
@@ -2512,7 +2696,6 @@ void Agent::Destroy() {
   algorithm_runtime_states_.clear();
   algorithm_assembly_states_.clear();
   standard_shared_container_sets_.clear();
-  pipeline_runtime_states_.clear();
 }
 
 }  // namespace agent

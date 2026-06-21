@@ -43,6 +43,7 @@ class AlgorithmStudioPaletteMixin:
         selection_shell.columnconfigure(0, weight=1)
         self.selection_frame = selection_shell
         self._bind_palette_wheel(selection_shell)
+        self.root.bind_all("<B1-Motion>", self._palette_drag_motion, add="+")
 
         selection_header = ttk.Frame(selection_shell)
         selection_header.grid(row=0, column=0, sticky="ew")
@@ -85,6 +86,7 @@ class AlgorithmStudioPaletteMixin:
         ttk.Label(selection_name_row, text="Name").grid(row=0, column=0, sticky="w", padx=(0, 8))
         selection_name_entry = ttk.Entry(selection_name_row, textvariable=self.selection_name_var)
         selection_name_entry.grid(row=0, column=1, sticky="ew")
+        self.selection_name_entry = selection_name_entry
         self._bind_palette_wheel(selection_name_row)
         self._bind_palette_wheel(selection_name_entry)
 
@@ -99,6 +101,30 @@ class AlgorithmStudioPaletteMixin:
         ttk.Button(selection_buttons, text="Delete", command=self._delete_current_selection).grid(row=1, column=0, sticky="ew", padx=(0, 6))
         ttk.Button(selection_buttons, text="Paste", command=self._paste_selection_from_clipboard).grid(row=1, column=1, columnspan=2, sticky="ew", padx=(6, 0))
         self._bind_palette_wheel(selection_buttons)
+        self.interface4agents_highlight_targets["createcosnode"] = [
+            (
+                selection_summary,
+                {
+                    "bg": COLORS["accent"],
+                    "fg": COLORS["window"],
+                    "highlightbackground": COLORS["accent"],
+                    "highlightcolor": COLORS["accent"],
+                    "highlightthickness": 2,
+                },
+            )
+        ]
+        self.interface4agents_highlight_targets["integratechild"] = [
+            (
+                selection_summary,
+                {
+                    "bg": COLORS["accent"],
+                    "fg": COLORS["window"],
+                    "highlightbackground": COLORS["accent"],
+                    "highlightcolor": COLORS["accent"],
+                    "highlightthickness": 2,
+                },
+            )
+        ]
 
         drag_header = ttk.Frame(palette_shell)
         drag_header.grid(row=1, column=0, sticky="ew", pady=(0, 8))
@@ -219,6 +245,20 @@ class AlgorithmStudioPaletteMixin:
 
             sub_label = tk.Label(tile, text=subtext, bg=COLORS["panel_alt"], fg=COLORS["muted"], anchor="w")
             sub_label.grid(row=1, column=1, sticky="ew", pady=(0, 8))
+            self.interface4agents_highlight_targets[kind] = [
+                (
+                    tile,
+                    {
+                        "bg": COLORS["accent"],
+                        "highlightbackground": COLORS["accent"],
+                        "highlightcolor": COLORS["accent"],
+                        "highlightthickness": 2,
+                    },
+                ),
+                (badge, {"bg": COLORS["accent"], "fg": COLORS["window"]}),
+                (title_label, {"bg": COLORS["accent"], "fg": COLORS["window"]}),
+                (sub_label, {"bg": COLORS["accent"], "fg": COLORS["window"]}),
+            ]
             bind_targets = [tile, badge, title_label, sub_label]
 
             for widget in bind_targets:
@@ -271,6 +311,39 @@ class AlgorithmStudioPaletteMixin:
                 highlightcolor=COLORS["accent"] if is_active else COLORS["grid"],
                 highlightthickness=1,
             )
+
+    def _interface4agents_clear_highlight(self) -> None:
+        if self.interface4agents_highlight_after_id is not None:
+            self.root.after_cancel(self.interface4agents_highlight_after_id)
+            self.interface4agents_highlight_after_id = None
+        for widget, config in self.interface4agents_highlight_restore:
+            widget.configure(**config)
+        self.interface4agents_highlight_restore = []
+
+    def _interface4agents_highlight_target(self, key: str) -> str:
+        normalized = str(key).strip().lower()
+        targets = self.interface4agents_highlight_targets[normalized]
+        self._interface4agents_clear_highlight()
+        for widget, config in targets:
+            restore_config = {option: widget.cget(option) for option in config}
+            self.interface4agents_highlight_restore.append((widget, restore_config))
+            widget.configure(**config)
+        first_widget = targets[0][0]
+        if self.palette_canvas and not normalized.startswith("scene:"):
+            self.palette_canvas.update_idletasks()
+            inner = self.palette_inner_frame
+            if inner is not None:
+                canvas_height = float(self.palette_canvas.winfo_height())
+                inner_height = float(inner.winfo_height())
+                if inner_height > canvas_height:
+                    widget_top = float(first_widget.winfo_y())
+                    widget_height = float(first_widget.winfo_height())
+                    target = max(0.0, min(widget_top - 24.0, inner_height - canvas_height))
+                    if widget_top + widget_height > target + canvas_height:
+                        target = max(0.0, widget_top + widget_height - canvas_height + 24.0)
+                    self.palette_canvas.yview_moveto(target / (inner_height - canvas_height))
+        self.interface4agents_highlight_after_id = self.root.after(900, self._interface4agents_clear_highlight)
+        return normalized
 
     def _set_canvas_view_mode(self, view_mode: str, *, log_message: str | None = None) -> None:
         normalized = str(view_mode or "").strip().lower()
@@ -337,6 +410,9 @@ class AlgorithmStudioPaletteMixin:
             "variant": variant,
             "x_root": event.x_root,
             "y_root": event.y_root,
+            "active": False,
+            "name": "",
+            "waste_area": False,
         }
 
     def _palette_drag_motion(self, event: tk.Event) -> None:
@@ -344,6 +420,35 @@ class AlgorithmStudioPaletteMixin:
             return
         self.palette_drag_state["x_root"] = event.x_root
         self.palette_drag_state["y_root"] = event.y_root
+        if not self.canvas:
+            return
+        left = self.canvas.winfo_rootx()
+        top = self.canvas.winfo_rooty()
+        right = left + self.canvas.winfo_width()
+        bottom = top + self.canvas.winfo_height()
+        inside_canvas = left <= event.x_root <= right and top <= event.y_root <= bottom
+        if not self.palette_drag_state["active"]:
+            self.palette_drag_state["waste_area"] = event.y_root < top
+            if not inside_canvas:
+                return
+            kind = str(self.palette_drag_state["kind"])
+            variant = self.palette_drag_state.get("variant")
+            x = self.canvas.canvasx(event.x_root - left) / self._canvas_zoom_factor()
+            y = self.canvas.canvasy(event.y_root - top) / self._canvas_zoom_factor()
+            self._drop_palette_item(kind, x, y, variant=str(variant) if variant is not None else None)
+            name = self._palette_drag_selected_name(kind)
+            if not name:
+                return
+            self.palette_drag_state["active"] = True
+            self.palette_drag_state["name"] = name
+            return
+        kind = str(self.palette_drag_state["kind"])
+        name = str(self.palette_drag_state["name"])
+        if name:
+            x = self.canvas.canvasx(event.x_root - left) / self._canvas_zoom_factor()
+            y = self.canvas.canvasy(event.y_root - top) / self._canvas_zoom_factor()
+            self._move_palette_drag_item(kind, name, x, y)
+        self.palette_drag_state["waste_area"] = event.y_root < top
 
     def _finish_palette_drag(self, event: tk.Event) -> None:
         if not self.palette_drag_state:
@@ -352,18 +457,32 @@ class AlgorithmStudioPaletteMixin:
         variant = self.palette_drag_state.get("variant")
         x_root = event.x_root
         y_root = event.y_root
-        self.palette_drag_state = None
         if not self.canvas:
+            self.palette_drag_state = None
             return
         left = self.canvas.winfo_rootx()
         top = self.canvas.winfo_rooty()
         right = left + self.canvas.winfo_width()
         bottom = top + self.canvas.winfo_height()
-        if x_root < left or x_root > right or y_root < top or y_root > bottom:
-            return
-        x = self.canvas.canvasx(x_root - left) / self._canvas_zoom_factor()
-        y = self.canvas.canvasy(y_root - top) / self._canvas_zoom_factor()
-        self._drop_palette_item(kind, x, y, variant=str(variant) if variant is not None else None)
+        active = bool(self.palette_drag_state.get("active"))
+        name = str(self.palette_drag_state.get("name") or "")
+        if not active and left <= x_root <= right and top <= y_root <= bottom:
+            x = self.canvas.canvasx(x_root - left) / self._canvas_zoom_factor()
+            y = self.canvas.canvasy(y_root - top) / self._canvas_zoom_factor()
+            self._drop_palette_item(kind, x, y, variant=str(variant) if variant is not None else None)
+            name = self._palette_drag_selected_name(kind)
+            if name:
+                self.palette_drag_state["active"] = True
+                self.palette_drag_state["name"] = name
+            else:
+                self.palette_drag_state = None
+                self._refresh_canvas_interaction_state(schedule_manifest_refresh=False)
+                return
+            name = str(self.palette_drag_state.get("name") or "")
+        if active and name and y_root < top:
+            self._delete_palette_drag_item(kind, name)
+        self.palette_drag_state = None
+        self._refresh_canvas_interaction_state(schedule_manifest_refresh=False)
 
     def _drop_palette_item(self, kind: str, x: float, y: float, variant: str | None = None) -> None:
         if self.canvas_view_mode == "decomposer2container_overview":
@@ -587,6 +706,104 @@ class AlgorithmStudioPaletteMixin:
             self.selected_stage_name = None
             self._refresh_all()
             self._log(f"Added fun {name}.")
+            return
+
+    def _palette_drag_selected_name(self, kind: str) -> str:
+        if kind == "containerelement":
+            return str(self.selected_container_group_name or "")
+        if kind == "decomposer":
+            return str(self.selected_rule_name or "")
+        if kind in {"variable", "array"}:
+            return str(self.selected_container_name or "")
+        if kind == "reflector":
+            return str(self.selected_reflector_name or "")
+        if kind in {"interventioner", "stage"}:
+            return str(self.selected_stage_name or "")
+        if kind == "resnode":
+            return str(self.selected_res_node_name or "")
+        if kind == "function":
+            return str(self.selected_function_name or "")
+        if kind == "functiontext":
+            return str(self.selected_function_text_name or "")
+        return ""
+
+    def _move_palette_drag_item(self, kind: str, name: str, x: float, y: float) -> None:
+        if kind == "containerelement":
+            item = self._find_container_group(name)
+            if item:
+                item.x = x
+                item.y = y
+        elif kind == "decomposer":
+            item = self._find_rule(name)
+            if item:
+                item.x = x
+                item.y = y
+        elif kind in {"variable", "array"}:
+            item = self._find_container(name)
+            if item:
+                item.x = x
+                item.y = y
+        elif kind == "reflector":
+            item = self._find_reflector(name)
+            if item:
+                item.x = x
+                item.y = y
+        elif kind in {"interventioner", "stage"}:
+            item = self._find_stage(name)
+            if item:
+                item.x = x
+                item.y = y
+        elif kind == "resnode":
+            item = self._find_res_node(name)
+            if item:
+                item.x = x
+                item.y = y
+        elif kind == "function":
+            item = self._find_function_frame(name)
+            if item:
+                item.x = x
+                item.y = y
+        elif kind == "functiontext":
+            item = self._find_function_text_item(name)
+            if item:
+                item.x = x
+                item.y = y
+        self._refresh_canvas_interaction_state(schedule_manifest_refresh=False)
+
+    def _delete_palette_drag_item(self, kind: str, name: str) -> None:
+        if kind == "containerelement":
+            if name == "container":
+                return
+            self.selected_container_group_name = name
+            self._delete_selected_container_group()
+            return
+        if kind == "decomposer":
+            self.selected_rule_name = name
+            self._delete_selected_rule()
+            return
+        if kind in {"variable", "array"}:
+            self.selected_container_name = name
+            self._delete_selected_container()
+            return
+        if kind == "reflector":
+            self.selected_reflector_name = name
+            self._delete_selected_reflector()
+            return
+        if kind in {"interventioner", "stage"}:
+            self.selected_stage_name = name
+            self._delete_selected_stage()
+            return
+        if kind == "resnode":
+            self.selected_res_node_name = name
+            self._delete_selected_res_node()
+            return
+        if kind == "function":
+            self.selected_function_name = name
+            self._delete_selected_function()
+            return
+        if kind == "functiontext":
+            self.selected_function_text_name = name
+            self._delete_selected_function_text()
             return
 
     def _resource_output_ports(self, resource_kind: str, outputs: list[str] | None = None) -> list[str]:

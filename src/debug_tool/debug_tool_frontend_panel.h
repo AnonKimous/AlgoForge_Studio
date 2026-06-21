@@ -104,7 +104,10 @@ class DebugToolFrontendPanel {
     std::string reflected_algorithm_name;
     std::string reflection_error;
     bool reflection_valid{false};
+    bool preview_request_dirty{true};
     bool pipeline_run_from_stage0_to_end{true};
+    std::string pipeline_debug_pipeline_name;
+    int pipeline_debug_stage_index{-1};
   };
 
   struct FileBrowserUiState {

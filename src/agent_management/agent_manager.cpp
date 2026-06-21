@@ -2,10 +2,6 @@
 #include "agent_manager.h"
 #undef AGENT_MANAGEMENT_LAYER_INTERNAL_BUILD
 
-#define AGENT_MANAGEMENT_LAYER_PUBLIC_FACADE_INCLUDE 1
-#include "agent_management/agent_ticker.h"
-#undef AGENT_MANAGEMENT_LAYER_PUBLIC_FACADE_INCLUDE
-
 #include <cassert>
 #include <algorithm>
 #include <iostream>
@@ -50,10 +46,96 @@ bool ReportAlgorithmPipelineStall(
   return false;
 }
 
+namespace {
+
+bool _SignalBlocksTick(
+  const agent::AlgorithmObject& object,
+  const AgentToAlgorithmSignal& signal) {
+  if ((signal.control_bits & kInterventionControlStopAndEditBit) != 0u) {
+    return true;
+  }
+  if (signal.stop_requested || signal.pause_requested) {
+    return true;
+  }
+  (void)object;
+  (void)signal;
+  return false;
+}
+
+}  // namespace
+
+class AgentTicker {
+ public:
+  void Init(std::shared_ptr<agent::Agent> agent);
+  void Tick(const InputState& input, Vec2 mouse_pixel, float dt_seconds);
+  void Destroy();
+
+  void ApplyInterventionRequest(const InteractionInterventionRequest& request);
+
+  const AlgorithmToAgentSignal& algorithm_to_agent_signal() const { return algorithm_to_agent_signal_; }
+  const InteractionInterventionRequest& intervention_request() const { return intervention_request_; }
+
+ private:
+  std::shared_ptr<agent::Agent> agent_binding_{};
+  AlgorithmToAgentSignal algorithm_to_agent_signal_{};
+  InteractionInterventionRequest intervention_request_{};
+};
+
+void AgentTicker::Init(std::shared_ptr<agent::Agent> agent) {
+  agent_binding_ = std::move(agent);
+  algorithm_to_agent_signal_ = {};
+  intervention_request_ = {};
+  intervention_request_.enabled = true;
+}
+
+void AgentTicker::Tick(
+  const InputState& input,
+  Vec2 mouse_pixel,
+  float dt_seconds) {
+  algorithm_to_agent_signal_ = {};
+  if (!agent_binding_) {
+    return;
+  }
+
+  const agent::AgentTickContext context{
+    .input = &input,
+    .mouse_pixel = mouse_pixel,
+    .dt_seconds = dt_seconds,
+    .intervention_request = &intervention_request_,
+  };
+  agent_binding_->RefreshInterventionSignals(context);
+
+  std::vector<bool> allow_tick_mask(agent_binding_->algorithm_count(), true);
+  for (size_t i = 0; i < agent_binding_->algorithm_count(); ++i) {
+    const agent::AlgorithmObject* object = agent_binding_->algorithm_object(i);
+    const agent::AgentAlgorithmRuntimeState* runtime_state = agent_binding_->algorithm_runtime_state(i);
+    if (!object || !runtime_state) {
+      allow_tick_mask[i] = false;
+      continue;
+    }
+    if (_SignalBlocksTick(*object, runtime_state->agent_to_algorithm_signal)) {
+      allow_tick_mask[i] = false;
+    }
+  }
+
+  agent::AgentTickResult result{};
+  if (agent_binding_->Tick(context, allow_tick_mask, &result)) {
+    algorithm_to_agent_signal_ = result.algorithm_to_agent_signal;
+  } else {
+    algorithm_to_agent_signal_ = {};
+  }
+}
+
+void AgentTicker::Destroy() {
+  agent_binding_.reset();
+  algorithm_to_agent_signal_ = {};
+  intervention_request_ = {};
+}
+
 struct AgentManager::ManagedAgentEntry {
   std::shared_ptr<agent::Agent> agent{};
   AgentTicker ticker{};
-  uint32_t limit_fps_flag{120u};
+  uint32_t limit_fps_flag{common_data::DefaultAgentLimitFpsFlag()};
   bool one_shot_tick_consumed{false};
   std::chrono::steady_clock::time_point last_tick_time{};
   bool last_tick_time_valid{false};
@@ -276,7 +358,8 @@ bool AgentManager::AttachPipelineAlgorithmToAgent(
   size_t* out_algorithm_index,
   std::string* out_error_message,
   agent::AlgorithmExecutionPreference execution_preference,
-  agent::AlgorithmPipelineSubmissionMode submission_mode) {
+  agent::AlgorithmPipelineTopology topology,
+  agent::AlgorithmPipelineSyncMode sync_mode) {
   auto set_error = [&](const std::string& message) {
     if (out_error_message) {
       *out_error_message = message;
@@ -295,7 +378,8 @@ bool AgentManager::AttachPipelineAlgorithmToAgent(
         &algorithm_index,
         out_error_message,
         execution_preference,
-        submission_mode)) {
+        topology,
+        sync_mode)) {
     assert(false && "Failed to mount pipeline algorithm.");
     if (out_error_message && out_error_message->empty()) {
       set_error("Failed to mount pipeline algorithm.");

@@ -34,6 +34,8 @@ class ContainerItem:
     height: float = 0.0
     expand: bool = False
     locked: bool = False
+    reuse_chain_id: str = ""
+    reuse_chain_index: int = 0
 
 
 @dataclass
@@ -192,6 +194,14 @@ class ProjectState:
         while True:
             candidate = f"containerElement_{index}"
             if all(group.name != candidate for group in self.container_groups):
+                return candidate
+            index += 1
+
+    def next_container_reuse_chain_id(self) -> str:
+        index = 1
+        while True:
+            candidate = f"containerReuse_{index}"
+            if all(container.reuse_chain_id != candidate for container in self.containers):
                 return candidate
             index += 1
 
@@ -731,6 +741,8 @@ class ProjectState:
                 "width": container.width,
                 "height": container.height,
                 "expand": container.expand,
+                "reuseChainId": container.reuse_chain_id,
+                "reuseChainIndex": container.reuse_chain_index,
             }
             if container.kind == "variable":
                 variable_section[container.name] = entry
@@ -953,6 +965,8 @@ class ProjectState:
                         width=float(entry.get("width", 0.0)),
                         height=float(entry.get("height", 0.0)),
                         expand=cls._expand_flag(entry.get("expand"), False),
+                        reuse_chain_id=str(entry.get("reuseChainId") or ""),
+                        reuse_chain_index=int(entry.get("reuseChainIndex", 0)),
                     )
                 )
 
@@ -983,6 +997,8 @@ class ProjectState:
                         width=float(entry.get("width", 0.0)),
                         height=float(entry.get("height", 0.0)),
                         expand=cls._expand_flag(entry.get("expand"), False),
+                        reuse_chain_id=str(entry.get("reuseChainId") or ""),
+                        reuse_chain_index=int(entry.get("reuseChainIndex", 0)),
                     )
                 )
 
