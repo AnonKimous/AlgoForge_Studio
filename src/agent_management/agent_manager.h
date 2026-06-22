@@ -67,6 +67,12 @@ bool ReportAlgorithmPipelineStall(
   const AlgorithmPipelineStallReport& report,
   std::string* out_error_message = nullptr);
 
+bool ExportAlgorithmPipelineTimingArtifacts(
+  const AlgorithmPipelineStallReport& report,
+  std::string* out_csv_path = nullptr,
+  std::string* out_mermaid_path = nullptr,
+  std::string* out_error_message = nullptr);
+
 class AgentManager {
  public:
   AgentManager();

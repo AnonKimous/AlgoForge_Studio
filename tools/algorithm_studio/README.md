@@ -15,8 +15,11 @@ It provides:
 - `ToolNodes` includes `container`, `decomposer`, `reflector`, and `interventioner`
 - `ResNode` palette inserts a single `mesh` node; `decomposer.res.mesh` can expand to `edge`, `vertex`, and `normal`
 - double-click `Variable` / `Array` nodes to edit temporary values
-- double-click `Function` nodes to draft plan/code with the right-side model; plan mode writes solution text, code mode stages text back into the editor and waits for `Save`
-- mouse-wheel zoom scales the canvas and node text together; wheel over an `Array` node slides its preview window
+- double-click a node title bar, meaning the colored header area, to collapse or expand the node
+- double-clicking the node body should not be described as the generic collapse gesture
+- for most node kinds, a body double-click is treated as a zoom-style interaction instead of a collapse action
+- `fun` nodes are special: double-clicking the node body opens the script instead of collapsing the node
+- treat mouse-wheel on the scene canvas as canvas zoom; do not describe it as the normal way to move the canvas
 - the internal agent now talks through `agents.py` and `interface4agents.py`
 - `interface4agents` uses command scripts with one `cmd arg arg arg` line per command
 - `highlight` flashes the UI location for a command, such as `highlight v add` or `highlight scene container`
@@ -51,6 +54,10 @@ This is a UI-first prototype.
 - Left-drag blank canvas space to box-select containers into a new `container`.
 - Drag a node's header to move the node, drag its resize handle to stretch it.
 - Right-drag blank canvas space to pan the scene.
+- Mouse-wheel is for zooming the scene canvas, not for panning it.
+- Double-click the colored node header to collapse or expand a node.
+- Do not use “double-click the whole node to collapse” as the generic instruction.
+- `fun` nodes are special: double-clicking the node body opens the script view.
 - Drag from either an input port or an output port to create a connection.
 - `accessRules.md` in `tools\` controls rule-based chat approval.
 - The project can be extended later to generate C++ and trigger hot builds.

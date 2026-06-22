@@ -10,6 +10,8 @@
 #include <cassert>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -82,6 +84,21 @@ uint64_t _HashContainer(uint64_t hash, const algorithm::AlgorithmContainer& cont
     hash = _HashBytes(hash, container.bytes.data(), container.bytes.size());
   }
   return hash;
+}
+
+bool _ShouldEmitPipelineRunnerProbe(const std::string& pipeline_name) {
+  return pipeline_name.find("::runner_mount") != std::string::npos;
+}
+
+void _AppendPipelineRunnerProbe(const std::string& file_name, const std::string& line) {
+  const std::filesystem::path path =
+    std::filesystem::path("D:/gptsandbox/artifacts/pipeline_runner") / file_name;
+  std::error_code ec;
+  std::filesystem::create_directories(path.parent_path(), ec);
+  std::ofstream file(path, std::ios::binary | std::ios::app);
+  if (file) {
+    file << line << '\n';
+  }
 }
 
 uint64_t _HashContainerSet(uint64_t hash, const algorithm::AlgorithmContainerSet& container_set) {
@@ -389,6 +406,8 @@ bool _FindPipelineGroupRange(
 
 bool _CopyPipelineCircularLoopback(
   const algorithm::AlgorithmContainerSet& source_container_set,
+  uint32_t shared_variable_count,
+  uint32_t shared_array_count,
   AlgorithmObject* target_stage,
   std::string* out_error_message) {
   if (!target_stage || !target_stage->mutable_container_set()) {
@@ -406,14 +425,17 @@ bool _CopyPipelineCircularLoopback(
     }
     return false;
   }
-  if (source_container_set.standard_layout.layout_name != target_container_set->standard_layout.layout_name) {
+  if (source_container_set.standard_layout.variable_count < shared_variable_count ||
+      target_container_set->standard_layout.variable_count < shared_variable_count ||
+      source_container_set.standard_layout.array_count < shared_array_count ||
+      target_container_set->standard_layout.array_count < shared_array_count) {
     if (out_error_message) {
-      *out_error_message = "Circular pipeline loopback requires identical standard layouts.";
+      *out_error_message = "Circular pipeline loopback shared prefix is out of range.";
     }
     return false;
   }
 
-  for (uint32_t i = 0; i < source_container_set.standard_layout.variable_count; ++i) {
+  for (uint32_t i = 0; i < shared_variable_count; ++i) {
     const std::string slot_name = source_container_set.standard_layout.MakeVariableName(i);
     const algorithm::AlgorithmContainer* source_container =
       algorithm::FindAlgorithmContainer(source_container_set, slot_name);
@@ -434,7 +456,7 @@ bool _CopyPipelineCircularLoopback(
     std::memcpy(target_container->bytes.data(), source_container->bytes.data(), source_container->bytes.size());
   }
 
-  for (uint32_t i = 0; i < source_container_set.standard_layout.array_count; ++i) {
+  for (uint32_t i = 0; i < shared_array_count; ++i) {
     const std::string slot_name = source_container_set.standard_layout.MakeArrayName(i);
     const algorithm::AlgorithmContainer* source_container =
       algorithm::FindAlgorithmContainer(source_container_set, slot_name);
@@ -1211,14 +1233,26 @@ BuiltAlgorithmMount _BuildAlgorithmMount(
   AlgorithmExecutionPreference execution_preference,
   std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>* standard_shared_container_sets) {
   BuiltAlgorithmMount result{};
+  const bool emit_runner_probe = _ShouldEmitPipelineRunnerProbe(algorithm_name) ||
+    algorithm_name.find("v2a0_pipeline_square_vertex_demo") != std::string::npos;
 
   std::string error_message;
   AlgorithmObject object{};
+  if (emit_runner_probe) {
+    _AppendPipelineRunnerProbe(
+      "agent_mount_probe.log",
+      "build_mount.create_object.begin algorithm=" + algorithm_name);
+  }
   if (!CreateAlgorithmObjectByName(algorithm_name, &object, &error_message)) {
     result.error_message = error_message.empty()
       ? ("Failed to create algorithm object for '" + algorithm_name + "'.")
       : std::move(error_message);
     return result;
+  }
+  if (emit_runner_probe) {
+    _AppendPipelineRunnerProbe(
+      "agent_mount_probe.log",
+      "build_mount.create_object.end algorithm=" + algorithm_name);
   }
 
   object.resource_bindings = resource_bindings;
@@ -1249,6 +1283,11 @@ BuiltAlgorithmMount _BuildAlgorithmMount(
     }
   }
 
+  if (emit_runner_probe) {
+    _AppendPipelineRunnerProbe(
+      "agent_mount_probe.log",
+      "build_mount.finalize.begin algorithm=" + algorithm_name);
+  }
   if (!algorithm_management::FinalizeAlgorithmObject(
         object,
         container_set_handle.get(),
@@ -1257,6 +1296,11 @@ BuiltAlgorithmMount _BuildAlgorithmMount(
       ? ("Failed to finalize algorithm inputs for '" + algorithm_name + "'.")
       : std::move(error_message);
     return result;
+  }
+  if (emit_runner_probe) {
+    _AppendPipelineRunnerProbe(
+      "agent_mount_probe.log",
+      "build_mount.finalize.end algorithm=" + algorithm_name);
   }
 
   if (cache_shared_standard_container && !shared_key.empty()) {
@@ -1276,6 +1320,8 @@ bool CreateAlgorithmObjectByName(
   const std::string& algorithm_name,
   AlgorithmObject* out_group,
   std::string* out_error_message) {
+  const bool emit_runner_probe =
+    algorithm_name.find("v2a0_pipeline_square_vertex_demo") != std::string::npos;
   if (!out_group) {
     if (out_error_message) {
       *out_error_message = "AlgorithmObject output pointer is null.";
@@ -1285,6 +1331,11 @@ bool CreateAlgorithmObjectByName(
 
   algorithm::AlgorithmPackageLocation package_location{};
   std::string location_error_message;
+  if (emit_runner_probe) {
+    _AppendPipelineRunnerProbe(
+      "agent_mount_probe.log",
+      "create_object_by_name.resolve_location.begin algorithm=" + algorithm_name);
+  }
   if (!algorithm_management::TryResolveAlgorithmPackageLocation(
         algorithm_name,
         &package_location,
@@ -1296,8 +1347,24 @@ bool CreateAlgorithmObjectByName(
     }
     return false;
   }
+  if (emit_runner_probe) {
+    _AppendPipelineRunnerProbe(
+      "agent_mount_probe.log",
+      "create_object_by_name.resolve_location.end algorithm=" + algorithm_name +
+        " runtime_root=" + package_location.runtime_package_root.string());
+    _AppendPipelineRunnerProbe(
+      "agent_mount_probe.log",
+      "create_object_by_name.create_from_location.begin algorithm=" + algorithm_name);
+  }
 
-  return algorithm_management::CreateAlgorithmObjectFromLocation(package_location, out_group, out_error_message);
+  const bool created =
+    algorithm_management::CreateAlgorithmObjectFromLocation(package_location, out_group, out_error_message);
+  if (emit_runner_probe && created) {
+    _AppendPipelineRunnerProbe(
+      "agent_mount_probe.log",
+      "create_object_by_name.create_from_location.end algorithm=" + algorithm_name);
+  }
+  return created;
 }
 
 bool Agent::Init(AgentInitConfig config) {
@@ -1406,6 +1473,13 @@ bool Agent::MountPipelineAlgorithm(
       *out_error_message = message;
     }
   };
+  const bool emit_runner_probe = _ShouldEmitPipelineRunnerProbe(pipeline_name);
+  if (emit_runner_probe) {
+    _AppendPipelineRunnerProbe(
+      "agent_mount_probe.log",
+      "mount.begin pipeline=" + pipeline_name +
+        " stages=" + std::to_string(stage_submissions.size()));
+  }
 
   if (!initialized_) {
     set_error("Agent is not initialized.");
@@ -1430,6 +1504,12 @@ bool Agent::MountPipelineAlgorithm(
   bool pipeline_supports_circular_submission = false;
   for (size_t stage_index = 0; stage_index < stage_submissions.size(); ++stage_index) {
     const AlgorithmPipelineStageSubmission& stage_submission = stage_submissions[stage_index];
+    if (emit_runner_probe) {
+      _AppendPipelineRunnerProbe(
+        "agent_mount_probe.log",
+        "mount.build_stage.begin index=" + std::to_string(stage_index) +
+          " name=" + stage_submission.stage_name);
+    }
     if (stage_submission.stage_name.empty()) {
       set_error("Pipeline stage name must not be empty.");
       return false;
@@ -1449,6 +1529,12 @@ bool Agent::MountPipelineAlgorithm(
     if (!built_mount.ok) {
       set_error(built_mount.error_message);
       return false;
+    }
+    if (emit_runner_probe) {
+      _AppendPipelineRunnerProbe(
+        "agent_mount_probe.log",
+        "mount.build_stage.end index=" + std::to_string(stage_index) +
+          " algorithm=" + built_mount.object.algorithm_profile.algorithm_name);
     }
 
     if (!built_mount.container_set || !built_mount.container_set->standard_layout.enabled()) {
@@ -1479,6 +1565,9 @@ bool Agent::MountPipelineAlgorithm(
 
   std::shared_ptr<algorithm::AlgorithmRuntimeTransferMap> shared_pipeline_transfer_map{};
   std::string transfer_map_error_message;
+  if (emit_runner_probe) {
+    _AppendPipelineRunnerProbe("agent_mount_probe.log", "mount.transfer_map.begin");
+  }
   if (!_TryBuildMountedPipelineTransferMap(
         built_stages,
         &shared_pipeline_transfer_map,
@@ -1487,6 +1576,9 @@ bool Agent::MountPipelineAlgorithm(
       ? "Failed to build the mounted pipeline runtime transfer map."
       : std::move(transfer_map_error_message));
     return false;
+  }
+  if (emit_runner_probe) {
+    _AppendPipelineRunnerProbe("agent_mount_probe.log", "mount.transfer_map.end");
   }
   DEBUG_TOOL_ASSERT(
     shared_pipeline_transfer_map && shared_pipeline_transfer_map->valid,
@@ -1504,6 +1596,9 @@ bool Agent::MountPipelineAlgorithm(
 
   const size_t pipeline_begin_index = algorithm_objects_.size();
   size_t appended_count = 0u;
+  if (emit_runner_probe) {
+    _AppendPipelineRunnerProbe("agent_mount_probe.log", "mount.append_objects.begin");
+  }
   for (; appended_count < built_stages.size(); ++appended_count) {
     size_t stage_index = 0u;
     if (!AppendAlgorithmObject(std::move(built_stages[appended_count].object), &stage_index)) {
@@ -1516,6 +1611,14 @@ bool Agent::MountPipelineAlgorithm(
       set_error("Failed to append pipeline stage object.");
       return false;
     }
+    if (emit_runner_probe) {
+      _AppendPipelineRunnerProbe(
+        "agent_mount_probe.log",
+        "mount.append_objects.stage index=" + std::to_string(stage_index));
+    }
+  }
+  if (emit_runner_probe) {
+    _AppendPipelineRunnerProbe("agent_mount_probe.log", "mount.append_objects.end");
   }
 
   for (size_t i = 0; i < built_stages.size(); ++i) {
@@ -1528,6 +1631,9 @@ bool Agent::MountPipelineAlgorithm(
     algorithm_objects_[stage_index].pipeline_topology = topology;
     algorithm_objects_[stage_index].pipeline_sync_mode = sync_mode;
     MarkAlgorithmAssemblyReady(stage_index);
+  }
+  if (emit_runner_probe) {
+    _AppendPipelineRunnerProbe("agent_mount_probe.log", "mount.mark_ready.end");
   }
 
   PipelineRuntimeState pipeline_runtime_state{};
@@ -1545,6 +1651,9 @@ bool Agent::MountPipelineAlgorithm(
   }
   PipelineLaneRuntimeState initial_lane_state{};
   std::string lane_error_message;
+  if (emit_runner_probe) {
+    _AppendPipelineRunnerProbe("agent_mount_probe.log", "mount.initial_lane.begin");
+  }
   if (!_TryBuildInitialPipelineLaneRuntimeState(
         algorithm_objects_[pipeline_begin_index],
         built_stages.size(),
@@ -1561,6 +1670,9 @@ bool Agent::MountPipelineAlgorithm(
       : std::move(lane_error_message));
     return false;
   }
+  if (emit_runner_probe) {
+    _AppendPipelineRunnerProbe("agent_mount_probe.log", "mount.initial_lane.end");
+  }
   initial_lane_state.owner_agent_name = agent_name_;
   if (topology == AlgorithmPipelineTopology::NonCircular &&
       !initial_lane_state.stage_has_data.empty()) {
@@ -1571,8 +1683,11 @@ bool Agent::MountPipelineAlgorithm(
   ++pipeline_runtime_state.next_lane_id;
 
   if (execution_preference == AlgorithmExecutionPreference::Cpu) {
+    if (emit_runner_probe) {
+      _AppendPipelineRunnerProbe("agent_mount_probe.log", "mount.register_cpu_pipeline.begin");
+    }
     const bool registered = algorithm_management::AlgorithmScheduler::Instance().RegisterPipeline(
-      runtime_systems::CpuPipelineRegistration{
+      algorithm_management::CpuPipelineRegistration{
         .pipeline_name = pipeline_name,
         .root_stage_name = algorithm_objects_[pipeline_begin_index].algorithm_profile.algorithm_name,
         .stage_count = static_cast<uint32_t>(built_stages.size()),
@@ -1589,6 +1704,10 @@ bool Agent::MountPipelineAlgorithm(
       }
       return false;
     }
+    if (emit_runner_probe) {
+      _AppendPipelineRunnerProbe("agent_mount_probe.log", "mount.register_cpu_pipeline.end");
+      _AppendPipelineRunnerProbe("agent_mount_probe.log", "mount.register_runtime.begin");
+    }
     const bool runtime_registered = algorithm_management::AlgorithmScheduler::Instance().RegisterPipelineRuntime(
       pipeline_name,
       agent_name_,
@@ -1600,7 +1719,13 @@ bool Agent::MountPipelineAlgorithm(
       }
       return false;
     }
+    if (emit_runner_probe) {
+      _AppendPipelineRunnerProbe("agent_mount_probe.log", "mount.register_runtime.end");
+    }
   } else {
+    if (emit_runner_probe) {
+      _AppendPipelineRunnerProbe("agent_mount_probe.log", "mount.register_runtime.begin");
+    }
     const bool runtime_registered = algorithm_management::AlgorithmScheduler::Instance().RegisterPipelineRuntime(
       pipeline_name,
       agent_name_,
@@ -1611,6 +1736,9 @@ bool Agent::MountPipelineAlgorithm(
         RemoveAlgorithm(algorithm_objects_.size() - 1u);
       }
       return false;
+    }
+    if (emit_runner_probe) {
+      _AppendPipelineRunnerProbe("agent_mount_probe.log", "mount.register_runtime.end");
     }
   }
 
@@ -1619,6 +1747,9 @@ bool Agent::MountPipelineAlgorithm(
   }
   if (out_error_message) {
     out_error_message->clear();
+  }
+  if (emit_runner_probe) {
+    _AppendPipelineRunnerProbe("agent_mount_probe.log", "mount.end");
   }
   return true;
 }
@@ -2127,6 +2258,25 @@ bool Agent::SubmitAlgorithm(
       AgentAlgorithmRuntimeState& runtime_state = updated_runtime_states[index];
       const auto stage_begin = std::chrono::steady_clock::now();
       algorithm_support::PipelineStageBridge bridge(object.runtime_transfer_map);
+      std::string ingress_error_message;
+      if (!bridge.IngestFromPreviousStage(
+            object.algorithm_profile.algorithm_name,
+            stage_container_sets,
+            object.mutable_container_set(),
+            &ingress_error_message)) {
+        const std::string failure_message = ingress_error_message.empty()
+          ? std::string("Failed to ingest pipeline stage input.")
+          : std::move(ingress_error_message);
+        DEBUG_TOOL_ASSERT(false, failure_message.c_str());
+        runtime_state.algorithm_to_agent_signal.stop_requested = true;
+        _SetPipelineStageRuntimeReason(
+          pipeline_stage_runtime_stats,
+          object.algorithm_profile.algorithm_name,
+          "Ingress failed: " + failure_message);
+        _MergeAlgorithmToAgentSignal(runtime_state.algorithm_to_agent_signal, &out_result->algorithm_to_agent_signal);
+        pipeline_processing_failed = true;
+        return;
+      }
       std::string ingress_debug_error_message;
       if (!bridge.CaptureIngressDebugSet(
             object.pipeline_name,
@@ -2219,9 +2369,29 @@ bool Agent::SubmitAlgorithm(
           pipeline_state.exit_reflection_snapshot_valid = false;
         }
         if (pipeline_state.topology == AlgorithmPipelineTopology::Circular) {
+          if (!bridge.EmitToNextStage(
+                object.algorithm_profile.algorithm_name,
+                *source_container_set,
+                &stage_container_sets,
+                &egress_error_message)) {
+            const std::string failure_message = egress_error_message.empty()
+              ? std::string("Failed to emit circular pipeline stage output.")
+              : std::move(egress_error_message);
+            DEBUG_TOOL_ASSERT(false, failure_message.c_str());
+            updated_runtime_states[index].algorithm_to_agent_signal.stop_requested = true;
+            _SetPipelineStageRuntimeReason(
+              pipeline_stage_runtime_stats,
+              object.algorithm_profile.algorithm_name,
+              "Egress failed: " + failure_message);
+            _MergeAlgorithmToAgentSignal(updated_runtime_states[index].algorithm_to_agent_signal, &out_result->algorithm_to_agent_signal);
+            pipeline_processing_failed = true;
+            return;
+          }
           std::string loopback_error_message;
           if (!_CopyPipelineCircularLoopback(
                 *source_container_set,
+                object.runtime_transfer_map->pipeline_shared_variable_count,
+                object.runtime_transfer_map->pipeline_shared_array_count,
                 &algorithm_objects_[begin_index],
                 &loopback_error_message)) {
             const std::string failure_message = loopback_error_message.empty()

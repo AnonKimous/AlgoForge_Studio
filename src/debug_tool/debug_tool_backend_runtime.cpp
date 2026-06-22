@@ -78,6 +78,21 @@ std::string _MakeCIdentifier(const std::string& text) {
   return result;
 }
 
+bool _ShouldEmitPipelineRunnerProbe(const std::string& pipeline_name) {
+  return pipeline_name.find("::runner_mount") != std::string::npos;
+}
+
+void _AppendPipelineRunnerProbe(const std::string& file_name, const std::string& line) {
+  const std::filesystem::path path =
+    std::filesystem::path("D:/gptsandbox/artifacts/pipeline_runner") / file_name;
+  std::error_code ec;
+  std::filesystem::create_directories(path.parent_path(), ec);
+  std::ofstream file(path, std::ios::binary | std::ios::app);
+  if (file) {
+    file << line << '\n';
+  }
+}
+
 std::string _HotReloadBuildCommand(const std::string& algorithm_name) {
   const std::string root = _ProjectRootPath();
   const std::string script_path = (std::filesystem::path(root) / "build_algorithm.bat").string();
@@ -346,7 +361,7 @@ debug_tool::AlgorithmRuntimeSummary _ToDebugToolAlgorithmRuntimeSummary(
     }
   }
   const agent::AlgorithmReflectionSnapshot* reflection_snapshot = nullptr;
-  runtime_systems::CpuPipelineRuntimeState pipeline_runtime_state{};
+  algorithm_management::CpuPipelineRuntimeState pipeline_runtime_state{};
   if (object->pipeline_stage &&
       object->pipeline_stage_index == 0u &&
       !object->pipeline_name.empty() &&
@@ -908,6 +923,13 @@ bool DebugToolBackendRuntime::AttachPipelinePackageToAgent(
   std::string* out_error_message,
   debug_tool::AlgorithmExecutionPreference execution_preference) {
   const bool include_stage0_bindings = _IsPipelineResourceBatchSubmissionName(pipeline_name);
+  if (_ShouldEmitPipelineRunnerProbe(pipeline_name)) {
+    _AppendPipelineRunnerProbe(
+      "backend_attach_probe.log",
+      "attach.begin include_stage0=" + std::string(include_stage0_bindings ? "true" : "false") +
+        " pipeline=" + pipeline_name +
+        " algorithm=" + pipeline_algorithm_name);
+  }
   if (include_stage0_bindings) {
     const std::shared_ptr<agent::Agent> managed_agent = agent_manager_.agent(agent_index);
     std::string mounted_pipeline_name{};
@@ -937,6 +959,9 @@ bool DebugToolBackendRuntime::AttachPipelinePackageToAgent(
   }
 
   std::vector<debug_tool::AlgorithmPipelineStageSubmission> stage_submissions{};
+  if (_ShouldEmitPipelineRunnerProbe(pipeline_name)) {
+    _AppendPipelineRunnerProbe("backend_attach_probe.log", "attach.build_stage_submissions.begin");
+  }
   if (!_BuildPipelineStageSubmissionsFromPackage(
         pipeline_algorithm_name,
         resource_bindings,
@@ -947,8 +972,21 @@ bool DebugToolBackendRuntime::AttachPipelinePackageToAgent(
     DEBUG_TOOL_ASSERT(false, "Failed to expand pipeline stage submissions.");
     return false;
   }
+  if (_ShouldEmitPipelineRunnerProbe(pipeline_name)) {
+    _AppendPipelineRunnerProbe(
+      "backend_attach_probe.log",
+      "attach.build_stage_submissions.end count=" + std::to_string(stage_submissions.size()));
+    for (size_t i = 0; i < stage_submissions.size(); ++i) {
+      _AppendPipelineRunnerProbe(
+        "backend_attach_probe.log",
+        "attach.stage_submission[" + std::to_string(i) + "]=" + stage_submissions[i].stage_name);
+    }
+  }
 
   size_t attached_algorithm_index = 0u;
+  if (_ShouldEmitPipelineRunnerProbe(pipeline_name)) {
+    _AppendPipelineRunnerProbe("backend_attach_probe.log", "attach.agent_manager_mount.begin");
+  }
   const bool attached = agent_manager_.AttachPipelineAlgorithmToAgent(
     agent_index,
     pipeline_name,
@@ -961,6 +999,11 @@ bool DebugToolBackendRuntime::AttachPipelinePackageToAgent(
   if (!attached) {
     DEBUG_TOOL_ASSERT(false, "Failed to attach pipeline package to the built-in agent.");
     return false;
+  }
+  if (_ShouldEmitPipelineRunnerProbe(pipeline_name)) {
+    _AppendPipelineRunnerProbe(
+      "backend_attach_probe.log",
+      "attach.agent_manager_mount.end index=" + std::to_string(attached_algorithm_index));
   }
 
   if (out_algorithm_index) {
@@ -986,6 +1029,11 @@ bool DebugToolBackendRuntime::AttachPipelinePackageToAgent(
       return false;
     }
     const uint32_t pipeline_stage_count = root_stage->pipeline_stage_count;
+    if (_ShouldEmitPipelineRunnerProbe(pipeline_name)) {
+      _AppendPipelineRunnerProbe(
+        "backend_attach_probe.log",
+        "attach.mark_waiting.begin stage_count=" + std::to_string(pipeline_stage_count));
+    }
     for (uint32_t stage_offset = 0u; stage_offset < pipeline_stage_count; ++stage_offset) {
       const size_t stage_index = attached_algorithm_index + static_cast<size_t>(stage_offset);
       const bool marked_waiting = managed_agent->BeginAlgorithmAssembly(stage_index);
@@ -998,6 +1046,9 @@ bool DebugToolBackendRuntime::AttachPipelinePackageToAgent(
         }
         return false;
       }
+    }
+    if (_ShouldEmitPipelineRunnerProbe(pipeline_name)) {
+      _AppendPipelineRunnerProbe("backend_attach_probe.log", "attach.mark_waiting.end");
     }
   }
   return attached;
@@ -1587,7 +1638,7 @@ bool DebugToolBackendRuntime::BuildRenderPreviewRequest(
   }
 
   const agent::AlgorithmReflectionSnapshot* reflection_snapshot = nullptr;
-  runtime_systems::CpuPipelineRuntimeState pipeline_runtime_state{};
+  algorithm_management::CpuPipelineRuntimeState pipeline_runtime_state{};
   if (object->pipeline_stage &&
       object->pipeline_stage_index == 0u &&
       !object->pipeline_name.empty() &&

@@ -137,6 +137,60 @@ struct AlgorithmReflectionSnapshot {
   }
 };
 
+struct CpuPipelineRegistration {
+  std::string pipeline_name;
+  std::string root_stage_name;
+  uint32_t stage_count{0u};
+  AlgorithmPipelineTopology topology{AlgorithmPipelineTopology::NonCircular};
+  AlgorithmPipelineSyncMode sync_mode{AlgorithmPipelineSyncMode::Forced};
+  uint32_t max_concurrent_stage0_submissions{0u};
+  std::string mandatory_stage_buffer_slot_name;
+};
+
+struct CpuPendingPipelineStage0Submission {
+  std::string owner_agent_name{};
+  uint64_t lane_id{0u};
+  bool loop_lane_active{false};
+  std::shared_ptr<algorithm::AlgorithmContainerSet> prepared_container_set{};
+  std::vector<AlgorithmResourceBinding> resource_bindings;
+  std::vector<AlgorithmDescriptorValue> descriptor_values;
+};
+
+struct CpuPipelineInterStageBufferRuntimeState {
+  std::string standard_container_slot_name{};
+  uint32_t scalar_slot_count{0u};
+  std::vector<float> scalar_slots{};
+  bool valid{false};
+};
+
+struct CpuPipelineLaneRuntimeState {
+  std::string owner_agent_name{};
+  uint64_t lane_id{0u};
+  bool loop_lane_active{false};
+  std::shared_ptr<algorithm::AlgorithmContainerSet> standard_container_set{};
+  std::vector<AlgorithmResourceBinding> resource_bindings{};
+  std::vector<AlgorithmDescriptorValue> descriptor_values{};
+  std::vector<bool> stage_has_data{};
+  CpuPipelineInterStageBufferRuntimeState inter_stage_buffer{};
+  bool valid{false};
+};
+
+struct CpuPipelineRuntimeState {
+  std::string owner_agent_name{};
+  AlgorithmPipelineTopology topology{AlgorithmPipelineTopology::NonCircular};
+  AlgorithmPipelineSyncMode sync_mode{AlgorithmPipelineSyncMode::Forced};
+  uint32_t max_concurrent_stage0_submissions{0u};
+  uint64_t next_lane_id{1u};
+  uint64_t current_lane_id{0u};
+  std::string mandatory_stage_buffer_slot_name{};
+  std::vector<CpuPipelineLaneRuntimeState> lanes{};
+  std::vector<bool> stage_has_data{};
+  std::vector<CpuPendingPipelineStage0Submission> pending_stage0_submissions{};
+  AlgorithmReflectionSnapshot exit_reflection_snapshot{};
+  bool exit_reflection_snapshot_valid{false};
+  bool stage0_saturated{false};
+};
+
 struct AlgorithmPackageDebugState {
   std::vector<AdvancedAlgorithmDebugSignal> signals;
 };
@@ -282,6 +336,7 @@ class AlgorithmObject {
   AlgorithmPipelineSyncMode pipeline_sync_mode{AlgorithmPipelineSyncMode::Forced};
   std::vector<AlgorithmResourceBinding> resource_bindings;
   std::vector<AlgorithmDescriptorValue> descriptor_values;
+  std::vector<std::string> pipeline_external_write_reset_container_names;
   bool cpu_symbol{true};
   bool gpu_symbol{true};
   AlgorithmMountMode mount_mode{AlgorithmMountMode::Direct};

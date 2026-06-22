@@ -2,8 +2,12 @@
 #include "agent_manager.h"
 #undef AGENT_MANAGEMENT_LAYER_INTERNAL_BUILD
 
+#include "algorithm_support/algorithm_library_paths.h"
+
 #include <cassert>
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <memory>
@@ -12,9 +16,177 @@
 
 namespace agent_management {
 
+namespace {
+
+std::string _SanitizePipelineTimingExportName(const std::string& name) {
+  if (name.empty()) {
+    return "pipeline";
+  }
+
+  std::string sanitized{};
+  sanitized.reserve(name.size());
+  for (const char ch : name) {
+    const bool keep =
+      (ch >= 'a' && ch <= 'z') ||
+      (ch >= 'A' && ch <= 'Z') ||
+      (ch >= '0' && ch <= '9') ||
+      ch == '_' ||
+      ch == '-';
+    sanitized.push_back(keep ? ch : '_');
+  }
+  return sanitized.empty() ? std::string("pipeline") : sanitized;
+}
+
+std::filesystem::path _ResolvePipelineTimingExportDirectory() {
+  const std::filesystem::path algorithm_library_root =
+    algorithm::library_paths::ResolveAlgorithmLibrarySourceRoot();
+  const std::filesystem::path project_root =
+    algorithm::library_paths::ResolveProjectRootFromAlgorithmLibraryRoot(algorithm_library_root);
+  if (!project_root.empty()) {
+    return project_root / "artifacts" / "pipeline_timing";
+  }
+  return std::filesystem::current_path() / "artifacts" / "pipeline_timing";
+}
+
+bool _ExportAlgorithmPipelineTimingArtifacts(
+  const AlgorithmPipelineStallReport& report,
+  std::string* out_csv_path,
+  std::string* out_mermaid_path,
+  std::string* out_error_message) {
+  namespace fs = std::filesystem;
+
+  const uint64_t export_stamp =
+    static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::system_clock::now().time_since_epoch()).count());
+  const std::string export_name =
+    _SanitizePipelineTimingExportName(report.algorithm_name.empty() ? std::string("pipeline") : report.algorithm_name);
+  const fs::path export_directory = _ResolvePipelineTimingExportDirectory();
+
+  std::error_code create_directory_error;
+  fs::create_directories(export_directory, create_directory_error);
+  if (create_directory_error) {
+    if (out_error_message) {
+      *out_error_message =
+        "Failed to create pipeline timing export directory: " + export_directory.string();
+    }
+    return false;
+  }
+
+  const fs::path csv_path =
+    export_directory / (export_name + "_" + std::to_string(export_stamp) + ".csv");
+  const fs::path mermaid_path =
+    export_directory / (export_name + "_" + std::to_string(export_stamp) + ".mmd");
+
+  {
+    std::ofstream csv_file(csv_path, std::ios::binary | std::ios::trunc);
+    if (!csv_file) {
+      if (out_error_message) {
+        *out_error_message = "Failed to open pipeline timing CSV export: " + csv_path.string();
+      }
+      return false;
+    }
+    csv_file << "stage_name,elapsed_seconds,reason\n";
+    for (const auto& stage_stat : report.stage_runtime_stats) {
+      std::string escaped_reason = stage_stat.reason;
+      size_t comma_pos = escaped_reason.find('"');
+      while (comma_pos != std::string::npos) {
+        escaped_reason.insert(comma_pos, 1u, '"');
+        comma_pos = escaped_reason.find('"', comma_pos + 2u);
+      }
+      csv_file << '"' << stage_stat.stage_name << '"' << ','
+               << stage_stat.elapsed_seconds << ','
+               << '"' << escaped_reason << '"' << '\n';
+    }
+  }
+
+  {
+    float max_elapsed_seconds = 0.0f;
+    for (const auto& stage_stat : report.stage_runtime_stats) {
+      max_elapsed_seconds = std::max(max_elapsed_seconds, stage_stat.elapsed_seconds);
+    }
+    if (max_elapsed_seconds <= 0.0f) {
+      max_elapsed_seconds = 1.0f;
+    }
+
+    std::ofstream mermaid_file(mermaid_path, std::ios::binary | std::ios::trunc);
+    if (!mermaid_file) {
+      if (out_error_message) {
+        *out_error_message = "Failed to open pipeline timing Mermaid export: " + mermaid_path.string();
+      }
+      return false;
+    }
+
+    mermaid_file << "xychart-beta\n";
+    mermaid_file << "    title \"Pipeline Timing - "
+                 << (report.algorithm_name.empty() ? "pipeline" : report.algorithm_name)
+                 << "\"\n";
+    mermaid_file << "    x-axis [";
+    for (size_t i = 0u; i < report.stage_runtime_stats.size(); ++i) {
+      if (i > 0u) {
+        mermaid_file << ", ";
+      }
+      mermaid_file << '"' << report.stage_runtime_stats[i].stage_name << '"';
+    }
+    mermaid_file << "]\n";
+    mermaid_file << "    y-axis \"seconds\" 0 --> " << max_elapsed_seconds << '\n';
+    mermaid_file << "    bar [";
+    for (size_t i = 0u; i < report.stage_runtime_stats.size(); ++i) {
+      if (i > 0u) {
+        mermaid_file << ", ";
+      }
+      mermaid_file << report.stage_runtime_stats[i].elapsed_seconds;
+    }
+    mermaid_file << "]\n";
+  }
+
+  if (out_csv_path) {
+    *out_csv_path = csv_path.string();
+  }
+  if (out_mermaid_path) {
+    *out_mermaid_path = mermaid_path.string();
+  }
+  if (out_error_message) {
+    out_error_message->clear();
+  }
+  return true;
+}
+
+}  // namespace
+
+bool ExportAlgorithmPipelineTimingArtifacts(
+  const AlgorithmPipelineStallReport& report,
+  std::string* out_csv_path,
+  std::string* out_mermaid_path,
+  std::string* out_error_message) {
+  return _ExportAlgorithmPipelineTimingArtifacts(
+    report,
+    out_csv_path,
+    out_mermaid_path,
+    out_error_message);
+}
+
 bool ReportAlgorithmPipelineStall(
   const AlgorithmPipelineStallReport& report,
   std::string* out_error_message) {
+  std::string csv_export_path{};
+  std::string mermaid_export_path{};
+  std::string export_error_message{};
+  if (!ExportAlgorithmPipelineTimingArtifacts(
+        report,
+        &csv_export_path,
+        &mermaid_export_path,
+        &export_error_message)) {
+    if (out_error_message) {
+      *out_error_message = export_error_message.empty()
+        ? "Failed to export pipeline timing artifacts."
+        : std::move(export_error_message);
+    }
+#ifndef NDEBUG
+    assert(false && "Failed to export pipeline timing artifacts.");
+#endif
+    return false;
+  }
+
   std::ostringstream stream;
   stream << "Pipeline algorithm stalled";
   if (!report.algorithm_name.empty()) {
@@ -34,6 +206,8 @@ bool ReportAlgorithmPipelineStall(
     }
     stream << '\n';
   }
+  stream << "  timing csv: " << csv_export_path << '\n';
+  stream << "  timing mermaid: " << mermaid_export_path << '\n';
 
   const std::string log_text = stream.str();
   std::cerr << log_text;

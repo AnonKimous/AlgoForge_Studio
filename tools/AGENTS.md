@@ -88,6 +88,14 @@ Compression must preserve:
 - If the user asks for真实函数/真实shader/C++代码, prefer updating the `fun` node script.
 - For minimal demo algorithms, especially descriptor-driven single-point motion demos, read `tools/skills/algorithm-studio-minimal-demo/SKILL.md` first and follow its scope rules before editing the scene.
 
+### Canvas Interaction Notes
+
+- When describing Algorithm Studio interactions, treat the colored node header as the node title bar.
+- The generic collapse / expand gesture is double-clicking that colored node header, not double-clicking anywhere on the node body.
+- Do not describe mouse-wheel as the normal way to pan the scene canvas; for agent guidance, mouse-wheel should be treated as canvas zoom.
+- Do not describe “double-click the whole node to collapse” as a universal rule.
+- `fun` nodes are special: double-clicking the node body opens the script instead of collapsing the node.
+
 ### Standard Slot Alias Rule
 
 - Standard-slot aliases are tool-side semantics only.

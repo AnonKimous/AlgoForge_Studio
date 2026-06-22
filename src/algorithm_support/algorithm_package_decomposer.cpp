@@ -819,9 +819,54 @@ bool _WriteArrayScalarAt(
   return true;
 }
 
+bool _ReadCpuInterStageScalarAt(
+  const algorithm_management::CpuPipelineInterStageBufferRuntimeState& inter_stage_buffer,
+  uint32_t index,
+  float* out_value,
+  std::string* out_error_message) {
+  if (!inter_stage_buffer.valid) {
+    _SetErrorMessage(out_error_message, "CPU pipeline inter-stage buffer is invalid.");
+    return false;
+  }
+  if (!out_value) {
+    _SetErrorMessage(out_error_message, "CPU pipeline inter-stage buffer read output pointer is null.");
+    return false;
+  }
+  if (index >= inter_stage_buffer.scalar_slots.size() ||
+      index >= inter_stage_buffer.scalar_slot_count) {
+    _SetErrorMessage(out_error_message, "CPU pipeline inter-stage buffer scalar read is out of range.");
+    return false;
+  }
+  *out_value = inter_stage_buffer.scalar_slots[index];
+  return true;
+}
+
+bool _WriteCpuInterStageScalarAt(
+  algorithm_management::CpuPipelineInterStageBufferRuntimeState* inter_stage_buffer,
+  uint32_t index,
+  float value,
+  std::string* out_error_message) {
+  if (!inter_stage_buffer) {
+    _SetErrorMessage(out_error_message, "CPU pipeline inter-stage buffer write target is null.");
+    return false;
+  }
+  if (!inter_stage_buffer->valid) {
+    _SetErrorMessage(out_error_message, "CPU pipeline inter-stage buffer is invalid.");
+    return false;
+  }
+  if (index >= inter_stage_buffer->scalar_slots.size() ||
+      index >= inter_stage_buffer->scalar_slot_count) {
+    _SetErrorMessage(out_error_message, "CPU pipeline inter-stage buffer scalar write is out of range.");
+    return false;
+  }
+  inter_stage_buffer->scalar_slots[index] = value;
+  return true;
+}
+
 bool _ApplyImplicitStageBufferIngress(
   const algorithm::AlgorithmRuntimeTransferMap& transfer_map,
   const std::string& target_stage_name,
+  const algorithm_management::CpuPipelineInterStageBufferRuntimeState* inter_stage_buffer,
   algorithm::AlgorithmContainerSet* target_container_set,
   std::unordered_set<std::string>* written_target_names,
   std::string* out_error_message) {
@@ -846,16 +891,6 @@ bool _ApplyImplicitStageBufferIngress(
   }
   if (stage_layout->extra_variable_count == 0u) {
     return true;
-  }
-
-  algorithm::AlgorithmContainer* stage_buffer =
-    algorithm::FindAlgorithmContainer(target_container_set, transfer_map.pipeline_shared_stage_buffer_slot_name);
-  if (!stage_buffer) {
-    _SetErrorMessage(
-      out_error_message,
-      "Pipeline implicit stage buffer ingress cannot find shared stage buffer '" +
-        transfer_map.pipeline_shared_stage_buffer_slot_name + "' for stage '" + target_stage_name + "'.");
-    return false;
   }
 
   for (uint32_t extra_index = 0u; extra_index < stage_layout->extra_variable_count; ++extra_index) {
@@ -888,12 +923,31 @@ bool _ApplyImplicitStageBufferIngress(
     }
 
     float value = 0.0f;
-    if (!_ReadArrayScalarAt(
-          *stage_buffer,
-          stage_layout->extra_variable_offset + extra_index,
-          &value,
-          out_error_message)) {
-      return false;
+    if (inter_stage_buffer) {
+      if (!_ReadCpuInterStageScalarAt(
+            *inter_stage_buffer,
+            stage_layout->extra_variable_offset + extra_index,
+            &value,
+            out_error_message)) {
+        return false;
+      }
+    } else {
+      algorithm::AlgorithmContainer* stage_buffer =
+        algorithm::FindAlgorithmContainer(target_container_set, transfer_map.pipeline_shared_stage_buffer_slot_name);
+      if (!stage_buffer) {
+        _SetErrorMessage(
+          out_error_message,
+          "Pipeline implicit stage buffer ingress cannot find shared stage buffer '" +
+            transfer_map.pipeline_shared_stage_buffer_slot_name + "' for stage '" + target_stage_name + "'.");
+        return false;
+      }
+      if (!_ReadArrayScalarAt(
+            *stage_buffer,
+            stage_layout->extra_variable_offset + extra_index,
+            &value,
+            out_error_message)) {
+        return false;
+      }
     }
     std::memcpy(target_variable->bytes.data(), &value, sizeof(float));
     written_target_names->insert(variable_name);
@@ -906,6 +960,7 @@ bool _ApplyImplicitStageBufferEgress(
   const algorithm::AlgorithmRuntimeTransferMap& transfer_map,
   const std::string& source_stage_name,
   const algorithm::AlgorithmContainerSet& source_container_set,
+  algorithm_management::CpuPipelineInterStageBufferRuntimeState* inter_stage_buffer,
   std::string* out_error_message) {
   const algorithm::AlgorithmRuntimeTransferStageLayout* stage_layout =
     _FindRuntimeTransferStageLayout(transfer_map, source_stage_name);
@@ -924,18 +979,6 @@ bool _ApplyImplicitStageBufferEgress(
   }
   if (stage_layout->extra_variable_count == 0u) {
     return true;
-  }
-
-  algorithm::AlgorithmContainer* stage_buffer =
-    algorithm::FindAlgorithmContainer(
-      const_cast<algorithm::AlgorithmContainerSet*>(&source_container_set),
-      transfer_map.pipeline_shared_stage_buffer_slot_name);
-  if (!stage_buffer) {
-    _SetErrorMessage(
-      out_error_message,
-      "Pipeline implicit stage buffer egress cannot find shared stage buffer '" +
-        transfer_map.pipeline_shared_stage_buffer_slot_name + "' for stage '" + source_stage_name + "'.");
-    return false;
   }
 
   for (uint32_t extra_index = 0u; extra_index < stage_layout->extra_variable_count; ++extra_index) {
@@ -961,12 +1004,33 @@ bool _ApplyImplicitStageBufferEgress(
 
     float value = 0.0f;
     std::memcpy(&value, source_variable->bytes.data(), sizeof(float));
-    if (!_WriteArrayScalarAt(
-          stage_buffer,
-          stage_layout->extra_variable_offset + extra_index,
-          value,
-          out_error_message)) {
-      return false;
+    if (inter_stage_buffer) {
+      if (!_WriteCpuInterStageScalarAt(
+            inter_stage_buffer,
+            stage_layout->extra_variable_offset + extra_index,
+            value,
+            out_error_message)) {
+        return false;
+      }
+    } else {
+      algorithm::AlgorithmContainer* stage_buffer =
+        algorithm::FindAlgorithmContainer(
+          const_cast<algorithm::AlgorithmContainerSet*>(&source_container_set),
+          transfer_map.pipeline_shared_stage_buffer_slot_name);
+      if (!stage_buffer) {
+        _SetErrorMessage(
+          out_error_message,
+          "Pipeline implicit stage buffer egress cannot find shared stage buffer '" +
+            transfer_map.pipeline_shared_stage_buffer_slot_name + "' for stage '" + source_stage_name + "'.");
+        return false;
+      }
+      if (!_WriteArrayScalarAt(
+            stage_buffer,
+            stage_layout->extra_variable_offset + extra_index,
+            value,
+            out_error_message)) {
+        return false;
+      }
     }
   }
 
@@ -1002,10 +1066,11 @@ bool QueryAlgorithmPackageRequestedBindingsFromLocation(
   return true;
 }
 
-bool PipelineStageBridgeIngress(
+bool _PipelineStageBridgeIngressImpl(
   const algorithm::AlgorithmRuntimeTransferMap& transfer_map,
   const std::string& target_stage_name,
   const std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>& stage_container_sets,
+  const algorithm_management::CpuPipelineInterStageBufferRuntimeState* inter_stage_buffer,
   algorithm::AlgorithmContainerSet* out_target_container_set,
   std::string* out_error_message) {
   if (!transfer_map.valid) {
@@ -1044,6 +1109,7 @@ bool PipelineStageBridgeIngress(
   if (!_ApplyImplicitStageBufferIngress(
         transfer_map,
         target_stage_name,
+        inter_stage_buffer,
         out_target_container_set,
         &written_target_names,
         out_error_message)) {
@@ -1056,10 +1122,42 @@ bool PipelineStageBridgeIngress(
   return true;
 }
 
-bool PipelineStageBridgeEgress(
+bool PipelineStageBridgeIngress(
+  const algorithm::AlgorithmRuntimeTransferMap& transfer_map,
+  const std::string& target_stage_name,
+  const std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>& stage_container_sets,
+  algorithm::AlgorithmContainerSet* out_target_container_set,
+  std::string* out_error_message) {
+  return _PipelineStageBridgeIngressImpl(
+    transfer_map,
+    target_stage_name,
+    stage_container_sets,
+    nullptr,
+    out_target_container_set,
+    out_error_message);
+}
+
+bool PipelineStageBridgeIngress(
+  const algorithm::AlgorithmRuntimeTransferMap& transfer_map,
+  const std::string& target_stage_name,
+  const std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>& stage_container_sets,
+  const algorithm_management::CpuPipelineInterStageBufferRuntimeState& inter_stage_buffer,
+  algorithm::AlgorithmContainerSet* out_target_container_set,
+  std::string* out_error_message) {
+  return _PipelineStageBridgeIngressImpl(
+    transfer_map,
+    target_stage_name,
+    stage_container_sets,
+    &inter_stage_buffer,
+    out_target_container_set,
+    out_error_message);
+}
+
+bool _PipelineStageBridgeEgressImpl(
   const algorithm::AlgorithmRuntimeTransferMap& transfer_map,
   const std::string& source_stage_name,
   const algorithm::AlgorithmContainerSet& source_container_set,
+  algorithm_management::CpuPipelineInterStageBufferRuntimeState* inter_stage_buffer,
   std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>* stage_container_sets,
   std::string* out_error_message) {
   if (!transfer_map.valid) {
@@ -1074,6 +1172,7 @@ bool PipelineStageBridgeEgress(
         transfer_map,
         source_stage_name,
         source_container_set,
+        inter_stage_buffer,
         out_error_message)) {
     return false;
   }
@@ -1113,6 +1212,37 @@ bool PipelineStageBridgeEgress(
     out_error_message->clear();
   }
   return true;
+}
+
+bool PipelineStageBridgeEgress(
+  const algorithm::AlgorithmRuntimeTransferMap& transfer_map,
+  const std::string& source_stage_name,
+  const algorithm::AlgorithmContainerSet& source_container_set,
+  std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>* stage_container_sets,
+  std::string* out_error_message) {
+  return _PipelineStageBridgeEgressImpl(
+    transfer_map,
+    source_stage_name,
+    source_container_set,
+    nullptr,
+    stage_container_sets,
+    out_error_message);
+}
+
+bool PipelineStageBridgeEgress(
+  const algorithm::AlgorithmRuntimeTransferMap& transfer_map,
+  const std::string& source_stage_name,
+  const algorithm::AlgorithmContainerSet& source_container_set,
+  algorithm_management::CpuPipelineInterStageBufferRuntimeState* inter_stage_buffer,
+  std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>* stage_container_sets,
+  std::string* out_error_message) {
+  return _PipelineStageBridgeEgressImpl(
+    transfer_map,
+    source_stage_name,
+    source_container_set,
+    inter_stage_buffer,
+    stage_container_sets,
+    out_error_message);
 }
 
 bool PipelineStageBridgeCaptureIngressDebugSet(

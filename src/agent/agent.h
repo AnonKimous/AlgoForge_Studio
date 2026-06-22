@@ -114,10 +114,10 @@ class Agent {
   }
   bool PipelineNameInUse(const std::string& pipeline_name) const;
 
-  using PendingPipelineStage0Submission = runtime_systems::CpuPendingPipelineStage0Submission;
-  using PipelineInterStageBufferRuntimeState = runtime_systems::CpuPipelineInterStageBufferRuntimeState;
-  using PipelineLaneRuntimeState = runtime_systems::CpuPipelineLaneRuntimeState;
-  using PipelineRuntimeState = runtime_systems::CpuPipelineRuntimeState;
+  using PendingPipelineStage0Submission = algorithm_management::CpuPendingPipelineStage0Submission;
+  using PipelineInterStageBufferRuntimeState = algorithm_management::CpuPipelineInterStageBufferRuntimeState;
+  using PipelineLaneRuntimeState = algorithm_management::CpuPipelineLaneRuntimeState;
+  using PipelineRuntimeState = algorithm_management::CpuPipelineRuntimeState;
 
  private:
   bool initialized_{false};

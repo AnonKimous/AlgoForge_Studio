@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
+#include <fstream>
 #include <iterator>
 #include <memory>
 #include <system_error>
@@ -29,6 +30,20 @@ namespace algorithm_support {
 namespace {
 
 namespace fs = std::filesystem;
+
+bool _ShouldEmitPipelineRunnerProbe(const std::string& algorithm_name) {
+  return algorithm_name.find("v2a0_pipeline_square_vertex_demo") != std::string::npos;
+}
+
+void _AppendPipelineRunnerProbe(const std::string& file_name, const std::string& line) {
+  const fs::path path = fs::path("D:/gptsandbox/artifacts/pipeline_runner") / file_name;
+  std::error_code ec;
+  fs::create_directories(path.parent_path(), ec);
+  std::ofstream file(path, std::ios::binary | std::ios::app);
+  if (file) {
+    file << line << '\n';
+  }
+}
 
 bool _LoadPackageRuntimeLifetime(
   const algorithm::AlgorithmPackageLocation& package_location,
@@ -566,6 +581,150 @@ bool _LoadPackageRuntimeTransferMap(
   if (out_has_transfer_map) {
     *out_has_transfer_map = true;
   }
+  if (out_error_message) {
+    out_error_message->clear();
+  }
+  return true;
+}
+
+bool _LoadPackageRuntimePipelineExternalWriteResetContainers(
+  const algorithm::AlgorithmPackageLocation& package_location,
+  const algorithm::AlgorithmContainerSet& container_set,
+  std::vector<std::string>* out_container_names,
+  std::string* out_error_message) {
+  if (!out_container_names) {
+    if (out_error_message) {
+      *out_error_message = "Pipeline external-write reset container list output pointer is null.";
+    }
+    return false;
+  }
+
+  out_container_names->clear();
+
+  const std::string algorithm_name = package_location.algorithm_name.empty()
+    ? package_location.manifest_name
+    : package_location.algorithm_name;
+  const fs::path package_json_path = algorithm::package_paths::ResolvePackageJsonPath(
+    package_location.package_root,
+    package_location.manifest_path,
+    algorithm_name);
+  if (package_json_path.empty()) {
+    if (out_error_message) {
+      *out_error_message = "Failed to resolve package JSON file for pipeline external-write reset containers.";
+    }
+    return false;
+  }
+
+  const std::string json_text = json_utils::ReadTextFile(package_json_path);
+  if (json_text.empty()) {
+    if (out_error_message) {
+      *out_error_message = "Failed to read package JSON file: " + package_json_path.generic_string();
+    }
+    return false;
+  }
+
+  cJSON* root = cJSON_Parse(json_text.c_str());
+  if (!root) {
+    if (out_error_message) {
+      *out_error_message = "Failed to parse package JSON file: " + package_json_path.generic_string();
+    }
+    return false;
+  }
+
+  const cJSON* runtime = cJSON_GetObjectItemCaseSensitive(root, "runtime");
+  if (!runtime) {
+    cJSON_Delete(root);
+    if (out_error_message) {
+      out_error_message->clear();
+    }
+    return true;
+  }
+  if (!cJSON_IsObject(runtime)) {
+    cJSON_Delete(root);
+    if (out_error_message) {
+      *out_error_message = "Package runtime section is invalid: " + package_json_path.generic_string();
+    }
+    return false;
+  }
+
+  const cJSON* pipeline = cJSON_GetObjectItemCaseSensitive(runtime, "pipeline");
+  if (!pipeline) {
+    cJSON_Delete(root);
+    if (out_error_message) {
+      out_error_message->clear();
+    }
+    return true;
+  }
+  if (!cJSON_IsObject(pipeline)) {
+    cJSON_Delete(root);
+    if (out_error_message) {
+      *out_error_message = "Package runtime pipeline section is invalid: " + package_json_path.generic_string();
+    }
+    return false;
+  }
+
+  const cJSON* reset_containers =
+    cJSON_GetObjectItemCaseSensitive(pipeline, "externalWriteResetContainers");
+  if (!reset_containers) {
+    reset_containers = cJSON_GetObjectItemCaseSensitive(pipeline, "clearAfterTickContainers");
+  }
+  if (!reset_containers) {
+    cJSON_Delete(root);
+    if (out_error_message) {
+      out_error_message->clear();
+    }
+    return true;
+  }
+  if (!cJSON_IsArray(reset_containers)) {
+    cJSON_Delete(root);
+    if (out_error_message) {
+      *out_error_message =
+        "Package runtime pipeline externalWriteResetContainers must be an array: " +
+        package_json_path.generic_string();
+    }
+    return false;
+  }
+
+  std::unordered_set<std::string> seen_container_names{};
+  const int reset_container_count = cJSON_GetArraySize(reset_containers);
+  out_container_names->reserve(reset_container_count > 0 ? static_cast<size_t>(reset_container_count) : 0u);
+  for (int i = 0; i < reset_container_count; ++i) {
+    const cJSON* item = cJSON_GetArrayItem(reset_containers, i);
+    if (!item || !cJSON_IsString(item) || !item->valuestring || !*item->valuestring) {
+      cJSON_Delete(root);
+      if (out_error_message) {
+        *out_error_message =
+          "Package runtime pipeline externalWriteResetContainers entry must be a non-empty string: " +
+          package_json_path.generic_string();
+      }
+      return false;
+    }
+
+    const std::string container_name = item->valuestring;
+    if (!seen_container_names.insert(container_name).second) {
+      cJSON_Delete(root);
+      if (out_error_message) {
+        *out_error_message =
+          "Package runtime pipeline externalWriteResetContainers contains a duplicated container name: " +
+          container_name;
+      }
+      return false;
+    }
+
+    if (!algorithm::FindAlgorithmContainer(container_set, container_name)) {
+      cJSON_Delete(root);
+      if (out_error_message) {
+        *out_error_message =
+          "Package runtime pipeline externalWriteResetContainers references an unknown container '" +
+          container_name + "' in " + package_json_path.generic_string();
+      }
+      return false;
+    }
+
+    out_container_names->push_back(container_name);
+  }
+
+  cJSON_Delete(root);
   if (out_error_message) {
     out_error_message->clear();
   }
@@ -1223,6 +1382,10 @@ bool CreateAlgorithmObjectFromLocation(
   const algorithm::AlgorithmPackageLocation& package_location,
   agent::AlgorithmObject* out_group,
   std::string* out_error_message) {
+  const std::string probe_algorithm_name = package_location.algorithm_name.empty()
+    ? package_location.manifest_name
+    : package_location.algorithm_name;
+  const bool emit_runner_probe = _ShouldEmitPipelineRunnerProbe(probe_algorithm_name);
   if (!out_group) {
     if (out_error_message) {
       *out_error_message = "AlgorithmObject output pointer is null.";
@@ -1243,8 +1406,17 @@ bool CreateAlgorithmObjectFromLocation(
     ? package_location.algorithm_name
     : package_location.manifest_name;
 
+  if (emit_runner_probe) {
+    _AppendPipelineRunnerProbe(
+      "package_loader_probe.log",
+      "create_from_location.container_set.begin algorithm=" + probe_algorithm_name);
+  }
   if (!_LoadContainerSetFromPackageJson(package_location, &group.shared_container_set, out_error_message)) {
     return false;
+  }
+  if (emit_runner_probe) {
+    _AppendPipelineRunnerProbe("package_loader_probe.log", "create_from_location.container_set.end");
+    _AppendPipelineRunnerProbe("package_loader_probe.log", "create_from_location.tick_lifetime.begin");
   }
 
   algorithm_management::AlgorithmTickLifetime tick_lifetime = algorithm_management::AlgorithmTickLifetime::Continuous;
@@ -1252,6 +1424,10 @@ bool CreateAlgorithmObjectFromLocation(
     return false;
   }
   group.tick_lifetime = tick_lifetime;
+  if (emit_runner_probe) {
+    _AppendPipelineRunnerProbe("package_loader_probe.log", "create_from_location.tick_lifetime.end");
+    _AppendPipelineRunnerProbe("package_loader_probe.log", "create_from_location.transfer_map.begin");
+  }
 
   bool has_runtime_transfer_map = false;
   if (!LoadAlgorithmPackageTransferMapFromLocation(
@@ -1264,6 +1440,23 @@ bool CreateAlgorithmObjectFromLocation(
   if (!has_runtime_transfer_map) {
     group.runtime_transfer_map.reset();
   }
+  if (emit_runner_probe) {
+    _AppendPipelineRunnerProbe(
+      "package_loader_probe.log",
+      "create_from_location.transfer_map.end has_map=" + std::string(has_runtime_transfer_map ? "true" : "false"));
+    _AppendPipelineRunnerProbe("package_loader_probe.log", "create_from_location.external_reset.begin");
+  }
+
+  if (!_LoadPackageRuntimePipelineExternalWriteResetContainers(
+        package_location,
+        *group.shared_container_set,
+        &group.pipeline_external_write_reset_container_names,
+        out_error_message)) {
+    return false;
+  }
+  if (emit_runner_probe) {
+    _AppendPipelineRunnerProbe("package_loader_probe.log", "create_from_location.external_reset.end");
+  }
 
   auto _ApplyLaunchOnceReflectionPolicy = [&group]() {
     if (group.tick_lifetime == algorithm_management::AlgorithmTickLifetime::LaunchOnceThenHold &&
@@ -1275,8 +1468,17 @@ bool CreateAlgorithmObjectFromLocation(
 
   AlgorithmPluginComponents plugin_components{};
   std::string plugin_error_message;
+  if (emit_runner_probe) {
+    _AppendPipelineRunnerProbe("package_loader_probe.log", "create_from_location.plugin_load.begin");
+  }
   if (package_location.has_plugin_module &&
       TryLoadAlgorithmPluginComponents(package_location, &plugin_components, &plugin_error_message)) {
+    if (emit_runner_probe) {
+      _AppendPipelineRunnerProbe(
+        "package_loader_probe.log",
+        "create_from_location.plugin_load.end success cpu=" + std::string(plugin_components.cpu_symbol ? "true" : "false") +
+          " gpu=" + std::string(plugin_components.gpu_symbol ? "true" : "false"));
+    }
     group.cpu_symbol = plugin_components.cpu_symbol;
     group.gpu_symbol = plugin_components.gpu_symbol;
     group.intervention = plugin_components.intervention;
@@ -1309,6 +1511,10 @@ bool CreateAlgorithmObjectFromLocation(
     }
     return false;
   }
+  if (emit_runner_probe) {
+    _AppendPipelineRunnerProbe("package_loader_probe.log", "create_from_location.plugin_load.end fallback");
+    _AppendPipelineRunnerProbe("package_loader_probe.log", "create_from_location.intervention.begin");
+  }
 
   group.cpu_symbol = true;
   group.gpu_symbol = true;
@@ -1317,6 +1523,10 @@ bool CreateAlgorithmObjectFromLocation(
         &group.intervention,
         out_error_message)) {
     return false;
+  }
+  if (emit_runner_probe) {
+    _AppendPipelineRunnerProbe("package_loader_probe.log", "create_from_location.intervention.end");
+    _AppendPipelineRunnerProbe("package_loader_probe.log", "create_from_location.reflector.begin");
   }
   if (group.intervention) {
     _AppendHiddenInterventionSignalContainer(group.shared_container_set.get());
@@ -1327,6 +1537,9 @@ bool CreateAlgorithmObjectFromLocation(
         &runtime_reflector,
         nullptr)) {
     group.algorithm_reflector = std::move(runtime_reflector);
+  }
+  if (emit_runner_probe) {
+    _AppendPipelineRunnerProbe("package_loader_probe.log", "create_from_location.reflector.end");
   }
 
   _ApplyLaunchOnceReflectionPolicy();

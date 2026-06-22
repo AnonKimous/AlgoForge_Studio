@@ -78,3 +78,7 @@ build.ps1
 build_msvc.cmd
 build_local.cmd
 tools/launch_algorithm_studio_local.bat
+
+# Temporary pipeline runner diagnostics
+/build/Debug/debugTool_runner*
+/artifacts/pipeline_runner/

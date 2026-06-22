@@ -44,8 +44,9 @@ Pipeline Runtime 开发草案
 
 2.5 CPU bridge 和 GPU bridge 不应混为一谈
 - CPU bridge 和 GPU bridge 本来就是两套东西
-- 当前这份文档里，已经明确的部分主要描述 GPU 侧 bridge 应该怎么做
-- CPU 侧 bridge 先保留独立概念，但暂时不在本文中强行定义细节
+- GPU 侧继续沿用“standard container 共享前缀 + 隐式 stageBuffer 卡位”的方案
+- CPU 侧改为“同一 lane 的所有 bridge 共享一份 interStageBuffer”
+- 这份共享 interStageBuffer 由 lane 持有，不再把标准容器里的隐式 stageBuffer 当成 CPU 运行时真正的跨 stage 缓冲
 
 3. 已经确认的核心规则
 
@@ -152,6 +153,8 @@ Pipeline Runtime 开发草案
 - interStageBuffer 不是另一份 standard container
 - interStageBuffer 也不是完整 stage 状态副本
 - interStageBuffer 只保留上一个 stage 写入给当前 stage 的碎数据
+- 对 CPU 侧来说，同一条 lane 的所有 stage bridge 共享这一份 interStageBuffer
+- 同一时刻只允许一个 stage 在 egress 阶段写它
 
 5.4 GPU 侧不建议单独绑定 ingress buffer
 - 对 GPU 侧 bridge，不建议单独再绑定一份 ingress buffer
@@ -160,6 +163,12 @@ Pipeline Runtime 开发草案
 - 这个统一 stageBuffer 必须落在所有 stage 共享的 standard array 前缀里，不能落到某个 stage 私有多出来的 a 槽位上
 - 这样 GPU bridge 读写的仍然是 standard container 内的一部分，而不是额外一套独立 ingress buffer
 - 这条规则不是推荐项，而是强制项
+
+5.4.1 CPU 侧的对应方案
+- CPU 侧不强制把跨 stage 碎数据塞回 standard container 的隐式 stageBuffer
+- CPU 侧 bridge 直接读写 lane 共享 interStageBuffer
+- 映射表负责记录每个 stage 的额外 `v` 在这份共享缓冲里的偏移
+- circular pipeline 回灌时，只回灌共享 standard prefix；额外 `v` 继续通过 interStageBuffer 回流
 
 5.5 bridge 应保持轻量
 - 负责绑定
@@ -191,6 +200,7 @@ Pipeline Runtime 开发草案
 - 真正流动的是 lane 状态
 - 不是每个 stage 各自抱着一整套复制出来的完整状态往前传
 - 对 GPU 侧来说，这里的“入边”更偏向 standard container 内统一 stage buffer 的某一段，而不是单独绑定的新 ingress buffer
+- 对 CPU 侧来说，这里的“入边”就是 lane 共享 interStageBuffer 里对应 stage 的那一段
 
 7. 映射表语义
 

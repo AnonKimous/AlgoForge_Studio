@@ -85,10 +85,26 @@ bool PipelineStageBridgeIngress(
   algorithm::AlgorithmContainerSet* out_target_container_set,
   std::string* out_error_message = nullptr);
 
+bool PipelineStageBridgeIngress(
+  const algorithm::AlgorithmRuntimeTransferMap& transfer_map,
+  const std::string& target_stage_name,
+  const std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>& stage_container_sets,
+  const algorithm_management::CpuPipelineInterStageBufferRuntimeState& inter_stage_buffer,
+  algorithm::AlgorithmContainerSet* out_target_container_set,
+  std::string* out_error_message = nullptr);
+
 bool PipelineStageBridgeEgress(
   const algorithm::AlgorithmRuntimeTransferMap& transfer_map,
   const std::string& source_stage_name,
   const algorithm::AlgorithmContainerSet& source_container_set,
+  std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>* stage_container_sets,
+  std::string* out_error_message = nullptr);
+
+bool PipelineStageBridgeEgress(
+  const algorithm::AlgorithmRuntimeTransferMap& transfer_map,
+  const std::string& source_stage_name,
+  const algorithm::AlgorithmContainerSet& source_container_set,
+  algorithm_management::CpuPipelineInterStageBufferRuntimeState* inter_stage_buffer,
   std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>* stage_container_sets,
   std::string* out_error_message = nullptr);
 
@@ -173,6 +189,27 @@ class PipelineStageBridge {
       out_error_message);
   }
 
+  bool IngestFromPreviousStage(
+    const std::string& target_stage_name,
+    const std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>& stage_container_sets,
+    const algorithm_management::CpuPipelineInterStageBufferRuntimeState& inter_stage_buffer,
+    algorithm::AlgorithmContainerSet* out_target_container_set,
+    std::string* out_error_message = nullptr) const {
+    if (!transfer_map_) {
+      if (out_error_message) {
+        *out_error_message = "Algorithm runtime transfer map is unavailable.";
+      }
+      return false;
+    }
+    return PipelineStageBridgeIngress(
+      *transfer_map_,
+      target_stage_name,
+      stage_container_sets,
+      inter_stage_buffer,
+      out_target_container_set,
+      out_error_message);
+  }
+
   bool EmitToNextStage(
     const std::string& source_stage_name,
     const algorithm::AlgorithmContainerSet& source_container_set,
@@ -188,6 +225,27 @@ class PipelineStageBridge {
       *transfer_map_,
       source_stage_name,
       source_container_set,
+      stage_container_sets,
+      out_error_message);
+  }
+
+  bool EmitToNextStage(
+    const std::string& source_stage_name,
+    const algorithm::AlgorithmContainerSet& source_container_set,
+    algorithm_management::CpuPipelineInterStageBufferRuntimeState* inter_stage_buffer,
+    std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>* stage_container_sets,
+    std::string* out_error_message = nullptr) const {
+    if (!transfer_map_) {
+      if (out_error_message) {
+        *out_error_message = "Algorithm runtime transfer map is unavailable.";
+      }
+      return false;
+    }
+    return PipelineStageBridgeEgress(
+      *transfer_map_,
+      source_stage_name,
+      source_container_set,
+      inter_stage_buffer,
       stage_container_sets,
       out_error_message);
   }

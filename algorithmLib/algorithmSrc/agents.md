@@ -36,20 +36,27 @@ Use `v` for variables and `a` for arrays.
 - Put the behavior description after the `vNxM` standard name.
 - Prefer short, explicit bundle names that make the purpose obvious.
 
-## devTast
+## devTask
 
 - 状态：in_progress
-- 最后更新：2026-06-17
-- 当前进度：runtime transfer 已收紧为单向线性链式映射，每个 stage 只能固定映射到下一个 stage，禁止分叉和汇聚；目标是增加吞吐，不是加速单次执行；卡死告警的 fail-fast 口子已留；映射表开始显式记录每个 stage 的共享标准槽前缀和额外标准槽偏移。
+- 最后更新：2026-06-22
+- 当前进度：
+  - 已完成：流水线按“一个 pipeline 作为一个算法单元”挂载与调度，目标表述统一为“增加吞吐”，不再使用“加速单次执行”。
+  - 已完成：runtime transfer map 已收紧为单向线性 `stage -> nextStage`，禁止 fan-out / fan-in。
+  - 已完成：原 `runtimeDecomposer/runtimeReflector` 的职责已经统一收口到 `PipelineStageBridge`。
+  - 已完成：GPU 侧继续把隐式 stageBuffer 绑定在 standard container 共享 `a` 前缀里；CPU 侧改为同一 lane 的 bridge 共享一份 `interStageBuffer`，不再依赖标准容器里的隐式 stageBuffer 作为真正运行时缓冲。
+  - 已完成：pipeline stall 会输出每个 stage 的耗时和原因，并在后端导出 `csv` / `mermaid` 时序文件到 `artifacts/pipeline_timing/`。
+  - 已完成：stage 支持声明 `runtime.pipeline.externalWriteResetContainers`，表示这些容器必须每帧从外部重写，stage 执行完成后立即清空。
+  - 已跳过：最初的“环形探针”方案已废弃，后续以 stall 日志和 fail-fast 为主。
 
-- [ ] 0. 流水线本质是一组算法被当成一个算法提交，由 agent 来梳理它们的流水关系，目标是增加吞吐，不是加速单次执行。
-- [ ] 1. 流水线需要映射表，标准容器改写成映射表，并随算法本身提交到 runtime sys 这一层。
-- [ ] 2. 映射表只保留线性 stage->nextStage 关系，不再支持一个 stage 映射到多个 stage，也不再支持一个 stage 接收多个 stage 的映射。
-- [ ] 3. agent 里保留一个最简单的环形探针，debug 模式默认启动，发现环直接断言错误，release 不启动。
-- [ ] 4. 参考 algorithmMNG 里的拆解器和反射器，新增 runtimeDecomposer 和 runtimeReflector，专门用于一次 tick 内的翻译、执行和输出，运行时反射负责抓映射表并写入对面的 runtimeDecomposer，运行时拆解负责解码传入的数据。
-- [ ] 5. debugTool 后端增加一个功能，监视进入的算法从开始翻译数据到写出数据一共花了多久，并支持导出成图。
-- [ ] 6. 增加一个标志，表示某些变量需要每帧都从外部写入，算法执行结束后，如果使用流水线算法，这些变量会被 runtimeReflector 擦除。
-- [ ] 7. 如果流水线算法持续 tick 不动，先留一个 fail-fast 口子，直接输出日志包含每个 stage 耗时和原因，然后断言报错，真正弹出算法留到后续。
+- [x] 0. 流水线本质是一组算法被当成一个算法提交，由 agent 来梳理它们的流水关系，目标是增加吞吐，不是加速单次执行。
+- [x] 1. 流水线需要映射表，标准容器改写成映射表，并随算法本身提交到 runtime sys 这一层。
+- [x] 2. 映射表只保留线性 `stage->nextStage` 关系，不再支持一个 stage 映射到多个 stage，也不再支持一个 stage 接收多个 stage 的映射。
+- [skip] 3. 原始“环形探针”方案已废弃；按后续决策不再实现。
+- [x] 4. 原 `runtimeDecomposer/runtimeReflector` 方案已由统一的 `PipelineStageBridge` 取代。
+- [x] 5. debugTool 后端会保留 pipeline 总耗时和各 stage 耗时，并在 stall 时导出 `csv` / `mermaid` 图文件。
+- [x] 6. 已增加 `runtime.pipeline.externalWriteResetContainers`，用于声明每帧外部重写、stage 执行后立即清空的容器。
+- [x] 7. 如果流水线算法持续 tick 不动，直接输出每个 stage 的耗时和原因日志，然后断言报错；真正“弹出算法”的动作仍留待后续。
 
 ## Pipeline Mapping Notes
 
@@ -73,7 +80,9 @@ Use `v` for variables and `a` for arrays.
   - stage0 额外多 1 个 `v`，偏移是 `0`
   - stage1 额外多 2 个 `v`，偏移是 `1`
   - stage3 额外多 1 个 `v`，偏移是 `3`
-- pipeline 强制要求隐式 stageBuffer 落在所有 stage 共享的 `a` 前缀里，不能挂到某个 stage 私有多出来的 `a` 上。
+- GPU pipeline 强制要求隐式 stageBuffer 落在所有 stage 共享的 `a` 前缀里，不能挂到某个 stage 私有多出来的 `a` 上。
+- CPU pipeline 的 bridge 运行时不再把这块隐式 stageBuffer 当成真正的跨 stage 缓冲；CPU 会为每条 lane 维护一份共享 `interStageBuffer`，所有 stage bridge 共同读写这份缓冲，并按映射表偏移解释额外 `v`。
+- 如果某个 stage 的某些容器必须每帧都从外部重写，可以在 package 的 `runtime.pipeline.externalWriteResetContainers` 里列出它们；该 stage 执行完成后，这些容器会被立即清零，避免旧值在流水线里滞留。
 
 ## Package Format
 
