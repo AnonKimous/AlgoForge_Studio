@@ -103,6 +103,9 @@ class AgentManager {
     const std::vector<agent::AlgorithmResourceBinding>& resource_bindings,
     const std::vector<agent::AlgorithmDescriptorValue>& descriptor_values,
     std::string* out_error_message = nullptr);
+  bool RequestAgentTimingLog(
+    size_t agent_index,
+    std::string* out_error_message = nullptr);
   bool DetachAlgorithmFromAgent(
     size_t agent_index,
     size_t algorithm_index,

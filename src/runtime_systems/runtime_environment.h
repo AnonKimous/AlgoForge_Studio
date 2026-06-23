@@ -16,6 +16,13 @@ namespace runtime_systems {
 class ImGuiVulkanRuntime;
 class SdlWindow;
 
+using RuntimeShutdownCallback = void (*)();
+using RuntimeGpuCacheClearCallback = void (*)();
+
+void SetRuntimeShutdownCallback(RuntimeShutdownCallback callback);
+void SetRuntimeGpuCacheClearCallback(RuntimeGpuCacheClearCallback callback);
+void InvokeRuntimeGpuCacheClearCallback();
+
 // Advisory runtime backend symbols. They default to true and do not change
 // the main-thread callback execution path yet.
 struct RuntimeExecutionSymbols {

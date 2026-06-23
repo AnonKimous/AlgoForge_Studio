@@ -278,24 +278,32 @@ debug_tool::PipelineStageBridgeDebugSummary _ToDebugToolPipelineStageBridgeDebug
     out_summary.stage_input_reflection_snapshot =
       _ToDebugToolReflectionSnapshot(
         _BuildBridgeReflectionSnapshot(debug_set.stage_input_container_set, "bridge_stage_input"));
+    out_summary.logical_decomposer_snapshot = out_summary.stage_input_reflection_snapshot;
+    out_summary.has_logical_decomposer_snapshot = true;
     out_summary.has_stage_input_reflection_snapshot = true;
   }
   if (debug_set.has_stage_output_container_set) {
     out_summary.stage_output_reflection_snapshot =
       _ToDebugToolReflectionSnapshot(
         _BuildBridgeReflectionSnapshot(debug_set.stage_output_container_set, "bridge_stage_output"));
+    out_summary.stage_runtime_snapshot = out_summary.stage_output_reflection_snapshot;
+    out_summary.has_stage_runtime_snapshot = true;
     out_summary.has_stage_output_reflection_snapshot = true;
   }
   if (debug_set.has_next_stage_input_container_set) {
     out_summary.next_stage_input_reflection_snapshot =
       _ToDebugToolReflectionSnapshot(
         _BuildBridgeReflectionSnapshot(debug_set.next_stage_input_container_set, "bridge_next_stage_input"));
+    out_summary.logical_reflector_snapshot = out_summary.next_stage_input_reflection_snapshot;
+    out_summary.has_logical_reflector_snapshot = true;
     out_summary.has_next_stage_input_reflection_snapshot = true;
   }
   if (debug_set.has_replay_output_container_set) {
     out_summary.replay_output_reflection_snapshot =
       _ToDebugToolReflectionSnapshot(
         _BuildBridgeReflectionSnapshot(debug_set.replay_output_container_set, "bridge_replay_output"));
+    out_summary.logical_replay_reflector_snapshot = out_summary.replay_output_reflection_snapshot;
+    out_summary.has_logical_replay_reflector_snapshot = true;
     out_summary.has_replay_output_reflection_snapshot = true;
   }
   if (debug_set.replay_reflection_snapshot.valid) {
@@ -355,10 +363,8 @@ debug_tool::AlgorithmRuntimeSummary _ToDebugToolAlgorithmRuntimeSummary(
     summary.algorithm_to_agent_signal = runtime_state->algorithm_to_agent_signal;
     summary.pipeline_active_stage_index = runtime_state->pipeline_active_stage_index;
     summary.pipeline_active_stage_index_valid = runtime_state->pipeline_active_stage_index_valid;
-    if (object->pipeline_sync_mode == agent::AlgorithmPipelineSyncMode::Forced) {
-      summary.pipeline_total_elapsed_seconds = runtime_state->pipeline_total_elapsed_seconds;
-      summary.pipeline_stage_runtime_stats = runtime_state->pipeline_stage_runtime_stats;
-    }
+    summary.pipeline_total_elapsed_seconds = runtime_state->pipeline_total_elapsed_seconds;
+    summary.pipeline_stage_runtime_stats = runtime_state->pipeline_stage_runtime_stats;
   }
   const agent::AlgorithmReflectionSnapshot* reflection_snapshot = nullptr;
   algorithm_management::CpuPipelineRuntimeState pipeline_runtime_state{};
@@ -1098,31 +1104,6 @@ bool DebugToolBackendRuntime::ReplayPipelineStageBridgeDebug(
     algorithm_index,
     context,
     out_error_message);
-}
-
-bool DebugToolBackendRuntime::SetPipelineStageDebugSelection(
-  size_t agent_index,
-  const std::string& pipeline_name,
-  bool select_all,
-  uint32_t stage_index,
-  std::string* out_error_message) {
-  const std::shared_ptr<agent::Agent> managed_agent = agent_manager_.agent(agent_index);
-  if (!managed_agent) {
-    if (out_error_message) {
-      *out_error_message = "Pipeline stage debug selection failed because the agent was not found.";
-    }
-    DEBUG_TOOL_ASSERT(false, "Pipeline stage debug selection failed because the agent was not found.");
-    return false;
-  }
-  if (!managed_agent->SetPipelineStageDebugSelection(
-        pipeline_name,
-        select_all,
-        stage_index,
-        out_error_message)) {
-    DEBUG_TOOL_ASSERT(false, "Failed to update pipeline stage debug selection.");
-    return false;
-  }
-  return true;
 }
 
 bool DebugToolBackendRuntime::HotReloadAlgorithmPackage(

@@ -348,14 +348,6 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
   }
   append_progress("pipeline_mounted");
 
-  if (!runtime.SetPipelineStageDebugSelection(0u, mounted_pipeline_name, true, 0u, &error_message)) {
-    throw std::runtime_error(
-      error_message.empty()
-        ? ("Failed to enable bridge debug selection for '" + mounted_pipeline_name + "'.")
-        : error_message);
-  }
-  append_progress("bridge_debug_selected");
-
   if (!runtime.AttachPipelinePackageToAgent(
         0u,
         submission_name,

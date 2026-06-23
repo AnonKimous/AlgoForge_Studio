@@ -1,7 +1,6 @@
 #define RUNTIME_SYSTEMS_LAYER_INTERNAL_BUILD 1
 #include "runtime_environment.h"
 #include "job_system.h"
-#include "algorithm_management/algorithm_manager.h"
 
 #include <SDL3/SDL.h>
 
@@ -13,6 +12,27 @@
 #include <utility>
 
 namespace runtime_systems {
+
+namespace {
+
+RuntimeShutdownCallback g_runtime_shutdown_callback = nullptr;
+RuntimeGpuCacheClearCallback g_runtime_gpu_cache_clear_callback = nullptr;
+
+}  // namespace
+
+void SetRuntimeShutdownCallback(RuntimeShutdownCallback callback) {
+  g_runtime_shutdown_callback = callback;
+}
+
+void SetRuntimeGpuCacheClearCallback(RuntimeGpuCacheClearCallback callback) {
+  g_runtime_gpu_cache_clear_callback = callback;
+}
+
+void InvokeRuntimeGpuCacheClearCallback() {
+  if (g_runtime_gpu_cache_clear_callback) {
+    g_runtime_gpu_cache_clear_callback();
+  }
+}
 
 void SdlWindowDeleter::operator()(SdlWindow* window) const {
   delete window;
@@ -136,7 +156,9 @@ void RuntimeEnvironment::Destroy() {
     imgui_runtime_.reset();
   }
   window_.reset();
-  algorithm_management::AlgorithmScheduler::Instance().Clear();
+  if (g_runtime_shutdown_callback) {
+    g_runtime_shutdown_callback();
+  }
   ShutdownJobSystem();
   execution_symbols_ = {};
   if (sdl_initialized_) {

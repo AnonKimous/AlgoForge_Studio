@@ -1,5 +1,6 @@
 #pragma once
 
+#include "algorithm_management/algorithm_abi.h"
 #include "common_data/common_data.h"
 #include "runtime_systems/runtime_systems.h"
 
@@ -139,11 +140,19 @@ struct PipelineStageBridgeDebugSummary {
   std::string next_stage_name;
   std::vector<PipelineStageBridgeDebugBinding> ingress_bindings;
   std::vector<PipelineStageBridgeDebugBinding> egress_bindings;
+  AlgorithmReflectionSnapshot logical_decomposer_snapshot{};
+  AlgorithmReflectionSnapshot stage_runtime_snapshot{};
+  AlgorithmReflectionSnapshot logical_reflector_snapshot{};
+  AlgorithmReflectionSnapshot logical_replay_reflector_snapshot{};
   AlgorithmReflectionSnapshot stage_input_reflection_snapshot{};
   AlgorithmReflectionSnapshot stage_output_reflection_snapshot{};
   AlgorithmReflectionSnapshot next_stage_input_reflection_snapshot{};
   AlgorithmReflectionSnapshot replay_output_reflection_snapshot{};
   AlgorithmReflectionSnapshot replay_reflection_snapshot{};
+  bool has_logical_decomposer_snapshot{false};
+  bool has_stage_runtime_snapshot{false};
+  bool has_logical_reflector_snapshot{false};
+  bool has_logical_replay_reflector_snapshot{false};
   bool has_stage_input_reflection_snapshot{false};
   bool has_stage_output_reflection_snapshot{false};
   bool has_next_stage_input_reflection_snapshot{false};
@@ -158,11 +167,19 @@ struct PipelineStageBridgeDebugSummary {
     next_stage_name.clear();
     ingress_bindings.clear();
     egress_bindings.clear();
+    logical_decomposer_snapshot.Clear();
+    stage_runtime_snapshot.Clear();
+    logical_reflector_snapshot.Clear();
+    logical_replay_reflector_snapshot.Clear();
     stage_input_reflection_snapshot.Clear();
     stage_output_reflection_snapshot.Clear();
     next_stage_input_reflection_snapshot.Clear();
     replay_output_reflection_snapshot.Clear();
     replay_reflection_snapshot.Clear();
+    has_logical_decomposer_snapshot = false;
+    has_stage_runtime_snapshot = false;
+    has_logical_reflector_snapshot = false;
+    has_logical_replay_reflector_snapshot = false;
     has_stage_input_reflection_snapshot = false;
     has_stage_output_reflection_snapshot = false;
     has_next_stage_input_reflection_snapshot = false;
@@ -248,12 +265,6 @@ class IDebugToolHost {
   virtual bool ReplayPipelineStageBridgeDebug(
     size_t agent_index,
     size_t algorithm_index,
-    std::string* out_error_message = nullptr) = 0;
-  virtual bool SetPipelineStageDebugSelection(
-    size_t agent_index,
-    const std::string& pipeline_name,
-    bool select_all,
-    uint32_t stage_index,
     std::string* out_error_message = nullptr) = 0;
   virtual bool HotReloadAlgorithmPackage(
     size_t agent_index,

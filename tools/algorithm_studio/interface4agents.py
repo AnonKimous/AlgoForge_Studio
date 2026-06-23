@@ -35,6 +35,14 @@ COMMAND_SPECS: tuple[AgentCommandSpec, ...] = (
         highlight_target="array",
     ),
     AgentCommandSpec(
+        name="createNode",
+        usage="createNode vnode | anode | reflector | function | interventioner | meshNode",
+        location="Left palette > Drag Palette",
+        summary="Preview dragging a blueprint node into the canvas.",
+        highlight_target="canvas",
+        aliases=("createnode",),
+    ),
+    AgentCommandSpec(
         name="createCosNode",
         usage="createCosNode <name>",
         location="Selection panel > Merge",
@@ -305,6 +313,13 @@ def _execute_highlight_command(app: Any, args: list[str]) -> str:
         if token in {"container", "containerelement", "decomposer", "reflector", "resnode", "function", "functiontext", "interventioner", "stage"}:
             return _execute_highlight_named_node_command(app, args)
         return _execute_highlight_named_node_command(app, args)
+    if spec.name == "createNode":
+        if len(args) < 2:
+            raise RuntimeError("highlight createNode requires a node kind.")
+        return _call(app, "_interface4agents_demo_palette_drag", args[1].strip())
+    if spec.name in {"v", "a"} and len(args) >= 2 and args[1].strip().lower() == "add":
+        demo_kind = "vnode" if spec.name == "v" else "anode"
+        return _call(app, "_interface4agents_demo_palette_drag", demo_kind)
     if spec.name in {"v", "a"}:
         target_key = "variable" if spec.name == "v" else "array"
         _call(app, "_interface4agents_highlight_target", target_key)

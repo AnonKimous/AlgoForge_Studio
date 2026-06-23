@@ -2,9 +2,6 @@
 #include "runtime_systems/job_system.h"
 #undef RUNTIME_SYSTEMS_LAYER_PUBLIC_FACADE_INCLUDE
 
-#include "algorithm_management/algorithm_manager.h"
-#include "algorithm_support/algorithm_protocol.h"
-
 #include <algorithm>
 #include <cassert>
 #include <chrono>
@@ -25,17 +22,6 @@
 
 namespace runtime_systems {
 
-void ClearGpuRuntime();
-bool TryExecuteGpuTick(
-  const agent::AlgorithmObject& object,
-  algorithm::AlgorithmContainerSet* container_set,
-  const agent::AgentTickContext& context,
-  std::string* out_error_message);
-bool TrySynchronizeGpuTickState(
-  const agent::AlgorithmObject& object,
-  algorithm::AlgorithmContainerSet* container_set,
-  std::string* out_error_message);
-
 namespace {
 
 #ifndef NDEBUG
@@ -49,24 +35,23 @@ namespace {
   throw std::runtime_error(std::move(message));
 }
 
-struct CpuJobCompletion {
+struct RuntimeJobCompletion {
   bool ok{false};
   std::string error_message;
 };
 
-struct CpuJobTask {
-  algorithm_management::AlgorithmJobPriority priority{
-    algorithm_management::AlgorithmJobPriority::High};
-  std::shared_ptr<CpuJobCompletion> completion;
+struct RuntimeJobTask {
+  RuntimeJobPriority priority{RuntimeJobPriority::High};
+  std::shared_ptr<RuntimeJobCompletion> completion;
   std::shared_ptr<std::promise<void>> done;
-  std::function<void(CpuJobCompletion&)> body;
+  std::function<void(RuntimeJobCompletion&)> body;
 };
 
 
 struct CpuWorkerQueues {
-  std::deque<CpuJobTask> high;
-  std::deque<CpuJobTask> normal;
-  std::deque<CpuJobTask> low;
+  std::deque<RuntimeJobTask> high;
+  std::deque<RuntimeJobTask> normal;
+  std::deque<RuntimeJobTask> low;
 };
 
 thread_local int g_current_cpu_worker_index = -1;
@@ -151,10 +136,10 @@ class CpuJobSystem {
   }
 
   bool SubmitBlocking(
-    algorithm_management::AlgorithmJobPriority priority,
-    std::function<void(CpuJobCompletion&)> body,
+    RuntimeJobPriority priority,
+    std::function<void(RuntimeJobCompletion&)> body,
     std::string* out_error_message) {
-    auto completion = std::make_shared<CpuJobCompletion>();
+    auto completion = std::make_shared<RuntimeJobCompletion>();
     auto done = std::make_shared<std::promise<void>>();
     std::future<void> future = done->get_future();
 
@@ -168,7 +153,7 @@ class CpuJobSystem {
       }
 
       const size_t target_worker_index = _SelectWorkerUnlocked(priority);
-      CpuJobTask task{};
+      RuntimeJobTask task{};
       task.priority = priority;
       task.completion = completion;
       task.done = done;
@@ -215,37 +200,37 @@ class CpuJobSystem {
     Shutdown();
   }
 
-  static std::deque<CpuJobTask>& _QueueForPriority(
+  static std::deque<RuntimeJobTask>& _QueueForPriority(
     CpuWorkerQueues& queues,
-    algorithm_management::AlgorithmJobPriority priority) {
+    RuntimeJobPriority priority) {
     switch (priority) {
-      case algorithm_management::AlgorithmJobPriority::High:
+      case RuntimeJobPriority::High:
         return queues.high;
-      case algorithm_management::AlgorithmJobPriority::Normal:
+      case RuntimeJobPriority::Normal:
         return queues.normal;
-      case algorithm_management::AlgorithmJobPriority::Low:
+      case RuntimeJobPriority::Low:
         return queues.low;
     }
     return queues.high;
   }
 
-  static const std::deque<CpuJobTask>& _QueueForPriority(
+  static const std::deque<RuntimeJobTask>& _QueueForPriority(
     const CpuWorkerQueues& queues,
-    algorithm_management::AlgorithmJobPriority priority) {
+    RuntimeJobPriority priority) {
     switch (priority) {
-      case algorithm_management::AlgorithmJobPriority::High:
+      case RuntimeJobPriority::High:
         return queues.high;
-      case algorithm_management::AlgorithmJobPriority::Normal:
+      case RuntimeJobPriority::Normal:
         return queues.normal;
-      case algorithm_management::AlgorithmJobPriority::Low:
+      case RuntimeJobPriority::Low:
         return queues.low;
     }
     return queues.high;
   }
 
   static bool _StealFromQueue(
-    std::deque<CpuJobTask>& queue,
-    CpuJobTask* out_task) {
+    std::deque<RuntimeJobTask>& queue,
+    RuntimeJobTask* out_task) {
     if (!out_task || queue.size() < 2u) {
       return false;
     }
@@ -270,7 +255,7 @@ class CpuJobSystem {
     return queues.high.size() * 9u + queues.normal.size() * 3u + queues.low.size();
   }
 
-  size_t _SelectWorkerUnlocked(algorithm_management::AlgorithmJobPriority priority) const {
+  size_t _SelectWorkerUnlocked(RuntimeJobPriority priority) const {
     if (workers_.empty()) {
       return 0u;
     }
@@ -291,7 +276,7 @@ class CpuJobSystem {
 
   bool _TryPopLocalTaskLocked(
     size_t worker_index,
-    CpuJobTask* out_task) {
+    RuntimeJobTask* out_task) {
     if (!out_task || worker_index >= queues_.size()) {
       return false;
     }
@@ -317,7 +302,7 @@ class CpuJobSystem {
 
   bool _TryStealTaskLocked(
     size_t thief_index,
-    CpuJobTask* out_task) {
+    RuntimeJobTask* out_task) {
     if (!out_task || queues_.empty()) {
       return false;
     }
@@ -341,7 +326,7 @@ class CpuJobSystem {
 
   bool _TryAcquireTaskLocked(
     int worker_index,
-    CpuJobTask* out_task) {
+    RuntimeJobTask* out_task) {
     if (worker_index >= 0) {
       if (_TryPopLocalTaskLocked(static_cast<size_t>(worker_index), out_task)) {
         return true;
@@ -358,7 +343,7 @@ class CpuJobSystem {
   }
 
   bool _TryExecuteOneTask(size_t worker_index) {
-    CpuJobTask task{};
+    RuntimeJobTask task{};
     {
       std::lock_guard<std::mutex> lock(mutex_);
       if (!initialized_) {
@@ -397,7 +382,7 @@ class CpuJobSystem {
   void _WorkerLoop(size_t worker_index) {
     g_current_cpu_worker_index = static_cast<int>(worker_index);
     while (true) {
-      CpuJobTask task{};
+      RuntimeJobTask task{};
       {
         std::unique_lock<std::mutex> lock(mutex_);
         cv_.wait(lock, [&]() {
@@ -446,65 +431,6 @@ class CpuJobSystem {
   std::vector<std::thread> workers_{};
 };
 
-class CpuJobRuntimeSystem {
- public:
-  static CpuJobRuntimeSystem& Instance() {
-    static CpuJobRuntimeSystem instance{};
-    return instance;
-  }
-
-  void Clear() {
-  }
-
-  bool ExecuteCpuTick(
-    const algorithm_management::AlgorithmObject& object,
-    const algorithm_management::AgentTickContext& context,
-    const common_data::AgentToAlgorithmSignal& agent_to_algorithm_signal,
-    algorithm::AlgorithmContainerSet* container_set,
-    common_data::AlgorithmToAgentSignal* out_algorithm_to_agent_signal,
-    algorithm_management::AlgorithmPackageDebugState* out_debug_state,
-    std::string* out_error_message) {
-    if (!container_set) {
-      if (out_error_message) {
-        *out_error_message = "AlgorithmContainerSet pointer is null.";
-      }
-      _AbortJobExecution("AlgorithmContainerSet pointer is null.");
-    }
-    if (!object.temporaryTest_main_thread_executor) {
-      if (out_error_message) {
-        *out_error_message = "CPU job executor is unavailable.";
-      }
-      _AbortJobExecution("CPU job executor is unavailable.");
-    }
-
-    auto body = [
-      &object,
-      &context,
-      &agent_to_algorithm_signal,
-      container_set,
-      out_algorithm_to_agent_signal,
-      out_debug_state](CpuJobCompletion& completion) {
-      completion.ok = object.temporaryTest_main_thread_executor->temporaryTestExecuteOnMainThread(
-        context,
-        object.algorithm_profile,
-        agent_to_algorithm_signal,
-        container_set,
-        out_algorithm_to_agent_signal,
-        out_debug_state);
-      if (!completion.ok && completion.error_message.empty()) {
-        completion.error_message = "CPU algorithm execution failed.";
-      }
-    };
-
-    return CpuJobSystem::Instance().SubmitBlocking(
-      context.job_priority,
-      std::move(body),
-      out_error_message);
-  }
-
- private:
-};
-
 }  // namespace
 
 bool InitializeJobSystem(size_t worker_count) {
@@ -519,53 +445,32 @@ bool IsJobSystemInitialized() {
   return CpuJobSystem::Instance().Initialized();
 }
 
-namespace job_cpu {
-
-void Clear() {
-  CpuJobRuntimeSystem::Instance().Clear();
-}
-
-bool Execute(
-  const algorithm_management::AlgorithmObject& object,
-  const algorithm_management::AgentTickContext& context,
-  const common_data::AgentToAlgorithmSignal& agent_to_algorithm_signal,
-  algorithm::AlgorithmContainerSet* container_set,
-  common_data::AlgorithmToAgentSignal* out_algorithm_to_agent_signal,
-  algorithm_management::AlgorithmPackageDebugState* out_debug_state,
+bool SubmitBlockingJob(
+  RuntimeJobPriority priority,
+  std::function<void(std::string* out_error_message)> body,
   std::string* out_error_message) {
-  return CpuJobRuntimeSystem::Instance().ExecuteCpuTick(
-    object,
-    context,
-    agent_to_algorithm_signal,
-    container_set,
-    out_algorithm_to_agent_signal,
-    out_debug_state,
+  if (!body) {
+    if (out_error_message) {
+      *out_error_message = "Runtime job body is missing.";
+    }
+    return false;
+  }
+
+  auto wrapped_body = [body = std::move(body)](RuntimeJobCompletion& completion) mutable {
+    std::string error_message;
+    body(&error_message);
+    if (!error_message.empty()) {
+      completion.ok = false;
+      completion.error_message = std::move(error_message);
+      return;
+    }
+    completion.ok = true;
+  };
+
+  return CpuJobSystem::Instance().SubmitBlocking(
+    priority,
+    std::move(wrapped_body),
     out_error_message);
 }
-
-}  // namespace job_cpu
-
-namespace job_gpu {
-
-void Clear() {
-  ClearGpuRuntime();
-}
-
-bool Execute(
-  const algorithm_management::AlgorithmObject& object,
-  algorithm::AlgorithmContainerSet* container_set,
-  const algorithm_management::AgentTickContext& context,
-  std::string* out_error_message) {
-  return TryExecuteGpuTick(object, container_set, context, out_error_message);
-}
-
-bool Synchronize(
-  const algorithm_management::AlgorithmObject& object,
-  algorithm::AlgorithmContainerSet* container_set,
-  std::string* out_error_message) {
-  return TrySynchronizeGpuTickState(object, container_set, out_error_message);
-}
-
-}  // namespace job_gpu
 
 }  // namespace runtime_systems

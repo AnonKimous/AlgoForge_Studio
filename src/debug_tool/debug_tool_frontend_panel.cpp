@@ -376,8 +376,6 @@ void DebugToolFrontendPanel::InitializeAgentComposerDefaults() {
   agent_composer_ui_state_.reflection_valid = false;
   agent_composer_ui_state_.preview_request_dirty = true;
   agent_composer_ui_state_.pipeline_run_from_stage0_to_end = true;
-  agent_composer_ui_state_.pipeline_debug_pipeline_name.clear();
-  agent_composer_ui_state_.pipeline_debug_stage_index = -1;
   agent_composer_defaults_initialized_ = true;
 }
 
@@ -1226,73 +1224,34 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
   if (selected_algorithm_summary &&
       selected_algorithm_summary->pipeline_stage &&
       !selected_algorithm_summary->pipeline_name.empty()) {
-    ImGui::SeparatorText("Pipeline Stage Debug");
-    std::vector<size_t> pipeline_stage_indices{};
-    pipeline_stage_indices.reserve(selected_agent_summary.algorithms.size());
-    for (size_t i = 0; i < selected_agent_summary.algorithms.size(); ++i) {
-      const debug_tool::AlgorithmRuntimeSummary& candidate = selected_agent_summary.algorithms[i];
-      if (!candidate.pipeline_stage ||
-          candidate.pipeline_name != selected_algorithm_summary->pipeline_name) {
-        continue;
-      }
-      pipeline_stage_indices.push_back(i);
-    }
-
-    if (agent_composer_ui_state_.pipeline_debug_pipeline_name != selected_algorithm_summary->pipeline_name) {
-      agent_composer_ui_state_.pipeline_debug_pipeline_name = selected_algorithm_summary->pipeline_name;
-      agent_composer_ui_state_.pipeline_debug_stage_index = -1;
-      host.SetPipelineStageDebugSelection(
-        0u,
-        agent_composer_ui_state_.pipeline_debug_pipeline_name,
-        true,
-        0u,
-        nullptr);
-    }
-
-    std::string selected_stage_display = "All";
-    if (agent_composer_ui_state_.pipeline_debug_stage_index >= 0) {
-      for (size_t candidate_index : pipeline_stage_indices) {
-        if (static_cast<int>(candidate_index) != agent_composer_ui_state_.pipeline_debug_stage_index) {
-          continue;
-        }
-        const debug_tool::AlgorithmRuntimeSummary& candidate =
-          selected_agent_summary.algorithms[candidate_index];
-        selected_stage_display =
-          _FormatAlgorithmRuntimeLabel(candidate, candidate_index, true);
-        break;
-      }
-    }
-    if (ImGui::BeginCombo("Stage Selection", selected_stage_display.c_str())) {
-      if (ImGui::Selectable("All", agent_composer_ui_state_.pipeline_debug_stage_index < 0)) {
-        agent_composer_ui_state_.pipeline_debug_stage_index = -1;
-        host.SetPipelineStageDebugSelection(
-          0u,
-          agent_composer_ui_state_.pipeline_debug_pipeline_name,
-          true,
-          0u,
-          nullptr);
-      }
-      for (size_t candidate_index : pipeline_stage_indices) {
-        const debug_tool::AlgorithmRuntimeSummary& candidate =
-          selected_agent_summary.algorithms[candidate_index];
-        const std::string candidate_name =
-          _FormatAlgorithmRuntimeLabel(candidate, candidate_index, true);
-        const bool is_selected =
-          agent_composer_ui_state_.pipeline_debug_stage_index == static_cast<int>(candidate_index);
-        if (ImGui::Selectable(candidate_name.c_str(), is_selected)) {
-          agent_composer_ui_state_.pipeline_debug_stage_index = static_cast<int>(candidate_index);
-          host.SetPipelineStageDebugSelection(
+    ImGui::SeparatorText("Pipeline Stage Tools");
+    ImGui::TextUnformatted(
+      "Single-stage debug should mount the selected stage as a normal algorithm, not rewrite the pipeline internals.");
+    if (ImGui::Button("Mount This Stage As Algorithm", ImVec2(260.0f, 0.0f))) {
+      std::string attach_error_message;
+      size_t attached_algorithm_index = 0u;
+      host.SetRenderPreviewRequest({});
+      host.PauseTicking();
+      if (!host.AttachAlgorithmToAgent(
             0u,
-            agent_composer_ui_state_.pipeline_debug_pipeline_name,
-            false,
-            static_cast<uint32_t>(candidate_index),
-            nullptr);
-        }
-        if (is_selected) {
-          ImGui::SetItemDefaultFocus();
-        }
+            selected_algorithm_summary->algorithm_name,
+            selected_algorithm_summary->resource_bindings,
+            selected_algorithm_summary->descriptor_values,
+            &attached_algorithm_index,
+            &attach_error_message,
+            debug_tool::AlgorithmMountMode::Direct,
+            selected_algorithm_summary->execution_preference)) {
+        DEBUG_TOOL_ASSERT(false, "Failed to mount the selected pipeline stage as a normal algorithm.");
+        host.ui_status_message() = attach_error_message.empty()
+          ? "Failed to mount the selected pipeline stage as a normal algorithm."
+          : attach_error_message;
+      } else {
+        agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(attached_algorithm_index);
+        agent_composer_ui_state_.preview_request_dirty = true;
+        host.ClearGpuRuntimeCaches();
+        host.ui_status_message() =
+          "Mounted the selected stage as a normal algorithm. Use this mount for single-stage debug.";
       }
-      ImGui::EndCombo();
     }
   }
 
@@ -1327,26 +1286,23 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
         "同步模式: %s",
         debug_tool::AlgorithmPipelineSyncModeDisplayName(
           selected_algorithm_summary->pipeline_sync_mode));
-      if (selected_algorithm_summary->pipeline_sync_mode ==
-          debug_tool::AlgorithmPipelineSyncMode::Forced) {
-        ImGui::Text(
-          "总耗时: %.3f s",
-          selected_algorithm_summary->pipeline_total_elapsed_seconds);
-        if (!selected_algorithm_summary->pipeline_stage_runtime_stats.empty()) {
-          for (const algorithm_management::AlgorithmPipelineStageRuntimeStat& stage_stat :
-               selected_algorithm_summary->pipeline_stage_runtime_stats) {
-            if (!stage_stat.reason.empty()) {
-              ImGui::BulletText(
-                "%s: %.3f s (%s)",
-                stage_stat.stage_name.c_str(),
-                stage_stat.elapsed_seconds,
-                stage_stat.reason.c_str());
-            } else {
-              ImGui::BulletText(
-                "%s: %.3f s",
-                stage_stat.stage_name.c_str(),
-                stage_stat.elapsed_seconds);
-            }
+      ImGui::Text(
+        "总耗时: %.3f s",
+        selected_algorithm_summary->pipeline_total_elapsed_seconds);
+      if (!selected_algorithm_summary->pipeline_stage_runtime_stats.empty()) {
+        for (const algorithm_management::AlgorithmPipelineStageRuntimeStat& stage_stat :
+             selected_algorithm_summary->pipeline_stage_runtime_stats) {
+          if (!stage_stat.reason.empty()) {
+            ImGui::BulletText(
+              "%s: %.3f s (%s)",
+              stage_stat.stage_name.c_str(),
+              stage_stat.elapsed_seconds,
+              stage_stat.reason.c_str());
+          } else {
+            ImGui::BulletText(
+              "%s: %.3f s",
+              stage_stat.stage_name.c_str(),
+              stage_stat.elapsed_seconds);
           }
         }
       }
@@ -1373,7 +1329,7 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
 
     if (!selected_algorithm_summary->pipeline_stage &&
         selected_algorithm_summary->bridge_debug_set.valid) {
-      ImGui::SeparatorText("Pipeline Bridge Debug");
+      ImGui::SeparatorText("Logical Stage Debug");
       ImGui::Text(
         "Bridge: %s <- %s -> %s",
         selected_algorithm_summary->bridge_debug_set.stage_name.empty()
@@ -1385,6 +1341,34 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
         selected_algorithm_summary->bridge_debug_set.next_stage_name.empty()
           ? "<tail>"
           : selected_algorithm_summary->bridge_debug_set.next_stage_name.c_str());
+      ImGui::TextUnformatted(
+        "Single-step debug folds bridge ingress into a logical decomposer view and folds bridge egress into a logical reflector view.");
+
+      if (selected_algorithm_summary->bridge_debug_set.has_logical_decomposer_snapshot) {
+        _DrawReflectionSnapshot(
+          "Logical Decomposer Output",
+          selected_algorithm_summary->bridge_debug_set.logical_decomposer_snapshot);
+      }
+      if (selected_algorithm_summary->bridge_debug_set.has_stage_runtime_snapshot) {
+        _DrawReflectionSnapshot(
+          "Stage Runtime Output",
+          selected_algorithm_summary->bridge_debug_set.stage_runtime_snapshot);
+      }
+      if (selected_algorithm_summary->bridge_debug_set.has_logical_reflector_snapshot) {
+        _DrawReflectionSnapshot(
+          "Logical Reflector Output",
+          selected_algorithm_summary->bridge_debug_set.logical_reflector_snapshot);
+      }
+      if (selected_algorithm_summary->bridge_debug_set.has_logical_replay_reflector_snapshot) {
+        _DrawReflectionSnapshot(
+          "Replay Logical Reflector Output",
+          selected_algorithm_summary->bridge_debug_set.logical_replay_reflector_snapshot);
+      }
+      _DrawReflectionSnapshot(
+        "Replay Runtime Reflector Snapshot",
+        selected_algorithm_summary->bridge_debug_set.replay_reflection_snapshot);
+
+      ImGui::SeparatorText("Bridge Transport Detail");
 
       if (!selected_algorithm_summary->bridge_debug_set.ingress_bindings.empty()) {
         ImGui::TextUnformatted("Ingress Bindings");
@@ -1413,41 +1397,17 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
         }
       }
 
-      if (selected_algorithm_summary->bridge_debug_set.has_stage_input_reflection_snapshot) {
-        _DrawReflectionSnapshot(
-          "Stage Input After Ingress",
-          selected_algorithm_summary->bridge_debug_set.stage_input_reflection_snapshot);
-      }
-      if (selected_algorithm_summary->bridge_debug_set.has_stage_output_reflection_snapshot) {
-        _DrawReflectionSnapshot(
-          "Stage Output Before Egress",
-          selected_algorithm_summary->bridge_debug_set.stage_output_reflection_snapshot);
-      }
-      if (selected_algorithm_summary->bridge_debug_set.has_next_stage_input_reflection_snapshot) {
-        _DrawReflectionSnapshot(
-          "Next Stage Input After Egress",
-          selected_algorithm_summary->bridge_debug_set.next_stage_input_reflection_snapshot);
-      }
-      if (selected_algorithm_summary->bridge_debug_set.has_replay_output_reflection_snapshot) {
-        _DrawReflectionSnapshot(
-          "Replay Output Snapshot",
-          selected_algorithm_summary->bridge_debug_set.replay_output_reflection_snapshot);
-      }
-      _DrawReflectionSnapshot(
-        "Replay Reflection Snapshot",
-        selected_algorithm_summary->bridge_debug_set.replay_reflection_snapshot);
-
-      if (ImGui::Button("Replay Bridge Stage Once", ImVec2(220.0f, 0.0f))) {
+      if (ImGui::Button("Replay Logical Stage Once", ImVec2(220.0f, 0.0f))) {
         std::string replay_error_message;
         if (!host.ReplayPipelineStageBridgeDebug(
               0u,
               static_cast<size_t>(selected_algorithm_index),
               &replay_error_message)) {
           host.ui_status_message() = replay_error_message.empty()
-            ? "Pipeline bridge stage replay failed."
+            ? "Logical stage replay failed."
             : std::move(replay_error_message);
         } else {
-          host.ui_status_message() = "Pipeline bridge stage replay executed once.";
+          host.ui_status_message() = "Logical stage replay executed once.";
         }
       }
     }
@@ -1836,14 +1796,6 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
                 : ("Failed to mount pipeline package: " + attach_error_message);
             } else {
               agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(attached_algorithm_index);
-              agent_composer_ui_state_.pipeline_debug_pipeline_name = pipeline_instance_name;
-              agent_composer_ui_state_.pipeline_debug_stage_index = -1;
-              host.SetPipelineStageDebugSelection(
-                0u,
-                pipeline_instance_name,
-                true,
-                0u,
-                nullptr);
               std::string preview_error_message;
               if (!build_and_apply_preview_for_algorithm(attached_algorithm_index, &preview_error_message)) {
                 DEBUG_TOOL_ASSERT(false, "Mounted pipeline failed preview validation.");
@@ -1875,14 +1827,6 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
               : ("Failed to mount pipeline package: " + attach_error_message);
           } else {
             agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(attached_algorithm_index);
-            agent_composer_ui_state_.pipeline_debug_pipeline_name = pipeline_instance_name;
-            agent_composer_ui_state_.pipeline_debug_stage_index = -1;
-            host.SetPipelineStageDebugSelection(
-              0u,
-              pipeline_instance_name,
-              true,
-              0u,
-              nullptr);
             host.ClearGpuRuntimeCaches();
             host.SetRenderPreviewRequest({});
             host.PauseTicking();

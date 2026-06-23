@@ -1,7 +1,8 @@
 #include "imgui_vulkan_runtime.h"
 
-#include "runtime_systems/algorithm_gpu_context.h"
+#include "runtime_systems/runtime_gpu_context.h"
 #include "runtime_systems/job_system.h"
+#include "runtime_systems/runtime_environment.h"
 
 #include <algorithm>
 #include <cassert>
@@ -160,7 +161,7 @@ void ImGuiVulkanRuntime::SetupVulkan(const char* app_name, SDL_Window* window) {
   pool_info.pPoolSizes = pool_sizes;
   CheckVkResult(vkCreateDescriptorPool(device_, &pool_info, allocator_, &descriptor_pool_));
 
-  AlgorithmGpuContextRegistry::Instance().Set(AlgorithmGpuExecutionContext{
+  RuntimeGpuContextRegistry::Instance().Set(RuntimeGpuExecutionContext{
     .instance = instance_,
     .physical_device = physical_device_,
     .device = device_,
@@ -222,7 +223,7 @@ void ImGuiVulkanRuntime::CleanupVulkanWindow() {
 }
 
 void ImGuiVulkanRuntime::CleanupVulkan() {
-  AlgorithmGpuContextRegistry::Instance().Clear();
+  RuntimeGpuContextRegistry::Instance().Clear();
   if (vma_allocator_ != VK_NULL_HANDLE) {
     vmaDestroyAllocator(vma_allocator_);
     vma_allocator_ = VK_NULL_HANDLE;
@@ -454,7 +455,7 @@ void ImGuiVulkanRuntime::ClearGpuRuntimeCaches() {
   if (device_ != VK_NULL_HANDLE) {
     CheckVkResult(vkDeviceWaitIdle(device_));
   }
-  job_gpu::Clear();
+  InvokeRuntimeGpuCacheClearCallback();
 }
 
 bool ImGuiVulkanRuntime::Tick(SDL_Window* window) {

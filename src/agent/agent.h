@@ -67,16 +67,12 @@ class Agent {
     size_t index,
     const AgentTickContext& context,
     std::string* out_error_message = nullptr);
-  bool SetPipelineStageDebugSelection(
-    const std::string& pipeline_name,
-    bool select_all,
-    uint32_t stage_index,
-    std::string* out_error_message = nullptr);
   bool EnqueuePipelineStage0Submission(
     const std::string& pipeline_name,
     const std::vector<AlgorithmResourceBinding>& resource_bindings,
     const std::vector<AlgorithmDescriptorValue>& descriptor_values,
     std::string* out_error_message = nullptr);
+  void RequestTimingLog();
   void Destroy();
 
   bool initialized() const { return initialized_; }
@@ -114,11 +110,6 @@ class Agent {
   }
   bool PipelineNameInUse(const std::string& pipeline_name) const;
 
-  using PendingPipelineStage0Submission = algorithm_management::CpuPendingPipelineStage0Submission;
-  using PipelineInterStageBufferRuntimeState = algorithm_management::CpuPipelineInterStageBufferRuntimeState;
-  using PipelineLaneRuntimeState = algorithm_management::CpuPipelineLaneRuntimeState;
-  using PipelineRuntimeState = algorithm_management::CpuPipelineRuntimeState;
-
  private:
   bool initialized_{false};
   std::string agent_name_{}; 
@@ -126,6 +117,7 @@ class Agent {
   std::vector<AgentAlgorithmRuntimeState> algorithm_runtime_states_{};
   std::vector<AlgorithmAssemblyState> algorithm_assembly_states_{};
   std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>> standard_shared_container_sets_{};
+  bool timing_log_requested_{false};
 };
 
 }  // namespace agent

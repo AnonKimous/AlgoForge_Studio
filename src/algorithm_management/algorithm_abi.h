@@ -292,6 +292,7 @@ enum class AlgorithmAssemblyState {
 struct AgentTickResult {
   AlgorithmToAgentSignal algorithm_to_agent_signal{};
   std::vector<AgentAlgorithmRuntimeState> algorithm_runtime_states;
+  std::string timing_log;
 };
 
 class IAlgorithmPackageSupport;

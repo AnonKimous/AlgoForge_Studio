@@ -102,6 +102,7 @@ class ResourceNodeItem:
 class FunctionFrameItem:
     name: str
     script: str = ""
+    script_language: str = "pseudocode"
     input_name: str = "in"
     output_name: str = "out"
     expected_input: str = ""
@@ -268,6 +269,11 @@ class ProjectState:
         return self.next_intervention_name()
 
     @staticmethod
+    def _split_port_names(raw_value: str, default_name: str) -> list[str]:
+        values = [part.strip() for part in str(raw_value or "").split(",") if part.strip()]
+        return values or [default_name]
+
+    @staticmethod
     def _expand_flag(value: Any, default: bool) -> bool:
         if value is None:
             return default
@@ -368,7 +374,7 @@ class ProjectState:
         if node_kind == "function":
             node = self._resolve_node(kind, name)
             assert isinstance(node, FunctionFrameItem)
-            return [node.input_name or "in"]
+            return self._split_port_names(node.input_name, "in")
         if node_kind == "functiontext":
             return []
         raise ValueError(f"Unsupported node kind for input ports: {node_kind}")
@@ -403,7 +409,7 @@ class ProjectState:
             return self._resource_output_ports(node.resource_kind, node.outputs)
         if node_kind == "function":
             assert isinstance(node, FunctionFrameItem)
-            return [node.output_name or "out"]
+            return self._split_port_names(node.output_name, "out")
         if node_kind == "functiontext":
             return []
         raise ValueError(f"Unsupported node kind for output ports: {node_kind}")
@@ -655,6 +661,7 @@ class ProjectState:
                 entry["height"] = float(getattr(item, "height", 220.0))
                 if kind == "function":
                     entry["script"] = str(getattr(item, "script", ""))
+                    entry["script_language"] = str(getattr(item, "script_language", "pseudocode"))
                     entry["input_name"] = str(getattr(item, "input_name", "in"))
                     entry["output_name"] = str(getattr(item, "output_name", "out"))
                 if kind == "functiontext":
@@ -832,6 +839,7 @@ class ProjectState:
                 {
                     "name": item.name,
                     "script": item.script,
+                    "script_language": item.script_language,
                     "input_name": item.input_name,
                     "output_name": item.output_name,
                     "expected_input": item.expected_input,
@@ -1125,6 +1133,7 @@ class ProjectState:
                     FunctionFrameItem(
                         name=str(item.get("name") or f"function_{index}"),
                         script=str(item.get("script") or ""),
+                        script_language=str(item.get("script_language") or "pseudocode"),
                         input_name=str(item.get("input_name") or "in"),
                         output_name=str(item.get("output_name") or "out"),
                         expected_input=str(item.get("expected_input") or ""),

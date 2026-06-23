@@ -53,10 +53,20 @@ class MockAgentClient:
         self.context_compression_enabled = True
         self._provider_session_signature: tuple[str, str, str] | None = None
         self._openai_previous_response_id: str | None = None
+        self._active_process: subprocess.Popen[str] | None = None
+        self._cancel_requested = False
 
     def reset_session_state(self) -> None:
         self._provider_session_signature = None
         self._openai_previous_response_id = None
+
+    def request_cancel(self) -> bool:
+        self._cancel_requested = True
+        process = self._active_process
+        if process is None or process.poll() is not None:
+            return False
+        process.terminate()
+        return True
 
     def _provider_signature(self) -> tuple[str, str, str]:
         return (
@@ -292,7 +302,7 @@ class MockAgentClient:
                 "Use kind=array only when the user explicitly asks for an array/a node such as a1 or 数组节点.",
                 "Keep meshNode minimal and only represent [mesh].",
                 "Reuse singleton tool-like nodes instead of duplicating them when possible: container, decomposer, reflector, interventioner, meshNode, fun.",
-                "For text writing or code generation tasks around fun, prefer using the fun node and its linked functiontext node instead of rewriting the whole document.",
+                "For script-writing tasks around fun, prefer using the fun node and its linked functiontext node instead of rewriting the whole document.",
                 "To call a tool, output a fenced code block labeled algorithm-studio-tool with a JSON object.",
                 "Examples:",
                 "```algorithm-studio-tool",
@@ -305,7 +315,7 @@ class MockAgentClient:
                 '{"tool":"ui_update_node","kind":"variable","name":"v1","count":8,"message":"Updated v1 count"}',
                 "```",
                 "```algorithm-studio-tool",
-                '{"tool":"ui_update_node","kind":"function","name":"fun","script":"generated text or code","message":"Updated fun script"}',
+                '{"tool":"ui_update_node","kind":"function","name":"fun","script_language":"pseudocode","script":"draft script or pseudocode","message":"Updated fun script"}',
                 "```",
                 "```algorithm-studio-tool",
                 '{"tool":"ui_add_node","kind":"functiontext","function_name":"fun","text":"solution draft","message":"Added function text"}',
@@ -1030,6 +1040,7 @@ class MockAgentClient:
             _emit_agent_event(event_callback, "activity.start", title="chat", summary="开始执行 Codex", detail="正在准备执行环境")
         last_error_message = ""
         return_code = -1
+        self._cancel_requested = False
         try:
             process = subprocess.Popen(
                 args,
@@ -1041,11 +1052,14 @@ class MockAgentClient:
                 errors="strict",
                 bufsize=1,
             )
+            self._active_process = process
             if process.stdin is None or process.stdout is None:
                 raise AssertionError("Codex process pipes were not initialized.")
             process.stdin.write(stdin_prompt)
             process.stdin.close()
             while True:
+                if self._cancel_requested and process.poll() is None:
+                    process.terminate()
                 line = process.stdout.readline()
                 if not line:
                     if process.poll() is not None:
@@ -1067,7 +1081,10 @@ class MockAgentClient:
             return_code = process.wait()
             output = Path(output_path).read_text(encoding="utf-8").strip() if Path(output_path).exists() else ""
         finally:
+            self._active_process = None
             Path(output_path).unlink(missing_ok=True)
+        if self._cancel_requested:
+            raise RuntimeError("Request cancelled.")
         if return_code != 0:
             error_message = last_error_message or f"Codex command failed (exit {return_code})."
             raise RuntimeError(error_message) from None
@@ -1142,6 +1159,7 @@ class MockAgentClient:
         event_callback: AgentEventCallback | None = None,
     ) -> str:
         normalized_attachments = self._normalize_attachments(attachments)
+        self._cancel_requested = False
         if False and self._should_stage_request(selection, prompt):
             compress_context = self._should_compress_planning_context(project, prompt, normalized_attachments)
             detail = "上下文较长，先压缩关键信息再整理方案。" if compress_context else "保留当前上下文，先整理执行方案。"

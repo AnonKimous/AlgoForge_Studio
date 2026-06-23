@@ -248,11 +248,13 @@ class AgentTicker {
 
   const AlgorithmToAgentSignal& algorithm_to_agent_signal() const { return algorithm_to_agent_signal_; }
   const InteractionInterventionRequest& intervention_request() const { return intervention_request_; }
+  const std::string& last_timing_log() const { return last_timing_log_; }
 
  private:
   std::shared_ptr<agent::Agent> agent_binding_{};
   AlgorithmToAgentSignal algorithm_to_agent_signal_{};
   InteractionInterventionRequest intervention_request_{};
+  std::string last_timing_log_{};
 };
 
 void AgentTicker::Init(std::shared_ptr<agent::Agent> agent) {
@@ -260,6 +262,7 @@ void AgentTicker::Init(std::shared_ptr<agent::Agent> agent) {
   algorithm_to_agent_signal_ = {};
   intervention_request_ = {};
   intervention_request_.enabled = true;
+  last_timing_log_.clear();
 }
 
 void AgentTicker::Tick(
@@ -267,6 +270,7 @@ void AgentTicker::Tick(
   Vec2 mouse_pixel,
   float dt_seconds) {
   algorithm_to_agent_signal_ = {};
+  last_timing_log_.clear();
   if (!agent_binding_) {
     return;
   }
@@ -295,8 +299,10 @@ void AgentTicker::Tick(
   agent::AgentTickResult result{};
   if (agent_binding_->Tick(context, allow_tick_mask, &result)) {
     algorithm_to_agent_signal_ = result.algorithm_to_agent_signal;
+    last_timing_log_ = std::move(result.timing_log);
   } else {
     algorithm_to_agent_signal_ = {};
+    last_timing_log_.clear();
   }
 }
 
@@ -304,6 +310,7 @@ void AgentTicker::Destroy() {
   agent_binding_.reset();
   algorithm_to_agent_signal_ = {};
   intervention_request_ = {};
+  last_timing_log_.clear();
 }
 
 struct AgentManager::ManagedAgentEntry {
@@ -422,6 +429,9 @@ bool AgentManager::Tick(const InputState& input, Vec2 mouse_pixel, float dt_seco
     }
 
     managed_agent->ticker.Tick(input, mouse_pixel, dt_seconds);
+    if (!managed_agent->ticker.last_timing_log().empty()) {
+      std::cerr << managed_agent->ticker.last_timing_log();
+    }
     if (managed_agent->agent) {
       const auto& algorithm_objects = managed_agent->agent->algorithm_objects();
       const auto& runtime_states = managed_agent->agent->algorithm_runtime_states();
@@ -597,6 +607,28 @@ bool AgentManager::EnqueuePipelineStage0Submission(
     return false;
   }
 
+  managed_agents_[agent_index]->ResetTickBudget();
+  if (out_error_message) {
+    out_error_message->clear();
+  }
+  return true;
+}
+
+bool AgentManager::RequestAgentTimingLog(
+  size_t agent_index,
+  std::string* out_error_message) {
+  auto set_error = [&](const std::string& message) {
+    if (out_error_message) {
+      *out_error_message = message;
+    }
+  };
+
+  if (agent_index >= managed_agents_.size() || !managed_agents_[agent_index] || !managed_agents_[agent_index]->agent) {
+    set_error("Selected agent is unavailable.");
+    return false;
+  }
+
+  managed_agents_[agent_index]->agent->RequestTimingLog();
   managed_agents_[agent_index]->ResetTickBudget();
   if (out_error_message) {
     out_error_message->clear();

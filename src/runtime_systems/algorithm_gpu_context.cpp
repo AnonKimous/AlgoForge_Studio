@@ -1,31 +1,30 @@
-#include "algorithm_gpu_context.h"
+#include "runtime_systems/runtime_gpu_context.h"
 
 namespace runtime_systems {
 
-AlgorithmGpuContextRegistry& AlgorithmGpuContextRegistry::Instance() {
-  static AlgorithmGpuContextRegistry instance{};
+RuntimeGpuContextRegistry& RuntimeGpuContextRegistry::Instance() {
+  static RuntimeGpuContextRegistry instance{};
   return instance;
 }
 
-void AlgorithmGpuContextRegistry::Set(AlgorithmGpuExecutionContext context) {
+void RuntimeGpuContextRegistry::Set(RuntimeGpuExecutionContext context) {
   std::lock_guard<std::mutex> lock(mutex_);
   context_ = context;
 }
 
-AlgorithmGpuExecutionContext AlgorithmGpuContextRegistry::Snapshot() const {
+RuntimeGpuExecutionContext RuntimeGpuContextRegistry::Snapshot() const {
   std::lock_guard<std::mutex> lock(mutex_);
   return context_;
 }
 
-bool AlgorithmGpuContextRegistry::HasContext() const {
+bool RuntimeGpuContextRegistry::HasContext() const {
   std::lock_guard<std::mutex> lock(mutex_);
   return context_.valid();
 }
 
-void AlgorithmGpuContextRegistry::Clear() {
+void RuntimeGpuContextRegistry::Clear() {
   std::lock_guard<std::mutex> lock(mutex_);
   context_ = {};
 }
 
 }  // namespace runtime_systems
-
