@@ -1410,6 +1410,45 @@ bool CreateAlgorithmObjectByName(
   return created;
 }
 
+bool QueryAlgorithmRequestedBindingsByName(
+  const std::string& algorithm_name,
+  AlgorithmRequestedResources* out_requested_resources,
+  AlgorithmRequestedDescriptorBindings* out_requested_descriptor_bindings,
+  std::string* out_error_message) {
+  if (!out_requested_resources || !out_requested_descriptor_bindings) {
+    if (out_error_message) {
+      *out_error_message = "Requested binding output pointers are null.";
+    }
+    return false;
+  }
+
+  AlgorithmObject algorithm_object{};
+  std::string create_error_message;
+  if (!CreateAlgorithmObjectByName(algorithm_name, &algorithm_object, &create_error_message)) {
+    if (out_error_message) {
+      *out_error_message = create_error_message.empty()
+        ? ("Failed to create algorithm object for '" + algorithm_name + "'.")
+        : std::move(create_error_message);
+    }
+    return false;
+  }
+
+  const std::string resolved_algorithm_name = algorithm_object.algorithm_profile.algorithm_name.empty()
+    ? algorithm_name
+    : algorithm_object.algorithm_profile.algorithm_name;
+  if (!algorithm_management::QueryAlgorithmRequestedBindings(
+        resolved_algorithm_name,
+        out_requested_resources,
+        out_requested_descriptor_bindings,
+        out_error_message)) {
+    if (out_error_message && out_error_message->empty()) {
+      *out_error_message = "Failed to query requested bindings for '" + resolved_algorithm_name + "'.";
+    }
+    return false;
+  }
+  return true;
+}
+
 bool Agent::Init(AgentInitConfig config) {
   agent_name_ = std::move(config.agent_name);
   algorithm_objects_ = std::move(config.algorithm_objects);
@@ -1519,7 +1558,7 @@ bool Agent::MountPipelineAlgorithm(
     return false;
   }
 
-  return algorithm_management::AlgorithmScheduler::Instance().MountPipelineAlgorithmObjects(
+  return algorithm_management::MountPipelineAlgorithmObjects(
     &algorithm_objects_,
     &algorithm_runtime_states_,
     &algorithm_assembly_states_,
@@ -1588,7 +1627,7 @@ bool Agent::RemoveAlgorithm(size_t index) {
     algorithm_assembly_states_.begin() + static_cast<std::ptrdiff_t>(erase_begin),
     algorithm_assembly_states_.begin() + static_cast<std::ptrdiff_t>(erase_end));
   if (!pipeline_name_to_remove.empty()) {
-        algorithm_management::AlgorithmScheduler::Instance().UnregisterPipeline(
+        algorithm_management::UnregisterMountedPipeline(
           pipeline_name_to_remove,
           agent_name_);
   }
@@ -1687,7 +1726,7 @@ bool Agent::SubmitAlgorithm(
     AlgorithmToAgentSignal pipeline_signal{};
     std::string pipeline_error_message;
     bool mounted_pipeline_processing_failed = false;
-    if (!algorithm_management::AlgorithmScheduler::Instance().TickMountedPipeline(
+    if (!algorithm_management::TickMountedPipeline(
           &algorithm_objects_,
           begin_index,
           end_index,
@@ -1780,7 +1819,7 @@ bool Agent::EnqueuePipelineStage0Submission(
     }
     return false;
   }
-  return algorithm_management::AlgorithmScheduler::Instance().EnqueueMountedPipelineStage0Submission(
+  return algorithm_management::EnqueueMountedPipelineStage0Submission(
     &algorithm_objects_,
     pipeline_name,
     agent_name_,
@@ -1794,7 +1833,7 @@ bool Agent::ReplayPipelineStageBridgeDebug(
   size_t index,
   const AgentTickContext& context,
   std::string* out_error_message) {
-  return algorithm_management::AlgorithmScheduler::Instance().ReplayMountedPipelineStageBridgeDebug(
+  return algorithm_management::ReplayMountedPipelineStageBridgeDebug(
     &algorithm_objects_,
     index,
     context,
@@ -1856,7 +1895,7 @@ void Agent::Destroy() {
     if (object.pipeline_stage &&
         object.pipeline_stage_index == 0u &&
         !object.pipeline_name.empty()) {
-      algorithm_management::AlgorithmScheduler::Instance().UnregisterPipeline(
+      algorithm_management::UnregisterMountedPipeline(
         object.pipeline_name,
         agent_name_);
     }

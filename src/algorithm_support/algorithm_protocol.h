@@ -1,6 +1,6 @@
 #pragma once
 
-#include "algorithm_management/algorithm_abi.h"
+#include "algorithm_support/algorithm_abi.h"
 #include "algorithm_support/algorithm_data.h"
 
 #include <memory>

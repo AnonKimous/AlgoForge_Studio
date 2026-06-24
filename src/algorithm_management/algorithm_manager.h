@@ -11,24 +11,12 @@
 #include <unordered_set>
 #include <vector>
 
-#define ALGORITHM_MANAGEMENT_LAYER_PUBLIC_FACADE_INCLUDE 1
-#include "algorithm_support/algorithm_container_manifest.h"
-#include "algorithm_support/algorithm_intervention.h"
-#include "algorithm_support/algorithm_package_location.h"
-#include "algorithm_support/algorithm_protocol.h"
-#include "algorithm_support/algorithm_types.h"
-#undef ALGORITHM_MANAGEMENT_LAYER_PUBLIC_FACADE_INCLUDE
+#include "algorithm_support/algorithm_support.h"
+#include "common_data/kernel_cfg.h"
 
 #define RUNTIME_SYSTEMS_LAYER_PUBLIC_FACADE_INCLUDE 1
 #include "runtime_systems/runtime_systems.h"
 #undef RUNTIME_SYSTEMS_LAYER_PUBLIC_FACADE_INCLUDE
-
-namespace agent_management {
-struct AlgorithmPipelineStallReport;
-bool ReportAlgorithmPipelineStall(
-  const AlgorithmPipelineStallReport& report,
-  std::string* out_error_message);
-}  // namespace agent_management
 
 namespace algorithm_management {
 
@@ -1700,6 +1688,114 @@ inline bool DecodeAlgorithmInterventionPacket(
   return algorithm_support::DecodeAlgorithmInterventionPacket(packet, request);
 }
 
+inline void ClearAlgorithmScheduler() {
+  AlgorithmScheduler::Instance().Clear();
+}
+
+inline bool MountPipelineAlgorithmObjects(
+  std::vector<::algorithm_management::AlgorithmObject>* mounted_objects,
+  std::vector<::algorithm_management::AgentAlgorithmRuntimeState>* inout_runtime_states,
+  std::vector<::algorithm_management::AlgorithmAssemblyState>* inout_assembly_states,
+  std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>* standard_shared_container_sets,
+  const std::string& owner_agent_name,
+  const std::string& pipeline_name,
+  const std::vector<AlgorithmPipelineStageSubmission>& stage_submissions,
+  AlgorithmExecutionPreference execution_preference,
+  AlgorithmPipelineTopology topology,
+  AlgorithmPipelineSyncMode sync_mode,
+  size_t* out_begin_index = nullptr,
+  std::string* out_error_message = nullptr) {
+  return AlgorithmScheduler::Instance().MountPipelineAlgorithmObjects(
+    mounted_objects,
+    inout_runtime_states,
+    inout_assembly_states,
+    standard_shared_container_sets,
+    owner_agent_name,
+    pipeline_name,
+    stage_submissions,
+    execution_preference,
+    topology,
+    sync_mode,
+    out_begin_index,
+    out_error_message);
+}
+
+inline bool EnqueueMountedPipelineStage0Submission(
+  std::vector<::algorithm_management::AlgorithmObject>* mounted_objects,
+  const std::string& pipeline_name,
+  const std::string& owner_agent_name,
+  const std::vector<AlgorithmResourceBinding>& resource_bindings,
+  const std::vector<AlgorithmDescriptorValue>& descriptor_values,
+  std::vector<::algorithm_management::AlgorithmAssemblyState>* inout_assembly_states,
+  std::string* out_error_message = nullptr) {
+  return AlgorithmScheduler::Instance().EnqueueMountedPipelineStage0Submission(
+    mounted_objects,
+    pipeline_name,
+    owner_agent_name,
+    resource_bindings,
+    descriptor_values,
+    inout_assembly_states,
+    out_error_message);
+}
+
+inline bool TickMountedPipeline(
+  std::vector<::algorithm_management::AlgorithmObject>* mounted_objects,
+  size_t begin_index,
+  size_t end_index,
+  const std::string& owner_agent_name,
+  const ::agent::AgentTickContext& context,
+  const std::vector<bool>& allow_tick_mask,
+  const std::vector<::algorithm_management::AlgorithmAssemblyState>& assembly_states,
+  bool collect_pipeline_timing,
+  std::vector<::algorithm_management::AgentAlgorithmRuntimeState>* inout_runtime_states,
+  common_data::AlgorithmToAgentSignal* out_pipeline_signal,
+  bool* out_pipeline_processing_failed,
+  std::string* out_error_message = nullptr) {
+  return AlgorithmScheduler::Instance().TickMountedPipeline(
+    mounted_objects,
+    begin_index,
+    end_index,
+    owner_agent_name,
+    context,
+    allow_tick_mask,
+    assembly_states,
+    collect_pipeline_timing,
+    inout_runtime_states,
+    out_pipeline_signal,
+    out_pipeline_processing_failed,
+    out_error_message);
+}
+
+inline bool ReplayMountedPipelineStageBridgeDebug(
+  std::vector<::algorithm_management::AlgorithmObject>* mounted_objects,
+  size_t index,
+  const ::agent::AgentTickContext& context,
+  std::vector<::algorithm_management::AgentAlgorithmRuntimeState>* inout_runtime_states,
+  std::string* out_error_message = nullptr) {
+  return AlgorithmScheduler::Instance().ReplayMountedPipelineStageBridgeDebug(
+    mounted_objects,
+    index,
+    context,
+    inout_runtime_states,
+    out_error_message);
+}
+
+inline void UnregisterMountedPipeline(
+  const std::string& pipeline_name,
+  const std::string& owner_agent_name) {
+  AlgorithmScheduler::Instance().UnregisterPipeline(pipeline_name, owner_agent_name);
+}
+
+inline bool TryGetMountedPipelineRuntime(
+  const std::string& pipeline_name,
+  const std::string& owner_agent_name,
+  CpuPipelineRuntimeState* out_runtime_state) {
+  return AlgorithmScheduler::Instance().TryGetPipelineRuntime(
+    pipeline_name,
+    owner_agent_name,
+    out_runtime_state);
+}
+
 inline AlgorithmScheduler& AlgorithmScheduler::Instance() {
   static AlgorithmScheduler instance{};
   static const bool hook_registered = []() {
@@ -3282,5 +3378,3 @@ using algorithm_management::LoadAlgorithmPackageDefaultBindings;
 using algorithm_management::LoadAlgorithmPackageDefaultBindingsFromLocation;
 using algorithm_management::SubmitAlgorithmObject;
 using algorithm_management::TryResolveAlgorithmPackageLocation;
-using agent_management::AlgorithmPipelineStallReport;
-using agent_management::ReportAlgorithmPipelineStall;

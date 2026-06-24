@@ -1,5 +1,5 @@
 #include "algorithm_support/algorithm_protocol.h"
-#include "algorithm_management/algorithm_abi.h"
+#include "algorithm_support/algorithm_abi.h"
 
 #include "algorithm_support/algorithm_container_manifest.h"
 #include "algorithm_support/algorithm_json_utils.h"

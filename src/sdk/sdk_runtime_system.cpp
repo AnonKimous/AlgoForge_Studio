@@ -19,7 +19,7 @@ void _SetError(std::string* out_error_message, std::string message) {
 }
 
 std::vector<agent::AlgorithmResourceBinding> _ToAgentResourceBindings(
-  const eastl::vector<ResourceBinding, eastl::RuntimeSystemAllocator>& bindings) {
+  const std::vector<ResourceBinding>& bindings) {
   std::vector<agent::AlgorithmResourceBinding> result;
   result.reserve(bindings.size());
   for (const ResourceBinding& binding : bindings) {
@@ -33,7 +33,7 @@ std::vector<agent::AlgorithmResourceBinding> _ToAgentResourceBindings(
 }
 
 std::vector<agent::AlgorithmDescriptorValue> _ToAgentDescriptorValues(
-  const eastl::vector<DescriptorValue, eastl::RuntimeSystemAllocator>& values) {
+  const std::vector<DescriptorValue>& values) {
   std::vector<agent::AlgorithmDescriptorValue> result;
   result.reserve(values.size());
   for (const DescriptorValue& value : values) {
@@ -214,21 +214,10 @@ AlgorithmHandle SdkRuntimeSystem::MountAlgorithm(
     return 0;
   }
 
-  agent::AlgorithmObject algorithm_object{};
-  std::string algorithm_object_error_message;
-  if (!agent::CreateAlgorithmObjectByName(algorithm_name, &algorithm_object, &algorithm_object_error_message)) {
-    _SetError(
-      out_error_message,
-      algorithm_object_error_message.empty()
-        ? ("Failed to create algorithm object for '" + algorithm_name + "'.")
-        : std::move(algorithm_object_error_message));
-    return 0;
-  }
-
   agent::AlgorithmRequestedResources requested_resources{};
   agent::AlgorithmRequestedDescriptorBindings requested_descriptors{};
-  const bool queried_bindings_ok = algorithm_management::QueryAlgorithmRequestedBindings(
-    algorithm_object.algorithm_profile.algorithm_name,
+  const bool queried_bindings_ok = agent::QueryAlgorithmRequestedBindingsByName(
+    algorithm_name,
     &requested_resources,
     &requested_descriptors,
     out_error_message);
@@ -243,9 +232,9 @@ AlgorithmHandle SdkRuntimeSystem::MountAlgorithm(
   draft.handle = next_algorithm_handle_++;
   draft.agent_handle = agent_handle;
   draft.agent_index = record->agent_index;
-  draft.algorithm_name = algorithm_object.algorithm_profile.algorithm_name.empty()
-    ? algorithm_name.c_str()
-    : algorithm_object.algorithm_profile.algorithm_name.c_str();
+  draft.algorithm_name = requested_resources.algorithm_name.empty()
+    ? algorithm_name
+    : requested_resources.algorithm_name;
   draft.resource_bindings.reserve(requested_resources.required_resources.size());
   for (const agent::AlgorithmRequestedResources::RequiredResource& resource : requested_resources.required_resources) {
     draft.resource_bindings.push_back(ResourceBinding{

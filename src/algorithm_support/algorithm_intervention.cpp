@@ -5,7 +5,7 @@
 #include "algorithm_support/algorithm_package_paths.h"
 #include "algorithm_support/algorithm_json_utils.h"
 
-#include "algorithm_management/algorithm_abi.h"
+#include "algorithm_support/algorithm_abi.h"
 #include "algorithm_management/algorithm_manager.h"
 #define RUNTIME_SYSTEMS_LAYER_PUBLIC_FACADE_INCLUDE 1
 #include "runtime_systems/runtime_systems.h"
@@ -495,7 +495,7 @@ runtime_systems::RuntimeJobPriority _ToRuntimeJobPriority(AlgorithmJobPriority p
 }
 
 void _ClearAlgorithmSchedulerForRuntimeShutdown() {
-  AlgorithmScheduler::Instance().Clear();
+  ClearAlgorithmScheduler();
 }
 
 bool _IsGpuExecutionStage(const agent::AlgorithmInterventionStageSpec& stage) {

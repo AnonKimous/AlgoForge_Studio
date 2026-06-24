@@ -32,6 +32,11 @@ bool CreateAlgorithmObjectByName(
   const std::string& algorithm_name,
   AlgorithmObject* out_group,
   std::string* out_error_message = nullptr);
+bool QueryAlgorithmRequestedBindingsByName(
+  const std::string& algorithm_name,
+  AlgorithmRequestedResources* out_requested_resources,
+  AlgorithmRequestedDescriptorBindings* out_requested_descriptor_bindings,
+  std::string* out_error_message = nullptr);
 
 class Agent {
  public:

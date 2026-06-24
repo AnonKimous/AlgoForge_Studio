@@ -1438,7 +1438,7 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
           algorithm_index,
           &mounted_preview_request,
           &mounted_preview_error_message)) {
-      DEBUG_TOOL_ASSERT(false, "Submitted algorithm did not produce a drawable preview.");
+      host.SetRenderPreviewRequest({});
       if (out_error_message) {
         *out_error_message = mounted_preview_error_message.empty()
           ? "Submitted algorithm did not produce a drawable preview."
@@ -1447,7 +1447,7 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
       return false;
     }
     if (!mounted_preview_request.valid) {
-      DEBUG_TOOL_ASSERT(false, "Submitted algorithm did not produce a drawable preview.");
+      host.SetRenderPreviewRequest({});
       if (out_error_message) {
         *out_error_message = mounted_preview_error_message.empty()
           ? "Submitted algorithm did not produce a drawable preview."
@@ -1698,14 +1698,10 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
           &preview_error_message) &&
         preview_request.valid) {
       host.SetRenderPreviewRequest(std::move(preview_request));
+      agent_composer_ui_state_.preview_request_dirty = false;
     } else if (selected_algorithm_summary->pipeline_name.empty()) {
       host.SetRenderPreviewRequest({});
-      host.ui_status_message() = preview_error_message.empty()
-        ? "Selected algorithm failed preview validation."
-        : std::move(preview_error_message);
-#ifndef NDEBUG
-      DEBUG_TOOL_ASSERT(false, "Selected algorithm failed preview validation.");
-#endif
+      agent_composer_ui_state_.preview_request_dirty = true;
     }
   }
 
@@ -1798,7 +1794,6 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
               agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(attached_algorithm_index);
               std::string preview_error_message;
               if (!build_and_apply_preview_for_algorithm(attached_algorithm_index, &preview_error_message)) {
-                DEBUG_TOOL_ASSERT(false, "Mounted pipeline failed preview validation.");
                 host.ui_status_message() = preview_error_message.empty()
                   ? "Pipeline mounted, but no drawable result was produced."
                   : std::move(preview_error_message);
@@ -1864,7 +1859,6 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
           agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(attached_algorithm_index);
           std::string preview_error_message;
           if (!build_and_apply_preview_for_algorithm(attached_algorithm_index, &preview_error_message)) {
-            DEBUG_TOOL_ASSERT(false, "Pipeline resource submission preview validation failed.");
             host.ui_status_message() = preview_error_message.empty()
               ? "Pipeline resource submission mounted, but no drawable result was produced."
               : std::move(preview_error_message);
@@ -1914,13 +1908,16 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
             } else {
               agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(attached_algorithm_index);
               std::string preview_error_message;
-              if (!build_and_apply_preview_for_algorithm(attached_algorithm_index, &preview_error_message)) {
-                DEBUG_TOOL_ASSERT(false, "Mounted algorithm failed preview validation.");
+              const bool preview_ready =
+                build_and_apply_preview_for_algorithm(attached_algorithm_index, &preview_error_message);
+              host.PauseTicking();
+              if (!preview_ready) {
+                host.SetRenderPreviewRequest({});
+                agent_composer_ui_state_.preview_request_dirty = true;
                 host.ui_status_message() = preview_error_message.empty()
-                  ? "Algorithm mounted, but no drawable result was produced."
-                  : std::move(preview_error_message);
+                  ? "Algorithm mounted. No drawable preview is available, but ticking can still start."
+                  : ("Algorithm mounted without drawable preview: " + preview_error_message);
               } else {
-                host.PauseTicking();
                 host.ui_status_message() = "Algorithm mounted. Press Start Tick to run it.";
               }
             }
@@ -1957,23 +1954,24 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
         host.ui_status_message() = "Mount an algorithm first.";
       } else if (!selected_algorithm_summary->pipeline_stage) {
         std::string preview_error_message;
-        if (!build_and_apply_preview_for_algorithm(
-              static_cast<size_t>(selected_algorithm_index),
-              &preview_error_message)) {
-          DEBUG_TOOL_ASSERT(false, "Mounted algorithm failed preview validation before start.");
-          host.ui_status_message() = preview_error_message.empty()
-            ? "Mounted algorithm did not produce a drawable preview."
-            : std::move(preview_error_message);
-        } else {
-          host.StartTicking();
-          host.ui_status_message() = "Mounted algorithm started.";
+        const bool preview_ready = build_and_apply_preview_for_algorithm(
+          static_cast<size_t>(selected_algorithm_index),
+          &preview_error_message);
+        if (!preview_ready) {
+          host.SetRenderPreviewRequest({});
+          agent_composer_ui_state_.preview_request_dirty = true;
         }
+        host.StartTicking();
+        host.ui_status_message() = preview_ready
+          ? "Mounted algorithm started."
+          : (preview_error_message.empty()
+              ? "Mounted algorithm started without a drawable preview."
+              : ("Mounted algorithm started without a drawable preview: " + preview_error_message));
       } else {
         std::string preview_error_message;
         if (!build_and_apply_preview_for_algorithm(
               static_cast<size_t>(selected_algorithm_index),
               &preview_error_message)) {
-          DEBUG_TOOL_ASSERT(false, "Mounted pipeline failed preview validation before start.");
           host.ui_status_message() = preview_error_message.empty()
             ? "Mounted pipeline did not produce a drawable preview."
             : std::move(preview_error_message);

@@ -131,6 +131,36 @@ std::string _ResolveAlgorithmShaderPath(
     shader_path).string();
 }
 
+std::string _ResolveShaderBinaryPath(const std::string& shader_path) {
+  if (shader_path.empty()) {
+    return {};
+  }
+
+  const std::filesystem::path path(shader_path);
+  const std::string path_text = path.string();
+  if (path_text.size() >= 4u && path_text.compare(path_text.size() - 4u, 4u, ".spv") == 0) {
+    return path_text;
+  }
+  return path_text + ".spv";
+}
+
+bool _IsReadableNonEmptyFile(const std::string& path) {
+  if (path.empty()) {
+    return false;
+  }
+
+  std::error_code ec;
+  const std::filesystem::path file_path(path);
+  if (!std::filesystem::exists(file_path, ec) || ec) {
+    return false;
+  }
+  if (!std::filesystem::is_regular_file(file_path, ec) || ec) {
+    return false;
+  }
+  const uintmax_t file_size = std::filesystem::file_size(file_path, ec);
+  return !ec && file_size > 0u;
+}
+
 const agent::AlgorithmReflectionValue* _FindReflectionValue(
   const agent::AlgorithmReflectionSnapshot& snapshot,
   const std::string& container_name) {
@@ -371,7 +401,7 @@ debug_tool::AlgorithmRuntimeSummary _ToDebugToolAlgorithmRuntimeSummary(
   if (object->pipeline_stage &&
       object->pipeline_stage_index == 0u &&
       !object->pipeline_name.empty() &&
-      algorithm_management::AlgorithmScheduler::Instance().TryGetPipelineRuntime(
+      algorithm_management::TryGetMountedPipelineRuntime(
         object->pipeline_name,
         managed_agent.agent_name(),
         &pipeline_runtime_state) &&
@@ -1623,7 +1653,7 @@ bool DebugToolBackendRuntime::BuildRenderPreviewRequest(
   if (object->pipeline_stage &&
       object->pipeline_stage_index == 0u &&
       !object->pipeline_name.empty() &&
-      algorithm_management::AlgorithmScheduler::Instance().TryGetPipelineRuntime(
+      algorithm_management::TryGetMountedPipelineRuntime(
         object->pipeline_name,
         managed_agent->agent_name(),
         &pipeline_runtime_state) &&
@@ -1637,6 +1667,22 @@ bool DebugToolBackendRuntime::BuildRenderPreviewRequest(
   out_request->stage_name = result_stage->stage_name;
   out_request->vertex_shader_path = _ResolveAlgorithmShaderPath(algorithm_name, result_stage->shader.vertex_shader_path);
   out_request->fragment_shader_path = _ResolveAlgorithmShaderPath(algorithm_name, result_stage->shader.fragment_shader_path);
+  const std::string vertex_shader_binary_path = _ResolveShaderBinaryPath(out_request->vertex_shader_path);
+  const std::string fragment_shader_binary_path = _ResolveShaderBinaryPath(out_request->fragment_shader_path);
+  if (!_IsReadableNonEmptyFile(vertex_shader_binary_path)) {
+    if (out_error_message) {
+      *out_error_message = "Preview vertex shader binary is unavailable: " + vertex_shader_binary_path;
+    }
+    out_request->Clear();
+    return false;
+  }
+  if (!_IsReadableNonEmptyFile(fragment_shader_binary_path)) {
+    if (out_error_message) {
+      *out_error_message = "Preview fragment shader binary is unavailable: " + fragment_shader_binary_path;
+    }
+    out_request->Clear();
+    return false;
+  }
   out_request->storage_buffers.reserve(result_stage->used_algorithm_containers.size());
 
   uint32_t instance_count = 0u;
@@ -1683,7 +1729,8 @@ bool DebugToolBackendRuntime::BuildRenderPreviewRequest(
     }
     out_request->storage_buffers.push_back(std::move(preview_buffer));
 
-    const uint32_t buffer_instances = static_cast<uint32_t>(container->bytes.size() / container->element_stride);
+    const uint32_t buffer_instances = static_cast<uint32_t>(
+      out_request->storage_buffers.back().bytes.size() / out_request->storage_buffers.back().element_stride);
     if (!have_instance_count) {
       instance_count = buffer_instances;
       have_instance_count = true;

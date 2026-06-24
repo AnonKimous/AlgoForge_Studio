@@ -73,7 +73,7 @@ COMMAND_SPECS: tuple[AgentCommandSpec, ...] = (
     ),
     AgentCommandSpec(
         name="scene",
-        usage="scene main | scene container | scene decomposer | scene reflector | scene interventioner | scene d2c | scene all",
+        usage="scene main | scene container | scene decomposer | scene reflector | scene interventioner | scene pretick | scene aftertick | scene render | scene d2c | scene all",
         location="Canvas header > scene tabs",
         summary="Switch the current scene tab.",
     ),
@@ -106,6 +106,12 @@ SCENE_TARGETS: dict[str, tuple[str, str, str]] = {
     "interventioner_overview": ("interventioner_overview", "interventioner", "interventionerScene"),
     "interventioneroverview": ("interventioner_overview", "interventioner", "interventionerScene"),
     "interventionerscene": ("interventioner_overview", "interventioner", "interventionerScene"),
+    "pretick": ("interventioner_pretick", "pretick", "preTick"),
+    "pretickscene": ("interventioner_pretick", "pretick", "preTick"),
+    "aftertick": ("interventioner_aftertick", "aftertick", "afterTick"),
+    "aftertickscene": ("interventioner_aftertick", "aftertick", "afterTick"),
+    "render": ("interventioner_render", "render", "render"),
+    "renderscene": ("interventioner_render", "render", "render"),
     "d2c": ("decomposer2container_overview", "decomposer2container", "d2cScene"),
     "decomposer2container": ("decomposer2container_overview", "decomposer2container", "d2cScene"),
     "decomposer2container_overview": ("decomposer2container_overview", "decomposer2container", "d2cScene"),
@@ -281,7 +287,10 @@ def _execute_scene_command(app: Any, args: list[str]) -> str:
     if normalized not in SCENE_TARGETS:
         raise RuntimeError(f"Unsupported scene target: {args[0]}")
     view_mode, _, scene_label = SCENE_TARGETS[normalized]
-    _call(app, "_set_canvas_view_mode", view_mode, log_message=f"Switched to {scene_label}.")
+    if view_mode in {"interventioner_pretick", "interventioner_aftertick", "interventioner_render"}:
+        _call(app, "_open_intervention_phase_view", view_mode)
+    else:
+        _call(app, "_set_canvas_view_mode", view_mode, log_message=f"Switched to {scene_label}.")
     return f"Switched to {scene_label}."
 
 

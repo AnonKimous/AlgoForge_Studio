@@ -39,26 +39,6 @@
   },
   "intervention": {
     "stages": {
-      "afterTick": {
-        "stage_name": "afterTick",
-        "stage_kind": "afterTick",
-        "used_algorithm_containers": {
-          "arrays": [
-            {
-              "name": "a1",
-              "kind": "array",
-              "tuple_width": 3,
-              "required": true
-            }
-          ],
-          "variables": []
-        },
-        "shader": {
-          "pipeline": "graphics",
-          "vertex": "temporary_test_line_motion_gpu_tick.vert",
-          "fragment": "temporary_test_line_motion_gpu_tick.frag"
-        }
-      },
       "resultRender": {
         "stage_name": "resultRender",
         "stage_kind": "resultRender",

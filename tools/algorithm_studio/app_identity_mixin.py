@@ -39,7 +39,15 @@ class AlgorithmStudioIdentityMixin:
             return (RESOURCE_SYNC_ZONE, ALGORITHM_SYNC_ZONE)
         if normalized == "all_in_one":
             return (RESOURCE_SYNC_ZONE, ALGORITHM_SYNC_ZONE)
-        if normalized in {"graph", "container_overview", "reflector_overview", "interventioner_overview"}:
+        if normalized in {
+            "graph",
+            "container_overview",
+            "reflector_overview",
+            "interventioner_overview",
+            "interventioner_pretick",
+            "interventioner_aftertick",
+            "interventioner_render",
+        }:
             return (ALGORITHM_SYNC_ZONE,)
         raise AssertionError(f"Unsupported canvas view mode: {normalized}")
 

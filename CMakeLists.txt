@@ -181,12 +181,18 @@ else()
   set(VMA_INCLUDE_DIR "${vma_source_SOURCE_DIR}/include" CACHE PATH "VMA include directory" FORCE)
 endif()
 
-message(STATUS "Fetching SPIRV-Reflect from GitHub.")
-FetchContent_Declare(spirv_reflect_source
-  URL "https://github.com/KhronosGroup/SPIRV-Reflect/archive/c90b7b781cdcff63cf1b409ffc7ca0a714e0425e.zip"
-)
-FetchContent_Populate(spirv_reflect_source)
-set(SPIRV_REFLECT_SOURCE_DIR "${spirv_reflect_source_SOURCE_DIR}" CACHE PATH "SPIRV-Reflect source directory" FORCE)
+set(_SPIRV_REFLECT_LOCAL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/SPIRV-Reflect-vulkan-sdk-1.4.350.0")
+if(EXISTS "${_SPIRV_REFLECT_LOCAL_DIR}/spirv_reflect.h")
+  message(STATUS "Using local SPIRV-Reflect mirror.")
+  set(SPIRV_REFLECT_SOURCE_DIR "${_SPIRV_REFLECT_LOCAL_DIR}" CACHE PATH "SPIRV-Reflect source directory" FORCE)
+else()
+  message(STATUS "Fetching SPIRV-Reflect from GitHub.")
+  FetchContent_Declare(spirv_reflect_source
+    URL "https://github.com/KhronosGroup/SPIRV-Reflect/archive/c90b7b781cdcff63cf1b409ffc7ca0a714e0425e.zip"
+  )
+  FetchContent_Populate(spirv_reflect_source)
+  set(SPIRV_REFLECT_SOURCE_DIR "${spirv_reflect_source_SOURCE_DIR}" CACHE PATH "SPIRV-Reflect source directory" FORCE)
+endif()
 
 resolve_existing_path(_CJSON_SOURCE_DIR cJSON.c
   "${CMAKE_CURRENT_SOURCE_DIR}/third_party/cjson"

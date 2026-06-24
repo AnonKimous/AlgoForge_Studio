@@ -8,11 +8,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
-
-#include <EASTL/string.h>
-#include <EASTL/vector.h>
-
-#include "runtime_systems/runtime_allocator.h"
+#include <vector>
 
 namespace agent_management {
 class AgentManager;
@@ -83,16 +79,16 @@ class SdkRuntimeSystem {
     AlgorithmHandle handle{0};
     AgentHandle agent_handle{0};
     size_t agent_index{0u};
-    eastl::basic_string<char, eastl::RuntimeSystemAllocator> algorithm_name;
-    eastl::vector<ResourceBinding, eastl::RuntimeSystemAllocator> resource_bindings;
-    eastl::vector<DescriptorValue, eastl::RuntimeSystemAllocator> descriptor_values;
+    std::string algorithm_name;
+    std::vector<ResourceBinding> resource_bindings;
+    std::vector<DescriptorValue> descriptor_values;
     bool submitted{false};
     size_t submitted_algorithm_index{0u};
   };
 
   std::unique_ptr<agent_management::AgentManager> agent_manager_{};
-  eastl::vector<AgentRecord, eastl::RuntimeSystemAllocator> agents_{};
-  eastl::vector<AlgorithmDraft, eastl::RuntimeSystemAllocator> drafts_{};
+  std::vector<AgentRecord> agents_{};
+  std::vector<AlgorithmDraft> drafts_{};
   AgentHandle next_agent_handle_{1};
   AlgorithmHandle next_algorithm_handle_{1};
 

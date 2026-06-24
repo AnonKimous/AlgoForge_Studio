@@ -86,6 +86,8 @@ Compression must preserve:
   - a linked `functiontext` node stores editable natural-language solution text
 - If the user asks for方案/思路/解法 around `fun`, prefer `functiontext`.
 - If the user asks for真实函数/真实shader/C++代码, prefer updating the `fun` node script.
+- For intervention `render` stage work, default to GLSL shader code unless the user explicitly asks for another implementation form.
+- Treat `render` stage logic as shader-first content, not pseudocode or C++ scaffolding by default.
 - For minimal demo algorithms, especially descriptor-driven single-point motion demos, read `tools/skills/algorithm-studio-minimal-demo/SKILL.md` first and follow its scope rules before editing the scene.
 
 ### Canvas Interaction Notes

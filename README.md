@@ -1,152 +1,259 @@
-# physBased-render
+# AlgoForge Studio
 
-## 中文
+面向算法模块化装配、调试、运行与打包的通用算法生产平台。
 
-`small-algorithm-kernel` 是一个面向多阶段算法流水线执行、验证和可视化的分层内核，同时提供 AI agent 辅助的低代码算法开发环境。
+> 将算法从零散实现提升为可描述、可封装、可挂载、可执行、可调试、可预览的标准化模块。
 
-它的核心不是单个算法，而是一条可以被拆分、组装、执行和调试的算法流水线：
+下文简称 `AlgoForge`。
 
-- 从资源描述出发，将 mesh、描述符和其他输入拆解成算法可消费的标准形式
-- 用 `manifest + CPU cpp + GPU shader + container` 描述一个可执行算法包
-- 把一个算法拆成多个 stage，并按流水线方式串联起来
-- 支持 CPU 和 GPU 两条执行路径
-- 支持结果反射回传、规则检查和异常信号上报
-- 支持介入器干预，便于调试、验证和回放
-- 支持 `debugTool` 挂载调试，直接查看资源、运行状态和反射结果
-- 支持流水线资源流转、阶段衔接和运行时状态追踪
+## 1. AlgoForge 是什么？
 
-### 流水线能力
+AlgoForge 是一个围绕“算法包”构建的通用算法生产平台。
 
-- 一个算法可以按多个 stage 组织成流水线
-- 每个 stage 都有明确的输入、输出和资源绑定
-- 流水线可以按顺序执行，也可以按约定进入循环式提交路径
-- 流水线运行时可以回传中间状态、最终结果和异常信号
-- debugTool 可以直接观察流水线当前跑到哪一段、哪一个 stage 卡住、哪一段数据没有推进
-- 介入器可以参与流水线的检查和修正，而不是只看最终结果
+它的目标不是针对某个特定场景直接提供一批即插即用的复杂算法或完整系统，而是提供一套通用的算法生产方法，让开发者能够把自己的算法组织、调试、运行并最终打包成可复用模块。
 
-### 项目能做什么
+平台为开发者提供一条更接近前端开发体验的算法工作流：可以用可视化、UI 交互，甚至 AI agent 交互的方式开发和调试算法，再把调试结果收敛为可运行、可集成、可交付的算法包。
 
-- 构建和运行算法包
-- 管理容器、资源绑定和执行状态
-- 在 CPU 和 GPU 两侧执行同一套算法逻辑
-- 把算法结果反射回宿主环境
-- 通过 debugTool 观察、调试和验证运行过程
-- 通过 AI agent 接入算法工具链，辅助结构组织、资源检查和文本生成
+围绕这个目标，AlgoForge 希望让算法开发具备五类更直接的工程特性：
 
-### 项目的优点
+- 易读：算法在开发阶段就可以通过图形化方式查看数据流的流向、每一步处理之后的状态变化，以及局部模块之间的关系。开发者可以先理解局部，再逐步理解整体算法如何工作。
+- 易用：算法相关的清单、代码和 shader 会被组织成统一结构，经过热编译后即可加载使用，也可以继续挂到 SDK 或其他宿主程序中。
+- 易调试：算法的数据流本身就是可视的，很多输入输出关系可以在开发流程中提前约束和校验，把问题尽量前置暴露，而不是等到整体运行后才发现结果异常。
+- 易开发：平台同时支持代码优先和低代码两种开发方式。熟悉底层实现的开发者可以直接编写清单、C++ 和 GLSL；更偏工具化工作流的开发者可以通过图形化 UI 组织结构、观察结果，并结合 AI agent 辅助完成编辑、检查、迭代和打包。
+- 执行高效：CPU 侧提供 jobs 系统支撑并行执行，GPU 侧基于 Vulkan 计算通路运行算法。当前没有把 CUDA 作为默认开发路径，主要是因为这个项目面向的开发者普遍不熟悉 CUDA；后续会继续补充更多 GPU 计算后端。
 
-- 协议统一，算法定义、资源拆解、容器组织和执行结果都遵循同一套约定
-- 数据模型极简，底层只保留 `v` 和 `a` 这类标准单元，减少多余封装
-- 工具链闭环，从算法生成、批量构建、挂载、执行到结果反射都能串起来
-- CPU / GPU 双路径并行支持，便于对比验证和能力扩展
-- AI agent 可以进入同一条生产链路，承担结构组织、检查和辅助输出任务
+从对外形态看，AlgoForge 当前主要由三类核心组件组成：
 
-### 项目怎么组织
+- `SDK`：给外部宿主程序接入、驱动和管理算法运行能力的接口层。
+- `debugtool`：给算法开发者观察、验证和调试运行过程的调试宿主。
+- `tools`：给算法开发者组织、编辑和生产算法包的工具链。
 
-- `common_data`：共享数据、数学、输入和交互类型
-- `runtime_systems`：窗口、ImGui 和 Vulkan 运行时支持
-- `algorithm_management`：算法包加载、容器创建、插件装配和统一入口
-- `agent`：运行时 agent 对象，负责挂载和提交
-- `agent_management`：agent 创建编排、挂载/卸载、描述符转发和 tick
-- `debugTool`：交互式调试入口
-- `sdk`：外部开发者提交算法和 agent 的入口
-- `algorithmLib/algorithmSrc`：算法包源码镜像
-- `algorithmLib/algorithmruntimeLib`：构建后的运行时产物
+## 2. AlgoForge 解决了什么痛点？
 
-### 工作流
+在很多项目中，算法通常直接散落在业务代码里，随着算法数量和复杂度增加，会逐渐暴露出这些问题：
 
-1. 通过工具或编辑器准备算法资源和描述信息
-2. 按约定组织成算法包
-3. 构建生成 CPU / GPU 对应产物
-4. 挂载到 `debugTool` 或 SDK 入口
-5. 执行后查看反射结果、异常信号和调试信息
-6. 需要时通过介入器和 AI agent 继续检查与辅助修正
+- 算法相关资源分散在多个位置，生命周期复杂，维护与调试成本高，复杂逻辑执行也缺乏局部性，整体运行效率难以稳定优化
+- 在正式接入之前，开发者往往缺少快速开发、快速验证和效果比对的方法，难以判断一次算法替换或优化是否值得投入
+- 算法开发往往同时要求数学理解、工程实现和运行时经验，经验不深的人员难以参与
+- 算法结构、数据流和模块边界天然不容易讲清楚，多人协作时沟通成本和迭代成本往往会迅速上升
 
-### Demo
+AlgoForge 针对这些问题，提供了一套更统一的算法工程化支撑：
 
-- `v6a6_pbd_ball_collision_demo`：用于验证刚体球碰撞、BVH 检查、连续碰撞检测、反射与介入链路
-- `temporary_test_line_motion`：用于验证基础的 GPU / 数据流执行路径
+- 提供一组连续的容器与装配方式，支持开发者自行收集算法所需的数据统一提交，实现数据与逻辑的分离
+- 用可视化数据流、反射、干预、预览和热重载能力支持开发期验证、调试和效果比对
+- 同时支持代码优先、图形化编辑和 AI 辅助的组合式开发流程，降低算法开发门槛
+- 支持把复杂算法拆成可独立开发和验证的阶段或模块，按能力分配任务，最终再统一装配并完成验证与调试
 
-### 约定
+## 3. 开发者可以用 AlgoForge 做什么？
 
-- 项目使用左手坐标系
-- 原点 `[0,0,0]` 位于左下近角
-- `+X` 向右，`+Y` 向上，`+Z` 指向屏幕内
-- Render Preview 中的 `x` 和 `y` 表示预览页像素坐标
-- `实例` 统一按 `agent` 理解
+基于 AlgoForge，开发者可以通过三类核心组件完成不同类型的工作：
 
-## English
+### 3.1 tools
 
-`small-algorithm-kernel` is a layered kernel for multi-stage algorithm pipeline execution, validation, and visualization, with an additional low-code development environment for AI agents.
+- 支持以图形化编辑和ai agent辅助(主导)的方法开发算法，生成相关清单、代码和 shader 资源，降低开发门槛
+- 查看算法内部的数据流流向，帮助开发者理解算法结构和处理过程
+- 支持以低代码方式生成可用逻辑，内部提供了一系列支持ai agent开发算法的skill和agents.md文件，自带新手村，降低了软件的使用门槛
 
-Its core is not a single algorithm, but a pipeline that can be split, assembled, executed, and debugged:
+### 3.2 debugtool
 
-- Start from resource descriptions and split mesh, descriptors, and other inputs into algorithm-ready forms
-- Describe an executable package with `manifest + CPU cpp + GPU shader + container`
-- Break one algorithm into multiple stages and connect them as a pipeline
-- Support both CPU and GPU execution paths
-- Reflect execution results back to the host, with rule checks and error reporting
-- Allow intervention hooks for debugging, validation, and replay
-- Attach packages to `debugTool` for direct inspection of resources, runtime state, and reflection data
-- Track pipeline resource flow, stage handoff, and runtime state
-- Expose forced sync and non-forced sync modes, with timing statistics only in forced sync
+- 在一个相对干净的沙盒环境中挂载并执行算法，通过vulkan和shader程序提供了可视化调试能力(shader得自己写,或者让tools出一个)
+- 支持使用预设或自定义的数据与资源驱动算法运行，快速复现和验证目标场景
+- 统计算法执行时间，包括多阶段 `pipeline` 的分阶段耗时，便于分析性能表现
 
-### Pipeline Capabilities
+### 3.3 SDK
 
-- An algorithm can be organized into multiple stages as a pipeline
-- Each stage has explicit inputs, outputs, and resource bindings
-- The pipeline can run sequentially or enter a circular submission path by convention
-- The runtime can report intermediate state, final results, and error signals
-- `debugTool` can show which stage is active, which stage is stalled, and which data has not advanced
-- Intervention hooks can inspect and correct the pipeline, not just the final output
+- 通过接入 SDK，在宿主程序中创建、初始化、执行、更新和卸载算法运行实例
+- SDK 更适合作为外部程序正式集成和调用算法的执行接口，本身依然可以使用AlgoForge底层提供的强大的Jobs和Vulkan计算后台(如果设备上有vulkan驱动的话)
+- 和前面两个组件不同，SDK支持跨平台使用(如果设备能支持vulkan驱动的话,而且不能低于1.3)
 
-### What it can do
+典型适用场景包括：
 
-- Build and run algorithm packages
-- Manage containers, resource bindings, and execution state
-- Execute the same algorithm logic on both CPU and GPU
-- Reflect algorithm output back into the host environment
-- Inspect, debug, and validate runtime behavior through `debugTool`
-- Bring AI agents into the same toolchain for structure organization, resource checks, and text generation
+- 几何处理与 mesh 数据变换
+- 物理仿真与阶段式计算
+- 渲染前处理与结果预览
+- 多阶段算法实验平台
+- 面向研究和原型验证的算法工作台
 
-### Why it stands out
+## 4. 核心概念和项目结构
 
-- Unified protocol across algorithm definition, resource decomposition, container layout, and result reflection
-- Minimal data model, with `v` and `a` as the base units to reduce unnecessary abstraction
-- End-to-end tooling from generation and batch build to mounting, execution, and reflection
-- Native support for both CPU and GPU execution paths
-- AI agents can participate in the same production flow for structure, checking, and assisted output
+### 4.1 核心概念
 
-### Architecture
+#### `algorithmManager` 
 
-- `common_data`: shared data, math, input, and interaction types
-- `runtime_systems`: windowing, ImGui, and Vulkan runtime support
-- `algorithm_management`: package loading, container creation, plugin assembly, and unified entrypoints
-- `agent`: runtime agent objects that handle mounting and submission
-- `agent_management`: agent orchestration, mount/unmount, descriptor forwarding, and ticking
-- `debugTool`: interactive debugging entrypoint
-- `sdk`: external entrypoint for submitting algorithms and agents
-- `algorithmLib/algorithmSrc`: mirrored algorithm source packages
-- `algorithmLib/algorithmruntimeLib`: built runtime artifacts
+- `AlgorithmManager`：算法层的对外唯一口，通过子模块提供装配、挂载、卸载和统一调度算法
+- `Pipeline Algorithm`：由多个 stage 组成的阶段式算法，用于组织更复杂的组合逻辑
 
-### Workflow
+#### `AlgorithmScheduler` 
 
-1. Prepare algorithm resources and descriptions through tools or the editor
-2. Package them according to the project conventions
-3. Build CPU / GPU artifacts
-4. Mount the results into `debugTool` or submit through the SDK
-5. Inspect reflection data, error signals, and debugging information after execution
-6. Use intervention hooks and AI agents to continue checking and refinement when needed
+- `AlgorithmScheduler`：负责算法的调度推进，控制算法在运行时中的执行顺序与节奏
+- `AlgorithmObject`：算法被装配后的统一运行对象，是算法载入之后的基础形态,平时挂在agent下,运行是提交到AlgorithmScheduler里面
 
-### Demos
+#### `AlgorithmSuppoter` 
 
-- `v6a6_pbd_ball_collision_demo`: validates rigid ball collision, BVH checks, continuous collision detection, reflection, and intervention flow
-- `temporary_test_line_motion`: validates the basic GPU/data flow execution path
+- `AlgorithmSuppoter`：算法层的支持组件集合，负责承接包加载、协议、桥接、反射和干预等公共能力
+- `manifest`：算法包的结构描述入口，用于声明算法相关的资源、配置、组织关系和装配信息
+- `container`：从manifest创建,算法运行过程中承载数据的基础容器，用于组织输入、缓存、中间结果和输出
+- `decomposer`：从manifest创建,负责把算法包中的清单、资源需求、描述符信息和结构信息拆解成可装配输入
+- `reflect`：从manifest创建,算法运行过程中暴露出的反射信息，用于状态收集、调试、验证和控制
+- `intervation`：从manifest创建,算法运行过程前预执行/后执行的算法，用于在算法执行前后影响算法,也可用于辅助算法开发,同时提供渲染能力协助算法可视化
 
-### Conventions
+#### `agent` 侧概念
 
-- The project uses a left-handed coordinate system
-- The origin `[0,0,0]` is at the lower-left near corner
-- `+X` points to the right, `+Y` points upward, and `+Z` points into the screen
-- In Render Preview, `x` and `y` refer to preview-page pixel coordinates
-- `实例` is treated as `agent`
+- `Agent Signal`：`Agent` 根据反射数据、输入状态或外部条件整理出的执行信号，用于指导当前这一轮该如何介入/推进/处理当前算法
+- `Agent`：面向算法运行对象的托管单元，负责持有算法、组织状态、管理信号并推进执行
+- `tick`：驱动 `Agent` 及其内部算法或 `pipeline` 向前推进一轮执行的基本更新动作
+
+#### `agent_management` 侧概念
+
+- `AgentManager`：负责 `Agent` 的创建、销毁、分配和集中管理
+
+### 4.2 运行时主体
+
+- `src/common_data`
+  共享数据结构、输入信号、mesh、交互数据和公共类型
+
+- `src/runtime_systems`
+  窗口、输入、任务系统、GPU 执行、Vulkan / ImGui 运行时支持
+
+- `src/algorithm_management`
+  算法层统一入口，负责算法装配、运行入口、调度封装和对内子组件管理
+
+- `src/algorithm_support`
+  算法层内部子组件，负责协议、包加载、反射、干预、桥接等支持逻辑
+
+- `src/agent`
+  面向算法运行对象的托管层，负责持有算法对象、组织运行状态、收集反射并决定本轮执行路径
+
+- `src/agent_management`
+  负责集中创建、销毁、分配和 tick `Agent`
+
+- `src/sdk`
+  面向外部开发者的主接入层，提供运行实例创建、销毁、算法挂载、资源挂载、算法提交等能力
+
+## 5. Demo 演示
+
+### Demo 1：最小算法包运行
+
+目标：
+
+- 定义一个最小可装配算法包
+- 挂载到运行时
+- 查看资源和描述符是否按预期绑定
+
+可以展示：
+
+- 算法包结构
+- 挂载过程
+- 运行成功后的反射或状态输出
+
+### Demo 2：Descriptor 驱动算法
+
+目标：
+
+- 通过描述符输入控制算法行为
+- 修改输入并观察结果变化
+
+可以展示：
+
+- 描述符绑定
+- 单步运行或连续运行
+- 结果预览变化
+
+### Demo 3：多阶段 Pipeline
+
+目标：
+
+- 组织多阶段算法 pipeline
+- 观察 stage 之间的数据桥接和状态推进
+
+可以展示：
+
+- stage 关系
+- pipeline 运行顺序
+- 中间状态与最终结果
+
+### Demo 4：调试与热重载
+
+目标：
+
+- 在 `debug_tool` 中挂载算法
+- 查看反射、桥接状态和渲染预览
+- 修改算法后重新构建并热重载
+
+可以展示：
+
+- reflection
+- intervention
+- render preview
+- hot reload
+
+当前仓库中可参考的示例包括：
+
+- `v6a6_pbd_ball_collision_demo`
+- `temporary_test_line_motion`
+- `v2a0_pipeline_square_vertex_demo`
+
+## 6. 快速开始
+
+### 6.1 构建框架
+
+构建 SDK：
+
+```bat
+build_sdk.bat
+```
+
+对于大多数外部开发者，AlgoForge 的使用起点就是 SDK，而不是直接依赖底层运行时模块。
+
+构建调试工具：
+
+```bat
+build_debugtool.bat
+```
+
+### 6.2 构建算法包
+
+```bat
+build_algorithm.bat <algorithm_target_name>
+```
+
+### 6.3 启动图形化工具
+
+```bat
+tools\launch_algorithm_studio.bat
+```
+
+### 6.4 典型工作流
+
+1. 在 `algorithmLib/algorithmSrc` 中准备算法包内容
+2. 使用 Algorithm Studio 或直接编辑 package 文件组织结构
+3. 构建算法包运行时产物
+4. 在外部程序中通过 `sdk` 创建运行实例并挂载算法
+5. 查看结果、反射和预览
+6. 修改算法并继续迭代
+
+## 7. 适合谁使用？
+
+AlgoForge 适合以下类型的开发者或团队：
+
+- 需要长期维护多种算法模块的工程团队
+- 需要把算法做成可挂载能力的宿主系统开发者
+- 需要多阶段 pipeline 的算法工程团队
+- 需要可视化调试、预览和热重载的算法研发团队
+- 需要 SDK 化对外提供算法能力的平台开发者
+
+## 8. 更新计划
+
+当前计划优先补齐运行时底座，包括内存管理系统、`AlgorithmScheduler` 持有和推进算法图的能力，以及 CUDA 执行通路改造。
+
+在工具链方面，后续会继续推进 `tools` 对 `pipeline` 的编辑支持，并补上把当前值记录为默认算法描述符的能力。
+
+在外部接入方面，`sdk` 后续会增加对崩溃中算法运行状态的抓取能力，同时继续收紧层间依赖边界，稳定外部程序集成路径。
+
+## 9. 项目状态
+
+AlgoForge 当前处于持续演进阶段。
+
+它已经具备算法包装配、单算法与 pipeline 运行、SDK 接入、调试宿主和图形化工具这些核心能力，但在外部开发者体验、协议稳定性、文档完整度和工具一致性方面仍有持续完善空间。
+
+如果你希望把算法工程做成长期可维护、可复用、可调试、可集成的模块体系，这个项目就是为这类目标服务的。

@@ -210,6 +210,7 @@ class AlgorithmStudioApp(
         self.algorithm_identity_syncing = False
         self.canvas_view_mode = "graph"
         self.scene_tab_buttons: dict[str, tk.Widget] = {}
+        self.scene_tab_phase_only: dict[str, bool] = {}
         self.scene_tabs_canvas: tk.Canvas | None = None
 
         self.project_name_var = tk.StringVar(value=self.project.algorithm_name)
@@ -406,15 +407,18 @@ class AlgorithmStudioApp(
         scene_tabs_canvas.bind("<Button-5>", self._on_scene_tabs_mouse_wheel)
         self.scene_tab_buttons = {}
         scene_specs = (
-            ("algorithmScene", "main", "graph"),
-            ("containerScene", "container", "container_overview"),
-            ("decomposerScene", "decomposer", "decomposer_overview"),
-            ("reflectorScene", "reflector", "reflector_overview"),
-            ("interventionerScene", "interventioner", "interventioner_overview"),
-            ("d2cScene", "decomposer2container", "decomposer2container_overview"),
-            ("allInOne", "all_in_one", "all_in_one"),
+            ("algorithmScene", "main", "graph", False),
+            ("containerScene", "container", "container_overview", False),
+            ("decomposerScene", "decomposer", "decomposer_overview", False),
+            ("reflectorScene", "reflector", "reflector_overview", False),
+            ("interventionerScene", "interventioner", "interventioner_overview", False),
+            ("preTick", "pretick", "interventioner_pretick", True),
+            ("afterTick", "aftertick", "interventioner_aftertick", True),
+            ("render", "render", "interventioner_render", True),
+            ("d2cScene", "decomposer2container", "decomposer2container_overview", False),
+            ("allInOne", "all_in_one", "all_in_one", False),
         )
-        for index, (label, tab_key, view_mode) in enumerate(scene_specs):
+        for index, (label, tab_key, view_mode, phase_only) in enumerate(scene_specs):
             button = tk.Label(
                 scene_tabs,
                 text=label,
@@ -428,11 +432,15 @@ class AlgorithmStudioApp(
             )
             padx = (0, 6) if index == 0 else (0, 6)
             button.pack(side="left", padx=padx)
-            button.bind("<Button-1>", lambda _event, mode=view_mode: self._set_canvas_view_mode(mode))
+            if phase_only:
+                button.bind("<Button-1>", lambda _event, mode=view_mode: self._open_intervention_phase_view(mode))
+            else:
+                button.bind("<Button-1>", lambda _event, mode=view_mode: self._set_canvas_view_mode(mode))
             button.bind("<MouseWheel>", self._on_scene_tabs_mouse_wheel)
             button.bind("<Button-4>", self._on_scene_tabs_mouse_wheel)
             button.bind("<Button-5>", self._on_scene_tabs_mouse_wheel)
             self.scene_tab_buttons[tab_key] = button
+            self.scene_tab_phase_only[tab_key] = phase_only
             self.interface4agents_highlight_targets[f"scene:{tab_key}"] = [
                 (
                     button,
@@ -2037,7 +2045,7 @@ class AlgorithmStudioApp(
             return
         self.stage_list.delete(0, tk.END)
         for stage in self.project.intervention_stages:
-            self.stage_list.insert(tk.END, f"{stage.name} (interventioner)")
+            self.stage_list.insert(tk.END, f"{stage.name} ({stage.kind})")
 
     def _refresh_preview(self) -> None:
         if not self.preview_text:
@@ -2534,6 +2542,116 @@ class AlgorithmStudioApp(
                 return stage
         return None
 
+    def _is_interventioner_view_mode(self, view_mode: str | None = None) -> bool:
+        normalized = str(view_mode or self.canvas_view_mode).strip().lower()
+        return normalized in {
+            "interventioner_overview",
+            "interventioner_pretick",
+            "interventioner_aftertick",
+            "interventioner_render",
+        }
+
+    def _normalize_intervention_stage_kind(self, kind: str) -> str:
+        normalized = str(kind or "").strip().lower().replace("-", "").replace("_", "")
+        if normalized == "pretick":
+            return "preTick"
+        if normalized == "aftertick":
+            return "afterTick"
+        if normalized in {"render", "resultrender"}:
+            return "resultRender"
+        if normalized == "interventioner":
+            return "interventioner"
+        return str(kind).strip() or "interventioner"
+
+    def _intervention_phase_kind_for_view_mode(self, view_mode: str | None = None) -> str | None:
+        normalized = str(view_mode or self.canvas_view_mode).strip().lower()
+        if normalized == "interventioner_pretick":
+            return "preTick"
+        if normalized == "interventioner_aftertick":
+            return "afterTick"
+        if normalized == "interventioner_render":
+            return "resultRender"
+        return None
+
+    def _default_stage_name_for_kind(self, kind: str) -> str:
+        canonical = self._normalize_intervention_stage_kind(kind)
+        if canonical == "preTick":
+            return "preTick"
+        if canonical == "afterTick":
+            return "afterTick"
+        if canonical == "resultRender":
+            return "resultRender"
+        return canonical or "interventioner"
+
+    def _find_stage_by_kind(self, kind: str) -> InterventionStage | None:
+        canonical = self._normalize_intervention_stage_kind(kind)
+        if self.selected_stage_name:
+            selected_stage = self._find_stage(self.selected_stage_name)
+            if selected_stage and self._normalize_intervention_stage_kind(selected_stage.kind) == canonical:
+                return selected_stage
+        for stage in self.project.intervention_stages:
+            if self._normalize_intervention_stage_kind(stage.kind) == canonical:
+                return stage
+        return None
+
+    def _focus_stage(self, stage: InterventionStage) -> None:
+        self.selected_stage_name = stage.name
+        self.selected_container_name = None
+        self.selected_rule_name = None
+        self.selected_reflector_name = None
+        self.selected_res_node_name = None
+        self.selected_function_name = None
+        self.selected_function_text_name = None
+        self.selected_container_group_name = None
+        self.stage_name_var.set(stage.name)
+        self.stage_kind_var.set(stage.kind)
+        self.stage_functions_var.set(", ".join(stage.functions))
+        self.stage_used_vars_var.set(", ".join(stage.used_variables))
+        self.stage_used_arrays_var.set(", ".join(stage.used_arrays))
+        self.stage_shader_vertex_var.set(stage.shader_vertex)
+        self.stage_shader_fragment_var.set(stage.shader_fragment)
+
+    def _ensure_stage_for_kind(self, kind: str) -> InterventionStage:
+        canonical = self._normalize_intervention_stage_kind(kind)
+        stage = self._find_stage_by_kind(canonical)
+        if stage is not None:
+            return stage
+        x_default, y_default = self._agent_ui_default_position(len(self.project.intervention_stages), lane="tool")
+        stage = InterventionStage(
+            name=self._default_stage_name_for_kind(canonical),
+            kind=canonical,
+            x=x_default,
+            y=y_default,
+        )
+        self.project.intervention_stages.append(stage)
+        self._log(f"Created default {canonical} stage.")
+        return stage
+
+    def _open_intervention_phase_view(self, view_mode: str) -> None:
+        stage_kind = self._intervention_phase_kind_for_view_mode(view_mode)
+        if stage_kind is None:
+            raise AssertionError(f"Unsupported intervention phase view: {view_mode}")
+        stage = self._ensure_stage_for_kind(stage_kind)
+        self._focus_stage(stage)
+        self._set_canvas_view_mode(view_mode)
+
+    def _is_stage_visible_in_current_view(self, stage: InterventionStage) -> bool:
+        phase_kind = self._intervention_phase_kind_for_view_mode()
+        if phase_kind is None:
+            return True
+        return self._normalize_intervention_stage_kind(stage.kind) == phase_kind
+
+    def _is_function_visible_in_current_view(self, function_name: str) -> bool:
+        phase_kind = self._intervention_phase_kind_for_view_mode()
+        if phase_kind is None:
+            return True
+        for stage in self.project.intervention_stages:
+            if self._normalize_intervention_stage_kind(stage.kind) != phase_kind:
+                continue
+            if function_name in stage.functions:
+                return True
+        return False
+
     def _find_container_group(self, name: str) -> ContainerGroupItem | None:
         for group in self.project.container_groups:
             if group.name == name:
@@ -2933,6 +3051,16 @@ class AlgorithmStudioApp(
                 return self._find_function_frame(name) is not None
             if kind == "functiontext":
                 return self._find_function_text_item(name) is not None
+            return False
+        if self.canvas_view_mode in {"interventioner_pretick", "interventioner_aftertick", "interventioner_render"}:
+            if kind in {"interventioner", "stage"}:
+                stage = self._find_stage(name)
+                return stage is not None and self._is_stage_visible_in_current_view(stage)
+            if kind == "function":
+                return self._find_function_frame(name) is not None and self._is_function_visible_in_current_view(name)
+            if kind == "functiontext":
+                item = self._find_function_text_item(name)
+                return item is not None and self._is_function_visible_in_current_view(item.function_name)
             return False
         if self.canvas_view_mode == "decomposer2container_overview":
             if kind == "resnode":
@@ -3486,9 +3614,12 @@ class AlgorithmStudioApp(
         stage = self._current_stage()
         if not stage:
             return
+        deleted_kind = self._normalize_intervention_stage_kind(stage.kind)
         self.project.intervention_stages = [item for item in self.project.intervention_stages if item.name != stage.name]
         self._remove_connections_for_node("interventioner", stage.name)
         self.selected_stage_name = None
+        if self._intervention_phase_kind_for_view_mode() == deleted_kind:
+            self.canvas_view_mode = "interventioner_overview"
         self._refresh_all()
         self._log(f"Deleted stage {stage.name}.")
 
@@ -4278,6 +4409,7 @@ class AlgorithmStudioApp(
         self.container_kind_var.set(container.kind)
         self.container_count_var.set(container.count)
         self.container_stride_var.set(container.stride)
+        self._refresh_scene_tabs()
         self._refresh_inspector()
 
     def _select_rule_from_list(self) -> None:
@@ -4295,6 +4427,7 @@ class AlgorithmStudioApp(
         self.rule_name_var.set(rule.name)
         self.rule_source_var.set(rule.source)
         self.rule_target_var.set(rule.target)
+        self._refresh_scene_tabs()
         self._refresh_inspector()
 
     def _select_stage_from_list(self) -> None:
@@ -4304,18 +4437,8 @@ class AlgorithmStudioApp(
         if not selection:
             return
         stage = self.project.intervention_stages[selection[0]]
-        self.selected_stage_name = stage.name
-        self.selected_container_name = None
-        self.selected_rule_name = None
-        self.selected_reflector_name = None
-        self.selected_container_group_name = None
-        self.stage_name_var.set(stage.name)
-        self.stage_kind_var.set(stage.kind)
-        self.stage_functions_var.set(", ".join(stage.functions))
-        self.stage_used_vars_var.set(", ".join(stage.used_variables))
-        self.stage_used_arrays_var.set(", ".join(stage.used_arrays))
-        self.stage_shader_vertex_var.set(stage.shader_vertex)
-        self.stage_shader_fragment_var.set(stage.shader_fragment)
+        self._focus_stage(stage)
+        self._refresh_scene_tabs()
         self._refresh_inspector()
 
     def _select_reflector_from_list(self) -> None:
@@ -4338,6 +4461,7 @@ class AlgorithmStudioApp(
         self.reflector_output_name_var.set(item.output_name)
         self.reflector_direct_from_var.set(", ".join(item.direct_from))
         self.reflector_direct_to_var.set(", ".join(item.direct_to))
+        self._refresh_scene_tabs()
         self._refresh_inspector()
 
     def _focus_selected_container_on_canvas(self) -> None:
@@ -4563,10 +4687,11 @@ class AlgorithmStudioApp(
         elif kind == "functiontext" and function_text:
             self.selected_function_text_name = function_text.name
         elif kind == "interventioner" and stage:
-            self.selected_stage_name = stage.name
+            self._focus_stage(stage)
         elif kind == "stage" and stage:
-            self.selected_stage_name = stage.name
+            self._focus_stage(stage)
         self._sync_selected_nodes()
+        self._refresh_scene_tabs()
         self._redraw_canvas()
         self._refresh_inspector()
         self._refresh_selection_panel()
@@ -6097,6 +6222,12 @@ class AlgorithmStudioApp(
             left_hint = "reflectorScene"
         elif self.canvas_view_mode == "interventioner_overview":
             left_hint = "interventionerScene"
+        elif self.canvas_view_mode == "interventioner_pretick":
+            left_hint = "preTick"
+        elif self.canvas_view_mode == "interventioner_aftertick":
+            left_hint = "afterTick"
+        elif self.canvas_view_mode == "interventioner_render":
+            left_hint = "render"
         elif self.canvas_view_mode == "all_in_one":
             left_hint = "allInOne"
         else:

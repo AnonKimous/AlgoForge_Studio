@@ -295,6 +295,12 @@ class AlgorithmStudioPaletteMixin:
             active_tab = "reflector"
         elif self.canvas_view_mode == "interventioner_overview":
             active_tab = "interventioner"
+        elif self.canvas_view_mode == "interventioner_pretick":
+            active_tab = "pretick"
+        elif self.canvas_view_mode == "interventioner_aftertick":
+            active_tab = "aftertick"
+        elif self.canvas_view_mode == "interventioner_render":
+            active_tab = "render"
         elif self.canvas_view_mode == "decomposer2container_overview":
             active_tab = "decomposer2container"
         elif self.canvas_view_mode == "all_in_one":
@@ -302,7 +308,15 @@ class AlgorithmStudioPaletteMixin:
         else:
             active_tab = "main"
         self.scene_tab_var.set(active_tab)
-        for tab_key, widget in self.scene_tab_buttons.items():
+        ordered_tabs = list(self.scene_tab_buttons.items())
+        for _tab_key, widget in ordered_tabs:
+            if widget.winfo_manager():
+                widget.pack_forget()
+        for tab_key, widget in ordered_tabs:
+            phase_only = bool(self.scene_tab_phase_only.get(tab_key))
+            should_show = (not phase_only) or (self._is_interventioner_view_mode() and bool(self.selected_stage_name))
+            if should_show:
+                widget.pack(side="left", padx=(0, 6))
             is_active = tab_key == active_tab
             widget.configure(
                 bg=COLORS["accent"] if is_active else COLORS["panel_alt"],
@@ -353,6 +367,9 @@ class AlgorithmStudioPaletteMixin:
             "decomposer_overview",
             "reflector_overview",
             "interventioner_overview",
+            "interventioner_pretick",
+            "interventioner_aftertick",
+            "interventioner_render",
             "decomposer2container_overview",
             "all_in_one",
         }:
@@ -363,6 +380,7 @@ class AlgorithmStudioPaletteMixin:
             self._refresh_scene_tabs()
             return
         self._reset_canvas_interaction_states()
+        preserve_selected_stage_name = self.selected_stage_name if self._is_interventioner_view_mode(normalized) else None
         self.canvas_view_mode = normalized
         if normalized != "graph":
             self.selection_state = None
@@ -374,6 +392,8 @@ class AlgorithmStudioPaletteMixin:
             self.selected_function_text_name = None
             self.selected_stage_name = None
             self.selected_container_group_name = None
+            if preserve_selected_stage_name and self._find_stage(preserve_selected_stage_name):
+                self.selected_stage_name = preserve_selected_stage_name
         if normalized == "decomposer_overview" and self._find_rule("decomposer") is None:
             self.project.decomposer_rules.append(DecomposerRule(name="decomposer", source="", target="", x=CANVAS_PADDING + 220.0, y=CANVAS_PADDING + 80.0))
         self._refresh_scene_tabs()
@@ -491,7 +511,7 @@ class AlgorithmStudioPaletteMixin:
             self._set_canvas_view_mode("graph", log_message="Switched back to algorithmScene for tool-node placement.")
         if self.canvas_view_mode == "reflector_overview" and kind not in {"variable", "array", "reflector"}:
             self._set_canvas_view_mode("graph", log_message="Switched back to algorithmScene for tool-node placement.")
-        if self.canvas_view_mode == "interventioner_overview" and kind not in {"variable", "array", "function", "interventioner", "stage"}:
+        if self._is_interventioner_view_mode() and kind not in {"variable", "array", "function", "interventioner", "stage"}:
             self._set_canvas_view_mode("graph", log_message="Switched back to algorithmScene for tool-node placement.")
         if kind == "resnode" and self.canvas_view_mode not in {"decomposer_overview", "all_in_one"}:
             self._log("meshNode can only be placed in decomposerScene.")

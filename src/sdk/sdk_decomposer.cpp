@@ -21,7 +21,7 @@ bool CreateAlgorithmPackageDecomposerByName(
 
   agent::AlgorithmRequestedResources requested_resources{};
   agent::AlgorithmRequestedDescriptorBindings requested_descriptor_bindings{};
-  if (!algorithm_management::QueryAlgorithmRequestedBindings(
+  if (!agent::QueryAlgorithmRequestedBindingsByName(
         algorithm_name,
         &requested_resources,
         &requested_descriptor_bindings,

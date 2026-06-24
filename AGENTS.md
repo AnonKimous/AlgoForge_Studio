@@ -19,6 +19,7 @@
 - Vulkan viewport setup in this repository is flipped to match this convention.
 - Render Preview shaders interpret `x` and `y` as preview-page pixel coordinates.
 - In Render Preview, `[0,0]` is the lower-left corner of the ImGui content region below the title bar.
+- For intervention and result-render stage logic, default to GLSL shader code unless the user explicitly asks for another implementation form.
 
 ## Encoding Rule
 
