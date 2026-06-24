@@ -7,9 +7,3 @@ extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateBundle(
   algorithm_library_plugin::AlgorithmPluginBundle* out_bundle) {
   return v2a0_pipeline_square_vertex_demo::CreateBundle(request, out_bundle);
 }
-
-extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateRuntimeReflector(
-  const algorithm_library_plugin::AlgorithmPluginRequest* request,
-  algorithm::AlgorithmReflector* out_reflector) {
-  return v2a0_pipeline_square_vertex_demo::CreateRuntimeReflector(request, out_reflector);
-}

@@ -1526,6 +1526,7 @@ bool Agent::MountAlgorithm(
     AlgorithmReflectionSnapshot reflection_snapshot{};
     if (CollectAlgorithmReflection(algorithm_index, &reflection_snapshot)) {
       runtime_state->reflection_snapshot = std::move(reflection_snapshot);
+      runtime_state->reflection_snapshot_cached = true;
     }
     if (mounted_algorithm_object->algorithm_reflector) {
       DEBUG_TOOL_ASSERT(

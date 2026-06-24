@@ -142,9 +142,9 @@ Use `cjson` style comments in the package file examples:
   },
   "intervention": {
     "stages": {
-      "afterTick": {
-        "stage_name": "afterTick",
-        "stage_kind": "afterTick",
+      "resultRender": {
+        "stage_name": "resultRender",
+        "stage_kind": "resultRender",
         "used_algorithm_containers": {
           "arrays": [
             {
@@ -185,4 +185,4 @@ Use `cjson` style comments in the package file examples:
 - Treat `[0,0,0]` as the lower-left near corner.
 - `+X` points right, `+Y` points up, and `+Z` points into the screen.
 - Render preview coordinates use the lower-left corner of the preview content region as `[0,0]`.
-- `afterTick` is the default place to attach GPU-side render work before the actual preview render pass.
+- `resultRender` is the default place to attach GPU-side render work before the actual preview render pass.

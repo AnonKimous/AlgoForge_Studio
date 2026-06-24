@@ -924,49 +924,7 @@ extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateBundle(
   out_bundle->Clear();
   out_bundle->cpu_symbol = true;
   out_bundle->gpu_symbol = true;
-
-  std::shared_ptr<agent::IAlgorithmIntervention> inner_intervention{};
-  algorithm::AlgorithmPackageLocation package_location{};
-  if (!algorithm_management::TryResolveAlgorithmPackageLocation(
-        request->algorithm_name ? request->algorithm_name : "",
-        &package_location,
-        nullptr)) {
-    return false;
-  }
-  if (!algorithm_support::LoadAlgorithmInterventionFromLocation(
-        package_location,
-        &inner_intervention,
-        nullptr)) {
-    return false;
-  }
-  out_bundle->intervention = new DelegatingIntervention(std::move(inner_intervention));
-  out_bundle->destroy_intervention = &_DestroyIntervention;
   out_bundle->temporary_test_executor = new CollisionDemoMainThreadExecutor();
   out_bundle->destroy_temporary_test_executor = &_DestroyTemporaryTestExecutor;
-  return true;
-}
-
-extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateRuntimeReflector(
-  const algorithm_library_plugin::AlgorithmPluginRequest* request,
-  algorithm::AlgorithmReflector* out_reflector) {
-  if (!request || !out_reflector) {
-    return false;
-  }
-
-  std::shared_ptr<algorithm::AlgorithmReflector> runtime_reflector{};
-  algorithm::AlgorithmPackageLocation package_location{};
-  if (!algorithm_management::TryResolveAlgorithmPackageLocation(
-        request->algorithm_name ? request->algorithm_name : "",
-        &package_location,
-        nullptr)) {
-    return false;
-  }
-  if (!algorithm_support::LoadAlgorithmPackageReflectorFromLocation(
-        package_location,
-        &runtime_reflector,
-        nullptr)) {
-    return false;
-  }
-  *out_reflector = *runtime_reflector;
   return true;
 }

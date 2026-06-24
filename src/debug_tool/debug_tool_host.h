@@ -53,6 +53,17 @@ struct AlgorithmPipelineStageSubmission {
   std::vector<AlgorithmDescriptorValue> descriptor_values;
 };
 
+struct AlgorithmInterventionStageSummary {
+  std::string stage_name;
+  algorithm_management::AlgorithmInterventionStageKind stage_kind{
+    algorithm_management::AlgorithmInterventionStageKind::Custom};
+  std::vector<std::string> functions;
+  std::vector<algorithm_management::AlgorithmInterventionContainerBinding> used_algorithm_containers;
+  std::string vertex_shader_path;
+  std::string fragment_shader_path;
+  std::string pipeline_kind;
+};
+
 enum class AlgorithmMountMode {
   Direct = 0,
   StandardContainer = 1,
@@ -204,11 +215,14 @@ struct AlgorithmRuntimeSummary {
   std::vector<AlgorithmDescriptorValue> descriptor_values;
   bool cpu_symbol{true};
   bool gpu_symbol{true};
+  bool has_reflector{false};
+  bool has_intervention{false};
   AlgorithmMountMode mount_mode{AlgorithmMountMode::Direct};
   AlgorithmExecutionPreference execution_preference{AlgorithmExecutionPreference::Gpu};
   AgentToAlgorithmSignal agent_to_algorithm_signal{};
   AlgorithmToAgentSignal algorithm_to_agent_signal{};
   AlgorithmReflectionSnapshot reflection_snapshot{};
+  std::vector<AlgorithmInterventionStageSummary> intervention_stage_summaries;
   float pipeline_total_elapsed_seconds{0.0f};
   std::vector<algorithm_management::AlgorithmPipelineStageRuntimeStat> pipeline_stage_runtime_stats;
   PipelineStageBridgeDebugSummary bridge_debug_set{};

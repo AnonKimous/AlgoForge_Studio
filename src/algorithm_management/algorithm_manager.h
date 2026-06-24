@@ -2212,6 +2212,14 @@ inline bool AlgorithmScheduler::MountPipelineAlgorithmObjects(
     inout_runtime_states->push_back(::algorithm_management::AgentAlgorithmRuntimeState{
       .algorithm_name = mounted_objects->back().algorithm_profile.algorithm_name,
     });
+    AlgorithmReflectionSnapshot stage_reflection_snapshot{};
+    if (pipeline_scheduler_detail::CollectReflectionSnapshot(
+          mounted_objects->back(),
+          *mounted_objects->back().container_set(),
+          &stage_reflection_snapshot)) {
+      inout_runtime_states->back().reflection_snapshot = std::move(stage_reflection_snapshot);
+      inout_runtime_states->back().reflection_snapshot_cached = true;
+    }
     inout_assembly_states->push_back(::algorithm_management::AlgorithmAssemblyState::Pending);
   }
 

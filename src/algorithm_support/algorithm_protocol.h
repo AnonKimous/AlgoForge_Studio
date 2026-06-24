@@ -28,9 +28,6 @@ struct AlgorithmPluginBundle {
   bool cpu_symbol{true};
   bool gpu_symbol{true};
 
-  agent::IAlgorithmIntervention* intervention{nullptr};
-  void (*destroy_intervention)(agent::IAlgorithmIntervention*){nullptr};
-
   agent::IAlgorithmtemporaryTestMainThreadExecutor* temporary_test_executor{nullptr};
   void (*destroy_temporary_test_executor)(agent::IAlgorithmtemporaryTestMainThreadExecutor*){nullptr};
 
@@ -38,8 +35,6 @@ struct AlgorithmPluginBundle {
     api_version = kAlgorithmPluginApiVersion;
     cpu_symbol = true;
     gpu_symbol = true;
-    intervention = nullptr;
-    destroy_intervention = nullptr;
     temporary_test_executor = nullptr;
     destroy_temporary_test_executor = nullptr;
   }
@@ -49,16 +44,10 @@ using AlgorithmPluginCreateBundleFn = bool (*)(
   const AlgorithmPluginRequest* request,
   AlgorithmPluginBundle* out_bundle);
 
-using AlgorithmPluginCreateRuntimeReflectorFn = bool (*)(
-  const AlgorithmPluginRequest* request,
-  algorithm::AlgorithmReflector* out_reflector);
-
 struct AlgorithmPluginComponents {
   bool cpu_symbol{true};
   bool gpu_symbol{true};
 
-  std::shared_ptr<algorithm::AlgorithmReflector> runtime_reflector{};
-  std::shared_ptr<agent::IAlgorithmIntervention> intervention{};
   std::shared_ptr<agent::IAlgorithmtemporaryTestMainThreadExecutor> temporary_test_executor{};
 };
 
@@ -308,7 +297,6 @@ namespace algorithm_management {
 using algorithm_support::AlgorithmPluginBundle;
 using algorithm_support::AlgorithmPluginComponents;
 using algorithm_support::AlgorithmPluginCreateBundleFn;
-using algorithm_support::AlgorithmPluginCreateRuntimeReflectorFn;
 using algorithm_support::AlgorithmPluginRequest;
 using algorithm_support::PipelineStageBridge;
 using ::algorithm::AlgorithmRuntimeTransferBinding;
@@ -332,10 +320,6 @@ extern "C" {
 ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateBundle(
   const algorithm_support::AlgorithmPluginRequest* request,
   algorithm_support::AlgorithmPluginBundle* out_bundle);
-
-ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateRuntimeReflector(
-  const algorithm_support::AlgorithmPluginRequest* request,
-  algorithm::AlgorithmReflector* out_reflector);
 
 }
 

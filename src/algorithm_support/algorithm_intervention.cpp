@@ -97,8 +97,12 @@ bool _ParseInterventionStageKind(
     *out_stage_kind = agent::AlgorithmInterventionStageKind::PreExecution;
     return true;
   }
-  if (kind == "afterTick") {
+  if (kind == "postExecution") {
     *out_stage_kind = agent::AlgorithmInterventionStageKind::PostExecution;
+    return true;
+  }
+  if (kind == "inExecution") {
+    *out_stage_kind = agent::AlgorithmInterventionStageKind::InExecution;
     return true;
   }
 
@@ -132,14 +136,12 @@ _InterventionSchema _LoadInterventionSchema(const algorithm::AlgorithmPackageLoc
 
   const cJSON* intervention = cJSON_GetObjectItemCaseSensitive(root, "intervention");
   if (!intervention || !cJSON_IsObject(intervention)) {
-    schema.error_message = "Package JSON file " + path.string() + " is missing an 'intervention' object.";
     cJSON_Delete(root);
     return schema;
   }
 
   const cJSON* stages = cJSON_GetObjectItemCaseSensitive(intervention, "stages");
   if (!stages || !cJSON_IsObject(stages)) {
-    schema.error_message = "Intervention section in package JSON file " + path.string() + " is missing a 'stages' object.";
     cJSON_Delete(root);
     return schema;
   }
@@ -246,9 +248,6 @@ _InterventionSchema _LoadInterventionSchema(const algorithm::AlgorithmPackageLoc
 
   cJSON_Delete(root);
   schema.valid = !schema.stage_specs.empty();
-  if (!schema.valid && schema.error_message.empty()) {
-    schema.error_message = path.string() + " does not contain any intervention stages.";
-  }
   return schema;
 }
 
@@ -414,6 +413,13 @@ bool LoadAlgorithmInterventionFromLocation(
 
   const _InterventionSchema schema = _LoadInterventionSchema(package_location);
   if (!schema.valid) {
+    if (schema.error_message.empty()) {
+      *out_intervention = nullptr;
+      if (out_error_message) {
+        out_error_message->clear();
+      }
+      return true;
+    }
     if (out_error_message) {
       *out_error_message = schema.error_message.empty()
         ? "Failed to load intervention schema from package location."
@@ -499,8 +505,7 @@ void _ClearAlgorithmSchedulerForRuntimeShutdown() {
 }
 
 bool _IsGpuExecutionStage(const agent::AlgorithmInterventionStageSpec& stage) {
-  return stage.stage_kind == agent::AlgorithmInterventionStageKind::PostExecution &&
-    (stage.stage_name == "afterTick" || stage.stage_name == "aftertick");
+  return stage.stage_kind == agent::AlgorithmInterventionStageKind::ResultRender;
 }
 
 bool _ResolveRuntimeGpuShaderPath(

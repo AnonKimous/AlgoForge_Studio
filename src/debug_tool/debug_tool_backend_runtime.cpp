@@ -385,6 +385,8 @@ debug_tool::AlgorithmRuntimeSummary _ToDebugToolAlgorithmRuntimeSummary(
   }
   summary.cpu_symbol = object->cpu_symbol;
   summary.gpu_symbol = object->gpu_symbol;
+  summary.has_reflector = object->algorithm_reflector != nullptr;
+  summary.has_intervention = object->intervention != nullptr;
   summary.mount_mode = static_cast<debug_tool::AlgorithmMountMode>(static_cast<int>(object->mount_mode));
   summary.execution_preference =
     static_cast<debug_tool::AlgorithmExecutionPreference>(static_cast<int>(object->execution_preference));
@@ -412,6 +414,23 @@ debug_tool::AlgorithmRuntimeSummary _ToDebugToolAlgorithmRuntimeSummary(
   }
   if (reflection_snapshot) {
     summary.reflection_snapshot = _ToDebugToolReflectionSnapshot(*reflection_snapshot);
+  }
+  if (object->intervention) {
+    std::vector<algorithm_management::AlgorithmInterventionStageSpec> stage_specs;
+    if (object->intervention->GetInterventionStageSpecs(&stage_specs)) {
+      summary.intervention_stage_summaries.reserve(stage_specs.size());
+      for (const algorithm_management::AlgorithmInterventionStageSpec& stage_spec : stage_specs) {
+        debug_tool::AlgorithmInterventionStageSummary stage_summary{};
+        stage_summary.stage_name = stage_spec.stage_name;
+        stage_summary.stage_kind = stage_spec.stage_kind;
+        stage_summary.functions = stage_spec.functions;
+        stage_summary.used_algorithm_containers = stage_spec.used_algorithm_containers;
+        stage_summary.vertex_shader_path = stage_spec.shader.vertex_shader_path;
+        stage_summary.fragment_shader_path = stage_spec.shader.fragment_shader_path;
+        stage_summary.pipeline_kind = stage_spec.shader.pipeline_kind;
+        summary.intervention_stage_summaries.push_back(std::move(stage_summary));
+      }
+    }
   }
   if (runtime_state && runtime_state->bridge_debug_set.valid) {
     summary.bridge_debug_set = _ToDebugToolPipelineStageBridgeDebugSummary(runtime_state->bridge_debug_set);
@@ -1609,14 +1628,18 @@ bool DebugToolBackendRuntime::BuildRenderPreviewRequest(
 
   const agent::AlgorithmObject* object = managed_agent->algorithm_object(algorithm_index);
   if (!object || !object->intervention) {
-    DEBUG_TOOL_ASSERT(false, "Algorithm has no intervention for preview rendering.");
+    if (out_error_message) {
+      *out_error_message = "Algorithm has no intervention for preview rendering.";
+    }
     return false;
   }
   const std::string algorithm_name = object->algorithm_profile.algorithm_name;
 
   std::vector<agent::AlgorithmInterventionStageSpec> stage_specs;
   if (!object->intervention->GetInterventionStageSpecs(&stage_specs) || stage_specs.empty()) {
-    DEBUG_TOOL_ASSERT(false, "Algorithm intervention did not expose any stages.");
+    if (out_error_message) {
+      *out_error_message = "Algorithm intervention did not expose any stages.";
+    }
     return false;
   }
 
@@ -1628,11 +1651,12 @@ bool DebugToolBackendRuntime::BuildRenderPreviewRequest(
     }
   }
   if (!result_stage) {
-    DEBUG_TOOL_ASSERT(false, "Algorithm intervention did not expose a result-render stage.");
+    if (out_error_message) {
+      *out_error_message = "Algorithm intervention did not expose a result-render stage.";
+    }
     return false;
   }
   if (result_stage->shader.vertex_shader_path.empty() || result_stage->shader.fragment_shader_path.empty()) {
-    DEBUG_TOOL_ASSERT(false, "Result-render stage is missing shader paths.");
     if (out_error_message) {
       *out_error_message = "Result-render stage is missing shader paths.";
     }

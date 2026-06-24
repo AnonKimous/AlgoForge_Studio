@@ -1419,6 +1419,12 @@ bool CreateAlgorithmObjectFromLocation(
     _AppendPipelineRunnerProbe("package_loader_probe.log", "create_from_location.tick_lifetime.begin");
   }
 
+  std::shared_ptr<algorithm::AlgorithmReflector> algorithm_reflector{};
+  if (!LoadAlgorithmPackageReflectorFromLocation(package_location, &algorithm_reflector, out_error_message)) {
+    return false;
+  }
+  group.algorithm_reflector = std::move(algorithm_reflector);
+
   algorithm_management::AlgorithmTickLifetime tick_lifetime = algorithm_management::AlgorithmTickLifetime::Continuous;
   if (!_LoadPackageRuntimeLifetime(package_location, &tick_lifetime, out_error_message)) {
     return false;
@@ -1458,6 +1464,12 @@ bool CreateAlgorithmObjectFromLocation(
     _AppendPipelineRunnerProbe("package_loader_probe.log", "create_from_location.external_reset.end");
   }
 
+  std::shared_ptr<agent::IAlgorithmIntervention> intervention{};
+  if (!LoadAlgorithmInterventionFromLocation(package_location, &intervention, out_error_message)) {
+    return false;
+  }
+  group.intervention = std::move(intervention);
+
   auto _ApplyLaunchOnceReflectionPolicy = [&group]() {
     if (group.tick_lifetime == algorithm_management::AlgorithmTickLifetime::LaunchOnceThenHold &&
         group.algorithm_reflector &&
@@ -1481,24 +1493,7 @@ bool CreateAlgorithmObjectFromLocation(
     }
     group.cpu_symbol = plugin_components.cpu_symbol;
     group.gpu_symbol = plugin_components.gpu_symbol;
-    group.intervention = plugin_components.intervention;
     group.temporaryTest_main_thread_executor = plugin_components.temporary_test_executor;
-    if (plugin_components.runtime_reflector) {
-      group.algorithm_reflector = std::move(plugin_components.runtime_reflector);
-    }
-    if (!group.algorithm_reflector) {
-      std::shared_ptr<algorithm::AlgorithmReflector> runtime_reflector{};
-      if (LoadAlgorithmPackageReflectorFromLocation(
-            package_location,
-            &runtime_reflector,
-            nullptr)) {
-        group.algorithm_reflector = std::move(runtime_reflector);
-      }
-    }
-    _ApplyLaunchOnceReflectionPolicy();
-    if (group.intervention) {
-      _AppendHiddenInterventionSignalContainer(group.shared_container_set.get());
-    }
     *out_group = std::move(group);
     if (out_error_message) {
       out_error_message->clear();
@@ -1513,34 +1508,10 @@ bool CreateAlgorithmObjectFromLocation(
   }
   if (emit_runner_probe) {
     _AppendPipelineRunnerProbe("package_loader_probe.log", "create_from_location.plugin_load.end fallback");
-    _AppendPipelineRunnerProbe("package_loader_probe.log", "create_from_location.intervention.begin");
   }
 
   group.cpu_symbol = true;
   group.gpu_symbol = true;
-  if (!LoadAlgorithmInterventionFromLocation(
-        package_location,
-        &group.intervention,
-        out_error_message)) {
-    return false;
-  }
-  if (emit_runner_probe) {
-    _AppendPipelineRunnerProbe("package_loader_probe.log", "create_from_location.intervention.end");
-    _AppendPipelineRunnerProbe("package_loader_probe.log", "create_from_location.reflector.begin");
-  }
-  if (group.intervention) {
-    _AppendHiddenInterventionSignalContainer(group.shared_container_set.get());
-  }
-  std::shared_ptr<algorithm::AlgorithmReflector> runtime_reflector{};
-  if (LoadAlgorithmPackageReflectorFromLocation(
-        package_location,
-        &runtime_reflector,
-        nullptr)) {
-    group.algorithm_reflector = std::move(runtime_reflector);
-  }
-  if (emit_runner_probe) {
-    _AppendPipelineRunnerProbe("package_loader_probe.log", "create_from_location.reflector.end");
-  }
 
   _ApplyLaunchOnceReflectionPolicy();
 
@@ -1622,10 +1593,6 @@ namespace {
 using CreateBundleFn = bool (*)(
   const algorithm_library_plugin::AlgorithmPluginRequest* request,
   algorithm_library_plugin::AlgorithmPluginBundle* out_bundle);
-
-using CreateRuntimeReflectorFn = bool (*)(
-  const algorithm_library_plugin::AlgorithmPluginRequest* request,
-  algorithm::AlgorithmReflector* out_reflector);
 
 void _SetErrorMessage(std::string* out_error_message, std::string message) {
   if (out_error_message) {
@@ -1733,27 +1700,11 @@ bool TryLoadAlgorithmPluginComponents(
   out_components->cpu_symbol = bundle.cpu_symbol;
   out_components->gpu_symbol = bundle.gpu_symbol;
 
-  if (bundle.intervention && bundle.destroy_intervention) {
-    out_components->intervention = _WrapPluginObject(
-      bundle.intervention,
-      bundle.destroy_intervention,
-      module_guard);
-  }
   if (bundle.temporary_test_executor && bundle.destroy_temporary_test_executor) {
     out_components->temporary_test_executor = _WrapPluginObject(
       bundle.temporary_test_executor,
       bundle.destroy_temporary_test_executor,
       module_guard);
-  }
-
-  const auto create_reflector_fn = reinterpret_cast<CreateRuntimeReflectorFn>(
-    GetProcAddress(static_cast<HMODULE>(module_guard.get()), "AlgorithmPlugin_CreateRuntimeReflector"));
-  if (create_reflector_fn) {
-    algorithm::AlgorithmReflector runtime_reflector{};
-    if (create_reflector_fn(&request, &runtime_reflector)) {
-      out_components->runtime_reflector =
-        std::make_shared<algorithm::AlgorithmReflector>(std::move(runtime_reflector));
-    }
   }
 
   _SetErrorMessage(out_error_message, {});

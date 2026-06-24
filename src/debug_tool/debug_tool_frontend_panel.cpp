@@ -103,6 +103,18 @@ std::string _FormatAlgorithmRuntimeLabel(
     " stage " + std::to_string(algorithm_summary.pipeline_stage_index) + "]";
 }
 
+const char* _AlgorithmInterventionStageKindDisplayName(
+  algorithm_management::AlgorithmInterventionStageKind stage_kind) {
+  switch (stage_kind) {
+    case algorithm_management::AlgorithmInterventionStageKind::ResultRender: return "resultRender";
+    case algorithm_management::AlgorithmInterventionStageKind::PreExecution: return "preTick";
+    case algorithm_management::AlgorithmInterventionStageKind::InExecution: return "inExecution";
+    case algorithm_management::AlgorithmInterventionStageKind::PostExecution: return "postExecution";
+    case algorithm_management::AlgorithmInterventionStageKind::Custom: return "custom";
+  }
+  return "custom";
+}
+
 void _DrawReflectionSnapshot(
   const char* title,
   const debug_tool::AlgorithmReflectionSnapshot& snapshot) {
@@ -1325,7 +1337,55 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
       }
     }
 
+    ImGui::SeparatorText("Reflector");
+    ImGui::Text("Reflector: %s", selected_algorithm_summary->has_reflector ? "present" : "absent");
     _DrawReflectionSnapshot("Reflection Snapshot", selected_algorithm_summary->reflection_snapshot);
+
+    ImGui::SeparatorText("Intervention");
+    ImGui::Text("Intervention: %s", selected_algorithm_summary->has_intervention ? "present" : "absent");
+    if (selected_algorithm_summary->intervention_stage_summaries.empty()) {
+      ImGui::TextUnformatted("No intervention stages available.");
+    } else {
+      for (const debug_tool::AlgorithmInterventionStageSummary& stage_summary :
+           selected_algorithm_summary->intervention_stage_summaries) {
+        ImGui::BulletText(
+          "%s [%s]",
+          stage_summary.stage_name.empty() ? "<stage>" : stage_summary.stage_name.c_str(),
+          _AlgorithmInterventionStageKindDisplayName(stage_summary.stage_kind));
+        if (!stage_summary.functions.empty()) {
+          ImGui::Indent();
+          ImGui::TextUnformatted("Functions:");
+          for (const std::string& function_name : stage_summary.functions) {
+            ImGui::BulletText("%s", function_name.c_str());
+          }
+          ImGui::Unindent();
+        }
+        if (!stage_summary.used_algorithm_containers.empty()) {
+          ImGui::Indent();
+          ImGui::TextUnformatted("Containers:");
+          for (const algorithm_management::AlgorithmInterventionContainerBinding& binding :
+               stage_summary.used_algorithm_containers) {
+            ImGui::BulletText(
+              "%s [%s]%s",
+              binding.container_name.c_str(),
+              binding.container_kind.c_str(),
+              binding.required ? "" : " (optional)");
+          }
+          ImGui::Unindent();
+        }
+        if (!stage_summary.vertex_shader_path.empty() || !stage_summary.fragment_shader_path.empty()) {
+          ImGui::Indent();
+          ImGui::Text(
+            "Shaders: %s | %s",
+            stage_summary.vertex_shader_path.empty() ? "<none>" : stage_summary.vertex_shader_path.c_str(),
+            stage_summary.fragment_shader_path.empty() ? "<none>" : stage_summary.fragment_shader_path.c_str());
+          if (!stage_summary.pipeline_kind.empty()) {
+            ImGui::Text("Pipeline: %s", stage_summary.pipeline_kind.c_str());
+          }
+          ImGui::Unindent();
+        }
+      }
+    }
 
     if (!selected_algorithm_summary->pipeline_stage &&
         selected_algorithm_summary->bridge_debug_set.valid) {
@@ -2051,6 +2111,7 @@ void DebugToolFrontendPanel::DrawAlgorithmPreviewUi(IDebugToolHost& host) {
   if (preview_size.x > 0.0f && preview_size.y > 0.0f) {
     host.SetRenderPreviewExtent(preview_size);
   }
+  ImGui::TextWrapped("%s", host.render_preview_debug_summary().c_str());
   if (host.has_render_preview_texture()) {
     ImGui::Image(host.render_preview_texture_id(), preview_size);
   } else {

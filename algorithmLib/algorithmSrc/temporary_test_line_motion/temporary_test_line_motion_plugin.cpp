@@ -221,8 +221,12 @@ bool _ParseInterventionStageKind(
     *out_stage_kind = agent::AlgorithmInterventionStageKind::PreExecution;
     return true;
   }
-  if (kind == "afterTick") {
+  if (kind == "postExecution") {
     *out_stage_kind = agent::AlgorithmInterventionStageKind::PostExecution;
+    return true;
+  }
+  if (kind == "inExecution") {
+    *out_stage_kind = agent::AlgorithmInterventionStageKind::InExecution;
     return true;
   }
 
@@ -247,14 +251,12 @@ TemporaryTestInterventionSchema _LoadInterventionSchema(const algorithm_library_
 
   const cJSON* intervention = cJSON_GetObjectItemCaseSensitive(root, "intervention");
   if (!intervention || !cJSON_IsObject(intervention)) {
-    schema.error_message = "Package JSON file " + path + " is missing an 'intervention' object.";
     cJSON_Delete(root);
     return schema;
   }
 
   const cJSON* stages = cJSON_GetObjectItemCaseSensitive(intervention, "stages");
   if (!stages || !cJSON_IsObject(stages)) {
-    schema.error_message = "Intervention section in package JSON file " + path + " is missing a 'stages' object.";
     cJSON_Delete(root);
     return schema;
   }
@@ -347,9 +349,6 @@ TemporaryTestInterventionSchema _LoadInterventionSchema(const algorithm_library_
 
   cJSON_Delete(root);
   schema.valid = !schema.stage_specs.empty();
-  if (!schema.valid && schema.error_message.empty()) {
-    schema.error_message = path + " does not contain any intervention stages.";
-  }
   return schema;
 }
 
@@ -834,40 +833,7 @@ extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateBundle(
   out_bundle->Clear();
   out_bundle->cpu_symbol = true;
   out_bundle->gpu_symbol = true;
-
-  const TemporaryTestInterventionSchema intervention_schema = _LoadInterventionSchema(*request);
-  if (!intervention_schema.valid) {
-    return false;
-  }
-
-  out_bundle->intervention = new TemporaryTestLineMotionIntervention(intervention_schema);
-  out_bundle->destroy_intervention = &_DestroyIntervention;
   out_bundle->temporary_test_executor = new TemporaryTestLineMotionMainThreadExecutor();
   out_bundle->destroy_temporary_test_executor = &_DestroyTemporaryTestExecutor;
-  return true;
-}
-
-extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateRuntimeReflector(
-  const algorithm_library_plugin::AlgorithmPluginRequest* request,
-  algorithm::AlgorithmReflector* out_reflector) {
-  if (!request || !out_reflector) {
-    return false;
-  }
-
-  std::shared_ptr<algorithm::AlgorithmReflector> runtime_reflector{};
-  algorithm::AlgorithmPackageLocation package_location{};
-  if (!algorithm_management::TryResolveAlgorithmPackageLocation(
-        request->algorithm_name ? request->algorithm_name : "",
-        &package_location,
-        nullptr)) {
-    return false;
-  }
-  if (!algorithm_support::LoadAlgorithmPackageReflectorFromLocation(
-        package_location,
-        &runtime_reflector,
-        nullptr)) {
-    return false;
-  }
-  *out_reflector = *runtime_reflector;
   return true;
 }

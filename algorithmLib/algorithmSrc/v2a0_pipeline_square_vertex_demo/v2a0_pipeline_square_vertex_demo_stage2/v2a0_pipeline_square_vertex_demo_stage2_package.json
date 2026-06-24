@@ -45,9 +45,9 @@
   },
   "intervention": {
     "stages": {
-      "afterTick": {
-        "stage_name": "afterTick",
-        "stage_kind": "afterTick",
+      "resultRender": {
+        "stage_name": "resultRender",
+        "stage_kind": "resultRender",
         "used_algorithm_containers": {
           "arrays": [
             {
