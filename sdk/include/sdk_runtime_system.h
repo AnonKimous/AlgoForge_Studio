@@ -28,7 +28,7 @@ struct ResourceBinding {
 
 struct DescriptorValue {
   std::string descriptor_name;
-  float scalar_value{0.0f};
+  double scalar_value{0.0};
 };
 
 class SdkRuntimeSystem {

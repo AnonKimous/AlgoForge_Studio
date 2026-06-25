@@ -1,0 +1,4 @@
+interface:
+  display_name: "Algorithm Studio Tide Tutorial"
+  short_description: "Teach the fastest possible minimal tide demo with short highlight-led steps"
+  default_prompt: "Use $algorithm-studio-minimal-tide-demo to teach the user the shortest path to a buildable and viewable tide algorithm in Algorithm Studio."

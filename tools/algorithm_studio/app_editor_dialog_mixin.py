@@ -4,10 +4,10 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 try:
-    from .backend import ContainerItem, FunctionFrameItem, FunctionTextItem
+    from .backend import ContainerFieldItem, ContainerItem, FunctionFrameItem, FunctionTextItem
     from .shared import COLORS
 except ImportError:
-    from backend import ContainerItem, FunctionFrameItem, FunctionTextItem
+    from backend import ContainerFieldItem, ContainerItem, FunctionFrameItem, FunctionTextItem
     from shared import COLORS
 
 
@@ -16,11 +16,171 @@ class AlgorithmStudioEditorDialogMixin:
         for tag in tags:
             if tag.startswith("container_section:"):
                 section = tag.split(":", 1)[1].strip()
-                if section in {"structure", "value"}:
+                if section in {"structure", "value", "fields"}:
                     return section
         return None
 
+    def _container_layout_field_index_from_tags(self, tags: tuple[str, ...]) -> int | None:
+        for tag in tags:
+            if not tag.startswith("container_field:"):
+                continue
+            parts = tag.split(":")
+            if len(parts) != 3:
+                raise AssertionError(f"Invalid container field tag: {tag}")
+            try:
+                return int(parts[2])
+            except Exception as exc:  # noqa: BLE001
+                raise AssertionError(f"Invalid container field tag index: {tag}") from exc
+        return None
+
+    def _container_layout_fields(self, container: ContainerItem) -> list[ContainerFieldItem]:
+        fields = getattr(container, "layout_fields", None)
+        if fields is None:
+            container.layout_fields = []
+            fields = container.layout_fields
+        if not isinstance(fields, list):
+            raise AssertionError(f"Container {container.name} layout_fields must be a list.")
+        for field_item in fields:
+            if not isinstance(field_item, ContainerFieldItem):
+                raise AssertionError(f"Container {container.name} has an invalid layout field entry.")
+        return fields
+
+    def _container_total_layout_bits(self, container: ContainerItem) -> int:
+        stride = max(1, int(getattr(container, "stride", 4) or 4))
+        return stride * 8
+
+    def _container_layout_bits_used(self, container: ContainerItem, *, exclude_index: int | None = None) -> int:
+        total = 0
+        for index, field_item in enumerate(self._container_layout_fields(container)):
+            if exclude_index is not None and index == exclude_index:
+                continue
+            total += int(field_item.bit_width)
+        return total
+
+    def _validate_container_layout_fields(self, container: ContainerItem) -> None:
+        total_bits = self._container_total_layout_bits(container)
+        used_bits = self._container_layout_bits_used(container)
+        if used_bits > total_bits:
+            raise AssertionError(
+                f"Container {container.name} layout fields use {used_bits} bits, exceeding stride budget {total_bits} bits."
+            )
+
+    def _layout_field_structure_token(self, field_item: ContainerFieldItem) -> str:
+        normalized_kind = str(field_item.kind or "").strip().lower()
+        if normalized_kind not in {"variable", "array"}:
+            raise AssertionError(f"Unsupported container field kind: {field_item.kind}")
+        bit_width = int(field_item.bit_width)
+        if bit_width <= 0:
+            raise AssertionError(f"Container field {field_item.name} has non-positive bit width.")
+        rule_text = str(field_item.rule_text or "").strip()
+        if not rule_text:
+            raise AssertionError(f"Container field {field_item.name} has empty rule text.")
+        prefix = "v" if normalized_kind == "variable" else "a"
+        return f"{prefix}:{bit_width}:{rule_text}"
+
+    def _sync_container_structure_from_layout_fields(self, container: ContainerItem) -> None:
+        fields = self._container_layout_fields(container)
+        if not fields:
+            container.structure = []
+            return
+        container.structure = [self._layout_field_structure_token(field_item) for field_item in fields]
+
+    def _default_layout_field_rule_text(self, source_name: str, target_name: str, bit_width: int) -> str:
+        normalized_source_name = str(source_name or "").strip()
+        normalized_target_name = str(target_name or "").strip()
+        if not normalized_source_name:
+            raise AssertionError("Layout field source name cannot be empty.")
+        if not normalized_target_name:
+            raise AssertionError("Layout field target name cannot be empty.")
+        if bit_width <= 0:
+            raise AssertionError("Layout field bit width must be positive.")
+        return f"from {normalized_source_name} to {normalized_target_name} {bit_width}"
+
+    def _default_layout_field_source_name(self, kind: str) -> str:
+        normalized = str(kind or "").strip().lower()
+        if normalized not in {"variable", "array"}:
+            raise AssertionError(f"Unsupported layout field kind: {kind}")
+        return "v1" if normalized == "variable" else "a1"
+
+    def _default_layout_field_target_name(self, container: ContainerItem) -> str:
+        existing = {str(field_item.name).strip().lower() for field_item in self._container_layout_fields(container)}
+        index = 1
+        while True:
+            candidate = f"field_{index}"
+            if candidate.lower() not in existing:
+                return candidate
+            index += 1
+
+    def _next_container_layout_field_name(self, container: ContainerItem, kind: str) -> str:
+        normalized = str(kind or "").strip().lower()
+        if normalized not in {"variable", "array"}:
+            raise AssertionError(f"Unsupported layout field kind: {kind}")
+        prefix = "v" if normalized == "variable" else "a"
+        existing = {str(field_item.name).strip() for field_item in self._container_layout_fields(container)}
+        index = 1
+        while True:
+            candidate = f"{prefix}{index}"
+            if candidate not in existing:
+                return candidate
+            index += 1
+
+    def _preferred_layout_field_name(self, container: ContainerItem, kind: str, preferred_name: str | None = None) -> str:
+        normalized = str(kind or "").strip().lower()
+        if normalized not in {"variable", "array"}:
+            raise AssertionError(f"Unsupported layout field kind: {kind}")
+        candidate = str(preferred_name or "").strip()
+        existing = {str(field_item.name).strip() for field_item in self._container_layout_fields(container)}
+        if candidate and candidate not in existing:
+            return candidate
+        return self._next_container_layout_field_name(container, normalized)
+
+    def _add_layout_field_to_container(
+        self,
+        container: ContainerItem,
+        kind: str,
+        *,
+        source_name: str | None = None,
+        rule_text: str | None = None,
+        bit_width: int = 32,
+    ) -> ContainerFieldItem:
+        normalized = str(kind or "").strip().lower()
+        if normalized not in {"variable", "array"}:
+            raise AssertionError(f"Unsupported layout field kind: {kind}")
+        resolved_bit_width = int(bit_width)
+        if resolved_bit_width <= 0:
+            raise AssertionError("Layout field bit width must be positive.")
+        resolved_source_name = str(source_name or "").strip() or self._default_layout_field_source_name(normalized)
+        field_name = self._preferred_layout_field_name(container, normalized, resolved_source_name)
+        target_name = self._default_layout_field_target_name(container)
+        field_item = ContainerFieldItem(
+            name=field_name,
+            kind=normalized,
+            bit_width=resolved_bit_width,
+            rule_text=str(rule_text or "").strip() or self._default_layout_field_rule_text(resolved_source_name, target_name, resolved_bit_width),
+        )
+        self._container_layout_fields(container).append(field_item)
+        self._validate_container_layout_fields(container)
+        self._sync_container_structure_from_layout_fields(container)
+        return field_item
+
+    def _container_layout_field_summary_lines(self, container: ContainerItem, limit: int = 4) -> list[str]:
+        fields = self._container_layout_fields(container)
+        if not fields:
+            return ["Drag v/a here to add layout rules"]
+        lines: list[str] = []
+        for field_item in fields[:limit]:
+            rule_text = str(field_item.rule_text or "").strip()
+            if not rule_text:
+                raise AssertionError(f"Container field {container.name}:{field_item.name} is missing rule text.")
+            lines.append(rule_text)
+        if len(fields) > limit:
+            lines.append(f"... ({len(fields)} total)")
+        return lines
+
     def _container_structure_preview(self, container: ContainerItem, limit: int = 3) -> list[str]:
+        layout_fields = self._container_layout_fields(container)
+        if layout_fields:
+            return self._container_layout_field_summary_lines(container, limit=limit)
         items = [str(value).strip() for value in getattr(container, "structure", []) if str(value).strip()]
         if not items:
             return ["-"]
@@ -29,6 +189,10 @@ class AlgorithmStudioEditorDialogMixin:
         return items[:limit] + [f"... ({len(items)} total)"]
 
     def _container_structure_signature(self, container: ContainerItem) -> str:
+        layout_fields = self._container_layout_fields(container)
+        if layout_fields:
+            signature = "".join("v" if field_item.kind == "variable" else "a" for field_item in layout_fields)
+            return signature or "-"
         items = [str(value).strip() for value in getattr(container, "structure", []) if str(value).strip()]
         if not items:
             return "-"
@@ -50,6 +214,95 @@ class AlgorithmStudioEditorDialogMixin:
 
     def _container_text_to_lines(self, text_widget: tk.Text) -> list[str]:
         return [line.strip() for line in text_widget.get("1.0", tk.END).splitlines() if line.strip()]
+
+    def _open_container_layout_field_editor(self, container: ContainerItem, field_index: int) -> None:
+        fields = self._container_layout_fields(container)
+        if field_index < 0 or field_index >= len(fields):
+            raise AssertionError(f"Container field index out of range for {container.name}: {field_index}")
+        field_item = fields[field_index]
+        dialog = tk.Toplevel(self.root)
+        dialog.title(f"{container.name} :: {field_item.name}")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+
+        body = ttk.Frame(dialog, padding=12)
+        body.grid(row=0, column=0, sticky="nsew")
+        body.columnconfigure(1, weight=1)
+
+        ttk.Label(body, text="Field Name").grid(row=0, column=0, sticky="w")
+        name_var = tk.StringVar(value=field_item.name)
+        ttk.Entry(body, textvariable=name_var).grid(row=0, column=1, sticky="ew", padx=(8, 0))
+
+        ttk.Label(body, text="Kind").grid(row=1, column=0, sticky="w", pady=(10, 0))
+        kind_var = tk.StringVar(value=field_item.kind)
+        kind_box = ttk.Combobox(body, textvariable=kind_var, values=("variable", "array"), state="readonly")
+        kind_box.grid(row=1, column=1, sticky="ew", padx=(8, 0), pady=(10, 0))
+
+        ttk.Label(body, text="Bit Width").grid(row=2, column=0, sticky="w", pady=(10, 0))
+        bit_width_var = tk.StringVar(value=str(field_item.bit_width))
+        ttk.Entry(body, textvariable=bit_width_var).grid(row=2, column=1, sticky="ew", padx=(8, 0), pady=(10, 0))
+
+        ttk.Label(body, text="Rule Text").grid(row=3, column=0, sticky="w", pady=(10, 0))
+        rule_text_var = tk.StringVar(value=field_item.rule_text)
+        ttk.Entry(body, textvariable=rule_text_var).grid(row=3, column=1, sticky="ew", padx=(8, 0), pady=(10, 0))
+
+        hint_label = ttk.Label(
+            body,
+            text=(
+                f"Stride budget: {self._container_total_layout_bits(container)} bits. "
+                "Use free rule text such as: from v1 to x,y 16,16"
+            ),
+            foreground=COLORS["muted"],
+            wraplength=360,
+        )
+        hint_label.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+
+        button_row = ttk.Frame(body)
+        button_row.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(14, 0))
+        button_row.columnconfigure((0, 1, 2), weight=1)
+
+        def _apply_and_close() -> None:
+            try:
+                updated_name = name_var.get().strip()
+                if not updated_name:
+                    raise AssertionError("Container field name cannot be empty.")
+                updated_kind = kind_var.get().strip().lower()
+                if updated_kind not in {"variable", "array"}:
+                    raise AssertionError(f"Unsupported container field kind: {updated_kind}")
+                updated_bit_width = int(bit_width_var.get().strip())
+                if updated_bit_width <= 0:
+                    raise AssertionError("Container field bit width must be positive.")
+                updated_rule_text = rule_text_var.get().strip()
+                if not updated_rule_text:
+                    raise AssertionError("Container field rule text cannot be empty.")
+                used_bits_without_current = self._container_layout_bits_used(container, exclude_index=field_index)
+                total_bits = self._container_total_layout_bits(container)
+                if used_bits_without_current + updated_bit_width > total_bits:
+                    raise AssertionError(
+                        f"Container {container.name} would use {used_bits_without_current + updated_bit_width} bits, exceeding {total_bits} bits."
+                    )
+                field_item.name = updated_name
+                field_item.kind = updated_kind
+                field_item.bit_width = updated_bit_width
+                field_item.rule_text = updated_rule_text
+                self._sync_container_structure_from_layout_fields(container)
+                self._refresh_all()
+                self._log(f"Updated layout field {container.name}:{field_item.name}.")
+                dialog.destroy()
+            except Exception as exc:  # noqa: BLE001
+                messagebox.showerror("Invalid field", str(exc))
+
+        def _delete_field() -> None:
+            del fields[field_index]
+            self._sync_container_structure_from_layout_fields(container)
+            self._refresh_all()
+            self._log(f"Deleted layout field {container.name}:{field_item.name}.")
+            dialog.destroy()
+
+        ttk.Button(button_row, text="Apply", command=_apply_and_close).grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        ttk.Button(button_row, text="Delete", command=_delete_field).grid(row=0, column=1, sticky="ew", padx=6)
+        ttk.Button(button_row, text="Cancel", command=dialog.destroy).grid(row=0, column=2, sticky="ew", padx=(6, 0))
 
     def _function_connection_snapshot(self, kind: str, name: str, port: str) -> str:
         node = self._node_by_kind_name(kind, name)
@@ -211,11 +464,22 @@ class AlgorithmStudioEditorDialogMixin:
         ttk.Label(meta_row, text=str(container.stride), foreground=COLORS["muted"]).grid(row=0, column=3, sticky="w", padx=(6, 18))
         ttk.Label(meta_row, text="Structure items").grid(row=0, column=4, sticky="w")
         ttk.Label(meta_row, text=str(len(getattr(container, "structure", []))), foreground=COLORS["muted"]).grid(row=0, column=5, sticky="w", padx=(6, 0))
+        layout_fields_active = bool(self._container_layout_fields(container))
 
-        structure_frame = ttk.LabelFrame(body, text="Structure", padding=8)
+        structure_title = "Layout Rules Preview" if layout_fields_active else "Structure"
+        structure_frame = ttk.LabelFrame(body, text=structure_title, padding=8)
         structure_frame.grid(row=2, column=0, sticky="nsew", pady=(12, 0), padx=(0, 6))
         structure_frame.columnconfigure(0, weight=1)
-        structure_frame.rowconfigure(0, weight=1)
+        structure_frame.rowconfigure(1, weight=1)
+        if layout_fields_active:
+            hint = ttk.Label(
+                structure_frame,
+                text="This container uses internal layout rules. Double-click a rule row on the canvas to edit it.",
+                foreground=COLORS["muted"],
+                wraplength=360,
+                justify="left",
+            )
+            hint.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
         structure_text = tk.Text(
             structure_frame,
             wrap="word",
@@ -229,10 +493,12 @@ class AlgorithmStudioEditorDialogMixin:
             highlightbackground=COLORS["grid"],
             highlightcolor=COLORS["accent"],
         )
-        structure_text.grid(row=0, column=0, sticky="nsew")
+        structure_text.grid(row=1, column=0, sticky="nsew")
         structure_text.insert("1.0", "\n".join(self._container_structure_preview(container, limit=9999)))
+        if layout_fields_active:
+            structure_text.configure(state="disabled")
         structure_scroll = ttk.Scrollbar(structure_frame, orient="vertical", command=structure_text.yview)
-        structure_scroll.grid(row=0, column=1, sticky="ns")
+        structure_scroll.grid(row=1, column=1, sticky="ns")
         structure_text.configure(yscrollcommand=structure_scroll.set)
 
         value_label = "Value" if container.kind == "variable" else "Values"
@@ -268,7 +534,10 @@ class AlgorithmStudioEditorDialogMixin:
         button_row.columnconfigure(1, weight=1)
 
         def _apply_and_close() -> None:
-            container.structure = self._container_text_to_lines(structure_text)
+            if layout_fields_active:
+                self._sync_container_structure_from_layout_fields(container)
+            else:
+                container.structure = self._container_text_to_lines(structure_text)
             if container.kind == "variable":
                 container.value = value_text.get("1.0", tk.END).strip()
             else:
@@ -408,16 +677,14 @@ class AlgorithmStudioEditorDialogMixin:
         dialog.title(f"fun {item.name}")
         dialog.transient(self.root)
         dialog.grab_set()
-        dialog.geometry("960x720")
-        dialog.minsize(860, 620)
+        dialog.geometry("960x780")
+        dialog.minsize(860, 680)
 
         body = ttk.Frame(dialog, padding=12)
         body.grid(row=0, column=0, sticky="nsew")
         dialog.columnconfigure(0, weight=1)
         dialog.rowconfigure(0, weight=1)
         body.columnconfigure(0, weight=1)
-        body.columnconfigure(1, weight=1)
-        body.columnconfigure(2, weight=1)
         body.rowconfigure(3, weight=1)
 
         title_row = ttk.Frame(body)
@@ -459,8 +726,14 @@ class AlgorithmStudioEditorDialogMixin:
         )
         helper_label.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(10, 0))
 
-        expected_input_frame = ttk.LabelFrame(body, text="Expected Input", padding=8)
-        expected_input_frame.grid(row=2, column=0, sticky="nsew", pady=(12, 0), padx=(0, 6))
+        top_row = ttk.Frame(body)
+        top_row.grid(row=2, column=0, sticky="nsew", pady=(12, 0))
+        top_row.columnconfigure(0, weight=1)
+        top_row.columnconfigure(1, weight=1)
+        top_row.columnconfigure(2, weight=1)
+
+        expected_input_frame = ttk.LabelFrame(top_row, text="Expected Input", padding=8)
+        expected_input_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
         expected_input_frame.columnconfigure(0, weight=1)
         expected_input_frame.rowconfigure(1, weight=1)
         expected_input_toolbar = ttk.Frame(expected_input_frame)
@@ -485,8 +758,8 @@ class AlgorithmStudioEditorDialogMixin:
         expected_input_scroll.grid(row=1, column=1, sticky="ns")
         expected_input_text.configure(yscrollcommand=expected_input_scroll.set)
 
-        expected_output_frame = ttk.LabelFrame(body, text="Expected Output", padding=8)
-        expected_output_frame.grid(row=2, column=1, sticky="nsew", pady=(12, 0), padx=6)
+        expected_output_frame = ttk.LabelFrame(top_row, text="Expected Output", padding=8)
+        expected_output_frame.grid(row=0, column=1, sticky="nsew", padx=8)
         expected_output_frame.columnconfigure(0, weight=1)
         expected_output_frame.rowconfigure(1, weight=1)
         expected_output_toolbar = ttk.Frame(expected_output_frame)
@@ -511,14 +784,78 @@ class AlgorithmStudioEditorDialogMixin:
         expected_output_scroll.grid(row=1, column=1, sticky="ns")
         expected_output_text.configure(yscrollcommand=expected_output_scroll.set)
 
-        notes_frame = ttk.LabelFrame(body, text="Linked Notes", padding=8)
-        notes_frame.grid(row=2, column=2, sticky="nsew", pady=(12, 0), padx=(6, 0))
+        linked_column = ttk.Frame(top_row)
+        linked_column.grid(row=0, column=2, sticky="nsew", padx=(8, 0))
+        linked_column.columnconfigure(0, weight=1)
+        linked_column.rowconfigure(0, weight=1)
+        linked_column.rowconfigure(1, weight=1)
+
+        linked_in_frame = ttk.LabelFrame(linked_column, text="Linked In", padding=6)
+        linked_in_frame.grid(row=0, column=0, sticky="nsew")
+        linked_in_frame.columnconfigure(0, weight=1)
+        linked_in_frame.rowconfigure(1, weight=1)
+        linked_in_toolbar = ttk.Frame(linked_in_frame)
+        linked_in_toolbar.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+        linked_in_toolbar.columnconfigure(0, weight=1)
+        linked_in_text = tk.Text(
+            linked_in_frame,
+            wrap="word",
+            height=5,
+            bg=COLORS["canvas"],
+            fg=COLORS["text"],
+            insertbackground=COLORS["text"],
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=1,
+            highlightbackground=COLORS["grid"],
+            highlightcolor=COLORS["accent"],
+        )
+        linked_in_text.grid(row=1, column=0, sticky="nsew")
+        linked_in_scroll = ttk.Scrollbar(linked_in_frame, orient="vertical", command=linked_in_text.yview)
+        linked_in_scroll.grid(row=1, column=1, sticky="ns")
+        linked_in_text.configure(yscrollcommand=linked_in_scroll.set, state="disabled")
+
+        linked_out_frame = ttk.LabelFrame(linked_column, text="Linked Out", padding=6)
+        linked_out_frame.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
+        linked_out_frame.columnconfigure(0, weight=1)
+        linked_out_frame.rowconfigure(1, weight=1)
+        linked_out_toolbar = ttk.Frame(linked_out_frame)
+        linked_out_toolbar.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+        linked_out_toolbar.columnconfigure(0, weight=1)
+        linked_out_text = tk.Text(
+            linked_out_frame,
+            wrap="word",
+            height=5,
+            bg=COLORS["canvas"],
+            fg=COLORS["text"],
+            insertbackground=COLORS["text"],
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=1,
+            highlightbackground=COLORS["grid"],
+            highlightcolor=COLORS["accent"],
+        )
+        linked_out_text.grid(row=1, column=0, sticky="nsew")
+        linked_out_scroll = ttk.Scrollbar(linked_out_frame, orient="vertical", command=linked_out_text.yview)
+        linked_out_scroll.grid(row=1, column=1, sticky="ns")
+        linked_out_text.configure(yscrollcommand=linked_out_scroll.set, state="disabled")
+
+        script_frame = ttk.LabelFrame(body, text="Script / Pseudocode", padding=8)
+        script_frame.grid(row=3, column=0, sticky="nsew", pady=(12, 0))
+        script_frame.columnconfigure(0, weight=1)
+        script_frame.rowconfigure(3, weight=1)
+
+        node_info_label = ttk.Label(script_frame, foreground=COLORS["muted"], anchor="w")
+        node_info_label.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+
+        notes_frame = ttk.LabelFrame(script_frame, text="Linked Notes", padding=6)
+        notes_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 8))
         notes_frame.columnconfigure(0, weight=1)
         notes_frame.rowconfigure(0, weight=1)
         notes_text = tk.Text(
             notes_frame,
             wrap="word",
-            height=10,
+            height=4,
             bg=COLORS["panel_alt"],
             fg=COLORS["text"],
             insertbackground=COLORS["text"],
@@ -536,10 +873,9 @@ class AlgorithmStudioEditorDialogMixin:
         notes_scroll.grid(row=0, column=1, sticky="ns")
         notes_text.configure(yscrollcommand=notes_scroll.set)
 
-        script_frame = ttk.LabelFrame(body, text="Script / Pseudocode", padding=8)
-        script_frame.grid(row=3, column=0, columnspan=3, sticky="nsew", pady=(12, 0))
-        script_frame.columnconfigure(0, weight=1)
-        script_frame.rowconfigure(0, weight=1)
+        script_toolbar = ttk.Frame(script_frame)
+        script_toolbar.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        script_toolbar.columnconfigure(0, weight=1)
         script_text = tk.Text(
             script_frame,
             wrap="none",
@@ -555,16 +891,16 @@ class AlgorithmStudioEditorDialogMixin:
             font=("Consolas", 10),
             undo=False,
         )
-        script_text.grid(row=0, column=0, sticky="nsew")
+        script_text.grid(row=3, column=0, sticky="nsew")
         script_text.insert("1.0", item.script)
         script_scroll_y = ttk.Scrollbar(script_frame, orient="vertical", command=script_text.yview)
-        script_scroll_y.grid(row=0, column=1, sticky="ns")
+        script_scroll_y.grid(row=3, column=1, sticky="ns")
         script_scroll_x = ttk.Scrollbar(script_frame, orient="horizontal", command=script_text.xview)
-        script_scroll_x.grid(row=1, column=0, sticky="ew")
+        script_scroll_x.grid(row=4, column=0, sticky="ew")
         script_text.configure(yscrollcommand=script_scroll_y.set, xscrollcommand=script_scroll_x.set)
 
         button_row = ttk.Frame(body)
-        button_row.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(12, 0))
+        button_row.grid(row=4, column=0, sticky="ew", pady=(12, 0))
         button_row.columnconfigure(0, weight=1)
         button_row.columnconfigure(1, weight=1)
         button_row.columnconfigure(2, weight=1)
@@ -587,8 +923,42 @@ class AlgorithmStudioEditorDialogMixin:
             expected_output_text.delete("1.0", tk.END)
             expected_output_text.insert("1.0", loaded_text)
 
+        def set_linked_nodes_preview(widget: tk.Text, direction: str) -> None:
+            try:
+                loaded_text = self._load_function_linked_text(item.name, direction)
+            except RuntimeError:
+                loaded_text = f"No linked {direction} nodes."
+            except Exception as exc:  # noqa: BLE001
+                loaded_text = str(exc)
+            widget.configure(state="normal")
+            widget.delete("1.0", tk.END)
+            widget.insert("1.0", loaded_text)
+            widget.configure(state="disabled")
+
+        def refresh_linked_node_views() -> None:
+            set_linked_nodes_preview(linked_in_text, "input")
+            set_linked_nodes_preview(linked_out_text, "output")
+
+        def refresh_node_info_bar(_event: tk.Event | None = None) -> None:
+            name_text = name_entry.get().strip() or item.name
+            input_text = input_name_entry.get().strip() or "in"
+            output_text = output_name_entry.get().strip() or "out"
+            script_language = script_language_entry.get().strip() or "pseudocode"
+            node_info_label.configure(
+                text=f"fun {name_text} | in: {input_text} | out: {output_text} | lang: {script_language}"
+            )
+
+        refresh_node_info_bar()
+        refresh_linked_node_views()
+        for widget in (name_entry, input_name_entry, output_name_entry):
+            widget.bind("<KeyRelease>", refresh_node_info_bar)
+        script_language_entry.bind("<<ComboboxSelected>>", refresh_node_info_bar)
+        script_language_entry.bind("<KeyRelease>", refresh_node_info_bar)
+
         ttk.Button(expected_input_toolbar, text="Load Linked Inputs", command=load_expected_input).grid(row=0, column=1, sticky="e")
         ttk.Button(expected_output_toolbar, text="Load Linked Outputs", command=load_expected_output).grid(row=0, column=1, sticky="e")
+        ttk.Button(linked_in_toolbar, text="Refresh In", command=refresh_linked_node_views).grid(row=0, column=1, sticky="e")
+        ttk.Button(linked_out_toolbar, text="Refresh Out", command=refresh_linked_node_views).grid(row=0, column=1, sticky="e")
 
         def apply_fields() -> None:
             new_name = name_entry.get().strip()

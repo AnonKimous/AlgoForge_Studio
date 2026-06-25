@@ -35,6 +35,12 @@ COMMAND_SPECS: tuple[AgentCommandSpec, ...] = (
         highlight_target="array",
     ),
     AgentCommandSpec(
+        name="field",
+        usage='field add <container> <variable|array> <field_name> [bit_width] ["rule text"] | field update <container> <field_name> [bit_width] ["rule text"] | field delete <container> <field_name> | field select <container> [field_name]',
+        location="Expanded v/a node > Layout Rules",
+        summary="Refine an expanded v/a container into internal layout fields.",
+    ),
+    AgentCommandSpec(
         name="createNode",
         usage="createNode vnode | anode | reflector | function | interventioner | meshNode",
         location="Left palette > Drag Palette",
@@ -147,6 +153,9 @@ def build_interface4agents_prompt() -> str:
         "- Syntax: cmd arg arg arg",
         "- Do not emit algorithm-studio-tool blocks.",
         "- Do not edit scripts directly when a command exists.",
+        "- When the prompt includes a recent operation stack, read that first and use it as the source of truth for the next teaching step.",
+        "- When teaching a UI step, emit exactly one relevant highlight before the explanation when the command set supports it.",
+        "- Containers are storage-only. Internal layout fields describe how the current algorithm or UI wants to read the bytes; they do not force a fixed scalar type by themselves.",
         "",
     ]
     for spec in COMMAND_SPECS:
@@ -165,11 +174,14 @@ def build_interface4agents_prompt() -> str:
             "highlight hang",
             "highlight integrateChild",
             "highlight hotReview",
+            "highlight field a1",
             "highlight node v1",
             "highlight containerelement cosNode",
             "scene container",
             "createCosNode cosNode",
             "v add v1 1 4",
+            'field add v1 variable phase01 32 "from v1 to phase01 32"',
+            'field add a1 array point_xy 64 "from a1 to x,y 32,32"',
             "hang v1 cosNode",
             "integrateChild cosNode",
             "a add a1 1 12",
@@ -259,6 +271,123 @@ def _execute_create_cos_node_command(app: Any, args: list[str]) -> str:
     return _call(app, "_apply_agent_ui_add_node", payload)
 
 
+def _find_required_container(app: Any, container_name: str) -> Any:
+    normalized_name = str(container_name or "").strip()
+    if not normalized_name:
+        raise RuntimeError("field requires a container name.")
+    container = _call(app, "_find_container", normalized_name)
+    if container is None:
+        raise RuntimeError(f"Container not found: {normalized_name}")
+    return container
+
+
+def _find_required_layout_field(app: Any, container: Any, field_name: str) -> tuple[int, Any]:
+    normalized_name = str(field_name or "").strip()
+    if not normalized_name:
+        raise RuntimeError("field requires a field name.")
+    fields = _call(app, "_container_layout_fields", container)
+    for index, field_item in enumerate(fields):
+        if str(field_item.name).strip() == normalized_name:
+            return index, field_item
+    raise RuntimeError(f"Layout field not found: {container.name}.{normalized_name}")
+
+
+def _join_rule_text(parts: list[str]) -> str | None:
+    text = " ".join(str(part).strip() for part in parts if str(part).strip()).strip()
+    return text or None
+
+
+def _parse_optional_bit_width(token: str | None, *, default: int) -> int:
+    if token is None:
+        return default
+    try:
+        value = int(str(token).strip())
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(f"Bit width must be an integer: {token}") from exc
+    if value <= 0:
+        raise RuntimeError("Bit width must be positive.")
+    return value
+
+
+def _execute_field_command(app: Any, args: list[str]) -> str:
+    if not args:
+        raise RuntimeError("field requires a subcommand.")
+    subcommand = args[0].strip().lower()
+    if subcommand == "add":
+        if len(args) < 4:
+            raise RuntimeError("field add requires <container> <variable|array> <field_name>.")
+        container = _find_required_container(app, args[1])
+        container.expand = True
+        kind = args[2].strip().lower()
+        source_name = args[3].strip()
+        if not source_name:
+            raise RuntimeError("field add requires a non-empty field name.")
+        bit_width = _parse_optional_bit_width(args[4] if len(args) > 4 else None, default=32)
+        rule_text = _join_rule_text(args[5:]) if len(args) > 5 else None
+        field_item = _call(
+            app,
+            "_add_layout_field_to_container",
+            container,
+            kind,
+            source_name=source_name,
+            rule_text=rule_text,
+            bit_width=bit_width,
+        )
+        _call(app, "_refresh_all")
+        _call(
+            app,
+            "_log",
+            f"Added layout field {field_item.name} to {container.name}: {field_item.rule_text}",
+        )
+        return f"Added layout field {field_item.name} to {container.name}."
+    if subcommand == "update":
+        if len(args) < 3:
+            raise RuntimeError("field update requires <container> and <field_name>.")
+        container = _find_required_container(app, args[1])
+        container.expand = True
+        _field_index, field_item = _find_required_layout_field(app, container, args[2])
+        bit_width = _parse_optional_bit_width(args[3] if len(args) > 3 else None, default=int(field_item.bit_width))
+        rule_text = _join_rule_text(args[4:]) if len(args) > 4 else str(field_item.rule_text or "").strip()
+        field_item.bit_width = bit_width
+        field_item.rule_text = str(rule_text or "").strip()
+        if not field_item.rule_text:
+            raise RuntimeError("field update requires non-empty rule text.")
+        _call(app, "_validate_container_layout_fields", container)
+        _call(app, "_sync_container_structure_from_layout_fields", container)
+        _call(app, "_refresh_all")
+        _call(
+            app,
+            "_log",
+            f"Updated layout field {field_item.name} in {container.name}: {field_item.rule_text}",
+        )
+        return f"Updated layout field {field_item.name} in {container.name}."
+    if subcommand == "delete":
+        if len(args) < 3:
+            raise RuntimeError("field delete requires <container> and <field_name>.")
+        container = _find_required_container(app, args[1])
+        field_index, field_item = _find_required_layout_field(app, container, args[2])
+        fields = _call(app, "_container_layout_fields", container)
+        del fields[field_index]
+        _call(app, "_validate_container_layout_fields", container)
+        _call(app, "_sync_container_structure_from_layout_fields", container)
+        _call(app, "_refresh_all")
+        _call(app, "_log", f"Deleted layout field {field_item.name} from {container.name}.")
+        return f"Deleted layout field {field_item.name} from {container.name}."
+    if subcommand == "select":
+        if len(args) < 2:
+            raise RuntimeError("field select requires <container>.")
+        container = _find_required_container(app, args[1])
+        container.expand = True
+        _call(app, "_refresh_all")
+        if len(args) > 2:
+            _field_index, field_item = _find_required_layout_field(app, container, args[2])
+            _call(app, "_interface4agents_highlight_container_field_area", container.name, field_item.name)
+            return f"Selected layout field {field_item.name} in {container.name}."
+        _call(app, "_interface4agents_highlight_container_field_area", container.name, None)
+        return f"Selected layout field area in {container.name}."
+    raise RuntimeError(f"Unsupported field command: {subcommand}")
+
+
 def _execute_hang_command(app: Any, args: list[str]) -> str:
     if len(args) < 2:
         raise RuntimeError("hang requires child and parent names.")
@@ -326,6 +455,11 @@ def _execute_highlight_command(app: Any, args: list[str]) -> str:
         if len(args) < 2:
             raise RuntimeError("highlight createNode requires a node kind.")
         return _call(app, "_interface4agents_demo_palette_drag", args[1].strip())
+    if spec.name == "field":
+        if len(args) < 2:
+            raise RuntimeError("highlight field requires a container name.")
+        field_name = args[2].strip() if len(args) > 2 and str(args[2]).strip() else None
+        return _call(app, "_interface4agents_highlight_container_field_area", args[1].strip(), field_name)
     if spec.name in {"v", "a"} and len(args) >= 2 and args[1].strip().lower() == "add":
         demo_kind = "vnode" if spec.name == "v" else "anode"
         return _call(app, "_interface4agents_demo_palette_drag", demo_kind)
@@ -341,7 +475,7 @@ def _execute_highlight_command(app: Any, args: list[str]) -> str:
             raise RuntimeError(f"Unsupported scene target: {args[1]}")
         _, tab_key, scene_label = SCENE_TARGETS[normalized]
         _call(app, "_interface4agents_highlight_target", f"scene:{tab_key}")
-        return f"Highlight: {spec.usage} | location: {spec.location} | target: {scene_label}"
+        return f"Highlight: {spec.usage} | location: {spec.location} > {scene_label} | target: {scene_label}"
     if spec.highlight_target:
         _call(app, "_interface4agents_highlight_target", spec.highlight_target)
         return f"Highlight: {spec.usage} | location: {spec.location}"
@@ -357,6 +491,8 @@ def execute_interface4agents_command(app: Any, tokens: list[str]) -> str:
         return _execute_container_command(app, "variable", args)
     if command == "a":
         return _execute_container_command(app, "array", args)
+    if command == "field":
+        return _execute_field_command(app, args)
     if command == "createcosnode":
         return _execute_create_cos_node_command(app, args)
     if command == "hang":

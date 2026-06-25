@@ -2,8 +2,8 @@
   "algorithm_name": "sample_algorithm",
   "container": {
     "globalCfg": {
-      "solvePrecision": "fp32",
-      "defaultPrecision": "fp32"
+      "solvePrecision": "32",
+      "defaultPrecision": "32"
     },
     "variable": 3,
     "variableArray": 0,

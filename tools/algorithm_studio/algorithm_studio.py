@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 import tkinter as tk
@@ -102,6 +103,7 @@ except ImportError:
 
 try:
     from .backend import (
+        ContainerFieldItem,
         ContainerGroupItem,
         ConnectionItem,
         ContainerItem,
@@ -113,16 +115,21 @@ try:
         ResourceNodeItem,
         ReflectorItem,
     )
+    from .app_container_group_mixin import AlgorithmStudioContainerGroupMixin
     from .app_container_transaction_mixin import AlgorithmStudioContainerTransactionMixin
     from .app_chat_mixin import AlgorithmStudioChatMixin
     from .app_chat_request_mixin import AlgorithmStudioChatRequestMixin
     from .app_canvas_overlay_mixin import AlgorithmStudioCanvasOverlayMixin
     from .app_canvas_interaction_mixin import AlgorithmStudioCanvasInteractionMixin
+    from .app_canvas_viewport_mixin import AlgorithmStudioCanvasViewportMixin
     from .app_editor_dialog_mixin import AlgorithmStudioEditorDialogMixin
     from .app_identity_mixin import AlgorithmStudioIdentityMixin
+    from .app_operation_stack_mixin import AlgorithmStudioOperationStackMixin
     from .app_palette_mixin import AlgorithmStudioPaletteMixin
+    from .app_runtime_logging_mixin import AlgorithmStudioRuntimeLoggingMixin
 except ImportError:
     from backend import (
+        ContainerFieldItem,
         ContainerGroupItem,
         ConnectionItem,
         ContainerItem,
@@ -134,25 +141,33 @@ except ImportError:
         ResourceNodeItem,
         ReflectorItem,
     )
+    from app_container_group_mixin import AlgorithmStudioContainerGroupMixin
     from app_container_transaction_mixin import AlgorithmStudioContainerTransactionMixin
     from app_chat_mixin import AlgorithmStudioChatMixin
     from app_chat_request_mixin import AlgorithmStudioChatRequestMixin
     from app_canvas_overlay_mixin import AlgorithmStudioCanvasOverlayMixin
     from app_canvas_interaction_mixin import AlgorithmStudioCanvasInteractionMixin
+    from app_canvas_viewport_mixin import AlgorithmStudioCanvasViewportMixin
     from app_editor_dialog_mixin import AlgorithmStudioEditorDialogMixin
     from app_identity_mixin import AlgorithmStudioIdentityMixin
+    from app_operation_stack_mixin import AlgorithmStudioOperationStackMixin
     from app_palette_mixin import AlgorithmStudioPaletteMixin
+    from app_runtime_logging_mixin import AlgorithmStudioRuntimeLoggingMixin
 
 
 class AlgorithmStudioApp(
+    AlgorithmStudioContainerGroupMixin,
     AlgorithmStudioContainerTransactionMixin,
     AlgorithmStudioChatMixin,
     AlgorithmStudioChatRequestMixin,
     AlgorithmStudioCanvasOverlayMixin,
     AlgorithmStudioCanvasInteractionMixin,
+    AlgorithmStudioCanvasViewportMixin,
     AlgorithmStudioEditorDialogMixin,
     AlgorithmStudioIdentityMixin,
+    AlgorithmStudioOperationStackMixin,
     AlgorithmStudioPaletteMixin,
+    AlgorithmStudioRuntimeLoggingMixin,
 ):
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
@@ -169,6 +184,10 @@ class AlgorithmStudioApp(
         self.document_editor_applying = False
         self.document_apply_after_id: str | None = None
         self.document_last_error: str | None = None
+        self.document_editor_mode = "manifest"
+        self.document_panel_view_mode = "text"
+        self.document_editor_target_kind: str | None = None
+        self.document_editor_target_name: str | None = None
         self.geometry_manifest_after_id: str | None = None
         self.agent_client = MockAgentClient()
         self.selected_container_name: str | None = None
@@ -194,24 +213,40 @@ class AlgorithmStudioApp(
         self.canvas_port_positions: dict[str, tuple[float, float]] = {}
         self.canvas_connection_item_to_index: dict[int, int] = {}
         self.canvas_zoom: float = 1.0
+        self.canvas_camera_x: float = 0.0
+        self.canvas_camera_y: float = 0.0
+        self.canvas_scaled_font_cache: dict[tuple[str, float], tkfont.Font] = {}
         self.canvas_double_click_suppress_until: float = 0.0
         self.palette_shell: ttk.Frame | None = None
         self.palette_canvas: tk.Canvas | None = None
         self.palette_inner_frame: ttk.Frame | None = None
+        self.palette_blueprint_frame: ttk.Frame | None = None
+        self.palette_tree_frame: ttk.Frame | None = None
+        self.drag_palette_hint_label: ttk.Label | None = None
+        self.drag_palette_mode_buttons: dict[str, tk.Widget] = {}
         self.interface4agents_highlight_targets: dict[str, list[tuple[tk.Widget, dict[str, Any]]]] = {}
         self.interface4agents_highlight_after_id: str | None = None
         self.interface4agents_highlight_restore: list[tuple[tk.Widget, dict[str, Any]]] = []
+        self.operation_source_stack: list[str] = []
+        self.operation_stack_entries: list[dict[str, str]] = []
+        self.operation_stack_auto_followup_after_id: str | None = None
+        self.operation_stack_auto_followup_signature: str = ""
         self.drag_palette_body_frame: ttk.Frame | None = None
         self.drag_palette_toggle_button: ttk.Button | None = None
         self.node_drag_state: dict[str, Any] | None = None
+        self.highlighted_container_chain_names: list[str] = []
         self.palette_drag_state: dict[str, Any] | None = None
         self.canvas_item_to_name: dict[int, str] = {}
         self.log_lines: list[str] = []
+        self.runtime_log_path: Path | None = None
         self.algorithm_identity_syncing = False
         self.canvas_view_mode = "graph"
+        self.canvas_viewport_states: dict[str, tuple[float, float, float]] = {"graph": (1.0, 0.0, 0.0)}
         self.scene_tab_buttons: dict[str, tk.Widget] = {}
         self.scene_tab_phase_only: dict[str, bool] = {}
         self.scene_tabs_canvas: tk.Canvas | None = None
+        self.scene_tab_primary_row: tk.Frame | None = None
+        self.scene_tab_phase_row: tk.Frame | None = None
 
         self.project_name_var = tk.StringVar(value=self.project.algorithm_name)
         self.package_name_var = tk.StringVar(value=self.project.package_name)
@@ -251,8 +286,10 @@ class AlgorithmStudioApp(
         self.agent_prompt_var = tk.StringVar(value="Generate a container layout and package skeleton for the selected algorithm.")
         self.agent_output_var = tk.StringVar()
         self.drag_palette_panel_collapsed_var = tk.BooleanVar(value=False)
+        self.drag_palette_mode_var = tk.StringVar(value="blueprint")
         self.sidebar_collapsed_var = tk.BooleanVar(value=False)
         self.agent_ready_var = tk.BooleanVar(value=False)
+        self.container_palette_expanded: dict[str, bool] = {}
         self.chat_history: list[dict[str, Any]] = []
         self.chat_message_serial = 0
         self.chat_embedded_widgets: list[tk.Widget] = []
@@ -273,6 +310,15 @@ class AlgorithmStudioApp(
         self.execution_runs: list[dict[str, Any]] = []
         self.execution_current_run: dict[str, Any] | None = None
         self.preview_text: tk.Text | None = None
+        self.document_panel: ttk.Frame | None = None
+        self.document_content_frame: ttk.Frame | None = None
+        self.document_panel_title_var = tk.StringVar(value="Document")
+        self.document_back_button: ttk.Button | None = None
+        self.document_view_graph_button: ttk.Button | None = None
+        self.document_view_text_button: ttk.Button | None = None
+        self.document_text_scrollbar: ttk.Scrollbar | None = None
+        self.document_graph_canvas: tk.Canvas | None = None
+        self.scene_document_pane: tk.PanedWindow | None = None
         self.log_text: tk.Text | None = None
         self.canvas: tk.Canvas | None = None
         self.container_list: tk.Listbox | None = None
@@ -282,10 +328,16 @@ class AlgorithmStudioApp(
         self.inspector_text: tk.Text | None = None
         self.selection_frame: ttk.Frame | None = None
         self.selection_body_frame: ttk.Frame | None = None
+        self.operation_stack_body_frame: ttk.Frame | None = None
         self.selection_summary_text: tk.Text | None = None
+        self.operation_stack_text: tk.Text | None = None
         self.selection_editor_frame: ttk.Frame | None = None
         self.selection_toggle_button: ttk.Button | None = None
+        self.selection_mode_toggle_button: ttk.Button | None = None
+        self.operation_stack_auto_read_button: ttk.Button | None = None
         self.selection_name_var = tk.StringVar(value=self.project.next_container_group_name())
+        self.selection_view_mode_var = tk.StringVar(value="selection")
+        self.operation_stack_auto_read_var = tk.BooleanVar(value=True)
         self.selection_panel_collapsed_var = tk.BooleanVar(value=False)
         self.selection_value_text: tk.Text | None = None
         self.selection_value_entry: ttk.Entry | None = None
@@ -319,6 +371,8 @@ class AlgorithmStudioApp(
         self.execution_body_frame: ttk.Frame | None = None
         self.execution_toggle_button: ttk.Button | None = None
         self.detail_panel_state: dict[str, Any] | None = None
+        self._initialize_runtime_logging()
+        self._install_runtime_exception_hooks()
         self.access_rules_path = resolve_access_rules_path()
         self._apply_saved_settings()
         self._configure_style()
@@ -331,6 +385,7 @@ class AlgorithmStudioApp(
         self._sync_project_to_vars()
         self._refresh_all()
         self._log("Algorithm Studio started.")
+        self._log(f"Runtime log file: {self.runtime_log_path}")
 
     def _configure_style(self) -> None:
         configure_style(self)
@@ -366,11 +421,22 @@ class AlgorithmStudioApp(
         frame = ttk.Frame(parent)
         frame.grid(row=0, column=1, sticky="nsew")
         frame.columnconfigure(0, weight=1)
-        frame.rowconfigure(0, weight=3)
-        frame.rowconfigure(1, weight=2)
+        frame.rowconfigure(0, weight=1)
 
-        canvas_frame = ttk.LabelFrame(frame, text="Scene", padding=8)
-        canvas_frame.grid(row=0, column=0, sticky="nsew")
+        split = tk.PanedWindow(
+            frame,
+            orient="vertical",
+            sashwidth=10,
+            sashrelief="raised",
+            bg=COLORS["window"],
+            bd=0,
+            relief="flat",
+            opaqueresize=True,
+        )
+        split.grid(row=0, column=0, sticky="nsew")
+        self.scene_document_pane = split
+
+        canvas_frame = ttk.LabelFrame(split, text="Scene", padding=8)
         canvas_frame.rowconfigure(1, weight=1)
         canvas_frame.columnconfigure(0, weight=1)
 
@@ -381,13 +447,19 @@ class AlgorithmStudioApp(
             scene_tabs_shell,
             bg=COLORS["panel"],
             highlightthickness=0,
-            height=44,
+            height=82,
         )
         scene_tabs_canvas.grid(row=0, column=0, sticky="ew")
         self.scene_tabs_canvas = scene_tabs_canvas
 
         scene_tabs = tk.Frame(scene_tabs_canvas, bg=COLORS["panel"])
         scene_tabs_window = scene_tabs_canvas.create_window((0, 0), window=scene_tabs, anchor="nw")
+        primary_tab_row = tk.Frame(scene_tabs, bg=COLORS["panel"])
+        primary_tab_row.pack(fill="x", anchor="w")
+        phase_tab_row = tk.Frame(scene_tabs, bg=COLORS["panel"])
+        phase_tab_row.pack(fill="x", anchor="w", pady=(6, 0))
+        self.scene_tab_primary_row = primary_tab_row
+        self.scene_tab_phase_row = phase_tab_row
 
         def _sync_scene_tabs_scrollregion(_event: tk.Event | None = None) -> None:
             if not self.scene_tabs_canvas:
@@ -414,13 +486,14 @@ class AlgorithmStudioApp(
             ("interventionerScene", "interventioner", "interventioner_overview", False),
             ("preTick", "pretick", "interventioner_pretick", True),
             ("afterTick", "aftertick", "interventioner_aftertick", True),
-            ("render", "render", "interventioner_render", True),
+            ("renderResult", "render", "interventioner_render", True),
             ("d2cScene", "decomposer2container", "decomposer2container_overview", False),
             ("allInOne", "all_in_one", "all_in_one", False),
         )
         for index, (label, tab_key, view_mode, phase_only) in enumerate(scene_specs):
+            row_parent = phase_tab_row if phase_only else primary_tab_row
             button = tk.Label(
-                scene_tabs,
+                row_parent,
                 text=label,
                 bg=COLORS["panel_alt"],
                 fg=COLORS["muted"],
@@ -443,13 +516,22 @@ class AlgorithmStudioApp(
             self.scene_tab_phase_only[tab_key] = phase_only
             self.interface4agents_highlight_targets[f"scene:{tab_key}"] = [
                 (
-                    button,
+                    scene_tabs_canvas,
                     {
-                        "bg": COLORS["accent"],
-                        "fg": COLORS["window"],
                         "highlightbackground": COLORS["accent"],
                         "highlightcolor": COLORS["accent"],
-                        "highlightthickness": 2,
+                        "highlightthickness": 3,
+                        "bd": 2,
+                    },
+                ),
+                (
+                    button,
+                    {
+                        "highlightbackground": COLORS["accent"],
+                        "highlightcolor": COLORS["accent"],
+                        "highlightthickness": 3,
+                        "relief": "solid",
+                        "bd": 2,
                     },
                 )
             ]
@@ -470,7 +552,7 @@ class AlgorithmStudioApp(
                 {
                     "highlightbackground": COLORS["accent"],
                     "highlightcolor": COLORS["accent"],
-                    "highlightthickness": 2,
+                    "highlightthickness": 3,
                 },
             )
         ]
@@ -488,14 +570,36 @@ class AlgorithmStudioApp(
         self.canvas.bind("<Button-5>", self._on_canvas_mouse_wheel)
         self.canvas.bind("<Configure>", lambda _event: self._redraw_canvas())
 
-        document_frame = ttk.LabelFrame(frame, text="Document", padding=8)
-        document_frame.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
-        document_frame.rowconfigure(0, weight=1)
+        document_frame = ttk.LabelFrame(split, text="Document", padding=8)
+        document_frame.rowconfigure(1, weight=1)
         document_frame.columnconfigure(0, weight=1)
-        document_scroll = ttk.Scrollbar(document_frame, orient="vertical")
+        self.document_panel = document_frame
+
+        document_header = ttk.Frame(document_frame)
+        document_header.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        document_header.columnconfigure(0, weight=1)
+        ttk.Label(document_header, textvariable=self.document_panel_title_var).grid(row=0, column=0, sticky="w")
+        graph_button = ttk.Button(document_header, text="Graphic", command=lambda: self._set_document_panel_view_mode("graphic"))
+        graph_button.grid(row=0, column=1, sticky="e", padx=(0, 6))
+        self.document_view_graph_button = graph_button
+        text_button = ttk.Button(document_header, text="Text", command=lambda: self._set_document_panel_view_mode("text"))
+        text_button.grid(row=0, column=2, sticky="e", padx=(0, 6))
+        self.document_view_text_button = text_button
+        back_button = ttk.Button(document_header, text="Back To Package", command=self._open_manifest_in_document_panel)
+        back_button.grid(row=0, column=3, sticky="e")
+        self.document_back_button = back_button
+
+        document_content = ttk.Frame(document_frame)
+        document_content.grid(row=1, column=0, columnspan=2, sticky="nsew")
+        document_content.columnconfigure(0, weight=1)
+        document_content.rowconfigure(0, weight=1)
+        self.document_content_frame = document_content
+
+        document_scroll = ttk.Scrollbar(document_content, orient="vertical")
         document_scroll.grid(row=0, column=1, sticky="ns")
+        self.document_text_scrollbar = document_scroll
         preview_text = tk.Text(
-            document_frame,
+            document_content,
             wrap="none",
             bg=COLORS["canvas"],
             fg=COLORS["text"],
@@ -512,6 +616,30 @@ class AlgorithmStudioApp(
         preview_text.bind("<<Modified>>", self._on_document_text_modified)
         document_scroll.config(command=preview_text.yview)
         self.preview_text = preview_text
+
+        document_graph_canvas = tk.Canvas(
+            document_content,
+            bg=COLORS["canvas"],
+            highlightthickness=1,
+            highlightbackground=COLORS["grid"],
+            highlightcolor=COLORS["accent"],
+            relief="flat",
+            borderwidth=0,
+        )
+        document_graph_canvas.bind("<Configure>", lambda _event: self._refresh_document_graph_view())
+        self.document_graph_canvas = document_graph_canvas
+        split.add(canvas_frame, minsize=260)
+        split.add(document_frame, minsize=180)
+
+        def _set_initial_document_split() -> None:
+            if not self.scene_document_pane:
+                return
+            total_height = max(int(frame.winfo_height()), 600)
+            self.scene_document_pane.sash_place(0, 0, int(total_height * 0.62))
+
+        self.root.after(0, _set_initial_document_split)
+        self._refresh_document_panel_header()
+        self._apply_document_panel_view_mode()
 
     def _build_sidebar_panel(self, parent: ttk.Frame) -> None:
         shell = ttk.Frame(parent, width=SIDEBAR_EXPANDED_WIDTH, padding=(0, 0, 0, 0))
@@ -714,6 +842,13 @@ class AlgorithmStudioApp(
         self.drag_palette_panel_collapsed_var.set(not self.drag_palette_panel_collapsed_var.get())
         self._apply_drag_palette_panel_layout()
 
+    def _set_drag_palette_mode(self, mode: str) -> None:
+        normalized = str(mode or "").strip().lower()
+        if normalized not in {"blueprint", "container_tree"}:
+            raise AssertionError(f"Unsupported drag palette mode: {mode}")
+        self.drag_palette_mode_var.set(normalized)
+        self._apply_drag_palette_mode_layout()
+
     def _toggle_selection_panel(self) -> None:
         self.selection_panel_collapsed_var.set(not self.selection_panel_collapsed_var.get())
         self._apply_selection_panel_layout()
@@ -797,17 +932,65 @@ class AlgorithmStudioApp(
             if not self.drag_palette_body_frame.winfo_ismapped():
                 self.drag_palette_body_frame.grid()
             self.drag_palette_toggle_button.configure(text="Hide")
+        self._apply_drag_palette_mode_layout()
+
+    def _apply_drag_palette_mode_layout(self) -> None:
+        if not self.palette_blueprint_frame or not self.palette_tree_frame or not self.drag_palette_hint_label:
+            return
+        mode = str(self.drag_palette_mode_var.get() or "blueprint").strip().lower()
+        if mode not in {"blueprint", "container_tree"}:
+            raise AssertionError(f"Unsupported drag palette mode: {mode}")
+        if mode == "container_tree":
+            self.palette_blueprint_frame.grid_remove()
+            if not self.palette_tree_frame.winfo_ismapped():
+                self.palette_tree_frame.grid(row=0, column=0, sticky="ew")
+            self.drag_palette_hint_label.configure(text="Double-click a parent to expand it, then drag children into the canvas")
+            self._refresh_container_tree_palette()
+        else:
+            self.palette_tree_frame.grid_remove()
+            if not self.palette_blueprint_frame.winfo_ismapped():
+                self.palette_blueprint_frame.grid(row=0, column=0, sticky="ew")
+            self.drag_palette_hint_label.configure(text="Drag blueprint nodes into the canvas")
+        for button_mode, button in self.drag_palette_mode_buttons.items():
+            active = button_mode == mode
+            button.configure(
+                bg=COLORS["accent"] if active else COLORS["panel_alt"],
+                fg=COLORS["window"] if active else COLORS["muted"],
+                highlightbackground=COLORS["accent"] if active else COLORS["grid"],
+                highlightcolor=COLORS["accent"] if active else COLORS["grid"],
+            )
 
     def _apply_selection_panel_layout(self) -> None:
-        if not self.selection_body_frame or not self.selection_toggle_button:
+        if not self.selection_toggle_button:
             return
+        self._refresh_operation_stack_auto_read_button()
+        mode = str(self.selection_view_mode_var.get() or "selection").strip().lower()
+        if mode not in {"selection", "operation_stack"}:
+            raise AssertionError(f"Unsupported selection panel view mode: {mode}")
         if self.selection_panel_collapsed_var.get():
-            self.selection_body_frame.grid_remove()
+            if self.selection_body_frame and self.selection_body_frame.winfo_ismapped():
+                self.selection_body_frame.grid_remove()
+            if self.operation_stack_body_frame and self.operation_stack_body_frame.winfo_ismapped():
+                self.operation_stack_body_frame.grid_remove()
             self.selection_toggle_button.configure(text="Show")
         else:
-            if not self.selection_body_frame.winfo_ismapped():
-                self.selection_body_frame.grid()
+            if self.selection_body_frame:
+                if mode == "selection":
+                    if not self.selection_body_frame.winfo_ismapped():
+                        self.selection_body_frame.grid()
+                elif self.selection_body_frame.winfo_ismapped():
+                    self.selection_body_frame.grid_remove()
+            if self.operation_stack_body_frame:
+                if mode == "operation_stack":
+                    if not self.operation_stack_body_frame.winfo_ismapped():
+                        self.operation_stack_body_frame.grid()
+                elif self.operation_stack_body_frame.winfo_ismapped():
+                    self.operation_stack_body_frame.grid_remove()
             self.selection_toggle_button.configure(text="Hide")
+        if self.selection_mode_toggle_button:
+            self.selection_mode_toggle_button.configure(
+                text="Operation Stack" if mode == "selection" else "Selection"
+            )
 
     def _apply_execution_panel_layout(self) -> None:
         if not self.execution_body_frame or not self.execution_toggle_button:
@@ -1313,30 +1496,51 @@ class AlgorithmStudioApp(
     def _consume_agent_tool_response(self, response: str) -> str:
         command_calls, response_without_commands = extract_interface4agents_script(response)
         tool_calls, visible_text = self._extract_agent_tool_calls(response_without_commands)
+        if tool_calls:
+            raise RuntimeError("algorithm-studio-tool blocks are disabled. Use interface4agents only.")
         summaries: list[str] = []
         failures: list[str] = []
         for tokens in command_calls:
             command_text = " ".join(tokens).strip()
             try:
-                summaries.append(execute_interface4agents_command(self, tokens))
+                self._push_operation_source("agent")
+                try:
+                    command_result = execute_interface4agents_command(self, tokens)
+                finally:
+                    self._pop_operation_source()
+                if command_text.lower().startswith("highlight "):
+                    if not visible_text.strip():
+                        summaries.append("Highlighted the requested UI target.")
+                else:
+                    summaries.append(command_result)
+                if not command_text.lower().startswith("highlight "):
+                    self._record_operation("agent", f"interface4agents: {command_text}")
             except Exception as exc:  # noqa: BLE001
                 failure_text = self._compact_activity_text(str(exc), limit=120) or "未知原因"
                 failures.append(f"命令 {command_text} 执行失败：{failure_text}")
+                if not command_text.lower().startswith("highlight "):
+                    self._record_operation("agent", f"interface4agents failed: {command_text} -> {failure_text}")
                 self._log(f"interface4agents failed: {command_text} -> {failure_text}")
                 continue
         for payload in tool_calls:
             tool_name = str(payload.get("tool") or "").strip()
             try:
-                if tool_name in {"ui_add_node", "ui_update_node", "ui_delete_node", "ui_add_rule"}:
-                    summaries.append(self._apply_agent_ui_tool(payload))
-                    continue
-                if tool_name == "update_document":
-                    summaries.append(self._apply_agent_update_document_tool(payload))
-                    continue
-                raise RuntimeError(f"Unsupported agent tool: {tool_name or '(empty)'}")
+                self._push_operation_source("agent")
+                try:
+                    if tool_name in {"ui_add_node", "ui_update_node", "ui_delete_node", "ui_add_rule"}:
+                        summaries.append(self._apply_agent_ui_tool(payload))
+                    elif tool_name == "update_document":
+                        summaries.append(self._apply_agent_update_document_tool(payload))
+                    else:
+                        raise RuntimeError(f"Unsupported agent tool: {tool_name or '(empty)'}")
+                finally:
+                    self._pop_operation_source()
+                self._record_operation("agent", f"tool: {tool_name or '(empty)'}")
+                continue
             except Exception as exc:  # noqa: BLE001
                 failure_text = self._compact_activity_text(str(exc), limit=120) or "未知原因"
                 failures.append(f"工具 {tool_name or '(empty)'} 执行失败：{failure_text}")
+                self._record_operation("agent", f"tool failed: {tool_name or '(empty)'} -> {failure_text}")
                 self._log(f"agent tool failed: {tool_name or '(empty)'} -> {failure_text}")
                 continue
         parts: list[str] = []
@@ -1497,9 +1701,11 @@ class AlgorithmStudioApp(
                 value=str(payload.get("value") or ""),
                 values=self._agent_tool_list_of_str(payload, "values"),
                 structure=self._agent_tool_list_of_str(payload, "structure"),
+                layout_fields=self.project._parse_layout_fields(payload.get("layoutFields", []), f"ui_add_node.container[{name}]"),
                 x=self._agent_tool_float(payload, "x", x_default),
                 y=self._agent_tool_float(payload, "y", y_default),
             )
+            self._ensure_container_shareptr_identity(container)
             self.project.containers.append(container)
             self.selected_container_name = name
             self._refresh_all()
@@ -1881,6 +2087,352 @@ class AlgorithmStudioApp(
         finally:
             self.document_editor_applying = False
 
+    def _refresh_document_panel_header(self) -> None:
+        if self.document_editor_mode == "manifest":
+            self.document_panel_title_var.set("Document")
+        else:
+            kind = str(self.document_editor_target_kind or "node")
+            name = str(self.document_editor_target_name or "")
+            self.document_panel_title_var.set(f"Doc Editor: {kind} {name}".strip())
+        if self.document_back_button is not None:
+            state = "disabled" if self.document_editor_mode == "manifest" else "normal"
+            self.document_back_button.configure(state=state)
+        graphic_state = "normal" if self.document_editor_mode == "node" else "disabled"
+        if self.document_view_graph_button is not None:
+            self.document_view_graph_button.configure(state=graphic_state)
+        if self.document_view_text_button is not None:
+            self.document_view_text_button.configure(state="normal")
+
+    def _set_document_panel_view_mode(self, mode: str) -> None:
+        normalized = str(mode or "").strip().lower()
+        if normalized not in {"graphic", "text"}:
+            raise AssertionError(f"Unsupported document panel view mode: {mode}")
+        if normalized == "graphic" and self.document_editor_mode != "node":
+            normalized = "text"
+        self.document_panel_view_mode = normalized
+        self._apply_document_panel_view_mode()
+
+    def _apply_document_panel_view_mode(self) -> None:
+        if not self.preview_text or not self.document_graph_canvas or not self.document_text_scrollbar:
+            return
+        if self.document_panel_view_mode == "graphic" and self.document_editor_mode == "node":
+            self.preview_text.grid_remove()
+            self.document_text_scrollbar.grid_remove()
+            self.document_graph_canvas.grid(row=0, column=0, columnspan=2, sticky="nsew")
+            self._refresh_document_graph_view()
+        else:
+            self.document_graph_canvas.grid_remove()
+            self.preview_text.grid(row=0, column=0, sticky="nsew")
+            self.document_text_scrollbar.grid(row=0, column=1, sticky="ns")
+
+    def _document_graph_sections(self, kind: str, data: dict[str, Any]) -> list[tuple[str, list[str]]]:
+        normalized_kind = str(kind).strip().lower()
+        if normalized_kind == "container":
+            layout_fields = data.get("layout_fields", data.get("layoutFields", []))
+            if not isinstance(layout_fields, list):
+                raise ValueError("container.layout_fields must be a list.")
+            field_lines: list[str] = []
+            for entry in layout_fields:
+                if not isinstance(entry, dict):
+                    raise ValueError("container.layout_fields entries must be objects.")
+                field_lines.append(str(entry.get("rule_text", entry.get("ruleText", ""))).strip() or "-")
+            if not field_lines:
+                field_lines = [str(line).strip() for line in data.get("structure", []) if str(line).strip()] or ["-"]
+            values = data.get("values", [])
+            if not isinstance(values, list):
+                values = []
+            value_lines = values[:6] if values else [str(data.get("value", "")).strip() or "-"]
+            return [
+                ("Header", [f"kind: {data.get('kind', '-')}", f"count: {data.get('count', '-')}", f"stride: {data.get('stride', '-')}"]),
+                ("Layout", field_lines[:8]),
+                ("Value", [str(line).strip() or "-" for line in value_lines]),
+            ]
+        if normalized_kind == "function":
+            return [
+                ("Ports", [f"in: {data.get('input_name', 'in')}", f"out: {data.get('output_name', 'out')}", f"lang: {data.get('script_language', '-') or '-'}"]),
+                ("Expected", [self._compact_activity_text(str(data.get("expected_input", "")).strip() or "-", limit=80), self._compact_activity_text(str(data.get("expected_output", "")).strip() or "-", limit=80)]),
+                ("Script", [self._compact_activity_text(line, limit=88) for line in str(data.get("script", "")).splitlines()[:8] if self._compact_activity_text(line, limit=88)] or ["-"]),
+                ("Notes", [self._compact_activity_text(str(data.get("linked_notes", "")).strip() or "-", limit=88)]),
+            ]
+        if normalized_kind == "functiontext":
+            return [
+                ("Link", [f"fun: {data.get('function_name', '-') or '-'}"]),
+                ("Text", [self._compact_activity_text(line, limit=88) for line in str(data.get("text", "")).splitlines()[:12] if self._compact_activity_text(line, limit=88)] or ["-"]),
+            ]
+        if normalized_kind == "containerelement":
+            return [
+                ("Members", [
+                    f"v: {', '.join(data.get('variables', [])[:6]) or '-'}",
+                    f"a: {', '.join(data.get('arrays', [])[:6]) or '-'}",
+                    f"g: {', '.join(data.get('groups', [])[:6]) or '-'}",
+                ]),
+            ]
+        if normalized_kind == "decomposer":
+            return [
+                ("Map", [f"from: {data.get('source', '-')}", f"to: {data.get('target', '-')}", f"kind: {data.get('map_kind', data.get('mapKind', '-'))}"]),
+                ("Script", [self._compact_activity_text(line, limit=88) for line in str(data.get("descriptor_script", data.get("script", ""))).splitlines()[:8] if self._compact_activity_text(line, limit=88)] or ["-"]),
+            ]
+        if normalized_kind == "reflector":
+            return [
+                ("Reflect", [f"fun: {data.get('reflect_fun', data.get('reflectFun', '-'))}", f"out: {data.get('output_kind', '-')}.{data.get('output_name', '-') or '-'}"]),
+                ("Sources", [", ".join(data.get("direct_from", [])[:8]) or ", ".join(data.get("inputs_varity", [])[:8]) or "-", ", ".join(data.get("inputs_array", [])[:8]) or "-"]),
+            ]
+        if normalized_kind in {"interventioner", "stage"}:
+            return [
+                ("Stage", [f"kind: {data.get('kind', '-')}", f"pipeline: {data.get('pipeline', '-')}", f"functions: {', '.join(data.get('functions', [])[:8]) or '-'}"]),
+                ("Shader", [self._compact_activity_text(str(data.get("shader_vertex", "")).strip() or "-", limit=88), self._compact_activity_text(str(data.get("shader_fragment", "")).strip() or "-", limit=88)]),
+            ]
+        return [("Data", [self._compact_activity_text(json.dumps(data, ensure_ascii=False), limit=88)])]
+
+    def _refresh_document_graph_view(self) -> None:
+        if not self.document_graph_canvas:
+            return
+        canvas = self.document_graph_canvas
+        canvas.delete("all")
+        if self.document_editor_mode != "node" or not self.document_editor_target_kind or not self.document_editor_target_name:
+            canvas.create_text(24, 24, anchor="nw", fill=COLORS["muted"], text="Graphic node view is available after a node is opened in the document panel.", font=("Segoe UI", 11))
+            return
+        kind = self.document_editor_target_kind
+        name = self.document_editor_target_name
+        data = self._node_document_data(kind, name)
+        sections = self._document_graph_sections(kind, data)
+        canvas_width = max(canvas.winfo_width(), 620)
+        x = 18.0
+        y = 18.0
+        width = max(float(canvas_width - 36), 420.0)
+        height = 180.0 + sum(max(len(lines), 1) * 22.0 for _title, lines in sections)
+        outline = COLORS["accent"]
+        title_text = f"{kind} {name}".strip()
+        self._create_rounded_rect(canvas, x, y, x + width, y + height, 14.0, fill="#0b1017", outline=outline, width=2, tags=("doc_node",))
+        self._draw_top_rounded_header(canvas, x + 2, y + 2, x + width - 2, y + 38, 12.0, fill=COLORS["accent_2"], tags=("doc_node_header",))
+        canvas.create_line(x + 3, y + 38, x + width - 3, y + 38, fill="#d5def3", width=1, tags=("doc_node_header",))
+        canvas.create_text(x + 14, y + 10, anchor="nw", fill="#ffffff", text=title_text, font=("Segoe UI", 13, "bold"), tags=("doc_node_header",))
+        current_y = y + 52
+        for section_title, lines in sections:
+            canvas.create_text(x + 16, current_y, anchor="nw", fill=COLORS["muted"], text=section_title.upper(), font=("Segoe UI", 10, "bold"))
+            current_y += 22
+            for line in lines or ["-"]:
+                canvas.create_text(x + 24, current_y, anchor="nw", fill=COLORS["text"], text=str(line).strip() or "-", font=("Segoe UI", 10), width=width - 44, justify="left")
+                current_y += 20
+            current_y += 8
+
+    def _document_panel_contains_screen_point(self, x_root: float, y_root: float) -> bool:
+        if not self.document_panel:
+            return False
+        left = self.document_panel.winfo_rootx()
+        top = self.document_panel.winfo_rooty()
+        right = left + self.document_panel.winfo_width()
+        bottom = top + self.document_panel.winfo_height()
+        return left <= x_root <= right and top <= y_root <= bottom
+
+    def _canvas_top_screen_y(self) -> int:
+        if not self.canvas:
+            raise AssertionError("Canvas is not initialized.")
+        return self.canvas.winfo_rooty()
+
+    def _node_document_data(self, kind: str, name: str) -> dict[str, Any]:
+        normalized_kind = str(kind).strip().lower()
+        item = self._node_by_kind_name(normalized_kind, str(name).strip())
+        if item is None:
+            raise AssertionError(f"Missing node for document editor: {kind}:{name}")
+        data = asdict(item)
+        if normalized_kind == "function":
+            linked_text = self._find_function_text_for_function(str(name).strip())
+            data["linked_notes"] = "" if linked_text is None else linked_text.text
+        return data
+
+    def _node_document_payload(self, kind: str, name: str) -> dict[str, Any]:
+        normalized_kind = str(kind).strip().lower()
+        normalized_name = str(name).strip()
+        return {
+            "editor": "node",
+            "kind": normalized_kind,
+            "name": normalized_name,
+            "data": self._node_document_data(normalized_kind, normalized_name),
+        }
+
+    def _node_document_text(self, kind: str, name: str) -> str:
+        return json.dumps(self._node_document_payload(kind, name), indent=2, ensure_ascii=False)
+
+    def _open_manifest_in_document_panel(self) -> None:
+        self.document_editor_mode = "manifest"
+        self.document_panel_view_mode = "text"
+        self.document_editor_target_kind = None
+        self.document_editor_target_name = None
+        self.document_editor_dirty = False
+        self.document_last_error = None
+        self._refresh_document_panel_header()
+        self._set_document_text(self._project_manifest_text())
+        self._apply_document_panel_view_mode()
+
+    def _open_node_in_document_panel(self, kind: str, name: str) -> None:
+        self.document_editor_mode = "node"
+        self.document_panel_view_mode = "graphic"
+        self.document_editor_target_kind = str(kind).strip().lower()
+        self.document_editor_target_name = str(name).strip()
+        self.document_editor_dirty = False
+        self.document_last_error = None
+        self._refresh_document_panel_header()
+        self._set_document_text(self._node_document_text(kind, name))
+        self._apply_document_panel_view_mode()
+        self.status_var.set(f"Opened {kind} {name} in the document panel.")
+
+    def _apply_node_document_payload(self, payload: dict[str, Any]) -> None:
+        normalized_kind = str(payload.get("kind") or "").strip().lower()
+        original_name = str(self.document_editor_target_name or "").strip()
+        target_name = str(payload.get("name") or original_name).strip()
+        data = payload.get("data")
+        if not normalized_kind or not original_name:
+            raise AssertionError("Node document target is missing.")
+        if not isinstance(data, dict):
+            raise ValueError("Node document payload.data must be a JSON object.")
+        if target_name != original_name:
+            raise ValueError("Node document rename is not supported in the document panel yet.")
+        if normalized_kind == "container":
+            item = self._find_container(original_name)
+            if item is None:
+                raise AssertionError(f"Missing container {original_name}")
+            item.count = max(1, int(data.get("count", item.count)))
+            item.stride = max(1, int(data.get("stride", item.stride)))
+            item.value = str(data.get("value", item.value))
+            raw_values = data.get("values", item.values)
+            if not isinstance(raw_values, list):
+                raise ValueError("container.values must be a list.")
+            item.values = [str(value).strip() for value in raw_values]
+            raw_structure = data.get("structure", item.structure)
+            if not isinstance(raw_structure, list):
+                raise ValueError("container.structure must be a list.")
+            item.structure = [str(value).strip() for value in raw_structure if str(value).strip()]
+            item.layout_fields = self.project._parse_layout_fields(data.get("layout_fields", data.get("layoutFields", [])), f"container[{item.name}]")
+            item.view_offset = max(0, int(data.get("view_offset", item.view_offset)))
+            item.x = float(data.get("x", item.x))
+            item.y = float(data.get("y", item.y))
+            item.width = float(data.get("width", item.width))
+            item.height = float(data.get("height", item.height))
+            item.expand = bool(data.get("expand", item.expand))
+            item.reuse_chain_id = str(data.get("reuse_chain_id", data.get("reuseChainId", item.reuse_chain_id)))
+            item.reuse_chain_index = int(data.get("reuse_chain_index", data.get("reuseChainIndex", item.reuse_chain_index)))
+            self._validate_container_layout_fields(item)
+            if item.layout_fields:
+                self._sync_container_structure_from_layout_fields(item)
+            return
+        if normalized_kind == "containerelement":
+            item = self._find_container_group(original_name)
+            if item is None:
+                raise AssertionError(f"Missing containerelement {original_name}")
+            for key in ("variables", "arrays", "groups"):
+                value = data.get(key, getattr(item, key))
+                if not isinstance(value, list):
+                    raise ValueError(f"containerelement.{key} must be a list.")
+                setattr(item, key, [str(entry).strip() for entry in value if str(entry).strip()])
+            item.x = float(data.get("x", item.x))
+            item.y = float(data.get("y", item.y))
+            item.width = float(data.get("width", item.width))
+            item.height = float(data.get("height", item.height))
+            item.expand = bool(data.get("expand", item.expand))
+            item.locked = bool(data.get("locked", item.locked))
+            return
+        if normalized_kind == "decomposer":
+            item = self._find_rule(original_name)
+            if item is None:
+                raise AssertionError(f"Missing decomposer {original_name}")
+            item.source = str(data.get("source", item.source)).strip()
+            item.target = str(data.get("target", item.target)).strip()
+            item.map_kind = str(data.get("map_kind", data.get("mapKind", item.map_kind))).strip() or item.map_kind
+            item.descriptor_script = str(data.get("descriptor_script", data.get("script", item.descriptor_script)))
+            item.resource_mode = str(data.get("resource_mode", data.get("resourceMode", item.resource_mode)))
+            item.resource_script = str(data.get("resource_script", data.get("resourceScript", item.resource_script)))
+            item.x = float(data.get("x", item.x))
+            item.y = float(data.get("y", item.y))
+            item.width = float(data.get("width", item.width))
+            item.height = float(data.get("height", item.height))
+            item.expand = bool(data.get("expand", item.expand))
+            return
+        if normalized_kind == "reflector":
+            item = self._find_reflector(original_name)
+            if item is None:
+                raise AssertionError(f"Missing reflector {original_name}")
+            item.reflect_fun = str(data.get("reflect_fun", data.get("reflectFun", item.reflect_fun))).strip() or item.reflect_fun
+            item.inputs_varity = [str(entry).strip() for entry in data.get("inputs_varity", item.inputs_varity)]
+            item.inputs_array = [str(entry).strip() for entry in data.get("inputs_array", item.inputs_array)]
+            item.output_kind = str(data.get("output_kind", item.output_kind)).strip() or item.output_kind
+            item.output_name = str(data.get("output_name", item.output_name)).strip()
+            item.direct_from = [str(entry).strip() for entry in data.get("direct_from", item.direct_from)]
+            item.direct_to = [str(entry).strip() for entry in data.get("direct_to", item.direct_to)]
+            item.x = float(data.get("x", item.x))
+            item.y = float(data.get("y", item.y))
+            item.width = float(data.get("width", item.width))
+            item.height = float(data.get("height", item.height))
+            item.expand = bool(data.get("expand", item.expand))
+            return
+        if normalized_kind == "resnode":
+            item = self._find_res_node(original_name)
+            if item is None:
+                raise AssertionError(f"Missing resnode {original_name}")
+            item.resource_types = [str(entry).strip() for entry in data.get("resource_types", item.resource_types)]
+            item.outputs = [str(entry).strip() for entry in data.get("outputs", item.outputs)]
+            item.resource_kind = str(data.get("resource_kind", item.resource_kind)).strip() or item.resource_kind
+            item.x = float(data.get("x", item.x))
+            item.y = float(data.get("y", item.y))
+            item.width = float(data.get("width", item.width))
+            item.height = float(data.get("height", item.height))
+            item.expand = bool(data.get("expand", item.expand))
+            return
+        if normalized_kind == "function":
+            item = self._find_function_frame(original_name)
+            if item is None:
+                raise AssertionError(f"Missing function {original_name}")
+            item.script = str(data.get("script", item.script))
+            item.script_language = str(data.get("script_language", item.script_language)).strip() or item.script_language
+            item.input_name = str(data.get("input_name", item.input_name)).strip() or "in"
+            item.output_name = str(data.get("output_name", item.output_name)).strip() or "out"
+            item.expected_input = str(data.get("expected_input", item.expected_input))
+            item.expected_output = str(data.get("expected_output", item.expected_output))
+            item.x = float(data.get("x", item.x))
+            item.y = float(data.get("y", item.y))
+            item.width = float(data.get("width", item.width))
+            item.height = float(data.get("height", item.height))
+            item.expand = bool(data.get("expand", item.expand))
+            linked_notes = str(data.get("linked_notes", "")).strip()
+            text_item = self._find_function_text_for_function(item.name)
+            if linked_notes:
+                if text_item is None:
+                    text_item = self._ensure_function_text_item(item.name)
+                text_item.text = linked_notes
+            elif text_item is not None:
+                text_item.text = ""
+            return
+        if normalized_kind == "functiontext":
+            item = self._find_function_text_item(original_name)
+            if item is None:
+                raise AssertionError(f"Missing functiontext {original_name}")
+            item.function_name = str(data.get("function_name", item.function_name)).strip() or item.function_name
+            item.text = str(data.get("text", item.text))
+            item.x = float(data.get("x", item.x))
+            item.y = float(data.get("y", item.y))
+            item.width = float(data.get("width", item.width))
+            item.height = float(data.get("height", item.height))
+            item.expand = bool(data.get("expand", item.expand))
+            return
+        if normalized_kind in {"interventioner", "stage"}:
+            item = self._find_stage(original_name)
+            if item is None:
+                raise AssertionError(f"Missing stage {original_name}")
+            item.kind = str(data.get("kind", item.kind)).strip() or item.kind
+            item.functions = [str(entry).strip() for entry in data.get("functions", item.functions)]
+            item.used_variables = [str(entry).strip() for entry in data.get("used_variables", item.used_variables)]
+            item.used_arrays = [str(entry).strip() for entry in data.get("used_arrays", item.used_arrays)]
+            item.pipeline = str(data.get("pipeline", item.pipeline)).strip() or item.pipeline
+            item.shader_vertex = str(data.get("shader_vertex", item.shader_vertex))
+            item.shader_fragment = str(data.get("shader_fragment", item.shader_fragment))
+            item.x = float(data.get("x", item.x))
+            item.y = float(data.get("y", item.y))
+            item.width = float(data.get("width", item.width))
+            item.height = float(data.get("height", item.height))
+            item.expand = bool(data.get("expand", item.expand))
+            return
+        raise ValueError(f"Unsupported node document kind: {normalized_kind}")
+
     def _cancel_document_apply(self) -> None:
         if self.document_apply_after_id is None:
             return
@@ -1943,6 +2495,16 @@ class AlgorithmStudioApp(
             payload = json.loads(raw_text)
             if not isinstance(payload, dict):
                 raise ValueError("Document root must be a JSON object.")
+            if self.document_editor_mode == "node":
+                self._apply_node_document_payload(payload)
+                self.document_editor_dirty = False
+                self.document_last_error = None
+                self._refresh_all()
+                if self.document_editor_target_kind and self.document_editor_target_name:
+                    self._set_document_text(self._node_document_text(self.document_editor_target_kind, self.document_editor_target_name))
+                self._apply_document_panel_view_mode()
+                self._log(f"Applied document-pane changes to {self.document_editor_target_kind}:{self.document_editor_target_name}.")
+                return
             project = ProjectState.from_package_json(payload)
         except Exception as exc:  # noqa: BLE001
             self.document_last_error = str(exc)
@@ -1952,6 +2514,7 @@ class AlgorithmStudioApp(
         self.document_last_error = None
         self._replace_project_state(project, source="Document applied.")
         self._set_document_text(self._project_manifest_text())
+        self._apply_document_panel_view_mode()
         self._log("Applied document changes to the scene.")
 
     def _commit_document_editor_or_report(self) -> bool:
@@ -1965,12 +2528,14 @@ class AlgorithmStudioApp(
         return True
 
     def _refresh_all(self) -> None:
+        start_time = time.perf_counter()
         self._cancel_geometry_manifest_refresh()
         self._sync_all_container_groups()
         self._sync_selected_nodes()
         self._sync_project_to_vars()
         self._sync_project_manifest_cache()
         self._refresh_scene_tabs()
+        self._refresh_container_tree_palette()
         self._refresh_container_list()
         self._refresh_rule_list()
         self._refresh_reflector_list()
@@ -1980,6 +2545,9 @@ class AlgorithmStudioApp(
         self._refresh_canvas_detail_panel()
         self._refresh_inspector()
         self._refresh_selection_panel()
+        elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+        if elapsed_ms >= 80.0:
+            self._write_runtime_log_line("PERF", f"_refresh_all took {elapsed_ms:.2f} ms in {self.canvas_view_mode}.")
 
     def _cancel_geometry_manifest_refresh(self) -> None:
         if self.geometry_manifest_after_id is None:
@@ -1996,17 +2564,26 @@ class AlgorithmStudioApp(
         self._cancel_geometry_manifest_refresh()
         self.geometry_manifest_after_id = self.root.after(delay_ms, self._flush_geometry_manifest_refresh)
 
-    def _refresh_canvas_interaction_state(self, *, schedule_manifest_refresh: bool = True) -> None:
-        self._sync_all_container_groups()
+    def _refresh_canvas_interaction_state(self, *, schedule_manifest_refresh: bool = True, sync_groups: bool = True) -> None:
+        start_time = time.perf_counter()
+        if sync_groups:
+            self._sync_all_container_groups()
         self._sync_selected_nodes()
         self._sync_project_to_vars()
         self._refresh_scene_tabs()
+        self._refresh_container_tree_palette()
         self._redraw_canvas()
         self._refresh_canvas_detail_panel()
         self._refresh_inspector()
         self._refresh_selection_panel()
         if schedule_manifest_refresh:
             self._schedule_geometry_manifest_refresh()
+        elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+        if elapsed_ms >= 40.0:
+            self._write_runtime_log_line(
+                "PERF",
+                f"_refresh_canvas_interaction_state took {elapsed_ms:.2f} ms in {self.canvas_view_mode} (sync_groups={sync_groups}).",
+            )
 
     def _refresh_container_list(self) -> None:
         if not self.container_list:
@@ -2052,8 +2629,19 @@ class AlgorithmStudioApp(
             return
         if self.document_editor_dirty:
             return
-        preview = self._project_manifest_text()
+        if self.document_editor_mode == "node":
+            if not self.document_editor_target_kind or not self.document_editor_target_name:
+                self._open_manifest_in_document_panel()
+                return
+            target_node = self._node_by_kind_name(self.document_editor_target_kind, self.document_editor_target_name)
+            if target_node is None:
+                self._open_manifest_in_document_panel()
+                return
+            preview = self._node_document_text(self.document_editor_target_kind, self.document_editor_target_name)
+        else:
+            preview = self._project_manifest_text()
         self._set_document_text(preview)
+        self._apply_document_panel_view_mode()
 
     def _refresh_inspector(self) -> None:
         if not self.inspector_text:
@@ -2315,6 +2903,7 @@ class AlgorithmStudioApp(
                         "value": container.value,
                         "values": list(container.values),
                         "structure": list(container.structure),
+                        "layout_fields": copy.deepcopy(container.layout_fields),
                         "view_offset": container.view_offset,
                         "x": container.x,
                         "y": container.y,
@@ -2482,6 +3071,7 @@ class AlgorithmStudioApp(
                 value=str(entry["value"]),
                 values=[str(value) for value in entry.get("values", [])],
                 structure=[str(value) for value in entry.get("structure", [])],
+                layout_fields=copy.deepcopy(entry.get("layout_fields", [])),
                 view_offset=int(entry.get("view_offset", 0)),
                 x=paste_x + float(entry["x"]) - anchor_x,
                 y=paste_y + float(entry["y"]) - anchor_y,
@@ -2541,6 +3131,16 @@ class AlgorithmStudioApp(
             if stage.name == name:
                 return stage
         return None
+
+    def _canvas_node_display_name(self, item: Any, fallback_name: str) -> str:
+        display_name = str(getattr(item, "display_name", "") or "").strip()
+        if display_name:
+            return display_name
+        return fallback_name
+
+    def _preserve_duplicate_display_name(self, source: Any, duplicate: Any) -> None:
+        display_name = self._canvas_node_display_name(source, str(getattr(source, "name", "") or "").strip())
+        setattr(duplicate, "display_name", display_name)
 
     def _is_interventioner_view_mode(self, view_mode: str | None = None) -> bool:
         normalized = str(view_mode or self.canvas_view_mode).strip().lower()
@@ -2795,11 +3395,44 @@ class AlgorithmStudioApp(
     def _container_min_render_size(self, container: ContainerItem) -> tuple[float, float]:
         parent_group_name = self._container_parent_group_name(container.name)
         compact = parent_group_name is not None and not self._is_hidden_root_group_name(parent_group_name)
-        width = 132.0 if compact else float(NODE_WIDTH)
+        width = 220.0 if compact else max(float(NODE_WIDTH), 320.0)
         value_lines = self._container_value_preview(container, 2 if compact else 3)
         content_rows = max(len(value_lines), 1)
-        height = max(92.0 if compact else 104.0, 62.0 + content_rows * 18.0)
+        field_lines = self._container_layout_field_summary_lines(container, limit=9999)
+        field_rows = max(len(field_lines), 1)
+        height = max(124.0 if compact else 148.0, 118.0 + content_rows * 18.0 + field_rows * 20.0)
         return width, height
+
+    def _container_field_section_bounds(self, container: ContainerItem) -> tuple[float, float, float, float] | None:
+        if not self._is_node_expanded(container, default=False):
+            return None
+        raw_x = container.x or CANVAS_PADDING + 40
+        raw_y = container.y or CANVAS_PADDING + 40
+        x, y = self._container_display_origin("container", container.name, raw_x, raw_y)
+        width, height = self._container_render_size(container)
+        parent_group_name = self._container_parent_group_name(container.name)
+        compact = parent_group_name is not None
+        value_lines = self._container_value_preview(container, 2 if compact else 3)
+        body_top = y + 24.0
+        port_y = y + height - 24.0
+        content_bottom = port_y - 10.0
+        value_section_height = 28.0 + max(len(value_lines), 1) * 18.0
+        field_top = body_top + value_section_height + 8.0
+        if field_top >= content_bottom:
+            return None
+        return x + 6.0, field_top, x + width - 6.0, content_bottom - 6.0
+
+    def _container_layout_drop_target(self, x: float, y: float) -> ContainerItem | None:
+        for container in reversed(self.project.containers):
+            if not self._is_node_visible_in_current_view("container", container.name):
+                continue
+            bounds = self._container_field_section_bounds(container)
+            if bounds is None:
+                continue
+            left, top, right, bottom = bounds
+            if left <= x <= right and top <= y <= bottom:
+                return container
+        return None
 
     def _container_render_size(self, container: ContainerItem) -> tuple[float, float]:
         if not self._is_node_expanded(container, default=False):
@@ -2808,421 +3441,6 @@ class AlgorithmStudioApp(
         width = float(getattr(container, "width", 0.0) or 0.0)
         height = float(getattr(container, "height", 0.0) or 0.0)
         return max(width, min_width), max(height, min_height)
-
-    def _container_group_render_size(self, group: ContainerGroupItem) -> tuple[float, float]:
-        if not self._is_node_expanded(group):
-            return self._collapsed_port_node_size(
-                [
-                    f"v: {len(group.variables)}",
-                    f"a: {len(group.arrays)}",
-                    f"g: {len(group.groups)}",
-                ],
-                ["in"],
-                ["out"],
-                group.width,
-            )
-        min_width, min_height = self._container_group_min_size(group)
-        return max(group.width, min_width), max(group.height, min_height)
-
-    def _container_center(self, container: ContainerItem) -> tuple[float, float]:
-        left, top, right, bottom = self._container_rect(container)
-        return (left + right) / 2, (top + bottom) / 2
-
-    def _container_domain_display_offset(self, kind: str, name: str) -> tuple[float, float]:
-        if self.canvas_view_mode != "decomposer2container_overview":
-            return 0.0, 0.0
-        if self._sync_zone_for_node(kind, name) == "resource":
-            return 0.0, 0.0
-        scene_width = 1440.0
-        if self.canvas:
-            scene_width = max(float(self.canvas.winfo_width()) / self._canvas_zoom_factor(), scene_width)
-        return max(scene_width * 0.48, 620.0), 0.0
-
-    def _container_display_origin(self, kind: str, name: str, x: float, y: float) -> tuple[float, float]:
-        dx, dy = self._container_domain_display_offset(kind, name)
-        return x + dx, y + dy
-
-    def _group_bounds(self, group: ContainerGroupItem) -> tuple[float, float, float, float]:
-        width, height = self._container_group_render_size(group)
-        x, y = self._container_display_origin("containerelement", group.name, group.x, group.y)
-        return x, y, x + width, y + height
-
-    def _container_rect(self, container: ContainerItem) -> tuple[float, float, float, float]:
-        width, height = self._container_render_size(container)
-        x, y = self._container_display_origin("container", container.name, container.x, container.y)
-        return x, y, x + width, y + height
-
-    def _rects_intersect(
-        self,
-        left_a: float,
-        top_a: float,
-        right_a: float,
-        bottom_a: float,
-        left_b: float,
-        top_b: float,
-        right_b: float,
-        bottom_b: float,
-    ) -> bool:
-        return not (right_a < left_b or right_b < left_a or bottom_a < top_b or bottom_b < top_a)
-
-    def _container_group_members(self, group: ContainerGroupItem) -> tuple[list[str], list[str]]:
-        variables: list[str] = []
-        arrays: list[str] = []
-        for name in group.variables:
-            container = self._find_container(name)
-            if not container or container.kind != "variable":
-                raise AssertionError(f"Missing variable member {name} in {group.name}.")
-            variables.append(container.name)
-        for name in group.arrays:
-            container = self._find_container(name)
-            if not container or container.kind != "array":
-                raise AssertionError(f"Missing array member {name} in {group.name}.")
-            arrays.append(container.name)
-        return variables, arrays
-
-    def _group_child_groups(self, group: ContainerGroupItem) -> list[str]:
-        child_groups: list[str] = []
-        for child_name in group.groups:
-            child_group = self._find_container_group(child_name)
-            if not child_group:
-                raise AssertionError(f"Missing child containerElement {child_name} in {group.name}.")
-            child_groups.append(child_group.name)
-        return child_groups
-
-    def _container_parent_group_name(self, name: str) -> str | None:
-        for group in self.project.container_groups:
-            if name in group.variables or name in group.arrays:
-                return group.name
-        return None
-
-    def _group_parent_group_name(self, name: str) -> str | None:
-        for group in self.project.container_groups:
-            if name in group.groups:
-                return group.name
-        return None
-
-    def _remove_container_from_parent_group(self, container_name: str) -> None:
-        parent_name = self._container_parent_group_name(container_name)
-        if not parent_name:
-            return
-        parent_group = self._find_container_group(parent_name)
-        if not parent_group:
-            raise AssertionError(f"Missing parent containerElement {parent_name}")
-        parent_group.variables = [name for name in parent_group.variables if name != container_name]
-        parent_group.arrays = [name for name in parent_group.arrays if name != container_name]
-
-    def _add_container_to_group(self, container_name: str, group_name: str) -> None:
-        container = self._find_container(container_name)
-        if not container:
-            raise AssertionError(f"Missing container {container_name}")
-        group = self._find_container_group(group_name)
-        if not group:
-            raise AssertionError(f"Missing containerElement {group_name}")
-        self._remove_container_from_parent_group(container_name)
-        if container.kind == "variable":
-            if container_name not in group.variables:
-                group.variables.append(container_name)
-        elif container.kind == "array":
-            if container_name not in group.arrays:
-                group.arrays.append(container_name)
-        else:
-            raise AssertionError(f"Unsupported container kind: {container.kind}")
-
-    def _remove_group_from_parent_group(self, group_name: str) -> None:
-        parent_name = self._group_parent_group_name(group_name)
-        if not parent_name:
-            return
-        parent_group = self._find_container_group(parent_name)
-        if not parent_group:
-            raise AssertionError(f"Missing parent containerElement {parent_name}")
-        parent_group.groups = [name for name in parent_group.groups if name != group_name]
-
-    def _add_group_to_parent_group(self, group_name: str, parent_name: str) -> None:
-        if group_name == parent_name:
-            raise AssertionError("containerElement cannot contain itself.")
-        if parent_name in self._group_descendant_names(group_name):
-            raise AssertionError(f"Cannot attach {group_name} into its descendant {parent_name}.")
-        parent_group = self._find_container_group(parent_name)
-        if not parent_group:
-            raise AssertionError(f"Missing containerElement {parent_name}")
-        self._remove_group_from_parent_group(group_name)
-        if group_name not in parent_group.groups:
-            parent_group.groups.append(group_name)
-
-    def _group_descendant_names(self, name: str) -> set[str]:
-        descendants: set[str] = set()
-        group = self._find_container_group(name)
-        if not group:
-            raise AssertionError(f"Missing containerElement {name}")
-        for child_name in group.groups:
-            if child_name in descendants:
-                continue
-            descendants.add(child_name)
-            descendants.update(self._group_descendant_names(child_name))
-        return descendants
-
-    def _group_ancestor_names(self, name: str) -> set[str]:
-        ancestors: set[str] = set()
-        parent_name = self._group_parent_group_name(name)
-        while parent_name:
-            if parent_name in ancestors:
-                raise AssertionError(f"Cycle detected in containerElement ancestry for {name}.")
-            ancestors.add(parent_name)
-            parent_name = self._group_parent_group_name(parent_name)
-        return ancestors
-
-    def _container_names_in_group_tree(self, name: str) -> set[str]:
-        group = self._find_container_group(name)
-        if not group:
-            raise AssertionError(f"Missing containerElement {name}")
-        names = set(group.variables) | set(group.arrays)
-        for child_name in group.groups:
-            names.update(self._container_names_in_group_tree(child_name))
-        return names
-
-    def _group_body_bounds(self, group: ContainerGroupItem) -> tuple[float, float, float, float]:
-        header_height = 30.0
-        width, height = self._container_group_render_size(group)
-        x, y = self._container_display_origin("containerelement", group.name, group.x, group.y)
-        return x, y + header_height, x + width, y + height
-
-    def _nearest_parent_group_name(self, kind: str, name: str) -> str | None:
-        if kind == "container":
-            return self._container_parent_group_name(name)
-        if kind == "containerelement":
-            return self._group_parent_group_name(name)
-        return None
-
-    def _node_has_collapsed_ancestor(self, kind: str, name: str) -> bool:
-        parent_name = self._nearest_parent_group_name(kind, name)
-        while parent_name:
-            if self._is_hidden_root_group_name(parent_name):
-                parent_name = self._group_parent_group_name(parent_name)
-                continue
-            parent_group = self._find_container_group(parent_name)
-            if not parent_group:
-                raise AssertionError(f"Missing ancestor containerElement {parent_name}")
-            if not self._is_node_expanded(parent_group):
-                return True
-            parent_name = self._group_parent_group_name(parent_name)
-        return False
-
-    def _is_node_visible_in_current_view(self, kind: str, name: str) -> bool:
-        if kind == "containerelement" and self._is_hidden_root_group_name(name):
-            return False
-        if kind in {"container", "containerelement"} and self._node_has_collapsed_ancestor(kind, name):
-            return False
-        if kind == "decomposer":
-            return False
-        if self.canvas_view_mode == "graph":
-            if kind == "resnode":
-                return False
-        if kind == "containerelement":
-            return self._find_container_group(name) is not None and self._scene_consumes_node_zone(kind, name)
-        if kind == "container":
-            return self._find_container(name) is not None and self._scene_consumes_node_zone(kind, name)
-        if self.canvas_view_mode == "all_in_one":
-            if kind == "decomposer":
-                return self._find_rule(name) is not None
-            if kind == "reflector":
-                return self._find_reflector(name) is not None
-            if kind == "resnode":
-                return self._find_res_node(name) is not None
-            if kind == "function":
-                return self._find_function_frame(name) is not None
-            if kind == "functiontext":
-                return self._find_function_text_item(name) is not None
-            if kind in {"interventioner", "stage"}:
-                return self._find_stage(name) is not None
-        if self.canvas_view_mode == "decomposer_overview":
-            if kind == "decomposer":
-                return self._find_rule(name) is not None
-            if kind == "resnode":
-                return self._find_res_node(name) is not None
-            return False
-        if self.canvas_view_mode == "reflector_overview":
-            if kind == "reflector":
-                return self._find_reflector(name) is not None
-            return False
-        if self.canvas_view_mode == "interventioner_overview":
-            if kind in {"interventioner", "stage"}:
-                return self._find_stage(name) is not None
-            if kind == "function":
-                return self._find_function_frame(name) is not None
-            if kind == "functiontext":
-                return self._find_function_text_item(name) is not None
-            return False
-        if self.canvas_view_mode in {"interventioner_pretick", "interventioner_aftertick", "interventioner_render"}:
-            if kind in {"interventioner", "stage"}:
-                stage = self._find_stage(name)
-                return stage is not None and self._is_stage_visible_in_current_view(stage)
-            if kind == "function":
-                return self._find_function_frame(name) is not None and self._is_function_visible_in_current_view(name)
-            if kind == "functiontext":
-                item = self._find_function_text_item(name)
-                return item is not None and self._is_function_visible_in_current_view(item.function_name)
-            return False
-        if self.canvas_view_mode == "decomposer2container_overview":
-            if kind == "resnode":
-                return self._find_res_node(name) is not None
-            return False
-        if self.canvas_view_mode == "graph":
-            if kind == "reflector":
-                return self._find_reflector(name) is not None
-            if kind == "function":
-                return self._find_function_frame(name) is not None
-            if kind == "functiontext":
-                return self._find_function_text_item(name) is not None
-            if kind in {"interventioner", "stage"}:
-                return self._find_stage(name) is not None
-            return False
-        if self.canvas_view_mode == "container_overview":
-            return False
-        raise AssertionError(f"Unsupported canvas view mode: {self.canvas_view_mode}")
-
-    def _smallest_group_containing_rect(
-        self,
-        rect: tuple[float, float, float, float],
-        *,
-        exclude_group_names: set[str] | None = None,
-    ) -> str | None:
-        exclude_group_names = exclude_group_names or set()
-        chosen_name: str | None = None
-        chosen_area = float("inf")
-        for group in self.project.container_groups:
-            if group.name in exclude_group_names:
-                continue
-            if not self._is_node_visible_in_current_view("containerelement", group.name):
-                continue
-            if not self._is_node_expanded(group):
-                continue
-            body_rect = self._group_body_bounds(group)
-            if not self.project._rect_contains_rect(*body_rect, *rect):
-                continue
-            area = group.width * group.height
-            if area < chosen_area:
-                chosen_area = area
-                chosen_name = group.name
-        return chosen_name
-
-    def _sync_container_group_membership(self, group: ContainerGroupItem) -> None:
-        self.project.validate_container_group(group)
-
-    def _sync_all_container_groups(self) -> None:
-        self._ensure_singleton_container_group(self.project)
-        self._ensure_singleton_resource_group(self.project)
-        self.project.sync_container_groups_from_geometry()
-
-    def _create_container_group_from_selection(self, name: str, x: float, y: float, width: float, height: float) -> ContainerGroupItem:
-        group = ContainerGroupItem(name=name, x=x, y=y, width=width, height=height)
-        self._pack_container_group_contents(group)
-        self.project.validate_container_group(group)
-        self.project.container_groups.append(group)
-        return group
-
-    def _container_group_direct_layout_items(self, group: ContainerGroupItem) -> list[tuple[str, Any]]:
-        items: list[tuple[str, Any]] = []
-        for child_name in group.groups:
-            child_group = self._find_container_group(child_name)
-            if not child_group:
-                raise AssertionError(f"Missing child containerElement {child_name} in {group.name}.")
-            items.append(("containerelement", child_group))
-        for name in group.variables:
-            container = self._find_container(name)
-            if container:
-                items.append(("container", container))
-        for name in group.arrays:
-            container = self._find_container(name)
-            if container:
-                items.append(("container", container))
-        return items
-
-    def _pack_container_group_contents(self, group: ContainerGroupItem) -> None:
-        layout_items = self._container_group_direct_layout_items(group)
-        start_y = group.y + 68.0
-        vertical_gap = 16.0
-        min_width, min_height = self._container_group_min_size(group)
-        group.width = max(group.width, min_width)
-        group.height = max(group.height, min_height)
-        inner_width = max(group.width - 32.0, 64.0)
-        cursor_y = start_y
-        max_child_width = 0.0
-        for child_kind, item in layout_items:
-            if child_kind == "containerelement":
-                child_group = item
-                child_group.width = max(inner_width, self._container_group_min_size(child_group)[0])
-                self._pack_container_group_contents(child_group)
-                child_width, child_height = self._container_group_render_size(child_group)
-                target_x = group.x + (group.width - child_width) / 2
-                dx = target_x - child_group.x
-                dy = cursor_y - child_group.y
-                if dx or dy:
-                    self._move_container_group_and_members(child_group, dx, dy)
-                max_child_width = max(max_child_width, child_width)
-                cursor_y += child_height + vertical_gap
-                continue
-            container = item
-            min_child_width, min_child_height = self._container_min_render_size(container)
-            container.width = max(inner_width, min_child_width)
-            container.height = max(float(getattr(container, "height", 0.0) or 0.0), min_child_height)
-            child_width, child_height = self._container_render_size(container)
-            container.x = group.x + (group.width - child_width) / 2
-            container.y = cursor_y
-            max_child_width = max(max_child_width, child_width)
-            cursor_y += child_height + vertical_gap
-        required_width = max(min_width, max_child_width + 32.0)
-        content_height = 68.0 if not layout_items else cursor_y - vertical_gap - group.y
-        required_height = max(min_height, content_height + 20.0)
-        group.width = max(group.width, required_width)
-        group.height = max(group.height, required_height)
-
-    def _pack_all_container_groups(self) -> None:
-        for group in sorted(self.project.container_groups, key=lambda item: item.width * item.height):
-            self._pack_container_group_contents(group)
-
-    def _resize_group_contents_proportionally(
-        self,
-        group: ContainerGroupItem,
-        old_body_bounds: tuple[float, float, float, float],
-        new_body_bounds: tuple[float, float, float, float],
-    ) -> None:
-        old_left, old_top, old_right, old_bottom = old_body_bounds
-        new_left, new_top, new_right, new_bottom = new_body_bounds
-        old_width = old_right - old_left
-        old_height = old_bottom - old_top
-        new_width = new_right - new_left
-        new_height = new_bottom - new_top
-        if old_width <= 0.0 or old_height <= 0.0:
-            raise AssertionError(f"Invalid old body bounds for {group.name}: {old_body_bounds}")
-        if new_width <= 0.0 or new_height <= 0.0:
-            raise AssertionError(f"Invalid new body bounds for {group.name}: {new_body_bounds}")
-        scale_x = new_width / old_width
-        scale_y = new_height / old_height
-
-        for child_name in group.groups:
-            child_group = self._find_container_group(child_name)
-            if not child_group:
-                raise AssertionError(f"Missing child containerElement {child_name} in {group.name}.")
-            old_child_bounds = self._group_bounds(child_group)
-            old_child_body_bounds = self._group_body_bounds(child_group)
-            child_group.x = new_left + (old_child_bounds[0] - old_left) * scale_x
-            child_group.y = new_top + (old_child_bounds[1] - old_top) * scale_y
-            min_child_width, min_child_height = self._container_group_min_size(child_group)
-            child_group.width = max(min_child_width, (old_child_bounds[2] - old_child_bounds[0]) * scale_x)
-            child_group.height = max(min_child_height, (old_child_bounds[3] - old_child_bounds[1]) * scale_y)
-            new_child_body_bounds = self._group_body_bounds(child_group)
-            self._resize_group_contents_proportionally(child_group, old_child_body_bounds, new_child_body_bounds)
-
-        for container_name in list(group.variables) + list(group.arrays):
-            container = self._find_container(container_name)
-            if not container:
-                raise AssertionError(f"Missing container {container_name} in {group.name}.")
-            old_child_bounds = self._container_rect(container)
-            min_child_width, min_child_height = self._container_min_render_size(container)
-            container.x = new_left + (old_child_bounds[0] - old_left) * scale_x
-            container.y = new_top + (old_child_bounds[1] - old_top) * scale_y
-            container.width = max(min_child_width, (old_child_bounds[2] - old_child_bounds[0]) * scale_x)
-            container.height = max(min_child_height, (old_child_bounds[3] - old_child_bounds[1]) * scale_y)
 
     def _add_container(self, kind: str) -> None:
         name = self._next_container_name_for_zone(kind, self._primary_sync_zone_for_view())
@@ -3238,6 +3456,7 @@ class AlgorithmStudioApp(
             x=CANVAS_PADDING + 20 + len(self.project.containers) * 18,
             y=CANVAS_PADDING + 24 + len(self.project.containers) * 18,
         )
+        self._ensure_container_shareptr_identity(container)
         self.project.containers.append(container)
         self.selected_container_name = container.name
         self.selected_rule_name = None
@@ -3257,19 +3476,20 @@ class AlgorithmStudioApp(
             existing.kind = kind
             existing.count = count
             existing.stride = stride
+            self._validate_container_layout_fields(existing)
             self.selected_container_name = existing.name
             self._log(f"Updated container {name}.")
         else:
-            self.project.containers.append(
-                ContainerItem(
-                    name=name,
-                    kind=kind,
-                    count=count,
-                    stride=stride,
-                    x=CANVAS_PADDING + 30 + len(self.project.containers) * 18,
-                    y=CANVAS_PADDING + 30 + len(self.project.containers) * 18,
-                )
+            container = ContainerItem(
+                name=name,
+                kind=kind,
+                count=count,
+                stride=stride,
+                x=CANVAS_PADDING + 30 + len(self.project.containers) * 18,
+                y=CANVAS_PADDING + 30 + len(self.project.containers) * 18,
             )
+            self._ensure_container_shareptr_identity(container)
+            self.project.containers.append(container)
             self.selected_container_name = name
             self._log(f"Created container {name}.")
         self._refresh_all()
@@ -3278,7 +3498,7 @@ class AlgorithmStudioApp(
         container = self._current_container()
         if not container:
             return
-        duplicate = self._duplicate_container_with_reuse(container)
+        duplicate = self._duplicate_container_shareptr_node(container)
         self.selected_container_name = duplicate.name
         self._refresh_all()
         self._log(f"Duplicated container to {duplicate.name}.")
@@ -3302,12 +3522,245 @@ class AlgorithmStudioApp(
             container.reuse_chain_index = 0
         duplicate = copy.deepcopy(container)
         duplicate.name = self.project.next_resource_container_name(container.kind) if self._is_resource_container_name(container.name) else self.project.next_container_name(container.kind)
+        self._preserve_duplicate_display_name(container, duplicate)
         duplicate.reuse_chain_id = source_chain_id
         duplicate.reuse_chain_index = self._container_reuse_chain_next_index(source_chain_id)
         duplicate.x = container.x + 36 if x is None else x
         duplicate.y = container.y + 36 if y is None else y
         self.project.containers.append(duplicate)
         return duplicate
+
+    def _ensure_container_shareptr_identity(self, container: ContainerItem) -> None:
+        if str(container.reuse_chain_id or "").strip():
+            return
+        container.reuse_chain_id = self.project.next_container_reuse_chain_id()
+        container.reuse_chain_index = 0
+
+    def _duplicate_container_shareptr_node(
+        self,
+        container: ContainerItem,
+        *,
+        x: float | None = None,
+        y: float | None = None,
+    ) -> ContainerItem:
+        self._ensure_container_shareptr_identity(container)
+        return self._duplicate_container_with_reuse(container, x=x, y=y)
+
+    def _extract_or_duplicate_container_for_drag(
+        self,
+        container_name: str,
+        *,
+        x: float,
+        y: float,
+    ) -> tuple[str, bool]:
+        container = self._find_container(container_name)
+        if container is None:
+            raise AssertionError(f"Missing container {container_name}")
+        parent_name = self._container_parent_group_name(container_name)
+        if parent_name and not self._is_hidden_root_group_name(parent_name):
+            detached = self._detach_container_from_group(container_name, parent_name)
+            if not detached:
+                raise AssertionError(f"Failed to detach {container_name} from {parent_name}")
+            container.x = float(x)
+            container.y = float(y)
+            return container.name, True
+        duplicate = self._duplicate_container_shareptr_node(container, x=float(x), y=float(y))
+        return duplicate.name, False
+
+    def _container_reuse_chain_names(self, container_name: str) -> list[str]:
+        container = self._find_container(container_name)
+        if container is None:
+            raise AssertionError(f"Missing container {container_name}")
+        chain_key = self._container_shareptr_key(container)
+        chain_members = [
+            item
+            for item in self.project.containers
+            if self._container_shareptr_key(item) == chain_key
+        ]
+        chain_members.sort(key=lambda item: (int(getattr(item, "reuse_chain_index", 0)), item.name))
+        return [item.name for item in chain_members]
+
+    def _clear_highlighted_container_chain(self) -> None:
+        self.highlighted_container_chain_names = []
+
+    def _set_highlighted_container_chain(self, chain_names: list[str]) -> None:
+        normalized_names: list[str] = []
+        for name in chain_names:
+            normalized_name = str(name).strip()
+            if not normalized_name:
+                continue
+            if self._find_container(normalized_name) is None:
+                raise AssertionError(f"Missing chain container {normalized_name}")
+            if normalized_name not in normalized_names:
+                normalized_names.append(normalized_name)
+        self.highlighted_container_chain_names = normalized_names
+
+    def _focus_canvas_on_nodes(self, nodes: list[tuple[str, str]]) -> None:
+        if not nodes:
+            raise AssertionError("Cannot focus canvas without target nodes.")
+        if not self.canvas:
+            return
+        visible_nodes = [(kind, name) for kind, name in nodes if self._selected_node_exists(kind, name)]
+        if not visible_nodes:
+            raise AssertionError("Cannot focus canvas because no target nodes are available.")
+        left = min(self._node_bounds(kind, name)[0] for kind, name in visible_nodes)
+        top = min(self._node_bounds(kind, name)[1] for kind, name in visible_nodes)
+        right = max(self._node_bounds(kind, name)[2] for kind, name in visible_nodes)
+        bottom = max(self._node_bounds(kind, name)[3] for kind, name in visible_nodes)
+        width = max(right - left, 1.0)
+        height = max(bottom - top, 1.0)
+        viewport_width = max(float(self.canvas.winfo_width()), 1.0)
+        viewport_height = max(float(self.canvas.winfo_height()), 1.0)
+        padding = 96.0
+        fit_zoom = min(
+            max((viewport_width - padding) / width, 0.4),
+            max((viewport_height - padding) / height, 0.4),
+        )
+        self.canvas_zoom = max(0.4, min(2.5, fit_zoom))
+        center_x = (left + right) * 0.5
+        center_y = (top + bottom) * 0.5
+        self.canvas_camera_x = viewport_width * 0.5 - center_x * self.canvas_zoom
+        self.canvas_camera_y = viewport_height * 0.5 - center_y * self.canvas_zoom
+        self._store_canvas_viewport_state()
+
+    def _quick_view_container_chain(self, container_name: str) -> None:
+        chain_names = self._container_reuse_chain_names(container_name)
+        if not chain_names:
+            raise AssertionError(f"Missing reuse chain for container {container_name}")
+        zone = self._sync_zone_for_node("container", container_name)
+        target_view_mode = self.canvas_view_mode
+        if not self._scene_consumes_node_zone("container", container_name, target_view_mode):
+            target_view_mode = "decomposer_overview" if zone == "resource" else "graph"
+            self._set_canvas_view_mode(target_view_mode)
+        variables: list[str] = []
+        arrays: list[str] = []
+        for name in chain_names:
+            item = self._find_container(name)
+            if item is None:
+                raise AssertionError(f"Missing chain container {name}")
+            parent_name = self._container_parent_group_name(name)
+            while parent_name and not self._is_hidden_root_group_name(parent_name):
+                parent_group = self._find_container_group(parent_name)
+                if parent_group is None:
+                    raise AssertionError(f"Missing ancestor containerElement {parent_name}")
+                parent_group.expand = True
+                parent_name = self._group_parent_group_name(parent_name)
+            if item.kind == "variable":
+                variables.append(name)
+            elif item.kind == "array":
+                arrays.append(name)
+            else:
+                raise AssertionError(f"Unsupported container kind in chain: {item.kind}")
+        anchor = self._find_container(container_name)
+        if anchor is None:
+            raise AssertionError(f"Missing anchor container {container_name}")
+        display_name = self._canvas_node_display_name(anchor, anchor.name)
+        rect_left = min(self._node_bounds("container", name)[0] for name in chain_names)
+        rect_top = min(self._node_bounds("container", name)[1] for name in chain_names)
+        rect_right = max(self._node_bounds("container", name)[2] for name in chain_names)
+        rect_bottom = max(self._node_bounds("container", name)[3] for name in chain_names)
+        parent_candidates = {
+            str(self._container_parent_group_name(name) or "").strip()
+            for name in chain_names
+        }
+        parent_candidates.discard("")
+        scope_group_name = ""
+        if len(parent_candidates) == 1:
+            scope_group_name = next(iter(parent_candidates))
+        self.selection_state = {
+            "groups": [],
+            "variables": variables,
+            "arrays": arrays,
+            "resnodes": [],
+            "rect": (rect_left, rect_top, rect_right, rect_bottom),
+            "scope_group": scope_group_name or None,
+            "suggested_name": display_name,
+        }
+        self.selected_container_name = None
+        self.selected_rule_name = None
+        self.selected_container_group_name = None
+        self.selected_reflector_name = None
+        self.selected_res_node_name = None
+        self.selected_function_name = None
+        self.selected_function_text_name = None
+        self.selected_stage_name = None
+        self._sync_selected_nodes()
+        self._focus_canvas_on_nodes([("container", name) for name in chain_names])
+        self._refresh_scene_tabs()
+        self._redraw_canvas()
+        self._refresh_inspector()
+        self._refresh_selection_panel()
+        self._log(f"Quick viewed chain {display_name} ({len(chain_names)} node(s)).")
+
+    def _highlight_container_chain_path(self, container_name: str) -> None:
+        chain_names = self._container_reuse_chain_names(container_name)
+        if not chain_names:
+            raise AssertionError(f"Missing reuse chain for container {container_name}")
+        self._quick_view_container_chain(container_name)
+        self._set_highlighted_container_chain(chain_names)
+        self._redraw_canvas()
+        anchor = self._find_container(container_name)
+        if anchor is None:
+            raise AssertionError(f"Missing anchor container {container_name}")
+        display_name = self._canvas_node_display_name(anchor, anchor.name)
+        self._log(f"Highlighted first-to-last path for {display_name} ({len(chain_names)} occurrence(s)).")
+
+    def _duplicate_container_group_tree(
+        self,
+        group_name: str,
+        *,
+        x: float | None = None,
+        y: float | None = None,
+    ) -> str:
+        source_root = self._find_container_group(group_name)
+        if source_root is None:
+            raise AssertionError(f"Missing containerElement {group_name}")
+        if self._is_hidden_root_group_name(group_name):
+            raise AssertionError(f"Hidden root group cannot be duplicated: {group_name}")
+        zone = self._sync_zone_for_node("containerelement", group_name)
+        root_group_name = self._sync_zone_root_group_name(zone)
+        base_x = source_root.x + 36.0 if x is None else float(x)
+        base_y = source_root.y + 36.0 if y is None else float(y)
+        source_root_x = float(source_root.x)
+        source_root_y = float(source_root.y)
+
+        def clone_group_recursive(source_name: str) -> str:
+            source_group = self._find_container_group(source_name)
+            if source_group is None:
+                raise AssertionError(f"Missing containerElement {source_name}")
+            duplicate_group = copy.deepcopy(source_group)
+            duplicate_group.name = self._next_group_name_for_zone(zone)
+            duplicate_group.variables = []
+            duplicate_group.arrays = []
+            duplicate_group.groups = []
+            duplicate_group.x = base_x + (float(source_group.x) - source_root_x)
+            duplicate_group.y = base_y + (float(source_group.y) - source_root_y)
+            self.project.container_groups.append(duplicate_group)
+
+            for container_name in list(source_group.variables) + list(source_group.arrays):
+                source_container = self._find_container(container_name)
+                if source_container is None:
+                    raise AssertionError(f"Missing container {container_name}")
+                duplicate_container = self._duplicate_container_with_reuse(
+                    source_container,
+                    x=base_x + (float(source_container.x) - source_root_x),
+                    y=base_y + (float(source_container.y) - source_root_y),
+                )
+                self._add_container_to_group(duplicate_container.name, duplicate_group.name)
+
+            for child_group_name in source_group.groups:
+                duplicate_child_name = clone_group_recursive(child_group_name)
+                self._add_group_to_parent_group(duplicate_child_name, duplicate_group.name)
+
+            return duplicate_group.name
+
+        duplicate_root_name = clone_group_recursive(group_name)
+        self._add_group_to_parent_group(duplicate_root_name, root_group_name)
+        duplicate_root = self._find_container_group(duplicate_root_name)
+        if duplicate_root is None:
+            raise AssertionError(f"Missing duplicated containerElement {duplicate_root_name}")
+        self._pack_container_group_contents(duplicate_root)
+        return duplicate_root_name
 
     def _duplicate_canvas_node(
         self,
@@ -3318,11 +3771,14 @@ class AlgorithmStudioApp(
         y: float | None = None,
     ) -> tuple[str, str]:
         normalized_kind = self._normalize_selected_kind(kind)
+        if normalized_kind == "containerelement":
+            duplicate_name = self._duplicate_container_group_tree(name, x=x, y=y)
+            return "containerelement", duplicate_name
         if normalized_kind == "container":
             source = self._find_container(name)
             if source is None:
                 raise AssertionError(f"Missing container {name}")
-            duplicate = self._duplicate_container_with_reuse(source, x=x, y=y)
+            duplicate = self._duplicate_container_shareptr_node(source, x=x, y=y)
             return "container", duplicate.name
         if normalized_kind == "decomposer":
             source = self._find_rule(name)
@@ -3330,6 +3786,7 @@ class AlgorithmStudioApp(
                 raise AssertionError(f"Missing decomposer {name}")
             duplicate = copy.deepcopy(source)
             duplicate.name = self.project.next_decomposer_name()
+            self._preserve_duplicate_display_name(source, duplicate)
             duplicate.x = source.x + 36.0 if x is None else x
             duplicate.y = source.y + 36.0 if y is None else y
             self.project.decomposer_rules.append(duplicate)
@@ -3340,6 +3797,7 @@ class AlgorithmStudioApp(
                 raise AssertionError(f"Missing reflector {name}")
             duplicate = copy.deepcopy(source)
             duplicate.name = self.project.next_reflector_name()
+            self._preserve_duplicate_display_name(source, duplicate)
             duplicate.x = source.x + 36.0 if x is None else x
             duplicate.y = source.y + 36.0 if y is None else y
             self.project.reflector_items.append(duplicate)
@@ -3350,6 +3808,7 @@ class AlgorithmStudioApp(
                 raise AssertionError(f"Missing resnode {name}")
             duplicate = copy.deepcopy(source)
             duplicate.name = self.project.next_res_name()
+            self._preserve_duplicate_display_name(source, duplicate)
             duplicate.x = source.x + 36.0 if x is None else x
             duplicate.y = source.y + 36.0 if y is None else y
             self.project.res_nodes.append(duplicate)
@@ -3360,6 +3819,7 @@ class AlgorithmStudioApp(
                 raise AssertionError(f"Missing function {name}")
             duplicate = copy.deepcopy(source)
             duplicate.name = self.project.next_function_name()
+            self._preserve_duplicate_display_name(source, duplicate)
             duplicate.x = source.x + 36.0 if x is None else x
             duplicate.y = source.y + 36.0 if y is None else y
             self.project.function_frames.append(duplicate)
@@ -3370,6 +3830,7 @@ class AlgorithmStudioApp(
                 raise AssertionError(f"Missing functiontext {name}")
             duplicate = copy.deepcopy(source)
             duplicate.name = self.project.next_function_text_name(source.function_name or source.name)
+            self._preserve_duplicate_display_name(source, duplicate)
             duplicate.x = source.x + 36.0 if x is None else x
             duplicate.y = source.y + 36.0 if y is None else y
             self.project.function_text_items.append(duplicate)
@@ -3380,6 +3841,7 @@ class AlgorithmStudioApp(
                 raise AssertionError(f"Missing stage {name}")
             duplicate = copy.deepcopy(source)
             duplicate.name = self.project.next_stage_name()
+            self._preserve_duplicate_display_name(source, duplicate)
             duplicate.x = source.x + 36.0 if x is None else x
             duplicate.y = source.y + 36.0 if y is None else y
             self.project.intervention_stages.append(duplicate)
@@ -3619,7 +4081,9 @@ class AlgorithmStudioApp(
         self._remove_connections_for_node("interventioner", stage.name)
         self.selected_stage_name = None
         if self._intervention_phase_kind_for_view_mode() == deleted_kind:
+            self._store_canvas_viewport_state(self.canvas_view_mode)
             self.canvas_view_mode = "interventioner_overview"
+            self._restore_canvas_viewport_state("interventioner_overview")
         self._refresh_all()
         self._log(f"Deleted stage {stage.name}.")
 
@@ -3726,16 +4190,27 @@ class AlgorithmStudioApp(
     def _chat_selected_context(self) -> str:
         summary = self._selected_item_summary().strip()
         selection = self._selection_label()
-        return "\n".join(
+        sections = [
+            f"Selection: {selection}",
+            "",
+            "Context:",
+            summary,
+        ]
+        operation_stack_context = self._operation_stack_context_block()
+        if operation_stack_context:
+            sections.extend(
+                [
+                    "",
+                    operation_stack_context,
+                ]
+            )
+        sections.extend(
             [
-                f"Selection: {selection}",
-                "",
-                "Context:",
-                summary,
                 "",
                 self._agent_document_context(),
             ]
         )
+        return "\n".join(sections)
 
     def _fill_chat_prompt_from_selection(self) -> None:
         if not self.chat_input_text:
@@ -4472,6 +4947,27 @@ class AlgorithmStudioApp(
             return self.canvas_container_group_nodes.get(name)
         return self.canvas_nodes.get(name)
 
+    def _interface4agents_flash_canvas_bounds(self, left: float, top: float, right: float, bottom: float) -> None:
+        if not self.canvas:
+            return
+        self.canvas.delete("interface4agents_flash")
+        overlays = [
+            (left - 6, top - 6, right + 6, bottom + 6, "#6b0000", 3),
+            (left - 3, top - 3, right + 3, bottom + 3, "#c81e1e", 2),
+            (left, bottom - 4, right, bottom + 4, "#ff6b6b", 3),
+        ]
+        for x0, y0, x1, y1, color, width in overlays:
+            self.canvas.create_rectangle(
+                x0,
+                y0,
+                x1,
+                y1,
+                outline=color,
+                width=width,
+                tags=("interface4agents_flash",),
+            )
+        self.canvas.tag_raise("interface4agents_flash")
+
     def _interface4agents_flash_canvas_item(self, item_id: int) -> None:
         if not self.canvas:
             return
@@ -4479,36 +4975,7 @@ class AlgorithmStudioApp(
         if bbox is None:
             return
         left, top, right, bottom = bbox
-        overlays = [
-            (left - 6, top - 6, right + 6, bottom + 6, "#6b0000", 3),
-            (left - 3, top - 3, right + 3, bottom + 3, "#c81e1e", 2),
-            (left, bottom - 4, right, bottom + 4, "#ff6b6b", 3),
-        ]
-        flash_ids: list[int] = []
-        for x0, y0, x1, y1, color, width in overlays:
-            flash_ids.append(
-                self.canvas.create_rectangle(
-                    x0,
-                    y0,
-                    x1,
-                    y1,
-                    outline=color,
-                    width=width,
-                    tags=("interface4agents_flash",),
-                )
-            )
-        self.canvas.tag_raise("interface4agents_flash")
-
-        def _clear_flash() -> None:
-            if not self.canvas:
-                return
-            for flash_id in flash_ids:
-                try:
-                    self.canvas.delete(flash_id)
-                except tk.TclError:
-                    pass
-
-        self.canvas.after(900, _clear_flash)
+        self._interface4agents_flash_canvas_bounds(left, top, right, bottom)
 
     def _interface4agents_highlight_node(self, kind: str, name: str) -> str:
         normalized_kind = str(kind).strip().lower()
@@ -4529,6 +4996,37 @@ class AlgorithmStudioApp(
             except RuntimeError:
                 continue
         raise RuntimeError(f"Node not visible on canvas: {normalized_name}")
+
+    def _interface4agents_highlight_container_field_area(self, container_name: str, field_name: str | None = None) -> str:
+        container = self._find_container(str(container_name or "").strip())
+        if container is None:
+            raise RuntimeError(f"Container not found: {container_name}")
+        container.expand = True
+        self._refresh_all()
+        if field_name:
+            field_names = [str(field_item.name).strip() for field_item in self._container_layout_fields(container)]
+            try:
+                field_index = field_names.index(str(field_name).strip())
+            except ValueError as exc:
+                raise RuntimeError(f"Layout field not found: {container.name}.{field_name}") from exc
+            if not self.canvas:
+                raise RuntimeError("Canvas is not ready.")
+            tag = f"container_field:{container.name}:{field_index}"
+            item_ids = self.canvas.find_withtag(tag)
+            if not item_ids:
+                raise RuntimeError(f"Layout field is not visible on canvas: {container.name}.{field_name}")
+            bbox = self.canvas.bbox(item_ids[0])
+            if bbox is None:
+                raise RuntimeError(f"Layout field is not visible on canvas: {container.name}.{field_name}")
+            left, top, right, bottom = bbox
+            self._interface4agents_flash_canvas_bounds(left, top, right, bottom)
+            return f"Highlight: field {container.name}.{field_name}"
+        bounds = self._container_field_section_bounds(container)
+        if bounds is None:
+            raise RuntimeError(f"Layout field area is not visible on canvas: {container.name}")
+        left, top, right, bottom = bounds
+        self._interface4agents_flash_canvas_bounds(left, top, right, bottom)
+        return f"Highlight: field {container.name}"
 
     def _interface4agents_hot_review(self) -> str:
         if not self.canvas:
@@ -4566,8 +5064,8 @@ class AlgorithmStudioApp(
                 if bbox is not None:
                     left, top, right, bottom = bbox
                     self._restore_canvas_anchor(
-                        ((left + right) / 2) / self._canvas_zoom_factor(),
-                        ((top + bottom) / 2) / self._canvas_zoom_factor(),
+                        (((left + right) / 2) - self.canvas_camera_x) / self._canvas_zoom_factor(),
+                        (((top + bottom) / 2) - self.canvas_camera_y) / self._canvas_zoom_factor(),
                         float(self.canvas.winfo_width()) / 2,
                         float(self.canvas.winfo_height()) / 2,
                     )
@@ -4585,8 +5083,8 @@ class AlgorithmStudioApp(
                 continue
             left, top, right, bottom = bbox
             self._restore_canvas_anchor(
-                ((left + right) / 2) / self._canvas_zoom_factor(),
-                ((top + bottom) / 2) / self._canvas_zoom_factor(),
+                (((left + right) / 2) - self.canvas_camera_x) / self._canvas_zoom_factor(),
+                (((top + bottom) / 2) - self.canvas_camera_y) / self._canvas_zoom_factor(),
                 float(self.canvas.winfo_width()) / 2,
                 float(self.canvas.winfo_height()) / 2,
             )
@@ -4654,8 +5152,9 @@ class AlgorithmStudioApp(
         self._refresh_all()
         self._log("Applied inspector edits.")
 
-    def _select_item_on_canvas(self, kind: str, name: str) -> None:
+    def _set_selected_canvas_item_state(self, kind: str, name: str) -> None:
         self.selection_state = None
+        self._clear_highlighted_container_chain()
         container = self._find_container(name)
         group = self._find_container_group(name)
         reflector = self._find_reflector(name)
@@ -4690,11 +5189,18 @@ class AlgorithmStudioApp(
             self._focus_stage(stage)
         elif kind == "stage" and stage:
             self._focus_stage(stage)
+
+    def _select_item_on_canvas(self, kind: str, name: str) -> None:
+        self._set_selected_canvas_item_state(kind, name)
         self._sync_selected_nodes()
         self._refresh_scene_tabs()
         self._redraw_canvas()
         self._refresh_inspector()
         self._refresh_selection_panel()
+
+    def _refresh_canvas_drag_preview(self) -> None:
+        self._sync_selected_nodes()
+        self._redraw_canvas()
 
     def _normalize_selected_kind(self, kind: str) -> str:
         if kind == "stage":
@@ -5044,27 +5550,40 @@ class AlgorithmStudioApp(
             width, height = self._container_group_render_size(group)
             header_height = 30.0
             outline = COLORS["accent"] if self.selected_container_group_name == group.name else COLORS["good"]
-            node_tag = f"group_clip_overlay:{group.name}"
-            canvas.create_rectangle(
+            overlay_tag = f"group_clip_overlay:{group.name}"
+            node_tag = f"node:containerelement:{group.name}"
+            radius = 14.0
+            self._create_rounded_rect(
+                canvas,
                 x,
                 y,
                 x + width,
                 y + height,
+                radius,
                 fill="",
                 outline=outline,
                 width=2,
                 dash=(4, 3),
-                tags=("group_clip_overlay", node_tag),
+                tags=("group_clip_overlay", overlay_tag, node_tag, "group_body"),
             )
-            canvas.create_rectangle(
-                x,
-                y,
-                x + width,
+            self._draw_top_rounded_header(
+                canvas,
+                x + 2,
+                y + 2,
+                x + width - 2,
                 y + header_height,
+                max(radius - 2.0, 4.0),
                 fill=COLORS["good"],
-                outline=outline,
-                width=2,
-                tags=("group_clip_overlay", node_tag),
+                tags=("group_clip_overlay", overlay_tag, node_tag, "group_header", "draggable"),
+            )
+            canvas.create_line(
+                x + 3,
+                y + header_height,
+                x + width - 3,
+                y + header_height,
+                fill="#d5def3",
+                width=1,
+                tags=("group_clip_overlay", overlay_tag, node_tag, "group_header"),
             )
             canvas.create_text(
                 x + 12,
@@ -5073,7 +5592,7 @@ class AlgorithmStudioApp(
                 fill=COLORS["window"],
                 text="container" if group.name == "container" else group.name,
                 font=("Segoe UI", 12, "bold"),
-                tags=("group_clip_overlay", node_tag),
+                tags=("group_clip_overlay", overlay_tag, node_tag, "group_header", "draggable"),
             )
 
     def _resolve_expanded_container_group_overlaps(self) -> None:
@@ -5113,7 +5632,7 @@ class AlgorithmStudioApp(
                 dy = target_top - top
                 self._move_top_level_node_by(candidate_kind, candidate_name, dy)
 
-    def _drag_toolnode_resize(self, x: int, y: int) -> None:
+    def _drag_toolnode_resize(self, x_root: float, y_root: float) -> None:
         if not self.toolnode_resize_state:
             raise AssertionError("Toolnode resize requested without active state.")
         kind = str(self.toolnode_resize_state["kind"])
@@ -5123,11 +5642,11 @@ class AlgorithmStudioApp(
             raise AssertionError(f"Missing {kind} node {name}")
         base_width = float(self.toolnode_resize_state["width"])
         base_height = float(self.toolnode_resize_state["height"])
-        start_x = float(self.toolnode_resize_state["x"])
-        start_y = float(self.toolnode_resize_state["y"])
-        node.width = max(320.0, base_width + self._scene_delta(x - start_x))
-        node.height = max(180.0, base_height + self._scene_delta(y - start_y))
-        self._refresh_all()
+        start_x = float(self.toolnode_resize_state["x_root"])
+        start_y = float(self.toolnode_resize_state["y_root"])
+        node.width = max(320.0, base_width + self._scene_delta(x_root - start_x))
+        node.height = max(180.0, base_height + self._scene_delta(y_root - start_y))
+        self._refresh_canvas_drag_preview()
 
     def _node_center(self, kind: str, name: str) -> tuple[float, float]:
         if kind == "container":
@@ -5372,7 +5891,7 @@ class AlgorithmStudioApp(
             return None
         item_id = closest[0]
         tags = self.canvas.gettags(item_id)
-        if not tags or "connection_preview" in tags or "marquee" in tags or "grid" in tags or "clip_mask" in tags or "group_clip_overlay" in tags or any(tag.startswith("grid_") for tag in tags):
+        if not tags or "connection_preview" in tags or "marquee" in tags or "grid" in tags or "clip_mask" in tags or "group_clip_overlay" in tags or "selected_highlight" in tags or "chain_path_highlight" in tags or "reuse_connection" in tags or "shared_connection" in tags or any(tag.startswith("grid_") for tag in tags):
             return None
         return item_id
 
@@ -5386,7 +5905,7 @@ class AlgorithmStudioApp(
             return None
         for item_id in reversed(items):
             tags = self.canvas.gettags(item_id)
-            if not tags or "connection_preview" in tags or "marquee" in tags or "grid" in tags or "clip_mask" in tags or "group_clip_overlay" in tags or any(tag.startswith("grid_") for tag in tags):
+            if not tags or "connection_preview" in tags or "marquee" in tags or "grid" in tags or "clip_mask" in tags or "group_clip_overlay" in tags or "selected_highlight" in tags or "chain_path_highlight" in tags or "reuse_connection" in tags or "shared_connection" in tags or any(tag.startswith("grid_") for tag in tags):
                 continue
             return item_id
         return None
@@ -5401,7 +5920,7 @@ class AlgorithmStudioApp(
             return None
         for item_id in reversed(items):
             tags = self.canvas.gettags(item_id)
-            if not tags or "connection_preview" in tags or "marquee" in tags or "grid" in tags or "clip_mask" in tags or "group_clip_overlay" in tags or any(tag.startswith("grid_") for tag in tags):
+            if not tags or "connection_preview" in tags or "marquee" in tags or "grid" in tags or "clip_mask" in tags or "group_clip_overlay" in tags or "selected_highlight" in tags or "chain_path_highlight" in tags or "reuse_connection" in tags or "shared_connection" in tags or any(tag.startswith("grid_") for tag in tags):
                 continue
             if any(tag.startswith("node:") for tag in tags):
                 return item_id
@@ -5410,173 +5929,6 @@ class AlgorithmStudioApp(
     def _split_port_names(self, raw_value: str, default_name: str) -> list[str]:
         values = [part.strip() for part in str(raw_value or "").split(",") if part.strip()]
         return values or [default_name]
-
-    def _canvas_zoom_factor(self) -> float:
-        zoom = float(self.canvas_zoom)
-        if zoom <= 0.0:
-            raise AssertionError(f"Canvas zoom must stay positive, got {zoom}.")
-        return zoom
-
-    def _scene_delta(self, value: float) -> float:
-        return value / self._canvas_zoom_factor()
-
-    def _scene_point(self, x: float, y: float) -> tuple[float, float]:
-        zoom = self._canvas_zoom_factor()
-        if not self.canvas:
-            return x / zoom, y / zoom
-        return self.canvas.canvasx(x) / zoom, self.canvas.canvasy(y) / zoom
-
-    def _port_canvas_position_screen(self, kind: str, name: str, direction: str, port: str) -> tuple[float, float]:
-        x, y = self._port_canvas_position(kind, name, direction, port)
-        zoom = self._canvas_zoom_factor()
-        return x * zoom, y * zoom
-
-    def _scale_canvas_rendering(self, canvas: tk.Canvas, zoom: float) -> None:
-        if zoom == 1.0:
-            return
-        for item_id in canvas.find_all():
-            item_type = canvas.type(item_id)
-            if item_type == "text":
-                font_spec = canvas.itemcget(item_id, "font")
-                if font_spec:
-                    font = tkfont.Font(font=font_spec)
-                    size = int(font.cget("size"))
-                    if size < 0:
-                        size = -size
-                    font.configure(size=max(1, int(round(size * zoom))))
-                    canvas.itemconfigure(item_id, font=font)
-                wrap_width = canvas.itemcget(item_id, "width")
-                if wrap_width:
-                    canvas.itemconfigure(item_id, width=max(1, int(round(float(wrap_width) * zoom))))
-                continue
-            width_value = canvas.itemcget(item_id, "width")
-            if width_value:
-                canvas.itemconfigure(item_id, width=max(1, int(round(float(width_value) * zoom))))
-
-    def _mouse_wheel_steps(self, event: tk.Event) -> int:
-        if getattr(event, "num", None) == 4:
-            return 1
-        if getattr(event, "num", None) == 5:
-            return -1
-        if getattr(event, "delta", 0):
-            return 1 if event.delta > 0 else -1
-        return 0
-
-    def _on_scene_tabs_mouse_wheel(self, event: tk.Event) -> str | None:
-        if not self.scene_tabs_canvas:
-            return None
-        steps = self._mouse_wheel_steps(event)
-        if steps == 0:
-            return "break"
-        self.scene_tabs_canvas.xview_scroll(-steps * 3, "units")
-        return "break"
-
-    def _on_canvas_mouse_wheel(self, event: tk.Event) -> str | None:
-        if not self.canvas:
-            return None
-        steps = self._mouse_wheel_steps(event)
-        if steps == 0:
-            return "break"
-        state = int(getattr(event, "state", 0) or 0)
-        item_id = self._canvas_item_hit(event.x, event.y)
-        if item_id is not None:
-            tags = self.canvas.gettags(item_id)
-            kind, node_name = self._node_info_from_tags(tags)
-            if kind == "container" and node_name and (state & 0x0008):
-                container = self._find_container(node_name)
-                if container and container.kind == "array":
-                    container.view_offset = max(0, container.view_offset - steps)
-                    self._refresh_all()
-                    return "break"
-        if state & 0x0001:
-            self.canvas.xview_scroll(-steps * 4, "units")
-        else:
-            self.canvas.yview_scroll(-steps * 4, "units")
-        self._redraw_canvas()
-        return "break"
-
-    def _on_palette_mouse_wheel(self, event: tk.Event) -> str | None:
-        if not self.palette_canvas:
-            return None
-        steps = self._mouse_wheel_steps(event)
-        if steps == 0:
-            return "break"
-        self.palette_canvas.yview_scroll(-steps * 3, "units")
-        return "break"
-
-    def _drag_canvas_pan(self, x: int, y: int) -> None:
-        if not self.canvas_pan_state or not self.canvas:
-            raise AssertionError("Canvas pan drag requested without active state.")
-        self.canvas_pan_state["x"] = x
-        self.canvas_pan_state["y"] = y
-        self.canvas.scan_dragto(x, y, gain=1)
-        self._redraw_canvas()
-
-    def _finish_canvas_pan(self) -> None:
-        if not self.canvas_pan_state:
-            return
-        self.canvas_pan_state = None
-        self._redraw_canvas()
-
-    def _expanded_scrollregion(self, canvas: tk.Canvas) -> tuple[float, float, float, float]:
-        bbox = canvas.bbox("all")
-        width = max(float(canvas.winfo_width()), 1.0)
-        height = max(float(canvas.winfo_height()), 1.0)
-        margin = max(width, height, 4000.0)
-        if not bbox:
-            return -margin, -margin, margin, margin
-        left, top, right, bottom = [float(value) for value in bbox]
-        return left - margin, top - margin, right + margin, bottom + margin
-
-    def _current_canvas_scrollregion(self) -> tuple[float, float, float, float]:
-        if not self.canvas:
-            raise AssertionError("Canvas scrollregion requested before canvas initialization.")
-        raw_value = str(self.canvas.cget("scrollregion")).strip()
-        if not raw_value:
-            return self._expanded_scrollregion(self.canvas)
-        parts = raw_value.split()
-        if len(parts) != 4:
-            raise AssertionError(f"Invalid canvas scrollregion: {raw_value!r}")
-        return tuple(float(value) for value in parts)
-
-    def _restore_canvas_anchor(self, scene_x: float, scene_y: float, screen_x: float, screen_y: float) -> None:
-        if not self.canvas:
-            raise AssertionError("Canvas anchor restore requested before canvas initialization.")
-        left, top, right, bottom = self._current_canvas_scrollregion()
-        viewport_width = max(float(self.canvas.winfo_width()), 1.0)
-        viewport_height = max(float(self.canvas.winfo_height()), 1.0)
-        zoom = self._canvas_zoom_factor()
-        target_canvas_x = scene_x * zoom
-        target_canvas_y = scene_y * zoom
-        desired_left = target_canvas_x - float(screen_x)
-        desired_top = target_canvas_y - float(screen_y)
-        total_width = right - left
-        total_height = bottom - top
-        if total_width <= viewport_width:
-            self.canvas.xview_moveto(0.0)
-        else:
-            x_fraction = (desired_left - left) / (total_width - viewport_width)
-            self.canvas.xview_moveto(max(0.0, min(1.0, x_fraction)))
-        if total_height <= viewport_height:
-            self.canvas.yview_moveto(0.0)
-        else:
-            y_fraction = (desired_top - top) / (total_height - viewport_height)
-            self.canvas.yview_moveto(max(0.0, min(1.0, y_fraction)))
-
-    def _zoom_canvas_at(self, screen_x: float, screen_y: float, steps: int) -> None:
-        if not self.canvas:
-            raise AssertionError("Canvas zoom requested before canvas initialization.")
-        if steps == 0:
-            return
-        scene_x, scene_y = self._scene_point(screen_x, screen_y)
-        old_zoom = self._canvas_zoom_factor()
-        new_zoom = max(0.4, min(2.5, old_zoom * (1.1 ** steps)))
-        if abs(new_zoom - old_zoom) < 1e-6:
-            return
-        self.canvas_zoom = new_zoom
-        self._redraw_canvas()
-        self._restore_canvas_anchor(scene_x, scene_y, screen_x, screen_y)
-        self._redraw_canvas()
 
     def _start_connection_drag(self, port_info: tuple[str, str, str, str], event: tk.Event) -> None:
         kind, name, direction, port = port_info
@@ -5882,6 +6234,45 @@ class AlgorithmStudioApp(
                     tags=("reuse_connection",),
                 )
 
+    def _draw_highlighted_container_chain_path(self, canvas: tk.Canvas) -> None:
+        chain_names = [name for name in self.highlighted_container_chain_names if self._is_node_visible_in_current_view("container", name)]
+        if len(chain_names) < 2:
+            return
+        ordered_items: list[ContainerItem] = []
+        for name in chain_names:
+            item = self._find_container(name)
+            if item is None:
+                raise AssertionError(f"Missing highlighted chain container {name}")
+            ordered_items.append(item)
+        ordered_items.sort(key=lambda item: (int(getattr(item, "reuse_chain_index", 0)), item.name))
+        for prev, curr in zip(ordered_items, ordered_items[1:]):
+            x0, y0 = self._container_center(prev)
+            x1, y1 = self._container_center(curr)
+            canvas.create_line(
+                x0,
+                y0,
+                x1,
+                y1,
+                fill="#f97316",
+                width=6,
+                dash=(14, 7),
+                arrow=tk.LAST,
+                arrowshape=(14, 16, 6),
+                tags=("chain_path_highlight",),
+            )
+            canvas.create_line(
+                x0,
+                y0,
+                x1,
+                y1,
+                fill="#fde68a",
+                width=2,
+                dash=(14, 7),
+                arrow=tk.LAST,
+                arrowshape=(14, 16, 6),
+                tags=("chain_path_highlight",),
+            )
+
     def _remove_connections_for_node(self, kind: str, name: str) -> None:
         before = len(self.project.connections)
         self.project.connections = [
@@ -5914,6 +6305,7 @@ class AlgorithmStudioApp(
         height = max(canvas.winfo_height(), 1)
         self._draw_grid(canvas, width, height)
         self._draw_container_reuse_links(canvas)
+        self._draw_highlighted_container_chain_path(canvas)
         self._draw_partial_shared_links(canvas)
         self.canvas_container_group_nodes.clear()
         self.canvas_nodes.clear()
@@ -5962,10 +6354,13 @@ class AlgorithmStudioApp(
             item_id = self._draw_stage_node(canvas, stage)
             self.canvas_nodes[stage.name] = item_id
             self.canvas_item_to_name[item_id] = stage.name
+        self._draw_selected_node_highlights(canvas)
         self._draw_child_clip_masks(canvas)
         canvas.tag_raise("clip_mask")
         self._draw_group_clip_overlays(canvas)
         canvas.tag_raise("group_clip_overlay")
+        canvas.tag_raise("group_resize_handle")
+        canvas.tag_raise("node_resize_handle")
         self._draw_connections(canvas)
         if self.connection_drag_state:
             self._draw_connection_drag_preview(canvas)
@@ -5973,12 +6368,11 @@ class AlgorithmStudioApp(
         if abs(zoom - 1.0) >= 1e-6:
             canvas.scale("all", 0.0, 0.0, zoom, zoom)
             self._scale_canvas_rendering(canvas, zoom)
+        if abs(self.canvas_camera_x) >= 1e-6 or abs(self.canvas_camera_y) >= 1e-6:
+            canvas.move("all", self.canvas_camera_x, self.canvas_camera_y)
         canvas.tag_raise("connection")
         canvas.tag_raise("connection_preview")
         self._draw_drag_delete_warning(canvas)
-        self._draw_selected_node_highlights(canvas)
-        left, top, right, bottom = self._expanded_scrollregion(canvas)
-        canvas.configure(scrollregion=(left, top, right, bottom))
 
     def _draw_selected_node_highlights(self, canvas: tk.Canvas) -> None:
         if not self.selected:
@@ -6011,7 +6405,7 @@ class AlgorithmStudioApp(
                     fill="",
                     outline=color,
                     width=width,
-                    tags=("selected_highlight",),
+                    tags=("selected_highlight", f"node:{kind}:{name}"),
                 )
         canvas.tag_raise("selected_highlight")
 
@@ -6096,12 +6490,15 @@ class AlgorithmStudioApp(
         width, height = self._container_group_render_size(group)
         node_tag = f"node:containerelement:{group.name}"
         outline = COLORS["accent"] if self.selected_container_group_name == group.name else COLORS["good"]
+        radius = 14.0
 
-        item_id = canvas.create_rectangle(
+        item_id = self._create_rounded_rect(
+            canvas,
             x,
             y,
             x + width,
             y + height,
+            radius,
             fill="#141a22",
             outline=outline,
             width=2,
@@ -6109,15 +6506,24 @@ class AlgorithmStudioApp(
             tags=(node_tag, "group_node", "group_body"),
         )
         header_height = 30
-        canvas.create_rectangle(
-            x,
-            y,
-            x + width,
+        self._draw_top_rounded_header(
+            canvas,
+            x + 2,
+            y + 2,
+            x + width - 2,
             y + header_height,
+            max(radius - 2.0, 4.0),
             fill=COLORS["good"],
-            outline=outline,
-            width=2,
             tags=(node_tag, "group_node", "group_header", "draggable"),
+        )
+        canvas.create_line(
+            x + 3,
+            y + header_height,
+            x + width - 3,
+            y + header_height,
+            fill="#d5def3",
+            width=1,
+            tags=(node_tag, "group_header"),
         )
         canvas.create_text(
             x + 12,
@@ -6131,13 +6537,12 @@ class AlgorithmStudioApp(
 
         body_top = y + header_height
         body_bottom = y + height
-        center_x = x + width / 2
 
         canvas.create_rectangle(
-            x + 1,
+            x + 2,
             body_top + 1,
-            x + width - 1,
-            body_bottom - 1,
+            x + width - 2,
+            body_bottom - 2,
             fill="#141a22",
             outline=COLORS["grid"],
             width=1,
@@ -6188,10 +6593,10 @@ class AlgorithmStudioApp(
     def _draw_grid(self, canvas: tk.Canvas, width: int, height: int) -> None:
         step = 48
         zoom = self._canvas_zoom_factor()
-        viewport_left = canvas.canvasx(0) / zoom
-        viewport_top = canvas.canvasy(0) / zoom
-        viewport_right = canvas.canvasx(width) / zoom
-        viewport_bottom = canvas.canvasy(height) / zoom
+        viewport_left = (-self.canvas_camera_x) / zoom
+        viewport_top = (-self.canvas_camera_y) / zoom
+        viewport_right = (float(width) - self.canvas_camera_x) / zoom
+        viewport_bottom = (float(height) - self.canvas_camera_y) / zoom
         viewport_width = max(viewport_right - viewport_left, 1.0)
         viewport_height = max(viewport_bottom - viewport_top, 1.0)
         margin = max(viewport_width, viewport_height, 2400.0)
@@ -6211,8 +6616,8 @@ class AlgorithmStudioApp(
             canvas.create_line(divider_x, grid_top, divider_x, grid_bottom, fill=COLORS["accent"], width=2, dash=(10, 10), tags=("grid_overlay_divider",))
             canvas.tag_lower("grid_overlay_bg")
             right_half_width = max(grid_right - divider_x, 1.0)
-            canvas.create_text(divider_x * 0.5, viewport_top + 18, anchor="center", fill=COLORS["good"], text="decomposer side", font=("Segoe UI", 10, "bold"), tags=("grid_overlay_label",))
-            canvas.create_text(divider_x + right_half_width * 0.5, viewport_top + 18, anchor="center", fill=COLORS["container"], text="container side", font=("Segoe UI", 10, "bold"), tags=("grid_overlay_label",))
+            canvas.create_text(divider_x * 0.5, viewport_top + 18 / zoom, anchor="center", fill=COLORS["good"], text="decomposer side", font=("Segoe UI", 10, "bold"), tags=("grid_overlay_label",))
+            canvas.create_text(divider_x + right_half_width * 0.5, viewport_top + 18 / zoom, anchor="center", fill=COLORS["container"], text="container side", font=("Segoe UI", 10, "bold"), tags=("grid_overlay_label",))
             left_hint = "d2cScene"
         elif self.canvas_view_mode == "container_overview":
             left_hint = "containerScene"
@@ -6232,8 +6637,8 @@ class AlgorithmStudioApp(
             left_hint = "allInOne"
         else:
             left_hint = "algorithmScene"
-        canvas.create_text(viewport_left + 24, viewport_top + 18, anchor="w", fill=COLORS["muted"], text=left_hint, font=("Segoe UI", 10), tags=("grid_overlay_label",))
-        canvas.create_text(viewport_right - 24, viewport_top + 18, anchor="e", fill=COLORS["muted"], text="right click: delete / duplicate", font=("Segoe UI", 10), tags=("grid_overlay_label",))
+        canvas.create_text(viewport_left + 24 / zoom, viewport_top + 18 / zoom, anchor="w", fill=COLORS["muted"], text=left_hint, font=("Segoe UI", 10), tags=("grid_overlay_label",))
+        canvas.create_text(viewport_right - 24 / zoom, viewport_top + 18 / zoom, anchor="e", fill=COLORS["muted"], text="right click: delete / duplicate", font=("Segoe UI", 10), tags=("grid_overlay_label",))
 
     def _draw_node_card(
         self,
@@ -6424,7 +6829,7 @@ class AlgorithmStudioApp(
                 canvas,
                 "container",
                 container.name,
-                container.name,
+                self._canvas_node_display_name(container, container.name),
                 self._container_value_preview(container, 2),
                 ["in"],
                 ["out"],
@@ -6435,11 +6840,12 @@ class AlgorithmStudioApp(
                 width,
             )
         header_fill = "#06080d"
-        title = container.name
+        title = self._canvas_node_display_name(container, container.name)
         parent_group_name = self._container_parent_group_name(container.name)
         compact = parent_group_name is not None
         width, height = self._container_render_size(container)
         value_lines = self._container_value_preview(container, 2 if compact else 3)
+        field_lines = self._container_layout_field_summary_lines(container, limit=9999)
         node_tag = f"node:container:{container.name}"
         outline = COLORS["accent"] if self.selected_container_name == container.name else fill
         item_id = canvas.create_rectangle(
@@ -6476,11 +6882,13 @@ class AlgorithmStudioApp(
         body_top = y + header_height
         port_y = y + height - 24
         content_bottom = port_y - 10
+        value_section_height = 28 + max(len(value_lines), 1) * 18
+        value_bottom = min(content_bottom, body_top + value_section_height)
         canvas.create_rectangle(
             x + 1,
             body_top + 1,
             x + width - 1,
-            content_bottom,
+            value_bottom,
             fill="#111827",
             outline=COLORS["grid"],
             width=1,
@@ -6508,6 +6916,57 @@ class AlgorithmStudioApp(
             justify="left",
             tags=(f"text_of_{item_id}", node_tag, "container_section:value"),
         )
+
+        field_top = value_bottom + 8
+        field_bottom = content_bottom
+        if field_top < field_bottom:
+            canvas.create_rectangle(
+                x + 1,
+                field_top,
+                x + width - 1,
+                field_bottom,
+                fill="#0b1220",
+                outline=COLORS["grid"],
+                width=1,
+                tags=(node_tag, "node_body", "container_section:fields"),
+            )
+            canvas.create_text(
+                x + 10,
+                field_top + 4,
+                anchor="nw",
+                fill=COLORS["muted"],
+                text="LAYOUT RULES",
+                font=("Segoe UI", 9, "bold"),
+                tags=(f"text_of_{item_id}", node_tag, "container_section:fields"),
+            )
+            row_top = field_top + 22
+            row_height = 20
+            visible_rows = max(1, int(max(field_bottom - row_top - 6, 0) // row_height))
+            visible_lines = field_lines[:visible_rows]
+            for index, line in enumerate(visible_lines):
+                current_top = row_top + index * row_height
+                row_tag = f"container_field:{container.name}:{index}"
+                canvas.create_rectangle(
+                    x + 8,
+                    current_top,
+                    x + width - 8,
+                    current_top + row_height - 2,
+                    fill="#111827",
+                    outline="#1f2a3a",
+                    width=1,
+                    tags=(node_tag, "node_body", "container_section:fields", row_tag),
+                )
+                canvas.create_text(
+                    x + 14,
+                    current_top + 3,
+                    anchor="nw",
+                    fill=COLORS["text"],
+                    text=self._compact_activity_text(line, limit=96) or "-",
+                    font=("Segoe UI", 9),
+                    width=width - 32,
+                    justify="left",
+                    tags=(f"text_of_{item_id}", node_tag, "container_section:fields", row_tag),
+                )
 
         input_tag = f"port:container:{container.name}:in:in"
         input_x = x + width * 0.22
@@ -6558,6 +7017,7 @@ class AlgorithmStudioApp(
     def _draw_decomposer_node(self, canvas: tk.Canvas, rule: DecomposerRule) -> int:
         x = rule.x or CANVAS_PADDING + 40
         y = rule.y or CANVAS_PADDING + 360
+        display_name = self._canvas_node_display_name(rule, rule.name)
         inputs = ["in"]
         outputs = self.project.output_ports_for("decomposer", rule.name)
         if not self._is_node_expanded(rule):
@@ -6565,7 +7025,7 @@ class AlgorithmStudioApp(
                 canvas,
                 "decomposer",
                 rule.name,
-                f"Decomposer {rule.name}",
+                f"Decomposer {display_name}",
                 [
                     f"map: {rule.map_kind or 'v2v'}",
                     f"{rule.source or '-'} -> {rule.target or '-'}",
@@ -6583,6 +7043,7 @@ class AlgorithmStudioApp(
         return self._draw_decomposer_frame_node(
             canvas,
             rule.name,
+            display_name,
             x,
             y,
             inputs,
@@ -6631,6 +7092,7 @@ class AlgorithmStudioApp(
         self,
         canvas: tk.Canvas,
         name: str,
+        display_name: str,
         x: float,
         y: float,
         inputs: list[str],
@@ -6675,7 +7137,7 @@ class AlgorithmStudioApp(
             y + 7,
             anchor="nw",
             fill=COLORS["window"],
-            text=f"Decomposer {name}",
+            text=f"Decomposer {display_name}",
             font=("Segoe UI", 12, "bold"),
             tags=(f"text_of_{item_id}", node_tag, "node_header", "draggable"),
         )
@@ -6841,6 +7303,7 @@ class AlgorithmStudioApp(
     def _draw_reflector_node(self, canvas: tk.Canvas, item: ReflectorItem) -> int:
         x = item.x or CANVAS_PADDING + 40
         y = item.y or CANVAS_PADDING + 180
+        display_name = self._canvas_node_display_name(item, item.name)
         inputs = ["in"]
         outputs = list(item.direct_to) if item.direct_to else ([item.output_name] if item.output_name else [item.output_kind or "out"])
         if not self._is_node_expanded(item):
@@ -6848,7 +7311,7 @@ class AlgorithmStudioApp(
                 canvas,
                 "reflector",
                 item.name,
-                f"Reflector {item.name}",
+                f"Reflector {display_name}",
                 [
                     f"filter: {item.reflect_fun or 'direct'}",
                     f"out: {', '.join(outputs) or '-'}",
@@ -6868,7 +7331,7 @@ class AlgorithmStudioApp(
             item.name,
             x,
             y,
-            f"Reflector {item.name}",
+            f"Reflector {display_name}",
             inputs,
             outputs,
             script_lines,
@@ -6881,12 +7344,13 @@ class AlgorithmStudioApp(
     def _draw_res_node(self, canvas: tk.Canvas, item: ResourceNodeItem) -> int:
         x = item.x or CANVAS_PADDING + 40
         y = item.y or CANVAS_PADDING + 420
+        display_name = self._canvas_node_display_name(item, item.name)
         if not self._is_node_expanded(item):
             return self._draw_collapsed_port_node(
                 canvas,
                 "resnode",
                 item.name,
-                "meshNode" if item.name == "meshNode" else f"meshNode {item.name}",
+                "meshNode" if display_name == "meshNode" else f"meshNode {display_name}",
                 [f"[{item.resource_kind or 'mesh'}]"],
                 ["in"],
                 self._resource_output_ports(item.resource_kind or "mesh", item.outputs),
@@ -6927,7 +7391,7 @@ class AlgorithmStudioApp(
             y + 7,
             anchor="nw",
             fill=COLORS["window"],
-            text="meshNode" if item.name == "meshNode" else f"meshNode {item.name}",
+            text="meshNode" if display_name == "meshNode" else f"meshNode {display_name}",
             font=("Segoe UI", 12, "bold"),
             tags=(f"text_of_{item_id}", node_tag, "node_header", "draggable"),
         )
@@ -7033,6 +7497,7 @@ class AlgorithmStudioApp(
     def _draw_function_frame_node(self, canvas: tk.Canvas, item: FunctionFrameItem) -> int:
         x = item.x or CANVAS_PADDING + 40
         y = item.y or CANVAS_PADDING + 520
+        display_name = self._canvas_node_display_name(item, item.name)
         inputs = self._split_port_names(item.input_name, "in")
         outputs = self._split_port_names(item.output_name, "out")
         script_lines = [line for line in (item.script or FUNCTION_SCRIPT_PLACEHOLDER).splitlines() if line.strip()]
@@ -7044,7 +7509,7 @@ class AlgorithmStudioApp(
                 canvas,
                 "function",
                 item.name,
-                "fun" if item.name == "fun" else f"fun {item.name}",
+                "fun" if display_name == "fun" else f"fun {display_name}",
                 script_lines[:2],
                 inputs,
                 outputs,
@@ -7060,7 +7525,7 @@ class AlgorithmStudioApp(
             item.name,
             x,
             y,
-            "fun" if item.name == "fun" else f"fun {item.name}",
+            "fun" if display_name == "fun" else f"fun {display_name}",
             inputs,
             outputs,
             script_lines,
@@ -7073,12 +7538,13 @@ class AlgorithmStudioApp(
     def _draw_function_text_node(self, canvas: tk.Canvas, item: FunctionTextItem) -> int:
         x = item.x or CANVAS_PADDING + 440
         y = item.y or CANVAS_PADDING + 520
+        display_name = self._canvas_node_display_name(item, item.name)
         if not self._is_node_expanded(item):
             return self._draw_collapsed_port_node(
                 canvas,
                 "functiontext",
                 item.name,
-                item.name,
+                display_name,
                 [f"fun: {item.function_name or '-'}", self._compact_activity_text(item.text, limit=48) or "-"],
                 [],
                 [],
@@ -7119,7 +7585,7 @@ class AlgorithmStudioApp(
             y + 7,
             anchor="nw",
             fill=COLORS["window"],
-            text=item.name,
+            text=display_name,
             font=("Segoe UI", 12, "bold"),
             tags=(f"text_of_{item_id}", node_tag, "node_header", "draggable"),
         )
@@ -7163,6 +7629,7 @@ class AlgorithmStudioApp(
     def _draw_stage_node(self, canvas: tk.Canvas, stage: InterventionStage) -> int:
         x = stage.x or CANVAS_PADDING + 40
         y = stage.y or CANVAS_PADDING + 280
+        display_name = self._canvas_node_display_name(stage, stage.name)
         inputs = ["in"]
         outputs = stage.functions or [stage.kind]
         if not self._is_node_expanded(stage):
@@ -7170,7 +7637,7 @@ class AlgorithmStudioApp(
                 canvas,
                 "interventioner",
                 stage.name,
-                f"Interventioner {stage.name}",
+                f"Interventioner {display_name}",
                 [
                     f"kind: {stage.kind}",
                     self._compact_activity_text(stage.shader_vertex or stage.shader_fragment, limit=48) or "shader",
@@ -7190,7 +7657,7 @@ class AlgorithmStudioApp(
             stage.name,
             x,
             y,
-            f"Interventioner {stage.name}",
+            f"Interventioner {display_name}",
             inputs,
             outputs,
             script_lines,
@@ -7538,18 +8005,17 @@ class AlgorithmStudioApp(
         canvas.tag_raise(handle_id)
         return item_id
 
-    def _log(self, message: str) -> None:
-        self.log_lines.append(message)
-        if self.log_text:
-            self.log_text.insert(tk.END, message + "\n")
-            self.log_text.see(tk.END)
-        self.status_var.set(message)
-
 def main() -> None:
-    root = tk.Tk()
-    app = AlgorithmStudioApp(root)
-    root.after(50, app._redraw_canvas)
-    root.mainloop()
+    app: AlgorithmStudioApp | None = None
+    try:
+        root = tk.Tk()
+        app = AlgorithmStudioApp(root)
+        root.after(50, app._redraw_canvas)
+        root.mainloop()
+    except Exception as exc:  # noqa: BLE001
+        if app is not None:
+            app._log_exception("Fatal startup/mainloop exception", type(exc), exc, exc.__traceback__)
+        raise
 
 
 if __name__ == "__main__":

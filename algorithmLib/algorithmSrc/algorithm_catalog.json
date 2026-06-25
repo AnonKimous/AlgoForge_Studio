@@ -26,6 +26,15 @@
       "decomposer": "v6a6_pbd_ball_collision_demo_package.json",
       "reflector": "v6a6_pbd_ball_collision_demo_package.json",
       "intervention": "v6a6_pbd_ball_collision_demo_package.json"
+    },
+    {
+      "name": "v2a0_precision_grid_mask_demo",
+      "display_name": "v2a0_precision_grid_mask_demo",
+      "folder": "v2a0_precision_grid_mask_demo",
+      "container_manifest": "v2a0_precision_grid_mask_demo_package.json",
+      "decomposer": "v2a0_precision_grid_mask_demo_package.json",
+      "reflector": "v2a0_precision_grid_mask_demo_package.json",
+      "intervention": "v2a0_precision_grid_mask_demo_package.json"
     }
   ]
 }

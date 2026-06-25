@@ -31,13 +31,6 @@ if not exist "%ALGO_SRC_ROOT%" (
   exit /b 1
 )
 
-if exist "%ALGO_RUNTIME_ROOT%" (
-  rmdir /s /q "%ALGO_RUNTIME_ROOT%"
-  if errorlevel 1 (
-    echo Failed to reset algorithm runtime root: "%ALGO_RUNTIME_ROOT%"
-    exit /b 1
-  )
-)
 if not exist "%ALGO_RUNTIME_ROOT%" mkdir "%ALGO_RUNTIME_ROOT%"
 if errorlevel 1 (
   echo Failed to create algorithm runtime root: "%ALGO_RUNTIME_ROOT%"
@@ -80,6 +73,12 @@ if errorlevel 1 (
 )
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference = 'Stop'; $root = '%ALGO_RUNTIME_ROOT%\%ALGO_TARGET%'; if (Test-Path -LiteralPath $root) { Get-ChildItem -LiteralPath $root -Recurse -File | Where-Object { $_.Extension -in '.exp','.lib','.pdb','.ilk','.obj','.manifest' } | Remove-Item -Force; Get-ChildItem -LiteralPath $root -Recurse -Directory | Sort-Object FullName -Descending | Where-Object { -not (Get-ChildItem -LiteralPath $_.FullName -Force) } | Remove-Item -Force }"
+if errorlevel 1 (
+  set "EXITCODE=1"
+  goto :cleanup
+)
+
+powershell -NoProfile -ExecutionPolicy Bypass -File "%ALGO_ROOT%\package_algorithm_runtime.ps1" -AlgorithmSourceRoot "%ALGO_SRC_ROOT%" -AlgorithmRuntimeRoot "%ALGO_RUNTIME_ROOT%"
 if errorlevel 1 (
   set "EXITCODE=1"
   goto :cleanup

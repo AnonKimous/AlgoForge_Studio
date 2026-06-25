@@ -6,6 +6,7 @@
 #include "common_data/kernel_cfg.h"
 
 #include <algorithm>
+#include <unordered_set>
 #include <utility>
 
 namespace sdk {
@@ -245,11 +246,15 @@ AlgorithmHandle SdkRuntimeSystem::MountAlgorithm(
     });
   }
   draft.descriptor_values.reserve(requested_descriptors.descriptor_slots.size());
+  std::unordered_set<std::string> seen_descriptor_names{};
   for (const agent::AlgorithmRequestedDescriptorBindings::DescriptorSlot& descriptor :
        requested_descriptors.descriptor_slots) {
+    if (!seen_descriptor_names.insert(descriptor.descriptor_name).second) {
+      continue;
+    }
     draft.descriptor_values.push_back(DescriptorValue{
       .descriptor_name = descriptor.descriptor_name,
-      .scalar_value = 0.0f,
+      .scalar_value = 0.0,
     });
   }
 

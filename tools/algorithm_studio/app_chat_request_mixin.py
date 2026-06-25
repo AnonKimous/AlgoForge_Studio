@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import threading
 import tkinter as tk
 from tkinter import messagebox
@@ -11,6 +12,36 @@ except ImportError:
 
 
 class AlgorithmStudioChatRequestMixin:
+    def _strip_interface4agents_blocks(self, text: str) -> str:
+        return re.sub(r"```interface4agents\s*.*?```", "", str(text or ""), flags=re.IGNORECASE | re.DOTALL)
+
+    def _compact_followup_history_for_model(self) -> str:
+        items = self._chat_user_assistant_items()
+        if not items:
+            return "(empty)"
+        first_user: dict[str, object] | None = None
+        latest_assistant: dict[str, object] | None = None
+        for item in items:
+            if str(item.get("role") or "") == "user":
+                first_user = item
+                break
+        for item in reversed(items):
+            if str(item.get("role") or "") == "assistant":
+                latest_assistant = item
+                break
+        sections: list[str] = []
+        if first_user is not None:
+            user_text = self._strip_interface4agents_blocks(str(first_user.get("content") or "")).strip()
+            compact_user = self._compact_activity_text(user_text, limit=320)
+            if compact_user:
+                sections.append("Original teaching goal:\n" + compact_user)
+        if latest_assistant is not None:
+            assistant_text = self._strip_interface4agents_blocks(str(latest_assistant.get("content") or "")).strip()
+            compact_assistant = self._compact_activity_text(assistant_text, limit=420)
+            if compact_assistant:
+                sections.append("Latest teaching step:\n" + compact_assistant)
+        return "\n\n".join(sections) or "(empty)"
+
     def _send_chat_message_from_event(self, event: tk.Event) -> str:
         self._send_chat_message()
         return "break"
@@ -21,21 +52,11 @@ class AlgorithmStudioChatRequestMixin:
         self.chat_input_text.insert(tk.INSERT, "\n")
         return "break"
 
-    def _send_chat_message(self) -> None:
-        if self.chat_busy:
-            self._log("Agent request already in progress.")
-            return
-        if not self.chat_input_text:
-            raise AssertionError("Chat input box is not initialized.")
-        prompt = self.chat_input_text.get("1.0", tk.END).strip()
-        attachments = [dict(item) for item in self.chat_attachments]
-        if not prompt and not attachments:
-            raise AssertionError("Chat prompt is empty.")
-        prompt_for_model = prompt or "Please inspect the attached content."
+    def _build_chat_request_prompt(self, prompt_for_model: str, *, compact_history: bool = False) -> tuple[str, str]:
         self._sync_agent_client_settings()
         selection = self._selection_label()
         context = self._chat_selected_context()
-        transcript = self._chat_history_for_model()
+        transcript = self._compact_followup_history_for_model() if compact_history else self._chat_history_for_model()
         prompt_sections = [context]
         if transcript and transcript != "(empty)":
             prompt_sections.extend(
@@ -52,6 +73,24 @@ class AlgorithmStudioChatRequestMixin:
         )
         final_prompt = "\n\n".join(prompt_sections).strip()
         self.agent_prompt_var.set(final_prompt)
+        return selection, final_prompt
+
+    def _start_chat_request(
+        self,
+        *,
+        prompt_for_model: str,
+        user_visible_content: str,
+        attachments: list[dict[str, str]] | None = None,
+        append_user_message: bool,
+        status_text: str,
+        log_message: str,
+        compact_history: bool = False,
+    ) -> None:
+        if self.chat_busy:
+            self._log("Agent request already in progress.")
+            return
+        resolved_attachments = [dict(item) for item in attachments or []]
+        selection, final_prompt = self._build_chat_request_prompt(prompt_for_model, compact_history=compact_history)
         try:
             approved = self._authorize_chat_request(selection, final_prompt)
         except Exception as exc:  # noqa: BLE001
@@ -65,16 +104,20 @@ class AlgorithmStudioChatRequestMixin:
         if not approved:
             self._finish_execution_trace("聊天请求", False, "审批未通过。")
             return
-        user_visible_content = prompt or "(attached content)"
-        self.pending_chat_request_message_id = self.chat_message_serial + 1
+        if append_user_message:
+            self.pending_chat_request_message_id = self.chat_message_serial + 1
+        else:
+            self.pending_chat_request_message_id = None
         self.chat_busy = True
-        self._append_chat_message("user", user_visible_content, attachments=attachments)
-        self.chat_input_text.delete("1.0", tk.END)
+        if append_user_message:
+            self._append_chat_message("user", user_visible_content, attachments=resolved_attachments)
+        if self.chat_input_text:
+            self.chat_input_text.delete("1.0", tk.END)
         self._clear_chat_attachments()
         if self.chat_send_button:
             self.chat_send_button.configure(state="disabled")
-        self.status_var.set(f"Sent to {self.agent_client.provider}; waiting for reply...")
-        self._log(f"Chat request sent via {self.agent_client.provider}.")
+        self.status_var.set(status_text)
+        self._log(log_message)
 
         def emit_event(event: dict[str, str]) -> None:
             self.root.after(0, lambda event=event: self._handle_agent_event(event))
@@ -85,7 +128,7 @@ class AlgorithmStudioChatRequestMixin:
                     self.project,
                     selection,
                     final_prompt,
-                    attachments=attachments,
+                    attachments=resolved_attachments,
                     event_callback=emit_event,
                 )
             except Exception as exc:  # noqa: BLE001
@@ -95,6 +138,99 @@ class AlgorithmStudioChatRequestMixin:
 
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()
+
+    def _send_chat_message(self) -> None:
+        if not self.chat_input_text:
+            raise AssertionError("Chat input box is not initialized.")
+        prompt = self.chat_input_text.get("1.0", tk.END).strip()
+        attachments = [dict(item) for item in self.chat_attachments]
+        if not prompt and not attachments:
+            raise AssertionError("Chat prompt is empty.")
+        self._start_chat_request(
+            prompt_for_model=prompt or "Please inspect the attached content.",
+            user_visible_content=prompt or "(attached content)",
+            attachments=attachments,
+            append_user_message=True,
+            status_text=f"Sent to {self.agent_client.provider}; waiting for reply...",
+            log_message=f"Chat request sent via {self.agent_client.provider}.",
+            compact_history=False,
+        )
+
+    def _latest_assistant_message_content(self) -> str:
+        for item in reversed(self.chat_history):
+            if str(item.get("role") or "") == "assistant":
+                return str(item.get("content") or "")
+        return ""
+
+    def _should_auto_continue_from_operation_stack(self) -> bool:
+        if not bool(self.operation_stack_auto_read_var.get()):
+            return False
+        if self.chat_busy:
+            return False
+        if not self.chat_history:
+            return False
+        latest_item = self.chat_history[-1]
+        if str(latest_item.get("role") or "") != "assistant":
+            return False
+        assistant_text = " ".join(self._latest_assistant_message_content().split()).lower()
+        if not assistant_text:
+            return False
+        trigger_tokens = (
+            "操作栈",
+            "operation stack",
+            "read stack",
+            "完成后",
+            "完成这一步",
+            "确认这一步",
+            "我再带你",
+            "我会等",
+        )
+        if not any(token in assistant_text for token in trigger_tokens):
+            return False
+        return True
+
+    def _operation_stack_auto_followup_prompt(self) -> str:
+        return "\n".join(
+            [
+                "Continue the current step-by-step UI teaching flow.",
+                "First read the latest operation stack in the context above.",
+                "If the latest user operations complete your previous instruction, move to the next single step.",
+                "Before explaining that next step, emit exactly one matching interface4agents highlight for the UI target when supported.",
+                "If the latest user operations do not complete your previous instruction, stay on the same step and re-highlight only that same UI target.",
+                "Do not ask the user to manually confirm an action if the operation stack already shows it.",
+            ]
+        )
+
+    def _schedule_operation_stack_auto_followup(self) -> None:
+        if not self._should_auto_continue_from_operation_stack():
+            return
+        signature = self._recent_operation_stack_text(limit=6)
+        if signature == self.operation_stack_auto_followup_signature:
+            return
+        if self.operation_stack_auto_followup_after_id is not None:
+            try:
+                self.root.after_cancel(self.operation_stack_auto_followup_after_id)
+            except Exception:
+                pass
+            self.operation_stack_auto_followup_after_id = None
+
+        def run_followup(expected_signature: str = signature) -> None:
+            self.operation_stack_auto_followup_after_id = None
+            if not self._should_auto_continue_from_operation_stack():
+                return
+            self.operation_stack_auto_followup_signature = expected_signature
+            self._start_chat_request(
+                prompt_for_model=self._operation_stack_auto_followup_prompt(),
+                user_visible_content="",
+                attachments=[],
+                append_user_message=False,
+                status_text=f"Operation stack updated; asking {self.agent_client.provider} to continue...",
+                log_message=f"Auto-continue request sent via {self.agent_client.provider} from operation stack.",
+                compact_history=True,
+            )
+
+        self.operation_stack_auto_followup_after_id = self.root.after(450, run_followup)
+
 
     def _authorize_chat_request(self, selection: str, final_prompt: str) -> bool:
         mode = self.approval_mode_var.get().strip().lower() or "manual"

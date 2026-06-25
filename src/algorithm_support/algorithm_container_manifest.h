@@ -3,6 +3,7 @@
 #include "algorithm_support/algorithm_types.h"
 
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace algorithm {
@@ -29,6 +30,7 @@ struct AlgorithmContainerManifest {
   AlgorithmStandardContainerLayout standard_layout{};
   std::vector<AlgorithmContainerManifestItem> variables;
   std::vector<AlgorithmContainerManifestItem> variable_arrays;
+  std::unordered_map<std::string, std::vector<std::string>> container_aliases_by_name;
   std::vector<AlgorithmReflectorManifestItem> reflectors;
 };
 

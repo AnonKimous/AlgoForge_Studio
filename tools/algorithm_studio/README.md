@@ -13,6 +13,11 @@ It provides:
 - `container` boxes can wrap `Variable` and `Array` nodes into a named merged alias
 - standard-slot aliases such as `a1:vertex` or `v1,v2:pos` are allowed as authoring semantics
 - `ToolNodes` includes `container`, `decomposer`, `reflector`, and `interventioner`
+- `container` is storage-only metadata; it does not by itself mean `float`, `int`, `bool`, `fp8x4`, or another scalar interpretation
+- `container` owns byte storage, grouping, and transfer shape, but it does not own byte-semantics interpretation
+- front-end text, labels, and teaching content may describe how a container's bytes are expected to be used, but those descriptions are guidance for humans and UI, not the container's runtime meaning
+- the actual read rule for those bytes belongs to the algorithm side that consumes them; for example, a stage may choose to read the same 32 bits as `float32`, `int32`, `fp8x4`, or `boolx32`
+- if descriptor bytes need a non-default interpretation, that rule must be expressed by the consuming algorithm logic rather than silently assumed from the container node alone
 - `ResNode` palette inserts a single `mesh` node; `decomposer.res.mesh` can expand to `edge`, `vertex`, and `normal`
 - double-click `Variable` / `Array` nodes to edit temporary values
 - double-click a node title bar, meaning the colored header area, to collapse or expand the node
@@ -73,6 +78,16 @@ This is a UI-first prototype.
 - Standard slots like `v1`, `v2`, `v3` may be grouped into higher-level aliases for readability, while the runtime still resolves the underlying standard slots.
 - Tool-side aliases are for authoring and debug readability only; exported runtime-facing package fields should still be written back as `vN/aN`.
 - Direct transfer for non-standard containers must keep the same container name on both sides and the same structure.
+
+## Container And Decode Semantics
+
+- A `container` is still the carrier of bytes, layout grouping, and transfer identity.
+- A `container` is not the authority for what those bytes "mean" numerically.
+- Front-end copy can explain expected usage, such as "this buffer is usually read as `float32 position`" or "these 32 bits are often treated as `boolx32`", so users and agents know how to operate the graph.
+- Expanded `v/a` nodes may also show front-end layout-rule lines such as `from v1 to x,y 16,16`; these are editable UI and algorithm hints rather than container-owned byte semantics.
+- The algorithm implementation is the authority that decides how to decode and consume the bytes at runtime.
+- That means the same stored bytes may be interpreted differently by different algorithm stages, as long as the consuming stage makes that rule explicit.
+- If a stage requires a specific decode rule, that requirement should be documented in the node's algorithm/front-end description and enforced by the algorithm path, not hidden inside the container's base storage identity.
 
 ## Launch behavior
 

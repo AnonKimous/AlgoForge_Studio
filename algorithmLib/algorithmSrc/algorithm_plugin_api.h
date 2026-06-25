@@ -1,4 +1,4 @@
 #pragma once
 
-#include "agent/agent_abi.h"
-#include "algorithm_management/algorithm_manager.h"
+#include "algorithm_support/algorithm_package_location.h"
+#include "algorithm_support/algorithm_protocol.h"

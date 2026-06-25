@@ -5,8 +5,8 @@
 namespace v2a0_pipeline_square_vertex_demo {
 
 inline bool CreateBundle(
-  const algorithm_library_plugin::AlgorithmPluginRequest* request,
-  algorithm_library_plugin::AlgorithmPluginBundle* out_bundle) {
+  const algorithmManager::support::AlgorithmPluginRequest* request,
+  algorithmManager::support::AlgorithmPluginBundle* out_bundle) {
   if (!request || !out_bundle) {
     return false;
   }
@@ -14,6 +14,36 @@ inline bool CreateBundle(
   out_bundle->Clear();
   out_bundle->cpu_symbol = false;
   out_bundle->gpu_symbol = true;
+<<<<<<< HEAD
+=======
+  out_bundle->reflector = true;
+  out_bundle->intervention = true;
+  return true;
+}
+
+inline bool CreateRuntimeReflector(
+  const algorithmManager::support::AlgorithmPluginRequest* request,
+  algorithm::AlgorithmReflector* out_reflector) {
+  if (!request || !out_reflector) {
+    return false;
+  }
+
+  std::shared_ptr<algorithm::AlgorithmReflector> runtime_reflector{};
+  algorithm::AlgorithmPackageLocation package_location{};
+  if (!algorithm::TryResolveAlgorithmPackageLocationForPluginCompile(
+        request->algorithm_name ? request->algorithm_name : "",
+        &package_location,
+        nullptr)) {
+    return false;
+  }
+  if (!algorithmManager::support::LoadAlgorithmPackageReflectorFromLocation(
+        package_location,
+        &runtime_reflector,
+        nullptr) || !runtime_reflector) {
+    return false;
+  }
+  *out_reflector = *runtime_reflector;
+>>>>>>> 0e5193b (preciser control of digital)
   return true;
 }
 

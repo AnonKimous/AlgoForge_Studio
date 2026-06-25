@@ -803,9 +803,9 @@ void _StepCollisionDemo(
   }
 }
 
-class CollisionDemoMainThreadExecutor final : public agent::IAlgorithmtemporaryTestMainThreadExecutor {
+class CollisionDemoCpuExecutor final : public agent::IAlgorithmCpuExecutor {
  public:
-  bool temporaryTestExecuteOnMainThread(
+  bool ExecuteCpuAlgorithm(
     const agent::AgentTickContext& context,
     const algorithm::AlgorithmProfile& algorithm_profile,
     const AgentToAlgorithmSignal& agent_to_algorithm_signal,
@@ -868,55 +868,15 @@ class CollisionDemoMainThreadExecutor final : public agent::IAlgorithmtemporaryT
   }
 };
 
-class DelegatingIntervention final : public agent::IAlgorithmIntervention {
- public:
-  explicit DelegatingIntervention(std::shared_ptr<agent::IAlgorithmIntervention> inner)
-    : inner_(std::move(inner)) {}
-
-  bool SupportsIntervention() const override {
-    return inner_ && inner_->SupportsIntervention();
-  }
-
-  void FillAgentToAlgorithmSignal(
-    const agent::AgentTickContext& context,
-    AgentToAlgorithmSignal* out_signal) const override {
-    if (!inner_) {
-      if (out_signal) {
-        *out_signal = {};
-      }
-      return;
-    }
-    inner_->FillAgentToAlgorithmSignal(context, out_signal);
-  }
-
-  bool GetInterventionStageSpecs(
-    std::vector<agent::AlgorithmInterventionStageSpec>* out_stage_specs) const override {
-    if (!inner_) {
-      if (out_stage_specs) {
-        out_stage_specs->clear();
-      }
-      return false;
-    }
-    return inner_->GetInterventionStageSpecs(out_stage_specs);
-  }
-
- private:
-  std::shared_ptr<agent::IAlgorithmIntervention> inner_{};
-};
-
-void _DestroyIntervention(agent::IAlgorithmIntervention* intervention) {
-  delete intervention;
-}
-
-void _DestroyTemporaryTestExecutor(agent::IAlgorithmtemporaryTestMainThreadExecutor* executor) {
+void _DestroyCpuExecutor(agent::IAlgorithmCpuExecutor* executor) {
   delete executor;
 }
 
 }  // namespace
 
 extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateBundle(
-  const algorithm_library_plugin::AlgorithmPluginRequest* request,
-  algorithm_library_plugin::AlgorithmPluginBundle* out_bundle) {
+  const algorithmManager::support::AlgorithmPluginRequest* request,
+  algorithmManager::support::AlgorithmPluginBundle* out_bundle) {
   if (!request || !out_bundle) {
     return false;
   }
@@ -924,7 +884,41 @@ extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateBundle(
   out_bundle->Clear();
   out_bundle->cpu_symbol = true;
   out_bundle->gpu_symbol = true;
+<<<<<<< HEAD
   out_bundle->temporary_test_executor = new CollisionDemoMainThreadExecutor();
   out_bundle->destroy_temporary_test_executor = &_DestroyTemporaryTestExecutor;
   return true;
 }
+=======
+  out_bundle->reflector = true;
+  out_bundle->intervention = true;
+  out_bundle->cpu_executor = new CollisionDemoCpuExecutor();
+  out_bundle->destroy_cpu_executor = &_DestroyCpuExecutor;
+  return true;
+}
+
+extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateRuntimeReflector(
+  const algorithmManager::support::AlgorithmPluginRequest* request,
+  algorithm::AlgorithmReflector* out_reflector) {
+  if (!request || !out_reflector) {
+    return false;
+  }
+
+  std::shared_ptr<algorithm::AlgorithmReflector> runtime_reflector{};
+  algorithm::AlgorithmPackageLocation package_location{};
+  if (!algorithm::TryResolveAlgorithmPackageLocationForPluginCompile(
+        request->algorithm_name ? request->algorithm_name : "",
+        &package_location,
+        nullptr)) {
+    return false;
+  }
+  if (!algorithmManager::support::LoadAlgorithmPackageReflectorFromLocation(
+        package_location,
+        &runtime_reflector,
+        nullptr)) {
+    return false;
+  }
+  *out_reflector = *runtime_reflector;
+  return true;
+}
+>>>>>>> 0e5193b (preciser control of digital)

@@ -82,7 +82,7 @@ class DebugToolFrontendPanel {
       std::string descriptor_name;
       std::string container_name;
       uint32_t array_index{0u};
-      float scalar_value{0.0f};
+      double scalar_value{0.0};
     };
     debug_tool::AlgorithmExecutionPreference execution_preference{debug_tool::AlgorithmExecutionPreference::Gpu};
     std::vector<debug_tool::AlgorithmCatalogEntry> algorithm_catalog_entries;

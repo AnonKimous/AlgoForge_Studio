@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -19,6 +20,14 @@ except ImportError:
 
 
 @dataclass
+class ContainerFieldItem:
+    name: str
+    kind: str = "variable"
+    bit_width: int = 32
+    rule_text: str = ""
+
+
+@dataclass
 class ContainerItem:
     name: str
     kind: str
@@ -27,6 +36,7 @@ class ContainerItem:
     value: str = ""
     values: list[str] = field(default_factory=list)
     structure: list[str] = field(default_factory=list)
+    layout_fields: list[ContainerFieldItem] = field(default_factory=list)
     view_offset: int = 0
     x: float = 0.0
     y: float = 0.0
@@ -437,6 +447,53 @@ class ProjectState:
             return "a"
         raise AssertionError(f"Unsupported container kind: {container.kind}")
 
+    @staticmethod
+    def _parse_layout_fields(raw_fields: Any, owner_name: str) -> list[ContainerFieldItem]:
+        if raw_fields is None:
+            return []
+        if not isinstance(raw_fields, list):
+            raise ValueError(f"{owner_name}.layoutFields must be a list.")
+        parsed: list[ContainerFieldItem] = []
+        for index, field_entry in enumerate(raw_fields, start=1):
+            if not isinstance(field_entry, dict):
+                raise ValueError(f"{owner_name}.layoutFields[{index}] must be an object.")
+            field_name = str(field_entry.get("name") or "").strip() or f"field_{index}"
+            field_kind = str(field_entry.get("kind") or "variable").strip().lower() or "variable"
+            if field_kind not in {"variable", "array"}:
+                raise ValueError(f"{owner_name}.layoutFields[{index}].kind must be variable or array.")
+            bit_width = int(field_entry.get("bitWidth", 32))
+            if bit_width <= 0:
+                raise ValueError(f"{owner_name}.layoutFields[{index}].bitWidth must be positive.")
+            rule_text = str(field_entry.get("ruleText") or field_entry.get("readAs") or "").strip()
+            if not rule_text:
+                raise ValueError(f"{owner_name}.layoutFields[{index}].ruleText is required.")
+            parsed.append(
+                ContainerFieldItem(
+                    name=field_name,
+                    kind=field_kind,
+                    bit_width=bit_width,
+                    rule_text=rule_text,
+                )
+            )
+        return parsed
+
+    def _layout_field_signature_from_container(self, container: ContainerItem) -> tuple[str, ...]:
+        signature: list[str] = []
+        for field_item in getattr(container, "layout_fields", []):
+            if not isinstance(field_item, ContainerFieldItem):
+                raise AssertionError(f"Container {container.name} has an invalid layout field entry.")
+            normalized_kind = str(field_item.kind or "").strip().lower()
+            if normalized_kind not in {"variable", "array"}:
+                raise AssertionError(f"Container {container.name} has unsupported layout field kind: {field_item.kind}")
+            bit_width = int(field_item.bit_width)
+            if bit_width <= 0:
+                raise AssertionError(f"Container {container.name} has a non-positive layout field width.")
+            rule_text = str(field_item.rule_text or "").strip()
+            if not rule_text:
+                raise AssertionError(f"Container {container.name} has an empty layout field rule text.")
+            signature.append(f"{normalized_kind}:{bit_width}:{rule_text}")
+        return tuple(signature)
+
     def _structure_signature_from_group(self, group: ContainerGroupItem) -> tuple[Any, ...]:
         signature: list[Any] = []
         for name in group.variables:
@@ -457,6 +514,9 @@ class ProjectState:
         return tuple(sorted(signature, key=repr))
 
     def _structure_signature_from_container(self, container: ContainerItem) -> tuple[Any, ...]:
+        layout_signature = self._layout_field_signature_from_container(container)
+        if layout_signature:
+            return (self._container_kind_code(container), layout_signature)
         normalized_structure = tuple(str(value).strip() for value in container.structure if str(value).strip())
         return (self._container_kind_code(container), normalized_structure)
 
@@ -731,6 +791,36 @@ class ProjectState:
             x += width + gap_x
             row_height = max(row_height, height)
 
+    @staticmethod
+    def _parse_decomposer_direct_script(script: str) -> tuple[str, list[str], list[int]] | None:
+        text = str(script or "").strip()
+        if not text:
+            return None
+        match = re.fullmatch(
+            r"from\s+([A-Za-z_][A-Za-z0-9_]*)\s+to\s+([A-Za-z0-9_,\s]+?)(?:\s+([0-9,\s]+))?",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if not match:
+            return None
+        source = match.group(1).strip()
+        targets = [item.strip() for item in match.group(2).split(",") if item.strip()]
+        if not source or not targets:
+            return None
+        bit_widths: list[int] = []
+        bit_text = (match.group(3) or "").strip()
+        if bit_text:
+            for token in bit_text.split(","):
+                token_text = token.strip()
+                if not token_text:
+                    continue
+                if not token_text.isdigit():
+                    return None
+                bit_widths.append(int(token_text))
+            if bit_widths and len(bit_widths) != len(targets):
+                return None
+        return source, targets, bit_widths
+
     def to_package_json(self) -> dict[str, Any]:
         self.sync_container_groups_from_geometry()
         variable_section: dict[str, Any] = {}
@@ -742,6 +832,15 @@ class ProjectState:
                 "value": container.value,
                 "values": list(container.values),
                 "structure": list(container.structure),
+                "layoutFields": [
+                    {
+                        "name": field_item.name,
+                        "kind": field_item.kind,
+                        "bitWidth": field_item.bit_width,
+                        "ruleText": field_item.rule_text,
+                    }
+                    for field_item in container.layout_fields
+                ],
                 "view_offset": container.view_offset,
                 "x": container.x,
                 "y": container.y,
@@ -758,10 +857,19 @@ class ProjectState:
 
         decomposer_description: list[dict[str, Any]] = []
         for rule in self.decomposer_rules:
+            parsed_direct_rule = None
+            if rule.map_kind != "filter" and rule.descriptor_script.strip():
+                parsed_direct_rule = self._parse_decomposer_direct_script(rule.descriptor_script)
+            from_names = [rule.source] if rule.source else []
+            to_value: Any = [rule.target] if rule.target else []
+            if parsed_direct_rule:
+                parsed_source, parsed_targets, _parsed_bit_widths = parsed_direct_rule
+                from_names = [parsed_source]
+                to_value = parsed_targets
             entry: dict[str, Any] = {
                 "name": rule.name,
-                "from": [rule.source] if rule.source else [],
-                "to": [rule.target] if rule.target else [],
+                "from": from_names,
+                "to": to_value,
                 "mapKind": rule.map_kind,
                 "x": rule.x,
                 "y": rule.y,
@@ -769,7 +877,7 @@ class ProjectState:
                 "height": rule.height,
                 "expand": rule.expand,
             }
-            if rule.map_kind == "filter":
+            if rule.descriptor_script:
                 entry["script"] = rule.descriptor_script
             if rule.resource_mode != "default" or rule.resource_script:
                 entry["resourceMode"] = rule.resource_mode
@@ -967,6 +1075,7 @@ class ProjectState:
                         value=str(entry.get("value") or ""),
                         values=[str(value) for value in values],
                         structure=[str(value) for value in structure],
+                        layout_fields=project._parse_layout_fields(entry.get("layoutFields", []), f"container.variable[{name}]"),
                         view_offset=int(entry.get("view_offset", 0)),
                         x=float(entry.get("x", 0.0)),
                         y=float(entry.get("y", 0.0)),
@@ -999,6 +1108,7 @@ class ProjectState:
                         value=str(entry.get("value") or ""),
                         values=[str(value) for value in values],
                         structure=[str(value) for value in structure],
+                        layout_fields=project._parse_layout_fields(entry.get("layoutFields", []), f"container.variableArray[{name}]"),
                         view_offset=int(entry.get("view_offset", 0)),
                         x=float(entry.get("x", 0.0)),
                         y=float(entry.get("y", 0.0)),

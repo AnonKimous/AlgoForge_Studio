@@ -45,7 +45,7 @@ struct AlgorithmResourceBinding {
 
 struct AlgorithmDescriptorValue {
   std::string descriptor_name;
-  float scalar_value{0.0f};
+  double scalar_value{0.0};
 };
 
 struct AlgorithmPipelineStageSubmission {
@@ -296,7 +296,7 @@ struct AgentTickResult {
 };
 
 class IAlgorithmPackageSupport;
-class IAlgorithmtemporaryTestMainThreadExecutor;
+class IAlgorithmCpuExecutor;
 class IAlgorithmIntervention;
 class AlgorithmObject;
 
@@ -343,7 +343,7 @@ class AlgorithmObject {
   AlgorithmMountMode mount_mode{AlgorithmMountMode::Direct};
   AlgorithmExecutionPreference execution_preference{AlgorithmExecutionPreference::Gpu};
   AlgorithmTickLifetime tick_lifetime{AlgorithmTickLifetime::Continuous};
-  std::shared_ptr<IAlgorithmtemporaryTestMainThreadExecutor> temporaryTest_main_thread_executor;
+  std::shared_ptr<IAlgorithmCpuExecutor> cpu_executor;
   std::shared_ptr<IAlgorithmIntervention> intervention;
 
  private:
@@ -403,11 +403,11 @@ class IComplexAlgorithmPackageSupport : public IAlgorithmPackageSupport {
   virtual void CollectDebugState(AlgorithmPackageDebugState* debug_state) const = 0;
 };
 
-class IAlgorithmtemporaryTestMainThreadExecutor {
+class IAlgorithmCpuExecutor {
  public:
-  virtual ~IAlgorithmtemporaryTestMainThreadExecutor() = default;
+  virtual ~IAlgorithmCpuExecutor() = default;
 
-  virtual bool temporaryTestExecuteOnMainThread(
+  virtual bool ExecuteCpuAlgorithm(
     const AgentTickContext& context,
     const algorithm::AlgorithmProfile& algorithm_profile,
     const AgentToAlgorithmSignal& agent_to_algorithm_signal,
@@ -459,41 +459,88 @@ class IAlgorithmIntervention {
 
 }  // namespace algorithm_management
 
+namespace algorithmManager {
+using ::algorithm_management::AgentAlgorithmRuntimeState;
+using ::algorithm_management::AgentInitConfig;
+using ::algorithm_management::AgentTickContext;
+using ::algorithm_management::AgentTickResult;
+using ::algorithm_management::AlgorithmAssemblySlot;
+using ::algorithm_management::AlgorithmAssemblyState;
+using ::algorithm_management::AlgorithmDescriptorValue;
+using ::algorithm_management::AlgorithmExecutionPhase;
+using ::algorithm_management::AlgorithmExecutionPreference;
+using ::algorithm_management::AlgorithmPipelineSubmissionMode;
+using ::algorithm_management::AlgorithmPipelineTopology;
+using ::algorithm_management::AlgorithmPipelineSyncMode;
+using ::algorithm_management::CpuPipelineInterStageBufferRuntimeState;
+using ::algorithm_management::CpuPipelineRegistration;
+using ::algorithm_management::CpuPipelineRuntimeState;
+using ::algorithm_management::AlgorithmJobPriority;
+using ::algorithm_management::AlgorithmInterventionContainerBinding;
+using ::algorithm_management::AlgorithmInterventionPackageDebugState;
+using ::algorithm_management::AlgorithmInterventionShaderSpec;
+using ::algorithm_management::AlgorithmInterventionStageKind;
+using ::algorithm_management::AlgorithmInterventionStageSpec;
+using ::algorithm_management::AlgorithmMountMode;
+using ::algorithm_management::AlgorithmPipelineStageSubmission;
+using ::algorithm_management::AlgorithmPipelineStageRuntimeStat;
+using ::algorithm_management::AlgorithmObject;
+using ::algorithm_management::AlgorithmPackageDebugState;
+using ::algorithm_management::PipelineStageBridgeDebugBinding;
+using ::algorithm_management::PipelineStageBridgeDebugSet;
+using ::algorithm_management::AlgorithmReflectionSnapshot;
+using ::algorithm_management::AlgorithmReflectionValue;
+using ::algorithm_management::AlgorithmTickLifetime;
+using ::algorithm_management::AlgorithmRequestedDescriptorBindings;
+using ::algorithm_management::AlgorithmRequestedResources;
+using ::algorithm_management::AlgorithmResourceBinding;
+using ::algorithm_management::IAlgorithmIntervention;
+using ::algorithm_management::IAlgorithmPackageSupport;
+using ::algorithm_management::IAlgorithmCpuExecutor;
+using ::algorithm_management::IComplexAlgorithmPackageSupport;
+using ::algorithm_management::ISimpleAlgorithmPackageSupport;
+namespace support {}
+namespace scheduler {}
+}  // namespace algorithmManager
+
 namespace agent {
-using algorithm_management::AgentAlgorithmRuntimeState;
-using algorithm_management::AgentInitConfig;
-using algorithm_management::AgentTickContext;
-using algorithm_management::AgentTickResult;
-using algorithm_management::AlgorithmAssemblySlot;
-using algorithm_management::AlgorithmAssemblyState;
-using algorithm_management::AlgorithmDescriptorValue;
-using algorithm_management::AlgorithmExecutionPhase;
-using algorithm_management::AlgorithmExecutionPreference;
-using algorithm_management::AlgorithmPipelineSubmissionMode;
-using algorithm_management::AlgorithmPipelineTopology;
-using algorithm_management::AlgorithmPipelineSyncMode;
-using algorithm_management::AlgorithmJobPriority;
-using algorithm_management::AlgorithmInterventionContainerBinding;
-using algorithm_management::AlgorithmInterventionPackageDebugState;
-using algorithm_management::AlgorithmInterventionShaderSpec;
-using algorithm_management::AlgorithmInterventionStageKind;
-using algorithm_management::AlgorithmInterventionStageSpec;
-using algorithm_management::AlgorithmMountMode;
-using algorithm_management::AlgorithmPipelineStageSubmission;
-using algorithm_management::AlgorithmPipelineStageRuntimeStat;
-using algorithm_management::AlgorithmObject;
-using algorithm_management::AlgorithmPackageDebugState;
-using algorithm_management::PipelineStageBridgeDebugBinding;
-using algorithm_management::PipelineStageBridgeDebugSet;
-using algorithm_management::AlgorithmReflectionSnapshot;
-using algorithm_management::AlgorithmReflectionValue;
-using algorithm_management::AlgorithmTickLifetime;
-using algorithm_management::AlgorithmRequestedDescriptorBindings;
-using algorithm_management::AlgorithmRequestedResources;
-using algorithm_management::AlgorithmResourceBinding;
-using algorithm_management::IAlgorithmIntervention;
-using algorithm_management::IAlgorithmPackageSupport;
-using algorithm_management::IAlgorithmtemporaryTestMainThreadExecutor;
-using algorithm_management::IComplexAlgorithmPackageSupport;
-using algorithm_management::ISimpleAlgorithmPackageSupport;
+using algorithmManager::AgentAlgorithmRuntimeState;
+using algorithmManager::AgentInitConfig;
+using algorithmManager::AgentTickContext;
+using algorithmManager::AgentTickResult;
+using algorithmManager::AlgorithmAssemblySlot;
+using algorithmManager::AlgorithmAssemblyState;
+using algorithmManager::AlgorithmDescriptorValue;
+using algorithmManager::AlgorithmExecutionPhase;
+using algorithmManager::AlgorithmExecutionPreference;
+using algorithmManager::AlgorithmPipelineSubmissionMode;
+using algorithmManager::AlgorithmPipelineTopology;
+using algorithmManager::AlgorithmPipelineSyncMode;
+using algorithmManager::CpuPipelineInterStageBufferRuntimeState;
+using algorithmManager::CpuPipelineRegistration;
+using algorithmManager::CpuPipelineRuntimeState;
+using algorithmManager::AlgorithmJobPriority;
+using algorithmManager::AlgorithmInterventionContainerBinding;
+using algorithmManager::AlgorithmInterventionPackageDebugState;
+using algorithmManager::AlgorithmInterventionShaderSpec;
+using algorithmManager::AlgorithmInterventionStageKind;
+using algorithmManager::AlgorithmInterventionStageSpec;
+using algorithmManager::AlgorithmMountMode;
+using algorithmManager::AlgorithmPipelineStageSubmission;
+using algorithmManager::AlgorithmPipelineStageRuntimeStat;
+using algorithmManager::AlgorithmObject;
+using algorithmManager::AlgorithmPackageDebugState;
+using algorithmManager::PipelineStageBridgeDebugBinding;
+using algorithmManager::PipelineStageBridgeDebugSet;
+using algorithmManager::AlgorithmReflectionSnapshot;
+using algorithmManager::AlgorithmReflectionValue;
+using algorithmManager::AlgorithmTickLifetime;
+using algorithmManager::AlgorithmRequestedDescriptorBindings;
+using algorithmManager::AlgorithmRequestedResources;
+using algorithmManager::AlgorithmResourceBinding;
+using algorithmManager::IAlgorithmIntervention;
+using algorithmManager::IAlgorithmPackageSupport;
+using algorithmManager::IAlgorithmCpuExecutor;
+using algorithmManager::IComplexAlgorithmPackageSupport;
+using algorithmManager::ISimpleAlgorithmPackageSupport;
 }  // namespace agent

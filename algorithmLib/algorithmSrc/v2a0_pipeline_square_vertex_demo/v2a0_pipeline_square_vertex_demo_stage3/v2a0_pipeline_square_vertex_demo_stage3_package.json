@@ -1,8 +1,8 @@
 {
   "algorithm_name": "v2a0_pipeline_square_vertex_demo_stage3",
   "globalCfg": {
-    "solvePrecision": "fp32",
-    "defaultPrecision": "fp32"
+    "solvePrecision": "32",
+    "defaultPrecision": "32"
   },
   "container": {
     "variable": 3,

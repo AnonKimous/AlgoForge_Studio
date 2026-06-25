@@ -92,6 +92,9 @@ Use one unified package file per algorithm bundle:
 - The file contains `container`, `decomposer`, `reflector`, and `intervention` sections.
 - The same package file can be used by the host, SDK, and debug tool.
 - GPU tick shaders receive viewport width/height push constants and interpret algorithm-space positions as lower-left origin pixel coordinates before converting to clip space.
+- `container` only describes storage layout such as count, shape, and scalar bit width. It does not declare whether payload bytes are `int`, `float`, or packed bits.
+- Descriptor encoding belongs to `decomposer.description`, and reflection decoding belongs to `reflector`.
+- If a `decomposer.description` item omits `codec`, runtime currently falls back to `float` for compatibility. Do not teach that `32` or `64` alone implies a semantic scalar type.
 
 Use `cjson` style comments in the package file examples:
 
@@ -105,8 +108,8 @@ Use `cjson` style comments in the package file examples:
 {
   "algorithm_name": "temporary_test_line_motion", // bundle name
   "globalCfg": {
-    "solvePrecision": "fp32", // global precision for the package
-    "defaultPrecision": "fp32"
+    "solvePrecision": "32", // global scalar bit width for the package
+    "defaultPrecision": "32"
   },
   "container": {
     "variable": 3, // create v1..v3
@@ -125,6 +128,7 @@ Use `cjson` style comments in the package file examples:
         "name": "point_position",
         "from": ["start_x", "start_y", "start_z"],
         "to": ["v1", "v2", "v3"]
+        // optional: add "codec": "float" / "int" / "uint" when the boundary must be explicit
       }
     ]
   },

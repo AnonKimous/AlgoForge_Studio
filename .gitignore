@@ -5,7 +5,9 @@ build_algorithms_v6a6/
 out/
 bin/
 lib/
+.tmp/
 /algorithmLib/.build_*/
+/algorithmLib/.rebuild_stash_*/
 /algorithmLib/algorithmruntimeLib*/
 /algorithmLib/**/*.lib
 /algorithmLib/**/*.dll

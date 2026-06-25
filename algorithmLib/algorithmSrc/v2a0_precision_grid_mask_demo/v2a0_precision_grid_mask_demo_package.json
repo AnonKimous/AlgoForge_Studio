@@ -1,0 +1,80 @@
+{
+  "algorithm_name": "v2a0_precision_grid_mask_demo",
+  "globalCfg": {
+    "solvePrecision": "32",
+    "defaultPrecision": "32"
+  },
+  "container": {
+    "variable": 2,
+    "variableArray": 0,
+    "aliases": [
+      "v1:packed_grid_state",
+      "v2:tick_counter"
+    ]
+  },
+  "decomposer": {
+    "res": {},
+    "description": [
+      {
+        "name": "packed_grid_state",
+        "from": ["packed_state_seed"],
+        "to": ["packed_grid_state"],
+        "codec": "uint"
+      },
+      {
+        "name": "tick_counter",
+        "from": ["tick_count_seed"],
+        "to": ["tick_counter"],
+        "codec": "uint"
+      }
+    ]
+  },
+  "reflector": {
+    "name": "packed_grid_state",
+    "functionName": "direct",
+    "items": [
+      {
+        "name": "packed_grid_state",
+        "from": ["packed_grid_state"],
+        "to": ["packed_grid_state"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "tick_counter",
+        "from": ["tick_counter"],
+        "to": ["tick_counter"],
+        "reflectFun": "direct"
+      }
+    ]
+  },
+  "intervention": {
+    "stages": {
+      "resultRender": {
+        "stage_name": "resultRender",
+        "stage_kind": "resultRender",
+        "used_algorithm_containers": {
+          "arrays": [
+            {
+              "name": "packed_grid_state",
+              "kind": "variable",
+              "tuple_width": 1,
+              "required": true
+            },
+            {
+              "name": "tick_counter",
+              "kind": "variable",
+              "tuple_width": 1,
+              "required": true
+            }
+          ],
+          "variables": []
+        },
+        "shader": {
+          "pipeline": "graphics",
+          "vertex": "v2a0_precision_grid_mask_demo_result_render.vert",
+          "fragment": "v2a0_precision_grid_mask_demo_result_render.frag"
+        }
+      }
+    }
+  }
+}

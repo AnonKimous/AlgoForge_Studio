@@ -16,9 +16,11 @@ from urllib.request import Request, urlopen
 
 try:
     from .backend import ProjectState
+    from .interface4agents import build_interface4agents_prompt
     from .shared import PROJECT_ROOT, _resolve_codex_command
 except ImportError:
     from backend import ProjectState
+    from interface4agents import build_interface4agents_prompt
     from shared import PROJECT_ROOT, _resolve_codex_command
 
 
@@ -164,7 +166,9 @@ class MockAgentClient:
 
     def _extract_visible_text(self, response: str) -> str:
         tool_pattern = re.compile(r"```algorithm-studio-tool\s*(.*?)\s*```", re.IGNORECASE | re.DOTALL)
-        stripped = tool_pattern.sub("", str(response or "")).strip()
+        command_pattern = re.compile(r"```interface4agents\s*(.*?)\s*```", re.IGNORECASE | re.DOTALL)
+        stripped = tool_pattern.sub("", str(response or ""))
+        stripped = command_pattern.sub("", stripped).strip()
         if stripped.startswith("{") and stripped.endswith("}"):
             try:
                 payload = json.loads(stripped)
@@ -211,7 +215,7 @@ class MockAgentClient:
         lowered = normalized_prompt.lower()
         if "return plain text only." in lowered:
             return False
-        if "do not emit algorithm-studio-tool blocks." in lowered:
+        if "do not emit algorithm-studio-tool blocks." in lowered or "use interface4agents only." in lowered:
             return False
         if "只返回代码" in normalized_prompt or "直接返回代码" in normalized_prompt:
             return False
@@ -283,6 +287,21 @@ class MockAgentClient:
         )
 
     def _document_tool_instructions(self) -> str:
+        return "\n".join(
+            [
+                build_interface4agents_prompt(),
+                "",
+                "Additional agent rules:",
+                "- Use interface4agents only. algorithm-studio-tool and update_document are disabled.",
+                "- Apply the smallest possible change that satisfies the request.",
+                "- Do not invent extra nodes, stages, functions, reflectors, resource nodes, or scaffolding unless the user explicitly asks for them.",
+                "- If the prompt includes a recent operation stack, read it before choosing the next teaching step.",
+                "- If Read Stack is off and the task depends on stack-driven teaching, ask the user to enable it instead of guessing progress.",
+                "- Expanded v/a nodes may contain internal layout fields. Use field commands when the user needs the container refined into smaller readable parts.",
+                "- Layout field rule text is a free-form UI or algorithm contract such as `from v1 to x,y 16,16`; do not rewrite it into fixed float/int semantics unless the user explicitly asks for that interpretation.",
+                "- Keep tutorial wording and generated explanations in English unless the user explicitly asks for another language.",
+            ]
+        ).strip()
         return "\n".join(
             [
                 "Tools available:",
@@ -651,7 +670,7 @@ class MockAgentClient:
             [
                 "Phase: planning only.",
                 "Do not edit the scene yet.",
-                "Do not emit any algorithm-studio-tool block.",
+                "Do not emit any interface4agents block yet.",
                 "Draft a short execution plan with 3 to 6 steps.",
                 "Favor the smallest valid change set and explicitly avoid unnecessary nodes or scaffolding.",
                 "End with one short line named `Execution focus:` that states what should be done first.",
@@ -667,9 +686,11 @@ class MockAgentClient:
             [
                 "Phase: execution.",
                 "Follow the plan below, but only make the smallest coherent batch of edits needed for the request.",
-                "Prefer 1 to 4 precise tool calls over broad rewrites.",
-                "If descriptor bindings or tightly coupled package structure make scattered tool calls risky, use one `update_document` call.",
-                "After any tool call blocks, add a short plain-text note about what changed and what remains.",
+                "Use interface4agents only.",
+                "Prefer 1 to 4 precise commands over broad rewrites.",
+                "If the prompt includes an operation stack, use it as the latest source of truth for progress.",
+                "For step-by-step teaching, emit exactly one highlight before the next instruction when supported.",
+                "After any command block, add a short plain-text note about what changed and what remains.",
                 "",
                 "Approved plan:",
                 compact_plan or "(none)",

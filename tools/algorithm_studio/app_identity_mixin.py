@@ -3,10 +3,10 @@ from __future__ import annotations
 import re
 
 try:
-    from .backend import ContainerGroupItem, ProjectState
+    from .backend import ContainerGroupItem, ContainerItem, ProjectState
     from .shared import NODE_HEIGHT, NODE_WIDTH, _load_algorithm_studio_settings, _save_algorithm_studio_settings
 except ImportError:
-    from backend import ContainerGroupItem, ProjectState
+    from backend import ContainerGroupItem, ContainerItem, ProjectState
     from shared import NODE_HEIGHT, NODE_WIDTH, _load_algorithm_studio_settings, _save_algorithm_studio_settings
 
 
@@ -138,9 +138,29 @@ class AlgorithmStudioIdentityMixin:
         return text
 
     def _algorithm_count_prefix(self) -> str:
-        variable_count = sum(1 for item in self.project.containers if item.kind == "variable" and not self._is_resource_container_name(item.name))
-        array_count = sum(1 for item in self.project.containers if item.kind == "array" and not self._is_resource_container_name(item.name))
+        variable_count, array_count = self._algorithm_shareptr_counts(self.project)
         return f"v{variable_count}a{array_count}"
+
+    def _container_shareptr_key(self, container: ContainerItem) -> str:
+        chain_id = str(container.reuse_chain_id or "").strip()
+        if chain_id:
+            return chain_id
+        return f"standalone:{container.name}"
+
+    def _algorithm_shareptr_counts(self, project: ProjectState) -> tuple[int, int]:
+        variable_keys: set[str] = set()
+        array_keys: set[str] = set()
+        for item in project.containers:
+            if self._is_resource_container_name(item.name):
+                continue
+            key = self._container_shareptr_key(item)
+            if item.kind == "variable":
+                variable_keys.add(key)
+            elif item.kind == "array":
+                array_keys.add(key)
+            else:
+                raise AssertionError(f"Unsupported container kind: {item.kind}")
+        return len(variable_keys), len(array_keys)
 
     def _compose_algorithm_name(self, suffix: str) -> str:
         normalized_suffix = self._algorithm_suffix_from_full_name(suffix).strip()
@@ -152,8 +172,7 @@ class AlgorithmStudioIdentityMixin:
         suffix = self._algorithm_suffix_from_full_name(project.algorithm_name or project.package_name)
         if not suffix:
             suffix = "new_algorithm"
-        variable_count = sum(1 for item in project.containers if item.kind == "variable" and not self._is_resource_container_name(item.name))
-        array_count = sum(1 for item in project.containers if item.kind == "array" and not self._is_resource_container_name(item.name))
+        variable_count, array_count = self._algorithm_shareptr_counts(project)
         prefix = f"v{variable_count}a{array_count}"
         self.algorithm_name_prefix = prefix
         full_name = f"{prefix}{suffix}"

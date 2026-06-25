@@ -299,7 +299,7 @@ target_compile_definitions(common_data PRIVATE PROJECT_ROOT_DIR="${CMAKE_CURRENT
 
 add_library(algorithm_management STATIC
   src/algorithm_support/algorithm_package_location.cpp
-  src/algorithm_support/algorithm_intervention.cpp
+  src/algorithm_support/algorithm_runtime_bridge.cpp
   src/algorithm_support/algorithm_package_decomposer.cpp
   src/algorithm_support/algorithm_package_loader.cpp
   ${CJSON_SOURCE_DIR}/cJSON.c

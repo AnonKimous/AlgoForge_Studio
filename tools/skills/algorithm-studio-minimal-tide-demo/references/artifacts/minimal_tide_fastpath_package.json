@@ -1,0 +1,127 @@
+{
+  "algorithm_name": "minimal_tide_fastpath",
+  "package_name": "minimal_tide_fastpath",
+  "cpu_available": true,
+  "gpu_available": true,
+  "container": {
+    "variable": {
+      "v1": {
+        "count": 1,
+        "stride": 4,
+        "value": "",
+        "values": [],
+        "structure": [],
+        "layoutFields": [],
+        "view_offset": 0,
+        "x": 120.0,
+        "y": 120.0,
+        "width": 360.0,
+        "height": 200.0,
+        "expand": true,
+        "reuseChainId": "",
+        "reuseChainIndex": 0
+      },
+      "v2": {
+        "count": 1,
+        "stride": 4,
+        "value": "",
+        "values": [],
+        "structure": [],
+        "layoutFields": [],
+        "view_offset": 0,
+        "x": 560.0,
+        "y": 120.0,
+        "width": 360.0,
+        "height": 200.0,
+        "expand": true,
+        "reuseChainId": "",
+        "reuseChainIndex": 0
+      }
+    },
+    "variableArray": {}
+  },
+  "containerElement": {
+    "items": []
+  },
+  "decomposer": {
+    "res": {},
+    "description": []
+  },
+  "reflector": {
+    "name": "minimal_tide_fastpath_reflector",
+    "functionName": "direct",
+    "items": []
+  },
+  "res": {
+    "items": []
+  },
+  "function": {
+    "items": [
+      {
+        "name": "fun",
+        "script": "Read v1 as the current wave height input.\nWrite v2 as sin(v1) scaled to a visible tide value.\nKeep the logic minimal and continuous.",
+        "script_language": "pseudocode",
+        "input_name": "v1",
+        "output_name": "v2",
+        "expected_input": "One scalar wave-height input.",
+        "expected_output": "One scalar tide result output.",
+        "x": 340.0,
+        "y": 340.0,
+        "width": 460.0,
+        "height": 240.0,
+        "expand": true
+      },
+      {
+        "name": "fun_render",
+        "script": "Use v2 as the tide height.\nFill the area below the tide line with blue.\nLeave the area above it clear.\nThe tide line should move up and down with the sine-wave result.",
+        "script_language": "glsl",
+        "input_name": "v2",
+        "output_name": "render",
+        "expected_input": "The computed tide height in v2.",
+        "expected_output": "A preview fill that follows the tide line.",
+        "x": 360.0,
+        "y": 340.0,
+        "width": 460.0,
+        "height": 260.0,
+        "expand": true
+      }
+    ]
+  },
+  "functionText": {
+    "items": []
+  },
+  "intervention": {
+    "stages": {
+      "resultRender": {
+        "stage_name": "resultRender",
+        "stage_kind": "resultRender",
+        "functions": [
+          "fun_render"
+        ],
+        "x": 120.0,
+        "y": 140.0,
+        "width": 420.0,
+        "height": 220.0,
+        "expand": true,
+        "used_algorithm_containers": {
+          "variables": [
+            {
+              "name": "v2",
+              "kind": "variable",
+              "tuple_width": 1,
+              "required": true
+            }
+          ],
+          "arrays": []
+        },
+        "shader": {
+          "pipeline": "graphics",
+          "vertex": "minimal_tide_fastpath_result_render.vert",
+          "fragment": "minimal_tide_fastpath_result_render.frag"
+        }
+      }
+    }
+  },
+  "ui": {},
+  "notes": {}
+}

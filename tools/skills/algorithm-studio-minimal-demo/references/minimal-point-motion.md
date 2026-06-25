@@ -4,7 +4,7 @@ Use this reference when the user wants the smallest possible point-motion demo i
 
 ## Target Shape
 
-- `algorithm_name`: keep equal to `package_name`
+- keep `algorithm_name` equal to `package_name`
 - one descriptor input: `phase01`
 - one variable container: `v1`
 - one array container: `a1`
@@ -45,8 +45,29 @@ z = 0
 - `a1` stores one xyz point
 - `afterTick` transforms `v1 -> a1`
 - `resultRender` displays `a1`
-- If a readable alias is shown in the tool, keep it tool-side only and still write `v1` / `a1` into runtime-facing package fields.
+- if a readable alias is shown in the tool, keep it tool-side only and still explain the runtime-facing slots as `v1` / `a1`
+- `v1` and `a1` only describe storage shape and width
+- do not explain them as owning a fixed scalar type unless the current algorithm explicitly adds that interpretation
+
+## Optional Internal Layout Teaching
+
+If the user wants the point container refined into smaller readable parts, expand `a1` and add layout fields.
+
+Example commands:
+
+```interface4agents
+field add a1 variable x 32 "from a1 to x 32"
+field add a1 variable y 32 "from a1 to y 32"
+field add a1 variable z 32 "from a1 to z 32"
+```
+
+Important:
+
+- these field rules are the current algorithm's read contract
+- they are not a universal statement that the container itself is permanently `float32`
 
 ## Preferred Authoring Choice
 
-If descriptor binding must be represented and the current UI tools do not express it cleanly, prefer one coherent `update_document` result over many partial tool calls.
+- prefer direct `interface4agents` commands
+- keep the scene as small as possible
+- if the user wants a live walkthrough, emit one `highlight` before each supported step and use the operation stack when it is available

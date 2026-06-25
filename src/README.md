@@ -42,6 +42,7 @@ separates intentionally cross-layer code into `src/capabilities`.
 - For the algorithm-management layer, the only public interface header is `algorithm_management/algorithm_manager.h`.
 - The algorithm-management manager creates real runtime containers from container manifests; missing manifests should fail immediately rather than degrade later at runtime.
 - The same algorithm manifest may optionally create a reflector; reflector creation must also stay manifest-driven rather than descriptor-driven.
+- Container manifests define storage shape and scalar width, not semantic payload type. Payload interpretation belongs to package boundaries such as decomposer or reflector.
 - For the runtime-systems layer, the only public interface header is `runtime_systems/runtime_systems.h`.
 - For the agent-management layer, the only public interface header is `agent_management/agent_management.h`.
 - `debugTool` is the debug executable surface. External SDK consumers should use `sdk/sdk.h` and should not depend on the UI layer.

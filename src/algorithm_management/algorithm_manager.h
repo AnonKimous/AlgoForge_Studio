@@ -12,11 +12,8 @@
 #include <vector>
 
 #include "algorithm_support/algorithm_support.h"
+#include "algorithm_management/algorithm_scheduler_runtime_bridge.h"
 #include "common_data/kernel_cfg.h"
-
-#define RUNTIME_SYSTEMS_LAYER_PUBLIC_FACADE_INCLUDE 1
-#include "runtime_systems/runtime_systems.h"
-#undef RUNTIME_SYSTEMS_LAYER_PUBLIC_FACADE_INCLUDE
 
 namespace algorithm_management {
 
@@ -34,26 +31,6 @@ using ::algorithm_management::AlgorithmPipelineStageSubmission;
 using ::algorithm::AlgorithmStandardContainerLayout;
 using ::algorithm::FindAlgorithmContainer;
 using ::algorithm::TryResolveAlgorithmPackageLocation;
-
-void SetAlgorithmRuntimeShutdownHook();
-void ClearAlgorithmExecutionCaches();
-bool ExecuteCpuAlgorithmObject(
-  const ::agent::AlgorithmObject& object,
-  const ::agent::AgentTickContext& context,
-  const common_data::AgentToAlgorithmSignal& agent_to_algorithm_signal,
-  ::algorithm::AlgorithmContainerSet* container_set,
-  common_data::AlgorithmToAgentSignal* out_algorithm_to_agent_signal,
-  ::agent::AlgorithmPackageDebugState* out_debug_state,
-  std::string* out_error_message = nullptr);
-bool ExecuteGpuAlgorithmObject(
-  const ::agent::AlgorithmObject& object,
-  ::algorithm::AlgorithmContainerSet* container_set,
-  const ::agent::AgentTickContext& context,
-  std::string* out_error_message = nullptr);
-bool SynchronizeGpuAlgorithmObject(
-  const ::agent::AlgorithmObject& object,
-  ::algorithm::AlgorithmContainerSet* container_set,
-  std::string* out_error_message = nullptr);
 
 class AlgorithmScheduler {
  public:
@@ -1829,14 +1806,9 @@ inline bool AlgorithmScheduler::SubmitAlgorithmObject(
     return false;
   }
 
-  if (object.execution_preference == AlgorithmExecutionPreference::Gpu) {
-    if (!object.gpu_symbol) {
-      if (out_error_message) {
-        *out_error_message = "Ready GPU algorithm is missing a GPU symbol.";
-      }
-      return false;
-    }
-
+  if (object.execution_preference == AlgorithmExecutionPreference::Gpu &&
+      object.gpu_symbol &&
+      HasExecutableGpuAlgorithmStage(object)) {
     if (!ExecuteGpuAlgorithmObject(
           object,
           container_set,
@@ -1859,9 +1831,19 @@ inline bool AlgorithmScheduler::SubmitAlgorithmObject(
     return true;
   }
 
-  if (!object.cpu_symbol || !object.temporaryTest_main_thread_executor) {
+  if (object.execution_preference == AlgorithmExecutionPreference::Gpu &&
+      object.gpu_symbol &&
+      !HasExecutableGpuAlgorithmStage(object) &&
+      !object.cpu_executor) {
     if (out_error_message) {
-      *out_error_message = "Ready CPU algorithm is missing its main-thread executor.";
+      *out_error_message = "Ready GPU algorithm does not expose an executable GPU stage.";
+    }
+    return false;
+  }
+
+  if (!object.cpu_symbol || !object.cpu_executor) {
+    if (out_error_message) {
+      *out_error_message = "Ready CPU algorithm is missing its CPU executor.";
     }
     return false;
   }
@@ -3356,6 +3338,63 @@ inline bool AlgorithmScheduler::UpdatePipelineRuntime(
 }
 
 }  // namespace algorithm_management
+
+namespace algorithmManager {
+using ::algorithm::AlgorithmContainer;
+using ::algorithm::AlgorithmContainerSet;
+using ::algorithm::AlgorithmContainerManifest;
+using ::algorithm::AlgorithmContainerManifestItem;
+using ::algorithm::AlgorithmContainerStorageKind;
+using ::algorithm::AlgorithmStandardContainerLayout;
+using ::algorithm::AlgorithmProfile;
+using ::algorithm::AlgorithmReflectionBinding;
+using ::algorithm::AlgorithmReflector;
+using ::algorithm::AlgorithmReflectorManifestItem;
+using ::algorithm_support::PipelineStageBridge;
+using ::algorithm::AlgorithmRuntimeTransferBinding;
+using ::algorithm::AlgorithmRuntimeTransferEdge;
+using ::algorithm::AlgorithmRuntimeTransferMap;
+using ::algorithm::AlgorithmPackageLocation;
+using ::algorithm::FindAlgorithmContainer;
+using ::algorithm_management::CreateAlgorithmObjectFromLocation;
+using ::algorithm_management::FinalizeAlgorithmObject;
+using ::algorithm_management::PrepareAlgorithmObjectByName;
+using ::algorithm_support::PipelineStageBridgeIngress;
+using ::algorithm_support::PipelineStageBridgeEgress;
+using ::algorithm_support::PipelineStageBridgeCaptureIngressDebugSet;
+using ::algorithm_support::PipelineStageBridgeCaptureEgressDebugSet;
+using ::algorithm_support::LoadAlgorithmPackageTransferMapFromLocation;
+using ::algorithm_management::QueryAlgorithmRequestedBindings;
+using ::algorithm_management::LoadAlgorithmPackageDefaultBindings;
+using ::algorithm_management::LoadAlgorithmPackageDefaultBindingsFromLocation;
+using ::algorithm_management::SubmitAlgorithmObject;
+using ::algorithm::TryResolveAlgorithmPackageLocation;
+
+namespace support {
+using ::algorithm_management::CreateAlgorithmObjectFromLocation;
+using ::algorithm_management::FinalizeAlgorithmObject;
+using ::algorithm_management::PrepareAlgorithmObjectByName;
+using ::algorithm_support::PipelineStageBridgeIngress;
+using ::algorithm_support::PipelineStageBridgeEgress;
+using ::algorithm_support::PipelineStageBridgeCaptureIngressDebugSet;
+using ::algorithm_support::PipelineStageBridgeCaptureEgressDebugSet;
+using ::algorithm_support::LoadAlgorithmPackageTransferMapFromLocation;
+using ::algorithm_management::QueryAlgorithmRequestedBindings;
+using ::algorithm_management::LoadAlgorithmPackageDefaultBindings;
+using ::algorithm_management::LoadAlgorithmPackageDefaultBindingsFromLocation;
+using ::algorithm::TryResolveAlgorithmPackageLocation;
+}  // namespace support
+
+namespace scheduler {
+using ::algorithm_management::AlgorithmScheduler;
+using ::algorithm_management::ClearAlgorithmScheduler;
+using ::algorithm_management::EnqueueMountedPipelineStage0Submission;
+using ::algorithm_management::MountPipelineAlgorithmObjects;
+using ::algorithm_management::ReplayMountedPipelineStageBridgeDebug;
+using ::algorithm_management::SubmitAlgorithmObject;
+using ::algorithm_management::TickMountedPipeline;
+}  // namespace scheduler
+}  // namespace algorithmManager
 
 using algorithm_management::AlgorithmContainer;
 using algorithm_management::AlgorithmContainerSet;

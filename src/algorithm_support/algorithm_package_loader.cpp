@@ -1,4 +1,5 @@
 #include "algorithm_support/algorithm_protocol.h"
+#include "algorithm_support/algorithm_intervention_support_detail.h"
 #include "algorithm_support/algorithm_package_location.h"
 #include "algorithm_support/algorithm_package_paths.h"
 #include "algorithm_support/algorithm_types.h"
@@ -8,10 +9,13 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <memory>
+#include <mutex>
+#include <string_view>
 #include <system_error>
 #include <unordered_map>
 #include <unordered_set>
@@ -31,6 +35,45 @@ namespace {
 
 namespace fs = std::filesystem;
 
+struct AlgorithmObjectMountMetadataCacheEntry {
+  std::shared_ptr<algorithm::AlgorithmContainerSet> container_template{};
+  algorithmManager::AlgorithmTickLifetime tick_lifetime{algorithmManager::AlgorithmTickLifetime::Continuous};
+  std::shared_ptr<algorithm::AlgorithmRuntimeTransferMap> runtime_transfer_map{};
+  bool has_runtime_transfer_map{false};
+  std::vector<std::string> pipeline_external_write_reset_container_names{};
+  bool valid{false};
+};
+
+bool _LoadContainerSetFromPackageJson(
+  const algorithm::AlgorithmPackageLocation& package_location,
+  std::shared_ptr<algorithm::AlgorithmContainerSet>* out_container_set,
+  std::string* out_error_message);
+
+bool _ResolveSingleRuntimeContainerReferenceName(
+  const algorithm::AlgorithmContainerSet& container_set,
+  const std::string& raw_name,
+  const std::string& field_name,
+  const std::string& package_path,
+  std::string* out_container_name,
+  std::string* out_error_message);
+
+bool _LoadPackageRuntimeLifetime(
+  const algorithm::AlgorithmPackageLocation& package_location,
+  algorithmManager::AlgorithmTickLifetime* out_tick_lifetime,
+  std::string* out_error_message);
+
+bool _LoadPackageRuntimePipelineExternalWriteResetContainers(
+  const algorithm::AlgorithmPackageLocation& package_location,
+  const algorithm::AlgorithmContainerSet& container_set,
+  std::vector<std::string>* out_container_names,
+  std::string* out_error_message);
+
+bool _LoadPackageRuntimeTransferMap(
+  const algorithm::AlgorithmPackageLocation& package_location,
+  algorithm::AlgorithmRuntimeTransferMap* out_transfer_map,
+  bool* out_has_transfer_map,
+  std::string* out_error_message);
+
 bool _ShouldEmitPipelineRunnerProbe(const std::string& algorithm_name) {
   return algorithm_name.find("v2a0_pipeline_square_vertex_demo") != std::string::npos;
 }
@@ -45,9 +88,210 @@ void _AppendPipelineRunnerProbe(const std::string& file_name, const std::string&
   }
 }
 
+std::string _BuildAlgorithmObjectMountMetadataCacheKey(
+  const algorithm::AlgorithmPackageLocation& package_location) {
+  return package_location.manifest_path.generic_string() + "|" +
+    package_location.plugin_module_path.generic_string() + "|" +
+    package_location.package_file_path.generic_string();
+}
+
+bool _BuildAlgorithmObjectMountMetadata(
+  const algorithm::AlgorithmPackageLocation& package_location,
+  AlgorithmObjectMountMetadataCacheEntry* out_entry,
+  std::string* out_error_message) {
+  if (!out_entry) {
+    if (out_error_message) {
+      *out_error_message = "AlgorithmObject mount metadata output pointer is null.";
+    }
+    return false;
+  }
+
+  *out_entry = {};
+  if (!_LoadContainerSetFromPackageJson(package_location, &out_entry->container_template, out_error_message)) {
+    return false;
+  }
+  if (!out_entry->container_template) {
+    if (out_error_message) {
+      *out_error_message = "AlgorithmObject mount metadata container template is unavailable.";
+    }
+    return false;
+  }
+  if (!_LoadPackageRuntimeLifetime(package_location, &out_entry->tick_lifetime, out_error_message)) {
+    return false;
+  }
+  algorithm::AlgorithmRuntimeTransferMap transfer_map{};
+  if (!_LoadPackageRuntimeTransferMap(
+        package_location,
+        &transfer_map,
+        &out_entry->has_runtime_transfer_map,
+        out_error_message)) {
+    return false;
+  }
+  if (out_entry->has_runtime_transfer_map) {
+    out_entry->runtime_transfer_map =
+      std::make_shared<algorithm::AlgorithmRuntimeTransferMap>(std::move(transfer_map));
+  }
+  if (!_LoadPackageRuntimePipelineExternalWriteResetContainers(
+        package_location,
+        *out_entry->container_template,
+        &out_entry->pipeline_external_write_reset_container_names,
+        out_error_message)) {
+    return false;
+  }
+  out_entry->valid = true;
+  if (out_error_message) {
+    out_error_message->clear();
+  }
+  return true;
+}
+
+bool _LoadAlgorithmObjectMountMetadata(
+  const algorithm::AlgorithmPackageLocation& package_location,
+  AlgorithmObjectMountMetadataCacheEntry* out_entry,
+  std::string* out_error_message) {
+  if (!out_entry) {
+    if (out_error_message) {
+      *out_error_message = "AlgorithmObject mount metadata output pointer is null.";
+    }
+    return false;
+  }
+
+  static std::mutex cache_mutex;
+  static std::unordered_map<std::string, AlgorithmObjectMountMetadataCacheEntry> cache;
+  const std::string cache_key = _BuildAlgorithmObjectMountMetadataCacheKey(package_location);
+
+  {
+    std::lock_guard<std::mutex> lock(cache_mutex);
+    const auto found = cache.find(cache_key);
+    if (found != cache.end() && found->second.valid) {
+      *out_entry = found->second;
+      if (out_error_message) {
+        out_error_message->clear();
+      }
+      return true;
+    }
+  }
+
+  AlgorithmObjectMountMetadataCacheEntry built_entry{};
+  if (!_BuildAlgorithmObjectMountMetadata(package_location, &built_entry, out_error_message)) {
+    return false;
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(cache_mutex);
+    cache[cache_key] = built_entry;
+  }
+  *out_entry = std::move(built_entry);
+  if (out_error_message) {
+    out_error_message->clear();
+  }
+  return true;
+}
+
+bool _TryParseScalarPrecisionBits(std::string_view text, uint32_t* out_bits) {
+  if (!out_bits) {
+    return false;
+  }
+  if (text == "8" || text == "i8" || text == "u8") {
+    *out_bits = 8u;
+    return true;
+  }
+  if (text == "16" || text == "i16" || text == "u16" || text == "fp16" || text == "float16") {
+    *out_bits = 16u;
+    return true;
+  }
+  if (text == "32" || text == "i32" || text == "u32" || text == "fp32" || text == "float32" || text == "float") {
+    *out_bits = 32u;
+    return true;
+  }
+  if (text == "64" || text == "i64" || text == "u64" || text == "fp64" || text == "float64" || text == "double") {
+    *out_bits = 64u;
+    return true;
+  }
+  return false;
+}
+
+bool _ParseScalarPrecisionBits(
+  std::string_view text,
+  const std::string& package_path,
+  uint32_t* out_bits,
+  std::string* out_error_message) {
+  if (_TryParseScalarPrecisionBits(text, out_bits)) {
+    return true;
+  }
+  if (out_error_message) {
+    *out_error_message =
+      "Unsupported precision '" + std::string(text) + "' in package JSON: " + package_path;
+  }
+  return false;
+}
+
+bool _ResolveContainerScalarBits(
+  const cJSON* root,
+  const cJSON* container_item,
+  const std::string& package_path,
+  uint32_t* out_bits,
+  std::string* out_error_message) {
+  if (!out_bits) {
+    if (out_error_message) {
+      *out_error_message = "Container scalar precision output pointer is null.";
+    }
+    return false;
+  }
+
+  uint32_t default_bits = 32u;
+  const cJSON* global_cfg = cJSON_GetObjectItemCaseSensitive(root, "globalCfg");
+  if (global_cfg) {
+    if (!cJSON_IsObject(global_cfg)) {
+      if (out_error_message) {
+        *out_error_message = "Package globalCfg must be an object: " + package_path;
+      }
+      return false;
+    }
+    const cJSON* default_precision_item =
+      cJSON_GetObjectItemCaseSensitive(global_cfg, "defaultPrecision");
+    if (default_precision_item) {
+      if (!cJSON_IsString(default_precision_item) || !default_precision_item->valuestring) {
+        if (out_error_message) {
+          *out_error_message = "Package defaultPrecision must be a string: " + package_path;
+        }
+        return false;
+      }
+      if (!_ParseScalarPrecisionBits(
+            default_precision_item->valuestring,
+            package_path,
+            &default_bits,
+            out_error_message)) {
+        return false;
+      }
+    }
+  }
+
+  *out_bits = default_bits;
+  if (!container_item || !cJSON_IsObject(container_item)) {
+    return true;
+  }
+
+  const cJSON* precision_item = cJSON_GetObjectItemCaseSensitive(container_item, "precision");
+  if (!precision_item) {
+    return true;
+  }
+  if (!cJSON_IsString(precision_item) || !precision_item->valuestring) {
+    if (out_error_message) {
+      *out_error_message = "Container precision must be a string: " + package_path;
+    }
+    return false;
+  }
+  return _ParseScalarPrecisionBits(
+    precision_item->valuestring,
+    package_path,
+    out_bits,
+    out_error_message);
+}
+
 bool _LoadPackageRuntimeLifetime(
   const algorithm::AlgorithmPackageLocation& package_location,
-  algorithm_management::AlgorithmTickLifetime* out_tick_lifetime,
+  algorithmManager::AlgorithmTickLifetime* out_tick_lifetime,
   std::string* out_error_message) {
   if (!out_tick_lifetime) {
     if (out_error_message) {
@@ -56,7 +300,7 @@ bool _LoadPackageRuntimeLifetime(
     return false;
   }
 
-  *out_tick_lifetime = algorithm_management::AlgorithmTickLifetime::Continuous;
+  *out_tick_lifetime = algorithmManager::AlgorithmTickLifetime::Continuous;
 
   const std::string algorithm_name = package_location.algorithm_name.empty()
     ? package_location.manifest_name
@@ -72,7 +316,7 @@ bool _LoadPackageRuntimeLifetime(
     return false;
   }
 
-  const std::string json_text = json_utils::ReadTextFile(package_json_path);
+  const std::string json_text = json_utils::ReadAlgorithmPackageJsonFile(package_json_path);
   if (json_text.empty()) {
     if (out_error_message) {
       *out_error_message = "Failed to read package JSON file: " + package_json_path.generic_string();
@@ -108,7 +352,7 @@ bool _LoadPackageRuntimeLifetime(
         return false;
       }
       if (cJSON_IsTrue(launch_once)) {
-        *out_tick_lifetime = algorithm_management::AlgorithmTickLifetime::LaunchOnceThenHold;
+        *out_tick_lifetime = algorithmManager::AlgorithmTickLifetime::LaunchOnceThenHold;
       }
     }
   }
@@ -240,6 +484,7 @@ bool _ValidateRuntimeTransferEdgeLinearity(
 
 bool _LoadRuntimeTransferBindingsFromObject(
   const cJSON* bindings_object,
+  const algorithm::AlgorithmContainerSet& container_set,
   const std::string& package_path,
   algorithm::AlgorithmRuntimeTransferEdge* out_edge,
   std::string* out_error_message) {
@@ -259,13 +504,38 @@ bool _LoadRuntimeTransferBindingsFromObject(
     }
 
     algorithm::AlgorithmRuntimeTransferBinding binding{};
-    binding.from_name = child->string;
+    if (!_ResolveSingleRuntimeContainerReferenceName(
+          container_set,
+          child->string,
+          "transfer binding source",
+          package_path,
+          &binding.from_name,
+          out_error_message)) {
+      return false;
+    }
     if (cJSON_IsString(child) && child->valuestring) {
-      binding.to_name = child->valuestring;
+      if (!_ResolveSingleRuntimeContainerReferenceName(
+            container_set,
+            child->valuestring,
+            "transfer binding target",
+            package_path,
+            &binding.to_name,
+            out_error_message)) {
+        return false;
+      }
     } else if (cJSON_IsObject(child)) {
-      binding.to_name = json_utils::GetStringField(child, "to");
-      if (binding.to_name.empty()) {
-        binding.to_name = json_utils::GetStringField(child, "target");
+      std::string raw_target_name = json_utils::GetStringField(child, "to");
+      if (raw_target_name.empty()) {
+        raw_target_name = json_utils::GetStringField(child, "target");
+      }
+      if (!_ResolveSingleRuntimeContainerReferenceName(
+            container_set,
+            raw_target_name,
+            "transfer binding target",
+            package_path,
+            &binding.to_name,
+            out_error_message)) {
+        return false;
       }
       binding.required = json_utils::GetBoolField(child, "required", true);
     } else {
@@ -285,6 +555,7 @@ bool _LoadRuntimeTransferBindingsFromObject(
 
 bool _LoadRuntimeTransferBindingsFromArray(
   const cJSON* bindings_array,
+  const algorithm::AlgorithmContainerSet& container_set,
   const std::string& package_path,
   algorithm::AlgorithmRuntimeTransferEdge* out_edge,
   std::string* out_error_message) {
@@ -306,13 +577,31 @@ bool _LoadRuntimeTransferBindingsFromArray(
     }
 
     algorithm::AlgorithmRuntimeTransferBinding binding{};
-    binding.from_name = json_utils::GetStringField(item, "from");
-    if (binding.from_name.empty()) {
-      binding.from_name = json_utils::GetStringField(item, "source");
+    std::string raw_source_name = json_utils::GetStringField(item, "from");
+    if (raw_source_name.empty()) {
+      raw_source_name = json_utils::GetStringField(item, "source");
     }
-    binding.to_name = json_utils::GetStringField(item, "to");
-    if (binding.to_name.empty()) {
-      binding.to_name = json_utils::GetStringField(item, "target");
+    if (!_ResolveSingleRuntimeContainerReferenceName(
+          container_set,
+          raw_source_name,
+          "transfer binding source",
+          package_path,
+          &binding.from_name,
+          out_error_message)) {
+      return false;
+    }
+    std::string raw_target_name = json_utils::GetStringField(item, "to");
+    if (raw_target_name.empty()) {
+      raw_target_name = json_utils::GetStringField(item, "target");
+    }
+    if (!_ResolveSingleRuntimeContainerReferenceName(
+          container_set,
+          raw_target_name,
+          "transfer binding target",
+          package_path,
+          &binding.to_name,
+          out_error_message)) {
+      return false;
     }
     binding.required = json_utils::GetBoolField(item, "required", true);
     if (!_AppendRuntimeTransferBinding(out_edge, std::move(binding), out_error_message)) {
@@ -325,6 +614,7 @@ bool _LoadRuntimeTransferBindingsFromArray(
 
 bool _LoadRuntimeTransferEdgeFromObject(
   const cJSON* item,
+  const algorithm::AlgorithmContainerSet& container_set,
   const std::string& package_path,
   algorithm::AlgorithmRuntimeTransferMap* out_transfer_map,
   std::string* out_error_message) {
@@ -360,11 +650,21 @@ bool _LoadRuntimeTransferEdgeFromObject(
   }
   if (bindings) {
     if (cJSON_IsObject(bindings)) {
-      if (!_LoadRuntimeTransferBindingsFromObject(bindings, package_path, &edge, out_error_message)) {
+      if (!_LoadRuntimeTransferBindingsFromObject(
+            bindings,
+            container_set,
+            package_path,
+            &edge,
+            out_error_message)) {
         return false;
       }
     } else if (cJSON_IsArray(bindings)) {
-      if (!_LoadRuntimeTransferBindingsFromArray(bindings, package_path, &edge, out_error_message)) {
+      if (!_LoadRuntimeTransferBindingsFromArray(
+            bindings,
+            container_set,
+            package_path,
+            &edge,
+            out_error_message)) {
         return false;
       }
     } else {
@@ -386,6 +686,7 @@ bool _LoadRuntimeTransferEdgeFromObject(
 bool _LoadRuntimeTransferEdgeFromKeyValue(
   const std::string& edge_key,
   const cJSON* value,
+  const algorithm::AlgorithmContainerSet& container_set,
   const std::string& package_path,
   algorithm::AlgorithmRuntimeTransferMap* out_transfer_map,
   std::string* out_error_message) {
@@ -407,11 +708,21 @@ bool _LoadRuntimeTransferEdgeFromKeyValue(
   edge.target_stage_name = std::move(target_stage_name);
   if (value) {
     if (cJSON_IsObject(value)) {
-      if (!_LoadRuntimeTransferBindingsFromObject(value, package_path, &edge, out_error_message)) {
+      if (!_LoadRuntimeTransferBindingsFromObject(
+            value,
+            container_set,
+            package_path,
+            &edge,
+            out_error_message)) {
         return false;
       }
     } else if (cJSON_IsArray(value)) {
-      if (!_LoadRuntimeTransferBindingsFromArray(value, package_path, &edge, out_error_message)) {
+      if (!_LoadRuntimeTransferBindingsFromArray(
+            value,
+            container_set,
+            package_path,
+            &edge,
+            out_error_message)) {
         return false;
       }
     } else {
@@ -461,7 +772,7 @@ bool _LoadPackageRuntimeTransferMap(
     return false;
   }
 
-  const std::string json_text = json_utils::ReadTextFile(package_json_path);
+  const std::string json_text = json_utils::ReadAlgorithmPackageJsonFile(package_json_path);
   if (json_text.empty()) {
     if (out_error_message) {
       *out_error_message = "Failed to read package JSON file: " + package_json_path.generic_string();
@@ -509,6 +820,28 @@ bool _LoadPackageRuntimeTransferMap(
     return false;
   }
 
+  std::shared_ptr<algorithm::AlgorithmContainerSet> runtime_container_set{};
+  std::string runtime_container_error_message;
+  if (!_LoadContainerSetFromPackageJson(
+        package_location,
+        &runtime_container_set,
+        &runtime_container_error_message)) {
+    cJSON_Delete(root);
+    if (out_error_message) {
+      *out_error_message = runtime_container_error_message.empty()
+        ? ("Failed to load runtime pipeline container aliases: " + package_json_path.generic_string())
+        : std::move(runtime_container_error_message);
+    }
+    return false;
+  }
+  if (!runtime_container_set) {
+    cJSON_Delete(root);
+    if (out_error_message) {
+      *out_error_message = "Runtime pipeline container set is unavailable: " + package_json_path.generic_string();
+    }
+    return false;
+  }
+
   const cJSON* circular_tick = cJSON_GetObjectItemCaseSensitive(pipeline, "supportsCircularTick");
   if (!circular_tick) {
     circular_tick = cJSON_GetObjectItemCaseSensitive(pipeline, "circularTick");
@@ -548,6 +881,7 @@ bool _LoadPackageRuntimeTransferMap(
       if (!_LoadRuntimeTransferEdgeFromKeyValue(
             child->string,
             child,
+            *runtime_container_set,
             package_json_path.generic_string(),
             out_transfer_map,
             out_error_message)) {
@@ -561,6 +895,7 @@ bool _LoadPackageRuntimeTransferMap(
       const cJSON* item = cJSON_GetArrayItem(mappings, i);
       if (!_LoadRuntimeTransferEdgeFromObject(
             item,
+            *runtime_container_set,
             package_json_path.generic_string(),
             out_transfer_map,
             out_error_message)) {
@@ -583,6 +918,34 @@ bool _LoadPackageRuntimeTransferMap(
   }
   if (out_error_message) {
     out_error_message->clear();
+  }
+  return true;
+}
+
+bool _ResolveSingleRuntimeContainerReferenceName(
+  const algorithm::AlgorithmContainerSet& container_set,
+  const std::string& raw_name,
+  const std::string& field_name,
+  const std::string& package_path,
+  std::string* out_container_name,
+  std::string* out_error_message) {
+  if (!out_container_name) {
+    if (out_error_message) {
+      *out_error_message = "Runtime container reference output pointer is null.";
+    }
+    return false;
+  }
+  out_container_name->clear();
+  if (!algorithm::TryResolveSingleAlgorithmContainerReferenceName(
+        container_set,
+        raw_name,
+        out_container_name)) {
+    if (out_error_message) {
+      *out_error_message =
+        "Runtime " + field_name + " must resolve to exactly one container name: " +
+        raw_name + " (" + package_path + ")";
+    }
+    return false;
   }
   return true;
 }
@@ -615,7 +978,7 @@ bool _LoadPackageRuntimePipelineExternalWriteResetContainers(
     return false;
   }
 
-  const std::string json_text = json_utils::ReadTextFile(package_json_path);
+  const std::string json_text = json_utils::ReadAlgorithmPackageJsonFile(package_json_path);
   if (json_text.empty()) {
     if (out_error_message) {
       *out_error_message = "Failed to read package JSON file: " + package_json_path.generic_string();
@@ -700,7 +1063,17 @@ bool _LoadPackageRuntimePipelineExternalWriteResetContainers(
       return false;
     }
 
-    const std::string container_name = item->valuestring;
+    std::string container_name{};
+    if (!_ResolveSingleRuntimeContainerReferenceName(
+          container_set,
+          item->valuestring,
+          "pipeline externalWriteResetContainers entry",
+          package_json_path.generic_string(),
+          &container_name,
+          out_error_message)) {
+      cJSON_Delete(root);
+      return false;
+    }
     if (!seen_container_names.insert(container_name).second) {
       cJSON_Delete(root);
       if (out_error_message) {
@@ -804,6 +1177,172 @@ std::string _BuildStandardContainerLayoutKey(const algorithm::AlgorithmContainer
   return key;
 }
 
+bool _LoadContainerAliasesFromJson(
+  const cJSON* container_section,
+  const std::string& package_path,
+  algorithm::AlgorithmContainerSet* out_container_set,
+  std::string* out_error_message) {
+  if (!out_container_set) {
+    if (out_error_message) {
+      *out_error_message = "Container alias target container set is null.";
+    }
+    return false;
+  }
+
+  const cJSON* aliases = cJSON_GetObjectItemCaseSensitive(container_section, "aliases");
+  if (!aliases) {
+    return true;
+  }
+  if (!cJSON_IsArray(aliases)) {
+    if (out_error_message) {
+      *out_error_message = "Package container aliases must be an array: " + package_path;
+    }
+    return false;
+  }
+
+  const int alias_count = cJSON_GetArraySize(aliases);
+  for (int i = 0; i < alias_count; ++i) {
+    const cJSON* alias_item = cJSON_GetArrayItem(aliases, i);
+    if (!alias_item || !cJSON_IsString(alias_item) || !alias_item->valuestring) {
+      if (out_error_message) {
+        *out_error_message = "Package container alias entry must be a string: " + package_path;
+      }
+      return false;
+    }
+
+    const std::string alias_text = alias_item->valuestring;
+    const std::string::size_type colon = alias_text.find(':');
+    if (colon == std::string::npos || alias_text.find(':', colon + 1u) != std::string::npos) {
+      if (out_error_message) {
+        *out_error_message =
+          "Package container alias must use the form name1,name2:alias: " + alias_text +
+          " (" + package_path + ")";
+      }
+      return false;
+    }
+
+    const std::string alias_name = _TrimRuntimeToken(alias_text.substr(colon + 1u));
+    if (alias_name.empty()) {
+      if (out_error_message) {
+        *out_error_message = "Package container alias name is empty: " + package_path;
+      }
+      return false;
+    }
+    if (algorithm::FindAlgorithmContainer(*out_container_set, alias_name)) {
+      if (out_error_message) {
+        *out_error_message =
+          "Package container alias conflicts with an existing container name: " + alias_name +
+          " (" + package_path + ")";
+      }
+      return false;
+    }
+    if (out_container_set->container_aliases_by_name.find(alias_name) !=
+        out_container_set->container_aliases_by_name.end()) {
+      if (out_error_message) {
+        *out_error_message =
+          "Package container alias is duplicated: " + alias_name + " (" + package_path + ")";
+      }
+      return false;
+    }
+
+    std::vector<std::string> resolved_container_names{};
+    std::unordered_set<std::string> unique_container_names{};
+    const std::string source_text = alias_text.substr(0, colon);
+    size_t cursor = 0u;
+    while (cursor <= source_text.size()) {
+      const std::string::size_type comma = source_text.find(',', cursor);
+      const std::string token = _TrimRuntimeToken(
+        source_text.substr(cursor, comma == std::string::npos ? std::string::npos : comma - cursor));
+      if (token.empty()) {
+        if (out_error_message) {
+          *out_error_message =
+            "Package container alias contains an empty source name: " + alias_text +
+            " (" + package_path + ")";
+        }
+        return false;
+      }
+
+      std::string resolved_name{};
+      if (!algorithm::TryResolveSingleAlgorithmContainerReferenceName(
+            *out_container_set,
+            token,
+            &resolved_name)) {
+        if (out_error_message) {
+          *out_error_message =
+            "Package container alias references an unknown or grouped container name: " + token +
+            " (" + package_path + ")";
+        }
+        return false;
+      }
+      if (!unique_container_names.insert(resolved_name).second) {
+        if (out_error_message) {
+          *out_error_message =
+            "Package container alias repeats the same container more than once: " + resolved_name +
+            " (" + package_path + ")";
+        }
+        return false;
+      }
+      resolved_container_names.push_back(std::move(resolved_name));
+
+      if (comma == std::string::npos) {
+        break;
+      }
+      cursor = comma + 1u;
+    }
+
+    if (resolved_container_names.empty()) {
+      if (out_error_message) {
+        *out_error_message = "Package container alias has no source containers: " + package_path;
+      }
+      return false;
+    }
+    out_container_set->container_aliases_by_name.emplace(alias_name, std::move(resolved_container_names));
+  }
+
+  return true;
+}
+
+bool _ExpandResolvedContainerReferenceNames(
+  const algorithm::AlgorithmContainerSet& container_set,
+  const std::vector<std::string>& raw_names,
+  const std::string& field_name,
+  const std::string& package_path,
+  std::vector<std::string>* out_container_names,
+  std::string* out_error_message) {
+  if (!out_container_names) {
+    if (out_error_message) {
+      *out_error_message = "Container reference expansion output vector is null.";
+    }
+    return false;
+  }
+  out_container_names->clear();
+
+  for (const std::string& raw_name : raw_names) {
+    std::vector<std::string> resolved_names{};
+    if (!algorithm::TryResolveAlgorithmContainerReferenceNames(
+          container_set,
+          raw_name,
+          &resolved_names)) {
+      if (out_error_message) {
+        *out_error_message =
+          "Package " + field_name + " references an unknown container name '" + raw_name +
+          "': " + package_path;
+      }
+      return false;
+    }
+    out_container_names->insert(out_container_names->end(), resolved_names.begin(), resolved_names.end());
+  }
+
+  if (out_container_names->empty()) {
+    if (out_error_message) {
+      *out_error_message =
+        "Package " + field_name + " resolves to an empty container list: " + package_path;
+    }
+    return false;
+  }
+  return true;
+}
+
 bool _LoadContainerSetFromPackageJson(
   const algorithm::AlgorithmPackageLocation& package_location,
   std::shared_ptr<algorithm::AlgorithmContainerSet>* out_container_set,
@@ -831,7 +1370,7 @@ bool _LoadContainerSetFromPackageJson(
     return false;
   }
 
-  const std::string json_text = json_utils::ReadTextFile(package_json_path);
+  const std::string json_text = json_utils::ReadAlgorithmPackageJsonFile(package_json_path);
   if (json_text.empty()) {
     if (out_error_message) {
       *out_error_message = "Failed to read package JSON file: " + package_json_path.generic_string();
@@ -862,8 +1401,19 @@ bool _LoadContainerSetFromPackageJson(
   const cJSON* variable_item = cJSON_GetObjectItemCaseSensitive(container_section, "variable");
   if (cJSON_IsNumber(variable_item)) {
     const uint32_t variable_count = json_utils::GetUintField(container_section, "variable");
+    uint32_t scalar_bits = 32u;
+    if (!_ResolveContainerScalarBits(root, nullptr, package_json_path.generic_string(), &scalar_bits, out_error_message)) {
+      cJSON_Delete(root);
+      return false;
+    }
+    const uint32_t scalar_bytes = scalar_bits / 8u;
     for (uint32_t i = 0; i < variable_count; ++i) {
-      if (!_AppendContainer("v" + std::to_string(i + 1u), algorithm::AlgorithmContainerStorageKind::TemporaryRegister, 1u, sizeof(float), container_set.get())) {
+      if (!_AppendContainer(
+            "v" + std::to_string(i + 1u),
+            algorithm::AlgorithmContainerStorageKind::TemporaryRegister,
+            1u,
+            scalar_bytes,
+            container_set.get())) {
         cJSON_Delete(root);
         return false;
       }
@@ -877,11 +1427,17 @@ bool _LoadContainerSetFromPackageJson(
         }
         return false;
       }
+      uint32_t scalar_bits = 32u;
+      if (!_ResolveContainerScalarBits(root, child, package_json_path.generic_string(), &scalar_bits, out_error_message)) {
+        cJSON_Delete(root);
+        return false;
+      }
+      const uint32_t scalar_bytes = scalar_bits / 8u;
       const uint32_t element_count = cJSON_IsObject(child) ? std::max<uint32_t>(1u, json_utils::GetUintField(child, "count", 1u)) : 1u;
       const std::vector<uint32_t> shape = json_utils::GetShapeField(child);
       const uint32_t element_stride = shape.empty()
-        ? sizeof(float)
-        : static_cast<uint32_t>(shape.size()) * sizeof(float);
+        ? scalar_bytes
+        : static_cast<uint32_t>(shape.size()) * scalar_bytes;
       if (!_AppendContainer(child->string, algorithm::AlgorithmContainerStorageKind::TemporaryRegister, element_count, element_stride, container_set.get())) {
         cJSON_Delete(root);
         return false;
@@ -892,8 +1448,19 @@ bool _LoadContainerSetFromPackageJson(
   const cJSON* variable_array_item = cJSON_GetObjectItemCaseSensitive(container_section, "variableArray");
   if (cJSON_IsNumber(variable_array_item)) {
     const uint32_t variable_array_count = json_utils::GetUintField(container_section, "variableArray");
+    uint32_t scalar_bits = 32u;
+    if (!_ResolveContainerScalarBits(root, nullptr, package_json_path.generic_string(), &scalar_bits, out_error_message)) {
+      cJSON_Delete(root);
+      return false;
+    }
+    const uint32_t scalar_bytes = scalar_bits / 8u;
     for (uint32_t i = 0; i < variable_array_count; ++i) {
-      if (!_AppendContainer("a" + std::to_string(i + 1u), algorithm::AlgorithmContainerStorageKind::Array, 1u, sizeof(float), container_set.get())) {
+      if (!_AppendContainer(
+            "a" + std::to_string(i + 1u),
+            algorithm::AlgorithmContainerStorageKind::Array,
+            1u,
+            scalar_bytes,
+            container_set.get())) {
         cJSON_Delete(root);
         return false;
       }
@@ -907,16 +1474,31 @@ bool _LoadContainerSetFromPackageJson(
         }
         return false;
       }
+      uint32_t scalar_bits = 32u;
+      if (!_ResolveContainerScalarBits(root, child, package_json_path.generic_string(), &scalar_bits, out_error_message)) {
+        cJSON_Delete(root);
+        return false;
+      }
+      const uint32_t scalar_bytes = scalar_bits / 8u;
       const uint32_t element_count = cJSON_IsObject(child) ? std::max<uint32_t>(1u, json_utils::GetUintField(child, "count", 1u)) : 1u;
       const std::vector<uint32_t> shape = json_utils::GetShapeField(child);
       const uint32_t element_stride = shape.empty()
-        ? sizeof(float)
-        : static_cast<uint32_t>(shape.size()) * sizeof(float);
+        ? scalar_bytes
+        : static_cast<uint32_t>(shape.size()) * scalar_bytes;
       if (!_AppendContainer(child->string, algorithm::AlgorithmContainerStorageKind::Array, element_count, element_stride, container_set.get())) {
         cJSON_Delete(root);
         return false;
       }
     }
+  }
+
+  if (!_LoadContainerAliasesFromJson(
+        container_section,
+        package_json_path.generic_string(),
+        container_set.get(),
+        out_error_message)) {
+    cJSON_Delete(root);
+    return false;
   }
 
   cJSON_Delete(root);
@@ -958,7 +1540,7 @@ bool _LoadPackageRuntimeReflector(
     return false;
   }
 
-  const std::string json_text = json_utils::ReadTextFile(package_json_path);
+  const std::string json_text = json_utils::ReadAlgorithmPackageJsonFile(package_json_path);
   if (json_text.empty()) {
     if (out_error_message) {
       *out_error_message = "Failed to read package JSON file: " + package_json_path.generic_string();
@@ -1034,6 +1616,28 @@ bool _LoadPackageRuntimeReflector(
       : std::string{};
 
   const int item_count = cJSON_GetArraySize(items);
+  std::shared_ptr<algorithm::AlgorithmContainerSet> reflector_container_set{};
+  std::string reflector_container_error_message;
+  if (!_LoadContainerSetFromPackageJson(
+        package_location,
+        &reflector_container_set,
+        &reflector_container_error_message)) {
+    if (out_error_message) {
+      *out_error_message = reflector_container_error_message.empty()
+        ? ("Failed to load package container aliases for reflector: " + package_json_path.generic_string())
+        : std::move(reflector_container_error_message);
+    }
+    cJSON_Delete(root);
+    return false;
+  }
+  if (!reflector_container_set) {
+    if (out_error_message) {
+      *out_error_message = "Package reflector container set is unavailable: " + package_json_path.generic_string();
+    }
+    cJSON_Delete(root);
+    return false;
+  }
+
   for (int i = 0; i < item_count; ++i) {
     const cJSON* item = cJSON_GetArrayItem(items, i);
     if (!item || !cJSON_IsObject(item)) {
@@ -1055,7 +1659,17 @@ bool _LoadPackageRuntimeReflector(
     if (item_filter_name == "direct") {
       const cJSON* from_item = cJSON_GetObjectItemCaseSensitive(item, "from");
       const cJSON* to_item = cJSON_GetObjectItemCaseSensitive(item, "to");
-      const std::vector<std::string> from_names = json_utils::GetStringList(from_item);
+      std::vector<std::string> from_names{};
+      if (!_ExpandResolvedContainerReferenceNames(
+            *reflector_container_set,
+            json_utils::GetStringList(from_item),
+            "reflector.from",
+            package_json_path.generic_string(),
+            &from_names,
+            out_error_message)) {
+        cJSON_Delete(root);
+        return false;
+      }
       const std::vector<std::string> to_names = json_utils::GetStringList(to_item);
       if (from_names.size() != to_names.size() || from_names.empty()) {
         cJSON_Delete(root);
@@ -1090,11 +1704,31 @@ bool _LoadPackageRuntimeReflector(
     const cJSON* varity = cJSON_GetObjectItemCaseSensitive(input, "varity");
     const cJSON* array = cJSON_GetObjectItemCaseSensitive(input, "array");
     if (varity) {
-      const std::vector<std::string> varity_names = json_utils::GetStringList(varity);
+      std::vector<std::string> varity_names{};
+      if (!_ExpandResolvedContainerReferenceNames(
+            *reflector_container_set,
+            json_utils::GetStringList(varity),
+            "reflector.input.varity",
+            package_json_path.generic_string(),
+            &varity_names,
+            out_error_message)) {
+        cJSON_Delete(root);
+        return false;
+      }
       container_names.insert(container_names.end(), varity_names.begin(), varity_names.end());
     }
     if (array) {
-      const std::vector<std::string> array_names = json_utils::GetStringList(array);
+      std::vector<std::string> array_names{};
+      if (!_ExpandResolvedContainerReferenceNames(
+            *reflector_container_set,
+            json_utils::GetStringList(array),
+            "reflector.input.array",
+            package_json_path.generic_string(),
+            &array_names,
+            out_error_message)) {
+        cJSON_Delete(root);
+        return false;
+      }
       container_names.insert(container_names.end(), array_names.begin(), array_names.end());
     }
     if (container_names.empty()) {
@@ -1159,7 +1793,7 @@ struct PackageDefaultResourceBinding {
 
 struct PackageDefaultDescriptorValue {
   std::string descriptor_name;
-  float scalar_value{0.0f};
+  double scalar_value{0.0};
 };
 
 struct PackageDefaultSchema {
@@ -1292,7 +1926,7 @@ PackageDefaultSchema _LoadPackageDefaultSchema(
         cJSON_Delete(root);
         return schema;
       }
-      value.scalar_value = static_cast<float>(cJSON_GetObjectItemCaseSensitive(item, "scalar_value")->valuedouble);
+      value.scalar_value = cJSON_GetObjectItemCaseSensitive(item, "scalar_value")->valuedouble;
       schema.descriptor_values.push_back(std::move(value));
     }
   }
@@ -1303,6 +1937,16 @@ PackageDefaultSchema _LoadPackageDefaultSchema(
 }
 
 }  // namespace
+
+bool LoadAlgorithmInterventionFromLocation(
+  const algorithm::AlgorithmPackageLocation& package_location,
+  std::shared_ptr<agent::IAlgorithmIntervention>* out_intervention,
+  std::string* out_error_message) {
+  return intervention_detail::LoadAlgorithmInterventionFromLocationImpl(
+    package_location,
+    out_intervention,
+    out_error_message);
+}
 
 bool LoadAlgorithmPackageReflectorFromLocation(
   const algorithm::AlgorithmPackageLocation& package_location,
@@ -1409,11 +2053,13 @@ bool CreateAlgorithmObjectFromLocation(
   if (emit_runner_probe) {
     _AppendPipelineRunnerProbe(
       "package_loader_probe.log",
-      "create_from_location.container_set.begin algorithm=" + probe_algorithm_name);
+      "create_from_location.mount_metadata.begin algorithm=" + probe_algorithm_name);
   }
-  if (!_LoadContainerSetFromPackageJson(package_location, &group.shared_container_set, out_error_message)) {
+  AlgorithmObjectMountMetadataCacheEntry mount_metadata{};
+  if (!_LoadAlgorithmObjectMountMetadata(package_location, &mount_metadata, out_error_message)) {
     return false;
   }
+<<<<<<< HEAD
   if (emit_runner_probe) {
     _AppendPipelineRunnerProbe("package_loader_probe.log", "create_from_location.container_set.end");
     _AppendPipelineRunnerProbe("package_loader_probe.log", "create_from_location.tick_lifetime.begin");
@@ -1427,41 +2073,27 @@ bool CreateAlgorithmObjectFromLocation(
 
   algorithm_management::AlgorithmTickLifetime tick_lifetime = algorithm_management::AlgorithmTickLifetime::Continuous;
   if (!_LoadPackageRuntimeLifetime(package_location, &tick_lifetime, out_error_message)) {
+=======
+  if (!mount_metadata.valid || !mount_metadata.container_template) {
+    if (out_error_message) {
+      *out_error_message = "Algorithm mount metadata is invalid.";
+    }
+>>>>>>> 0e5193b (preciser control of digital)
     return false;
   }
-  group.tick_lifetime = tick_lifetime;
-  if (emit_runner_probe) {
-    _AppendPipelineRunnerProbe("package_loader_probe.log", "create_from_location.tick_lifetime.end");
-    _AppendPipelineRunnerProbe("package_loader_probe.log", "create_from_location.transfer_map.begin");
-  }
-
-  bool has_runtime_transfer_map = false;
-  if (!LoadAlgorithmPackageTransferMapFromLocation(
-        package_location,
-        &group.runtime_transfer_map,
-        &has_runtime_transfer_map,
-        out_error_message)) {
-    return false;
-  }
-  if (!has_runtime_transfer_map) {
-    group.runtime_transfer_map.reset();
-  }
+  group.shared_container_set = std::make_shared<algorithm::AlgorithmContainerSet>();
+  algorithm::CopyAlgorithmContainerSet(*mount_metadata.container_template, group.shared_container_set.get());
+  group.tick_lifetime = mount_metadata.tick_lifetime;
+  group.runtime_transfer_map = mount_metadata.has_runtime_transfer_map
+    ? mount_metadata.runtime_transfer_map
+    : std::shared_ptr<algorithm::AlgorithmRuntimeTransferMap>{};
+  group.pipeline_external_write_reset_container_names =
+    mount_metadata.pipeline_external_write_reset_container_names;
   if (emit_runner_probe) {
     _AppendPipelineRunnerProbe(
       "package_loader_probe.log",
-      "create_from_location.transfer_map.end has_map=" + std::string(has_runtime_transfer_map ? "true" : "false"));
-    _AppendPipelineRunnerProbe("package_loader_probe.log", "create_from_location.external_reset.begin");
-  }
-
-  if (!_LoadPackageRuntimePipelineExternalWriteResetContainers(
-        package_location,
-        *group.shared_container_set,
-        &group.pipeline_external_write_reset_container_names,
-        out_error_message)) {
-    return false;
-  }
-  if (emit_runner_probe) {
-    _AppendPipelineRunnerProbe("package_loader_probe.log", "create_from_location.external_reset.end");
+      "create_from_location.mount_metadata.end has_map=" +
+        std::string(mount_metadata.has_runtime_transfer_map ? "true" : "false"));
   }
 
   std::shared_ptr<agent::IAlgorithmIntervention> intervention{};
@@ -1471,7 +2103,7 @@ bool CreateAlgorithmObjectFromLocation(
   group.intervention = std::move(intervention);
 
   auto _ApplyLaunchOnceReflectionPolicy = [&group]() {
-    if (group.tick_lifetime == algorithm_management::AlgorithmTickLifetime::LaunchOnceThenHold &&
+    if (group.tick_lifetime == algorithmManager::AlgorithmTickLifetime::LaunchOnceThenHold &&
         group.algorithm_reflector &&
         group.algorithm_reflector->refresh_mode == algorithm::AlgorithmReflectionRefreshMode::EveryTick) {
       group.algorithm_reflector->refresh_mode = algorithm::AlgorithmReflectionRefreshMode::CaptureOnceAfterCompletion;
@@ -1489,11 +2121,45 @@ bool CreateAlgorithmObjectFromLocation(
       _AppendPipelineRunnerProbe(
         "package_loader_probe.log",
         "create_from_location.plugin_load.end success cpu=" + std::string(plugin_components.cpu_symbol ? "true" : "false") +
-          " gpu=" + std::string(plugin_components.gpu_symbol ? "true" : "false"));
+          " gpu=" + std::string(plugin_components.gpu_symbol ? "true" : "false") +
+          " reflector=" + std::string(plugin_components.reflector ? "true" : "false") +
+          " intervention=" + std::string(plugin_components.intervention ? "true" : "false"));
     }
     group.cpu_symbol = plugin_components.cpu_symbol;
     group.gpu_symbol = plugin_components.gpu_symbol;
+<<<<<<< HEAD
     group.temporaryTest_main_thread_executor = plugin_components.temporary_test_executor;
+=======
+    group.cpu_executor = plugin_components.cpu_executor;
+    if (plugin_components.gpu_executor) {
+      group.intervention = plugin_components.gpu_executor;
+    } else if (plugin_components.intervention) {
+      std::shared_ptr<agent::IAlgorithmIntervention> package_intervention{};
+      if (!LoadAlgorithmInterventionFromLocation(
+            package_location,
+            &package_intervention,
+            out_error_message)) {
+        return false;
+      }
+      group.intervention = std::move(package_intervention);
+    }
+    if (plugin_components.runtime_reflector &&
+        !plugin_components.runtime_reflector->empty()) {
+      group.algorithm_reflector = std::move(plugin_components.runtime_reflector);
+    } else if (plugin_components.reflector) {
+      std::shared_ptr<algorithm::AlgorithmReflector> runtime_reflector{};
+      if (LoadAlgorithmPackageReflectorFromLocation(
+            package_location,
+            &runtime_reflector,
+            nullptr)) {
+        group.algorithm_reflector = std::move(runtime_reflector);
+      }
+    }
+    _ApplyLaunchOnceReflectionPolicy();
+    if (group.intervention) {
+      _AppendHiddenInterventionSignalContainer(group.shared_container_set.get());
+    }
+>>>>>>> 0e5193b (preciser control of digital)
     *out_group = std::move(group);
     if (out_error_message) {
       out_error_message->clear();
@@ -1524,8 +2190,8 @@ bool CreateAlgorithmObjectFromLocation(
 
 bool LoadAlgorithmPackageDefaultBindingsFromLocation(
   const algorithm::AlgorithmPackageLocation& package_location,
-  std::vector<algorithm_management::AlgorithmResourceBinding>* out_resource_bindings,
-  std::vector<algorithm_management::AlgorithmDescriptorValue>* out_descriptor_values,
+  std::vector<algorithmManager::AlgorithmResourceBinding>* out_resource_bindings,
+  std::vector<algorithmManager::AlgorithmDescriptorValue>* out_descriptor_values,
   bool* out_has_default_file,
   std::string* out_error_message) {
   if (!out_resource_bindings || !out_descriptor_values) {
@@ -1565,7 +2231,7 @@ bool LoadAlgorithmPackageDefaultBindingsFromLocation(
 
   out_resource_bindings->reserve(schema.resource_bindings.size());
   for (const PackageDefaultResourceBinding& binding : schema.resource_bindings) {
-    out_resource_bindings->push_back(algorithm_management::AlgorithmResourceBinding{
+    out_resource_bindings->push_back(algorithmManager::AlgorithmResourceBinding{
       .resource_name = binding.resource_name,
       .resource_kind = binding.resource_kind,
       .source_path = binding.source_path,
@@ -1573,7 +2239,7 @@ bool LoadAlgorithmPackageDefaultBindingsFromLocation(
   }
   out_descriptor_values->reserve(schema.descriptor_values.size());
   for (const PackageDefaultDescriptorValue& value : schema.descriptor_values) {
-    out_descriptor_values->push_back(algorithm_management::AlgorithmDescriptorValue{
+    out_descriptor_values->push_back(algorithmManager::AlgorithmDescriptorValue{
       .descriptor_name = value.descriptor_name,
       .scalar_value = value.scalar_value,
     });
@@ -1591,9 +2257,16 @@ bool LoadAlgorithmPackageDefaultBindingsFromLocation(
 namespace {
 
 using CreateBundleFn = bool (*)(
-  const algorithm_library_plugin::AlgorithmPluginRequest* request,
-  algorithm_library_plugin::AlgorithmPluginBundle* out_bundle);
+  const algorithmManager::support::AlgorithmPluginRequest* request,
+  algorithmManager::support::AlgorithmPluginBundle* out_bundle);
 
+<<<<<<< HEAD
+=======
+using CreateRuntimeReflectorFn = bool (*)(
+  const algorithmManager::support::AlgorithmPluginRequest* request,
+  algorithm::AlgorithmReflector* out_reflector);
+
+>>>>>>> 0e5193b (preciser control of digital)
 void _SetErrorMessage(std::string* out_error_message, std::string message) {
   if (out_error_message) {
     *out_error_message = std::move(message);
@@ -1669,28 +2342,32 @@ bool TryLoadAlgorithmPluginComponents(
     return false;
   }
 
-  algorithm_library_plugin::AlgorithmPluginRequest request{};
-  const std::string algorithm_library_root = package_location.package_root.has_parent_path()
-    ? package_location.package_root.parent_path().generic_string()
-    : package_location.package_root.generic_string();
-  const std::string algorithm_folder = package_location.package_root.filename().generic_string();
+  algorithmManager::support::AlgorithmPluginRequest request{};
+  const std::filesystem::path plugin_request_package_root =
+    package_location.source_package_root.empty()
+      ? package_location.package_root
+      : package_location.source_package_root;
+  const std::string algorithm_library_root = plugin_request_package_root.has_parent_path()
+    ? plugin_request_package_root.parent_path().generic_string()
+    : plugin_request_package_root.generic_string();
+  const std::string algorithm_folder = plugin_request_package_root.filename().generic_string();
   request.algorithm_name = package_location.algorithm_name.c_str();
   request.algorithm_library_root = algorithm_library_root.c_str();
   request.algorithm_folder = algorithm_folder.c_str();
 
-  algorithm_library_plugin::AlgorithmPluginBundle bundle{};
+  algorithmManager::support::AlgorithmPluginBundle bundle{};
   if (!create_bundle_fn(&request, &bundle)) {
     _SetErrorMessage(out_error_message, "Algorithm plugin rejected bundle creation: " + plugin_path.string());
     return false;
   }
 
-  if (request.api_version != algorithm_library_plugin::kAlgorithmPluginApiVersion) {
+  if (request.api_version != algorithmManager::support::kAlgorithmPluginApiVersion) {
     _SetErrorMessage(
       out_error_message,
       "Algorithm plugin request ABI version mismatch for: " + plugin_path.string());
     return false;
   }
-  if (bundle.api_version != algorithm_library_plugin::kAlgorithmPluginApiVersion) {
+  if (bundle.api_version != algorithmManager::support::kAlgorithmPluginApiVersion) {
     _SetErrorMessage(
       out_error_message,
       "Algorithm plugin bundle ABI version mismatch for: " + plugin_path.string());
@@ -1699,7 +2376,10 @@ bool TryLoadAlgorithmPluginComponents(
 
   out_components->cpu_symbol = bundle.cpu_symbol;
   out_components->gpu_symbol = bundle.gpu_symbol;
+  out_components->reflector = bundle.reflector;
+  out_components->intervention = bundle.intervention;
 
+<<<<<<< HEAD
   if (bundle.temporary_test_executor && bundle.destroy_temporary_test_executor) {
     out_components->temporary_test_executor = _WrapPluginObject(
       bundle.temporary_test_executor,
@@ -1707,6 +2387,32 @@ bool TryLoadAlgorithmPluginComponents(
       module_guard);
   }
 
+=======
+  if (bundle.gpu_executor && bundle.destroy_gpu_executor) {
+    out_components->gpu_executor = _WrapPluginObject(
+      bundle.gpu_executor,
+      bundle.destroy_gpu_executor,
+      module_guard);
+  }
+  if (bundle.cpu_executor && bundle.destroy_cpu_executor) {
+    out_components->cpu_executor = _WrapPluginObject(
+      bundle.cpu_executor,
+      bundle.destroy_cpu_executor,
+      module_guard);
+  }
+
+  const auto create_reflector_fn = reinterpret_cast<CreateRuntimeReflectorFn>(
+    GetProcAddress(static_cast<HMODULE>(module_guard.get()), "AlgorithmPlugin_CreateRuntimeReflector"));
+  if (bundle.reflector && create_reflector_fn) {
+    algorithm::AlgorithmReflector runtime_reflector{};
+    if (create_reflector_fn(&request, &runtime_reflector) &&
+        !runtime_reflector.empty()) {
+      out_components->runtime_reflector =
+        std::make_shared<algorithm::AlgorithmReflector>(std::move(runtime_reflector));
+    }
+  }
+
+>>>>>>> 0e5193b (preciser control of digital)
   _SetErrorMessage(out_error_message, {});
   return true;
 }

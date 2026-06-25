@@ -1,0 +1,18 @@
+{
+  "algorithm_name": "temporary_test_line_motion",
+  "resource_bindings": [],
+  "descriptor_values": [
+    {
+      "descriptor_name": "start_x",
+      "scalar_value": 180.0
+    },
+    {
+      "descriptor_name": "start_y",
+      "scalar_value": 120.0
+    },
+    {
+      "descriptor_name": "start_z",
+      "scalar_value": 0.0
+    }
+  ]
+}

@@ -26,7 +26,13 @@ class AlgorithmStudioChatMixin:
         controls = self.chat_message_controls.get(message_id)
         if controls is None:
             return
-        buttons = [widget for widget in controls.get("buttons", []) if isinstance(widget, tk.Widget)]
+        buttons: list[tk.Widget] = []
+        for widget in controls.get("buttons", []):
+            if not isinstance(widget, tk.Widget):
+                continue
+            if not widget.winfo_exists():
+                continue
+            buttons.append(widget)
         if visible:
             if bool(controls.get("visible")):
                 return

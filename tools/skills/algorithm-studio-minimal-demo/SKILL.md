@@ -1,6 +1,6 @@
 ---
 name: algorithm-studio-minimal-demo
-description: Build the smallest valid Algorithm Studio demo bundle with strict scope control. Use when a user asks for a minimal demo algorithm, a descriptor-driven motion example, a single-point movement demo, or when Algorithm Studio keeps inventing extra nodes, stages, or scaffolding and must be constrained to the smallest working scene.
+description: Build the smallest valid Algorithm Studio demo bundle with strict scope control, interface4agents-only execution, and optional internal container refinement. Use when a user asks for a minimal demo algorithm, a descriptor-driven motion example, or a single-point movement demo.
 ---
 
 # Algorithm Studio Minimal Demo
@@ -9,43 +9,40 @@ Build the minimum valid scene that satisfies the request. Prefer fewer nodes, fe
 
 ## Execution Contract
 
-- First check whether the request is short and whether there is a direct matching UI tool or document-editing path.
-- If there is a direct path, execute it immediately in one pass.
-- Do not force a separate planning phase and execution phase.
-- If the request is genuinely complex and needs a checklist, keep that checklist short and continue execution in the same pass whenever possible.
-- Any short checklist should preserve:
-  - the target minimal motion shape
-  - the exact containers and stages allowed
-  - the descriptor binding intent
-  - the nodes and files that must not be added
+- Read [references/minimal-point-motion.md](references/minimal-point-motion.md) for the canonical point-motion target.
+- Use `interface4agents` only.
+- Do not emit `algorithm-studio-tool`.
+- Do not use `update_document`.
+- If the prompt includes an operation stack, read it before choosing the next step.
+- If the user wants a guided walkthrough, teach one UI step at a time and emit exactly one supported `highlight` before that step.
+- Keep all teaching text in English unless the user explicitly asks for another language.
 
 ## Workflow
 
 1. Read the current scene and keep existing unrelated content unchanged unless the user asked to replace it.
 2. Reduce the request to the minimum data path needed to satisfy it.
-3. Prefer UI tools for simple node edits.
-4. Use `update_document` when descriptor bindings or a tightly-coupled minimal package are easier to express safely as one coherent document update.
-5. Stop as soon as the requested demo is representable. Do not add optional helpers.
+3. Prefer direct `interface4agents` commands for scene changes.
+4. Stop as soon as the requested demo is representable. Do not add optional helpers.
 
 ## Hard Rules
 
 - Do not invent extra `v`, `a`, `meshNode`, `reflector`, `decomposer`, `interventioner`, or `fun` nodes unless the request cannot work without them.
-- If the scene uses standard-slot aliases for readability, treat them as authoring semantics only and emit underlying `vN/aN` names in runtime-facing package fields.
+- If the scene uses readable aliases, keep them as authoring semantics only and still use `vN/aN` names in runtime-facing explanations.
 - Keep `algorithm_name` and `package_name` identical if the user will likely build the result.
 - Prefer one `afterTick` stage and one `resultRender` stage for motion demos.
-- Use one `fun` only when real plugin C++ is explicitly requested.
-- Keep one `functiontext` only when the user explicitly wants natural-language solution text.
-- If a descriptor input is required, prefer a single descriptor variable over multiple split descriptors.
-- If a point can be represented with one array entry, do not create additional array rows.
+- Use `fun` only when real plugin logic is explicitly requested.
+- Keep one `functiontext` only when the user explicitly wants detached natural-language solution text.
+- Treat containers as storage-only. Container bit width alone does not define float, int, fp8, or bool semantics.
+- If the user needs finer structure, expand `v/a` and refine them with internal layout fields.
+- Layout field `ruleText` is a free-form contract such as `from v1 to phase01 32` or `from a1 to x,y 16,16`.
 
 ## Canonical Minimal Motion Shape
 
-For a “single point moves from `(0,0)` to `(100,0)` and back” demo, prefer this exact shape unless the user asks otherwise:
+For a single point that moves from `(0, 0)` to `(100, 0)` and back, prefer this shape unless the user asks otherwise:
 
 - one descriptor input: `phase01`
-- one algorithm variable: `v1`
-- one algorithm array: `a1`
-- `a1` stores one point as `x y z`
+- one variable container: `v1`
+- one array container: `a1`
 - one `afterTick`
 - one `resultRender`
 
@@ -56,21 +53,4 @@ Map the data path like this:
 - `afterTick` writes one point into `a1`
 - `resultRender` draws `a1`
 
-Treat `phase01` as normalized in `[0, 1]` unless the user says otherwise. For back-and-forth motion, use a triangle-wave style mapping so:
-
-- `phase01 = 0.0` -> `x = 0`
-- `phase01 = 0.5` -> `x = 100`
-- `phase01 = 1.0` -> `x = 0`
-
-Keep `y = 0` and `z = 0`.
-
-## Preferred Package Decisions
-
-- Prefer `update_document` for descriptor-bound demo bundles because the package-level relationship is usually clearer and less error-prone than scattered UI tool edits.
-- Keep the package unified in one `<algorithm_name>_package.json`.
-- If shaders are required, keep them minimal and only large enough to show the point clearly.
-- If a plugin is required, keep it to the minimum runtime code needed to populate or transform the one point.
-
-## References
-
-- For the canonical minimal point-motion target, read [references/minimal-point-motion.md](references/minimal-point-motion.md).
+If the user wants `a1` split into smaller parts, teach layout fields inside the expanded container instead of claiming that the container itself owns a hardcoded scalar type.

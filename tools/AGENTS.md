@@ -1,173 +1,91 @@
-# Algorithm Studio Agent Instructions
+# Algorithm Studio Agent Guide
 
-## Task Complexity
+## Scope
 
-- First check whether the user command is short and whether there is a direct matching interface or tool path for it.
-- If the command is short and there is a direct matching interface or tool path, handle it directly without first writing a plan or checklist.
-- If the task is complex, ambiguous, risky, spans multiple coordinated edits, or does not have a clear direct interface path, prefer first producing a short working document or checklist instead of trying to handle everything immediately.
-- Do not split a normal request into a mandatory plan phase and a later execution phase.
-- If a checklist is genuinely needed, keep it inside the same pass and continue into execution instead of forcing a two-stage round trip.
-- That working document should stay short and execution-oriented.
-- Prefer 3 to 6 concrete steps.
-- State the minimum required nodes, stages, files, and bindings.
-- Explicitly call out what must not be added.
-- Do not emit any `algorithm-studio-tool` block when only drafting the working document.
-- Do not rewrite the full `Document` just to think through the task.
+This `tools` workspace hosts the Algorithm Studio editor, its agent bridge, and its teaching skills.
 
-Use this template when a checklist or working document is needed:
+- Main desktop app: `tools/algorithm_studio/algorithm_studio.py`
+- Agent bridge: `tools/algorithm_studio/agents.py`
+- Agent prompt builder: `tools/algorithm_studio/agent_client.py`
+- UI command surface: `tools/algorithm_studio/interface4agents.py`
+- Teaching skills:
+  - `tools/skills/algorithm-studio-minimal-demo/`
+  - `tools/skills/algorithm-studio-minimal-tide-demo/`
 
-```text
-Goal
-- one short statement of the task
+Read the relevant skill and reference file before teaching.
 
-Constraints
-- hard constraint 1
-- hard constraint 2
+## Mandatory Execution Model
 
-Minimal structure
-- required node / stage / file 1
-- required node / stage / file 2
-- explicit "do not add" items if important
+- Agents must drive the editor through fenced `interface4agents` blocks only.
+- `algorithm-studio-tool` blocks are disabled.
+- `update_document` is disabled.
+- Fail fast on invalid state. Do not silently skip missing nodes, unknown scenes, or unsupported commands.
+- Keep all teaching and project-facing documentation in English unless the user explicitly asks for another language.
 
-Steps
-1. first execution step
-2. second execution step
-3. third execution step
+## Operation Stack Rules
 
-Execution focus
-- the immediate next action
-```
+- The operation stack is the latest source of truth for user progress.
+- The stack is included in agent context only when the UI toggle `Read Stack: On` is enabled.
+- If a teaching flow depends on stack-driven progression and `Read Stack` is off, ask the user to enable it.
+- Highlight operations and chat operations are intentionally excluded from the operation stack.
+- Scene switches should be treated as real progress signals when they appear in the stack.
 
-When the document or prior context is genuinely long:
+## Teaching Rules
 
-- compress old conversation into a short working summary
-- compress the current scene into only the structures relevant to the task
-- compress the document into the minimum facts needed for execution
-- carry forward only constraints, target shape, unresolved decisions, and the next step
-- do not repeatedly recompress unchanged context across consecutive turns
+- Teach one concrete UI step at a time.
+- Do not dump the whole workflow in a single answer.
+- When the current command set supports it, emit exactly one `highlight` before explaining the next UI action.
+- After the highlighted command block, explain only the current step.
+- Before moving forward, read the latest operation stack and confirm that the previous step actually happened.
+- If the stack does not confirm the step, stay on that same step and re-highlight only that target.
 
-### Compression Rule
+## Scene Model
 
-Whenever context becomes long enough to interfere with execution quality or prompt budget, the agent should compress:
+Use the current scene names exposed by `interface4agents`:
 
-- old conversation
-- scene state
-- document state
-- prior working text
+- `scene main`
+- `scene container`
+- `scene decomposer`
+- `scene reflector`
+- `scene interventioner`
+- `scene pretick`
+- `scene aftertick`
+- `scene render`
+- `scene d2c`
+- `scene all`
 
-Do not compress on every turn.
-Do not recompress unchanged skill instructions or unchanged AGENTS instructions unless they are part of the overlong context that must be reduced.
+For teaching, refer to the visible UI names such as `containerScene`, `decomposerScene`, `reflectorScene`, and the intervention sub-tabs.
 
-Compression must preserve:
+## Container And Layout Semantics
 
-- the user goal
-- hard constraints
-- the minimal target structure
-- completed steps
-- remaining steps
-- unresolved risks
-- the immediate next action
+- `v` and `a` nodes are storage containers, not fixed scalar-type declarations.
+- Expanded `v/a` nodes may contain internal layout fields.
+- Internal layout fields are stored as `layoutFields` with:
+  - `kind`
+  - `bitWidth`
+  - `ruleText`
+- `ruleText` is a free-form contract between the UI and the current algorithm. It does not force a universal float/int/bool meaning.
+- Good examples:
+  - `from v1 to phase01 32`
+  - `from a1 to x,y 16,16`
+  - `from a2 to alive,team,heat 1,7,24`
+- When a tutorial needs finer structure, explicitly teach the user to expand the container and refine it with layout fields.
+- Resource nodes are not part of the default teaching documents. Only introduce them when the user explicitly requests a resource-driven workflow.
 
-## Preferred Editing Strategy
+## Command Expectations
 
-- Prefer UI tools first. Use them for adding, updating, or deleting nodes and rules.
-- Only use `update_document` when the user explicitly asks to edit raw document text, or when the requested change cannot be expressed safely with the UI tools.
-- Apply the smallest possible change that satisfies the user request.
-- Keep unrelated fields unchanged.
-- Do not invent extra nodes, resource nodes, stages, functions, reflectors, rules, or scaffolding unless the user explicitly asked for them.
-- In Chinese requests, bare `容器` means `containerElement` by default, not a variable node.
-- Prefer `kind: "container"` for that case.
-- Use `variable` only when the user explicitly asks for `v节点`, `变量节点`, or names like `v1`.
-- Use `array` only when the user explicitly asks for `a节点`, `数组节点`, or names like `a1`.
-- `meshNode` should stay minimal and only represent `[mesh]`.
-- The singleton tool-like nodes should be reused instead of duplicated when possible: `container`, `decomposer`, `reflector`, `interventioner`, `meshNode`, `fun`.
-- For `fun`, keep two layers:
-  - the `fun` node itself stores real code such as C++ / shader content
-  - a linked `functiontext` node stores editable natural-language solution text
-- If the user asks for方案/思路/解法 around `fun`, prefer `functiontext`.
-- If the user asks for真实函数/真实shader/C++代码, prefer updating the `fun` node script.
-- For intervention `render` stage work, default to GLSL shader code unless the user explicitly asks for another implementation form.
-- Treat `render` stage logic as shader-first content, not pseudocode or C++ scaffolding by default.
-- For minimal demo algorithms, especially descriptor-driven single-point motion demos, read `tools/skills/algorithm-studio-minimal-demo/SKILL.md` first and follow its scope rules before editing the scene.
+- Prefer direct `interface4agents` commands over abstract descriptions when a command exists.
+- Use `highlight field <container>` when you need to point at the layout-rule area inside an expanded container.
+- Use `field ...` commands when you need to refine a container into smaller parts.
+- Do not describe hidden implementation details as if they were user-visible UI.
 
-### Canvas Interaction Notes
+## Build Explanation
 
-- When describing Algorithm Studio interactions, treat the colored node header as the node title bar.
-- The generic collapse / expand gesture is double-clicking that colored node header, not double-clicking anywhere on the node body.
-- Do not describe mouse-wheel as the normal way to pan the scene canvas; for agent guidance, mouse-wheel should be treated as canvas zoom.
-- Do not describe “double-click the whole node to collapse” as a universal rule.
-- `fun` nodes are special: double-clicking the node body opens the script instead of collapsing the node.
+When the user asks how build works, explain it at a high level:
 
-### Standard Slot Alias Rule
+- the editor materializes package data and generated source assets into the algorithm output folder
+- stage shader files are written from the current intervention setup
+- generated plugin or script support files are emitted as needed
+- the repository build batch is then invoked for the target algorithm
 
-- Standard-slot aliases are tool-side semantics only.
-- The scene or working document may describe aliases such as `a1:vertex` or `v1,v2:pos` for readability.
-- Single-slot aliases still follow the underlying `v` or `a` slot rules.
-- Multi-slot aliases may be shown as higher-level grouped variables in `containerElement` details.
-- When emitting or editing package fields that are consumed by the current trunk runtime, always write the underlying `vN/aN` names instead of alias names.
-
-### Pipeline Mapping Rule
-
-- When preparing pipeline runtime mapping data, do not assume every stage exposes an identical standard container.
-- The tool should think in terms of:
-  - one shared compatible `v/a` prefix across all stages
-  - plus stage-local extra standard slots
-- Those extra standard slots must be summarized into the pipeline mapping metadata with cumulative offsets, so later bridge code can treat them as registered stage-local extensions instead of unnamed loose slots.
-- The current runtime is intentionally stricter: extra standard slots may only be extra `v` registers.
-- If a stage declares any extra standard `a` outside the shared prefix, the runtime should fail fast instead of trying to adapt it.
-- The implicit pipeline `stageBuffer` must stay inside the shared `a` prefix, not inside a stage-local extra `a`.
-
-## UI Tools
-
-Use these exact formats:
-
-```algorithm-studio-tool
-{"tool":"ui_add_node","kind":"variable","name":"v1","count":1,"stride":4,"message":"Added v1"}
-```
-
-```algorithm-studio-tool
-{"tool":"ui_update_node","kind":"variable","name":"v1","count":8,"message":"Updated v1 count"}
-```
-
-```algorithm-studio-tool
-{"tool":"ui_add_node","kind":"functiontext","function_name":"fun","text":"solution draft","message":"Added function text"}
-```
-
-```algorithm-studio-tool
-{"tool":"ui_update_node","kind":"functiontext","name":"fun_text","text":"updated solution draft","message":"Updated function text"}
-```
-
-```algorithm-studio-tool
-{"tool":"ui_delete_node","kind":"variable","name":"v1","message":"Deleted v1"}
-```
-
-```algorithm-studio-tool
-{"tool":"ui_add_rule","name":"v1_to_v2","source":"v1","target":"v2","map_kind":"v2v","message":"Added rule"}
-```
-
-Rules:
-
-- `ui_add_node` kinds currently supported: `variable`, `array`, `stage`, `interventioner`, `resnode`, `function`, `functiontext`, `reflector`.
-- `ui_add_node` also supports `container`, `containerelement`, `container_group`, `containergroup` for containerElement nodes.
-- `ui_update_node` should be used to change existing node properties instead of rewriting the whole document.
-- `ui_delete_node` should be used to remove an existing node by `kind` and `name`.
-- `ui_add_rule` should be used to add a decomposer rule between existing containers.
-- Use `functiontext` for detached editable solution text linked to `fun`.
-- Use the `fun` node script for real code such as C++ and shader content.
-- Prefer these tools over `update_document` whenever possible.
-
-### Agent UI Commands
-
-- When the task is about teaching the user to operate Algorithm Studio, prefer the `interface4agents` command script layer instead of raw document edits.
-- Use `highlight` to point at the UI location of a command before explaining it.
-- Start with the `v`, `a`, and `scene` command families.
-
-## Document Editing Fallback
-
-- `Document` remains the source of truth, but full document rewriting is a fallback path.
-- If you must use `update_document`, always start from the current full `Document` JSON and return a full updated JSON object.
-- The returned `document` must be valid JSON with a JSON object at the root.
-- Do not return a patch, diff, comments, or placeholder schema.
-- If a rename changes references, update every affected reference consistently.
-- Preserve ordering relationships in the document when editing graph content.
-- If the requested edit cannot be applied safely, explain why instead of emitting an invalid tool call.
+Keep the explanation aligned with the current editor state instead of older document-only workflows.

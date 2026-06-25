@@ -276,6 +276,7 @@ struct AlgorithmContainerSet {
   std::vector<AlgorithmContainer> temporary_registers;
   std::vector<AlgorithmContainer> temporary_caches;
   std::vector<AlgorithmContainer> hidden_containers;
+  std::unordered_map<std::string, std::vector<std::string>> container_aliases_by_name;
 };
 
 inline void CopyAlgorithmContainer(
@@ -333,6 +334,74 @@ inline void CopyAlgorithmContainerSet(
     CopyAlgorithmContainer(container, &copied_container);
     out_target_container_set->hidden_containers.push_back(std::move(copied_container));
   }
+
+  out_target_container_set->container_aliases_by_name = source_container_set.container_aliases_by_name;
+}
+
+inline bool HasDeclaredAlgorithmContainerName(
+  const AlgorithmContainerSet& container_set,
+  const std::string& container_name) {
+  for (const AlgorithmContainer& container : container_set.arrays) {
+    if (container.name == container_name) return true;
+  }
+  for (const AlgorithmContainer& container : container_set.temporary_registers) {
+    if (container.name == container_name) return true;
+  }
+  for (const AlgorithmContainer& container : container_set.temporary_caches) {
+    if (container.name == container_name) return true;
+  }
+  return false;
+}
+
+inline bool TryResolveAlgorithmContainerReferenceNames(
+  const AlgorithmContainerSet& container_set,
+  const std::string& container_name,
+  std::vector<std::string>* out_container_names) {
+  if (!out_container_names) {
+    return false;
+  }
+  out_container_names->clear();
+  if (container_name.empty()) {
+    return false;
+  }
+
+  if (HasDeclaredAlgorithmContainerName(container_set, container_name)) {
+    out_container_names->push_back(container_name);
+    return true;
+  }
+
+  AlgorithmContainerStorageKind storage_kind{};
+  uint32_t index{};
+  if (container_set.standard_layout.enabled() &&
+      container_set.standard_layout.TryResolveContainerName(container_name, &storage_kind, &index)) {
+    out_container_names->push_back(container_name);
+    return true;
+  }
+
+  const auto alias_found = container_set.container_aliases_by_name.find(container_name);
+  if (alias_found == container_set.container_aliases_by_name.end()) {
+    return false;
+  }
+
+  *out_container_names = alias_found->second;
+  return !out_container_names->empty();
+}
+
+inline bool TryResolveSingleAlgorithmContainerReferenceName(
+  const AlgorithmContainerSet& container_set,
+  const std::string& container_name,
+  std::string* out_container_name) {
+  if (!out_container_name) {
+    return false;
+  }
+  out_container_name->clear();
+  std::vector<std::string> resolved_names{};
+  if (!TryResolveAlgorithmContainerReferenceNames(container_set, container_name, &resolved_names) ||
+      resolved_names.size() != 1u) {
+    return false;
+  }
+  *out_container_name = resolved_names.front();
+  return true;
 }
 
 inline bool IsStandardContainerSlotName(
@@ -368,6 +437,11 @@ inline AlgorithmContainer* FindAlgorithmContainer(
   for (AlgorithmContainer& container : container_set->temporary_caches) {
     if (container.name == name) return &container;
   }
+  std::string resolved_name{};
+  if (TryResolveSingleAlgorithmContainerReferenceName(*container_set, name, &resolved_name) &&
+      resolved_name != name) {
+    return FindAlgorithmContainer(container_set, resolved_name);
+  }
   AlgorithmContainerStorageKind storage_kind{};
   uint32_t index{};
   if (!container_set->standard_layout.enabled() ||
@@ -396,6 +470,11 @@ inline const AlgorithmContainer* FindAlgorithmContainer(
   }
   for (const AlgorithmContainer& container : container_set.temporary_caches) {
     if (container.name == name) return &container;
+  }
+  std::string resolved_name{};
+  if (TryResolveSingleAlgorithmContainerReferenceName(container_set, name, &resolved_name) &&
+      resolved_name != name) {
+    return FindAlgorithmContainer(container_set, resolved_name);
   }
   AlgorithmContainerStorageKind storage_kind{};
   uint32_t index{};

@@ -85,7 +85,6 @@ class AlgorithmStudioCanvasOverlayMixin:
             self.canvas.coords(rect_id, x, y, x + width, y + height)
             self.canvas.coords(text_id, x + width / 2, y + height / 2)
             if step >= steps:
-                self.canvas.after(450, lambda: self.canvas.delete("highlight_demo"))
                 return
             self.canvas.after(28, lambda next_step=step + 1: animate(next_step))
 
@@ -254,7 +253,19 @@ class AlgorithmStudioCanvasOverlayMixin:
             widget.bind("<ButtonRelease-1>", self._finish_canvas_detail_panel_drag)
         self.canvas.tag_raise("detail_panel")
 
-    def _handle_canvas_node_body_double_click(self, kind: str, node_name: str) -> None:
+    def _handle_canvas_node_body_double_click(self, kind: str, node_name: str, tags: tuple[str, ...] | None = None) -> None:
+        resolved_tags = tags or ()
+        if kind == "container":
+            container = self._find_container(node_name)
+            if container is None:
+                raise AssertionError(f"Missing container {node_name}")
+            field_index = self._container_layout_field_index_from_tags(resolved_tags)
+            if field_index is not None:
+                self._open_container_layout_field_editor(container, field_index)
+                return
+            section = self._container_section_from_tags(resolved_tags)
+            self._open_container_editor(container, focus_section=section)
+            return
         if kind == "function":
             item = self._find_function_frame(node_name)
             if item is None:

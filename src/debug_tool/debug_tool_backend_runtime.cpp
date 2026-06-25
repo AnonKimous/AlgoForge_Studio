@@ -123,12 +123,7 @@ std::string _ResolveAlgorithmShaderPath(
     return {};
   }
 
-  return algorithm::library_paths::ResolveAlgorithmRelativePath(
-    algorithm::library_paths::ResolveAlgorithmLibraryRuntimeRoot(),
-    algorithm::library_paths::ResolvePackageRelativePath(
-      package_location.package_root,
-      algorithm::library_paths::ResolveAlgorithmLibrarySourceRoot()),
-    shader_path).string();
+  return (package_location.runtime_package_root / path).lexically_normal().string();
 }
 
 std::string _ResolveShaderBinaryPath(const std::string& shader_path) {
@@ -962,8 +957,8 @@ bool DebugToolBackendRuntime::AttachAlgorithmToAgent(
     out_error_message,
     static_cast<agent::AlgorithmMountMode>(static_cast<int>(mount_mode)),
     static_cast<agent::AlgorithmExecutionPreference>(static_cast<int>(execution_preference)));
-  if (!attached) {
-    DEBUG_TOOL_ASSERT(false, "Failed to attach algorithm to the built-in agent.");
+  if (!attached && out_error_message && out_error_message->empty()) {
+    *out_error_message = "Failed to attach algorithm to the built-in agent.";
   }
   return attached;
 }

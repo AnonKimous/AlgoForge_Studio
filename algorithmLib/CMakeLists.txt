@@ -128,51 +128,25 @@ endfunction()
 
 set(CORE_DEBUG_DIR "${CORE_BUILD_DIR}/Debug")
 if(BUILD_ALGORITHM_SAMPLE_PLUGIN)
-  resolve_existing_path(_SDL3_INCLUDE_DIR SDL3/SDL.h
-    "${REPO_ROOT}/third_party/SDL-main/include"
-    "$ENV{VULKAN_SDK}/Include"
-    "$ENV{VULKAN_SDK}/include"
-  )
-  if(_SDL3_INCLUDE_DIR)
-    set(SDL3_INCLUDE_DIR "${_SDL3_INCLUDE_DIR}" CACHE PATH "SDL3 include directory" FORCE)
-    resolve_existing_file(_SDL3_LIBRARY_DEBUG
-      "$ENV{VULKAN_SDK}/Lib/SDL3.lib"
-      "$ENV{VULKAN_SDK}/lib/SDL3.lib"
-    )
-    resolve_existing_file(_SDL3_LIBRARY_RELEASE
-      "$ENV{VULKAN_SDK}/Lib/SDL3.lib"
-      "$ENV{VULKAN_SDK}/lib/SDL3.lib"
-    )
-    if(_SDL3_LIBRARY_DEBUG AND _SDL3_LIBRARY_RELEASE)
-      set(SDL3_LINK_LIBS
-        debug "${SDL3_LIBRARY_DEBUG}"
-        optimized "${SDL3_LIBRARY_RELEASE}"
-      )
-    else()
-      message(STATUS "SDL3 library not found locally; fetching SDL3 from GitHub.")
-      FetchContent_Declare(sdl3_source
-        URL "https://github.com/libsdl-org/SDL/archive/refs/tags/release-3.4.8.zip"
-      )
-      FetchContent_MakeAvailable(sdl3_source)
-      set(SDL3_INCLUDE_DIR "${sdl3_source_SOURCE_DIR}/include" CACHE PATH "SDL3 include directory" FORCE)
-      set(SDL3_LINK_LIBS)
-    endif()
-  else()
-    message(STATUS "SDL3 not found locally; fetching SDL3 from GitHub.")
-    FetchContent_Declare(sdl3_source
-      URL "https://github.com/libsdl-org/SDL/archive/refs/tags/release-3.4.8.zip"
-    )
-    FetchContent_MakeAvailable(sdl3_source)
-    set(SDL3_INCLUDE_DIR "${sdl3_source_SOURCE_DIR}/include" CACHE PATH "SDL3 include directory" FORCE)
-    set(SDL3_LINK_LIBS)
-  endif()
-  require_core_library("${CORE_DEBUG_DIR}/algorithm_management.lib" "Build the root project before building the sample algorithm plugin.")
-  require_core_library("${CORE_DEBUG_DIR}/common_data.lib" "Build the root project before building the sample algorithm plugin.")
-  require_core_library("${CORE_DEBUG_DIR}/runtime_systems.lib" "Build the root project before building the sample algorithm plugin.")
-  import_core_static_library(algorithm_management_core algorithm_management.lib)
-  import_core_static_library(common_data_core common_data.lib)
-  import_core_static_library(runtime_systems_core runtime_systems.lib)
+  set(ALGORITHM_PLUGIN_MIRROR_SRC_ROOT "${CMAKE_CURRENT_BINARY_DIR}/plugin_support_mirror/src")
+  file(MAKE_DIRECTORY "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}")
+  file(COPY "${REPO_ROOT}/src/algorithm_support" DESTINATION "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}")
+  file(COPY "${REPO_ROOT}/src/common_data" DESTINATION "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}")
+  file(MAKE_DIRECTORY "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}/agent")
+  configure_file(
+    "${REPO_ROOT}/src/agent/agent_abi.h"
+    "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}/agent/agent_abi.h"
+    COPYONLY)
 
+  add_library(algorithm_plugin_support_mirror STATIC
+    "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}/algorithm_support/algorithm_package_location.cpp"
+    "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}/algorithm_support/algorithm_plugin_support_minimal.cpp"
+    "${REPO_ROOT}/third_party/cjson/cJSON.c"
+  )
+  target_include_directories(algorithm_plugin_support_mirror PUBLIC
+    "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}"
+    "${REPO_ROOT}/third_party/cjson"
+  )
 endif()
 
 add_custom_target(algorithm_packages)
@@ -247,16 +221,16 @@ function(register_algorithm_package package_manifest)
     list(GET plugin_sources 0 plugin_source)
     if(BUILD_ALGORITHM_SAMPLE_PLUGIN)
       add_library("${algorithm_target_name}_plugin" MODULE "${plugin_source}")
-      target_include_directories("${algorithm_target_name}_plugin" PUBLIC ${PROJECT_INCLUDE_DIRS})
+      target_include_directories("${algorithm_target_name}_plugin" PUBLIC
+        "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}"
+        ${PROJECT_INCLUDE_DIRS}
+      )
       target_compile_definitions("${algorithm_target_name}_plugin" PRIVATE
         ALGORITHM_LIBRARY_PLUGIN_BUILD=1
         ALGORITHM_LIBRARY_RESOURCE_ROOT="${ALGORITHM_LIBRARY_SOURCE_ROOT}"
       )
       target_link_libraries("${algorithm_target_name}_plugin" PRIVATE
-        algorithm_management_core
-        common_data_core
-        runtime_systems_core
-        Vulkan::Vulkan
+        algorithm_plugin_support_mirror
       )
       set_target_properties("${algorithm_target_name}_plugin" PROPERTIES
         PREFIX ""

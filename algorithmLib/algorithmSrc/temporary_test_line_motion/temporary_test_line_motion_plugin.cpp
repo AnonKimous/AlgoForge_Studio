@@ -1,184 +1,35 @@
 #define ALGORITHM_LIBRARY_PLUGIN_BUILD 1
 
-#include "agent/agent.h"
 #include "../algorithm_plugin_api.h"
 
-#include "cJSON.h"
-
-#include <algorithm>
 #include <cstring>
-#include <fstream>
-#include <initializer_list>
-#include <sstream>
-#include <string_view>
 
 namespace {
 
-struct TemporaryTestResourceEntry {
-  std::string resource_name;
-  std::string resource_kind;
-  std::string container_name;
-  bool required{true};
-};
+constexpr float kLeftStep = -0.10f;
+constexpr float kUpStep = 0.03f;
 
-struct TemporaryTestDescriptionBinding {
-  std::string name;
-  std::vector<std::string> from_names;
-  std::string target_container_name;
-  std::vector<uint32_t> target_indices;
-  std::vector<std::string> target_container_names;
-};
-
-struct TemporaryTestDescriptionEntry {
-  std::string name;
-  std::vector<TemporaryTestDescriptionBinding> bindings;
-};
-
-struct TemporaryTestSchema {
-  std::vector<TemporaryTestResourceEntry> required_resources;
-  std::vector<TemporaryTestDescriptionEntry> description_entries;
-  bool valid{false};
-  std::string error_message;
-};
-
-struct TemporaryTestInterventionSchema {
-  std::vector<agent::AlgorithmInterventionStageSpec> stage_specs;
-  bool valid{false};
-  std::string error_message;
-};
-
-std::string _ReadTextFile(const std::string& path) {
-  std::ifstream file(path, std::ios::binary);
-  if (!file) {
-    return {};
-  }
-  std::ostringstream stream;
-  stream << file.rdbuf();
-  return stream.str();
-}
-
-std::string _GetStringField(const cJSON* object, const char* key) {
-  if (!object || !key) {
-    return {};
-  }
-  const cJSON* item = cJSON_GetObjectItemCaseSensitive(object, key);
-  if (!item || !cJSON_IsString(item) || !item->valuestring) {
-    return {};
-  }
-  return item->valuestring;
-}
-
-std::vector<std::string> _GetStringList(const cJSON* item) {
-  std::vector<std::string> values;
-  if (!item) {
-    return values;
-  }
-  if (cJSON_IsString(item) && item->valuestring) {
-    values.push_back(item->valuestring);
-    return values;
-  }
-  if (!cJSON_IsArray(item)) {
-    return values;
-  }
-  const int count = cJSON_GetArraySize(item);
-  values.reserve(count > 0 ? static_cast<size_t>(count) : 0u);
-  for (int i = 0; i < count; ++i) {
-    const cJSON* entry = cJSON_GetArrayItem(item, i);
-    if (!entry || !cJSON_IsString(entry) || !entry->valuestring) {
-      continue;
-    }
-    values.emplace_back(entry->valuestring);
-  }
-  return values;
-}
-
-std::vector<std::string> _GetStringListField(
-  const cJSON* object,
-  std::initializer_list<const char*> keys) {
-  if (!object || !cJSON_IsObject(object)) {
-    return {};
-  }
-
-  for (const char* key : keys) {
-    if (!key) {
-      continue;
-    }
-    const cJSON* item = cJSON_GetObjectItemCaseSensitive(object, key);
-    std::vector<std::string> values = _GetStringList(item);
-    if (!values.empty()) {
-      return values;
-    }
-  }
-
-  return {};
-}
-
-std::vector<uint32_t> _GetUintList(const cJSON* item) {
-  std::vector<uint32_t> values;
-  if (!item || !cJSON_IsArray(item)) {
-    return values;
-  }
-  const int count = cJSON_GetArraySize(item);
-  values.reserve(count > 0 ? static_cast<size_t>(count) : 0u);
-  for (int i = 0; i < count; ++i) {
-    const cJSON* entry = cJSON_GetArrayItem(item, i);
-    if (!entry || !cJSON_IsNumber(entry) || entry->valuedouble < 0.0) {
-      continue;
-    }
-    values.push_back(static_cast<uint32_t>(entry->valuedouble));
-  }
-  return values;
-}
-
-uint32_t _GetUintField(const cJSON* object, const char* key, uint32_t fallback = 0u) {
-  if (!object || !key) {
-    return fallback;
-  }
-  const cJSON* item = cJSON_GetObjectItemCaseSensitive(object, key);
-  if (!item || !cJSON_IsNumber(item) || item->valuedouble < 0.0) {
-    return fallback;
-  }
-  return static_cast<uint32_t>(item->valuedouble);
-}
-
-float _GetFloatField(const cJSON* object, const char* key, float fallback = 0.0f) {
-  if (!object || !key) {
-    return fallback;
-  }
-  const cJSON* item = cJSON_GetObjectItemCaseSensitive(object, key);
-  if (!item || !cJSON_IsNumber(item)) {
-    return fallback;
-  }
-  return static_cast<float>(item->valuedouble);
-}
-
-bool _GetBoolField(const cJSON* object, const char* key, bool fallback = false) {
-  if (!object || !key) {
-    return fallback;
-  }
-  const cJSON* item = cJSON_GetObjectItemCaseSensitive(object, key);
-  if (!item) {
-    return fallback;
-  }
-  if (item->type & (cJSON_True | cJSON_False)) {
-    return (item->type & cJSON_True) != 0;
-  }
-  return fallback;
-}
-
-bool _WriteFloatValue(
-  algorithm::AlgorithmContainer* container,
-  float value) {
+bool AdvanceScalar(algorithm::AlgorithmContainer* container, float delta) {
   if (!container) {
+    return false;
+  }
+  if (container->storage_kind != algorithm::AlgorithmContainerStorageKind::TemporaryRegister) {
+    return false;
+  }
+  if (container->element_stride < sizeof(float)) {
     return false;
   }
   if (container->bytes.size() < sizeof(float)) {
     return false;
   }
-  std::memcpy(container->bytes.data(), &value, sizeof(float));
+  float value = 0.0f;
+  std::memcpy(&value, container->bytes.data(), sizeof(value));
+  value += delta;
+  std::memcpy(container->bytes.data(), &value, sizeof(value));
   return true;
 }
 
+<<<<<<< HEAD
 bool _WriteFloatValueAtIndex(
   algorithm::AlgorithmContainer* container,
   uint32_t index,
@@ -482,305 +333,11 @@ const agent::AlgorithmResourceBinding* _FindResourceBinding(
 }
 
 class TemporaryTestLineMotionDecomposer final {
+=======
+class LineMotionCpuExecutor final : public agent::IAlgorithmCpuExecutor {
+>>>>>>> 0e5193b (preciser control of digital)
  public:
-  explicit TemporaryTestLineMotionDecomposer(TemporaryTestSchema schema)
-    : schema_(std::move(schema)) {}
-
-  bool GetRequestedResources(
-    const algorithm::AlgorithmProfile& algorithm_profile,
-    agent::AlgorithmRequestedResources* out_requested_resources) const {
-    if (!out_requested_resources) {
-      return false;
-    }
-    *out_requested_resources = {};
-    out_requested_resources->algorithm_name = algorithm_profile.algorithm_name;
-    if (!schema_.valid) {
-      return false;
-    }
-    out_requested_resources->required_resources.reserve(schema_.required_resources.size());
-    for (const TemporaryTestResourceEntry& entry : schema_.required_resources) {
-      out_requested_resources->required_resources.push_back(agent::AlgorithmRequestedResources::RequiredResource{
-        .resource_name = entry.resource_name,
-        .resource_kind = entry.resource_kind,
-        .required = entry.required,
-      });
-    }
-    out_requested_resources->valid = true;
-    return true;
-  }
-
-  bool GetRequestedDescriptorBindings(
-    const algorithm::AlgorithmProfile& algorithm_profile,
-    agent::AlgorithmRequestedDescriptorBindings* out_requested_descriptor_bindings) const {
-    if (!out_requested_descriptor_bindings) {
-      return false;
-    }
-    *out_requested_descriptor_bindings = {};
-    out_requested_descriptor_bindings->algorithm_name = algorithm_profile.algorithm_name;
-    if (!schema_.valid) {
-      return false;
-    }
-    for (const TemporaryTestDescriptionEntry& entry : schema_.description_entries) {
-      for (const TemporaryTestDescriptionBinding& binding : entry.bindings) {
-        if (!binding.target_container_names.empty()) {
-          if (binding.from_names.size() != binding.target_container_names.size() &&
-              binding.from_names.size() != 1u) {
-            return false;
-          }
-          for (size_t i = 0; i < binding.target_container_names.size(); ++i) {
-            const size_t from_index = binding.from_names.size() == 1u ? 0u : i;
-            out_requested_descriptor_bindings->descriptor_slots.push_back(
-              agent::AlgorithmRequestedDescriptorBindings::DescriptorSlot{
-                .descriptor_name = binding.from_names[from_index],
-                .container_name = binding.target_container_names[i],
-                .array_index = 0u,
-              });
-          }
-          continue;
-        }
-
-        if (binding.from_names.size() != binding.target_indices.size() &&
-            binding.from_names.size() != 1u) {
-          return false;
-        }
-        for (size_t i = 0; i < binding.target_indices.size(); ++i) {
-          const uint32_t target_index = binding.target_indices[i];
-          if (target_index == 0u) {
-            return false;
-          }
-          const size_t from_index = binding.from_names.size() == 1u ? 0u : i;
-          out_requested_descriptor_bindings->descriptor_slots.push_back(
-            agent::AlgorithmRequestedDescriptorBindings::DescriptorSlot{
-              .descriptor_name = binding.from_names[from_index],
-              .container_name = binding.target_container_name,
-              .array_index = target_index - 1u,
-            });
-        }
-      }
-    }
-    out_requested_descriptor_bindings->valid = true;
-    return true;
-  }
-
-  bool Decompose(
-    const algorithm::AlgorithmProfile& algorithm_profile,
-    const std::vector<agent::AlgorithmResourceBinding>& resource_bindings,
-    const std::vector<agent::AlgorithmDescriptorValue>& descriptor_values,
-    algorithm::AlgorithmContainerSet* container_set,
-    std::string* out_error_message) const {
-    if (!container_set) {
-      if (out_error_message) {
-        *out_error_message = "AlgorithmContainerSet output pointer is null.";
-      }
-      return false;
-    }
-    if (!schema_.valid) {
-      if (out_error_message) {
-        *out_error_message = schema_.error_message;
-      }
-      return false;
-    }
-
-    for (const TemporaryTestResourceEntry& entry : schema_.required_resources) {
-      if (!entry.required) {
-        continue;
-      }
-      const agent::AlgorithmResourceBinding* binding = _FindResourceBinding(resource_bindings, entry.resource_name);
-      if (!binding) {
-        if (out_error_message) {
-          *out_error_message = "Missing required resource binding '" + entry.resource_name + "' for '" +
-            algorithm_profile.algorithm_name + "'.";
-        }
-        return false;
-      }
-      if (entry.resource_kind == "mesh") {
-        if (binding->source_path.empty()) {
-          if (out_error_message) {
-            *out_error_message = "Required mesh resource '" + entry.resource_name + "' has no source path for '" +
-              algorithm_profile.algorithm_name + "'.";
-          }
-          return false;
-        }
-        std::ifstream file(binding->source_path, std::ios::binary);
-        if (!file) {
-          if (out_error_message) {
-            *out_error_message = "Required mesh resource file '" + binding->source_path + "' could not be opened for '" +
-              algorithm_profile.algorithm_name + "'.";
-          }
-          return false;
-        }
-      }
-    }
-
-    for (const TemporaryTestDescriptionEntry& entry : schema_.description_entries) {
-      for (const TemporaryTestDescriptionBinding& binding : entry.bindings) {
-        if (!binding.target_container_names.empty()) {
-          if (binding.from_names.size() != binding.target_container_names.size() &&
-              binding.from_names.size() != 1u) {
-            if (out_error_message) {
-              *out_error_message = "Description entry '" + entry.name + "' has mismatched source and target counts for '" +
-                algorithm_profile.algorithm_name + "'.";
-            }
-            return false;
-          }
-          for (size_t i = 0; i < binding.target_container_names.size(); ++i) {
-            const size_t from_index = binding.from_names.size() == 1u ? 0u : i;
-            const agent::AlgorithmDescriptorValue* value = _FindDescriptorValue(descriptor_values, binding.from_names[from_index]);
-            if (!value) {
-              if (out_error_message) {
-                *out_error_message = "Missing descriptor value '" + binding.from_names[from_index] + "' for '" +
-                  algorithm_profile.algorithm_name + "'.";
-              }
-              return false;
-            }
-
-            AlgorithmContainer* container = FindAlgorithmContainer(container_set, binding.target_container_names[i]);
-            if (!container) {
-              if (out_error_message) {
-                *out_error_message = "Missing target container '" + binding.target_container_names[i] + "' for '" +
-                  algorithm_profile.algorithm_name + "'.";
-              }
-              return false;
-            }
-            if (!_WriteFloatValue(container, value->scalar_value)) {
-              if (out_error_message) {
-                *out_error_message = "Failed to write descriptor value into container '" + binding.target_container_names[i] + "' for '" +
-                  algorithm_profile.algorithm_name + "'.";
-              }
-              return false;
-            }
-          }
-          continue;
-        }
-
-        if (binding.target_container_name.empty() || binding.target_indices.empty()) {
-          if (out_error_message) {
-            *out_error_message = "Description entry '" + entry.name + "' is missing a target container for '" +
-              algorithm_profile.algorithm_name + "'.";
-          }
-          return false;
-        }
-        if (binding.from_names.size() != binding.target_indices.size() &&
-            binding.from_names.size() != 1u) {
-          if (out_error_message) {
-            *out_error_message = "Description entry '" + entry.name + "' has mismatched source and target counts for '" +
-              algorithm_profile.algorithm_name + "'.";
-          }
-          return false;
-        }
-
-        AlgorithmContainer* container = FindAlgorithmContainer(container_set, binding.target_container_name);
-        if (!container) {
-          if (out_error_message) {
-            *out_error_message = "Missing target container '" + binding.target_container_name + "' for '" +
-              algorithm_profile.algorithm_name + "'.";
-          }
-          return false;
-        }
-        if (container->storage_kind != AlgorithmContainerStorageKind::Array) {
-          if (out_error_message) {
-            *out_error_message = "Target container '" + binding.target_container_name + "' is not an array for '" +
-              algorithm_profile.algorithm_name + "'.";
-          }
-          return false;
-        }
-
-        for (size_t i = 0; i < binding.target_indices.size(); ++i) {
-          const uint32_t target_index = binding.target_indices[i];
-          if (target_index == 0u) {
-            if (out_error_message) {
-              *out_error_message = "Description entry '" + entry.name + "' uses an invalid target index for '" +
-                algorithm_profile.algorithm_name + "'.";
-            }
-            return false;
-          }
-          const size_t from_index = binding.from_names.size() == 1u ? 0u : i;
-          const agent::AlgorithmDescriptorValue* value = _FindDescriptorValue(descriptor_values, binding.from_names[from_index]);
-          if (!value) {
-            if (out_error_message) {
-              *out_error_message = "Missing descriptor value '" + binding.from_names[from_index] + "' for '" +
-                algorithm_profile.algorithm_name + "'.";
-            }
-            return false;
-          }
-          if (!_WriteFloatValueAtIndex(container, target_index - 1u, value->scalar_value)) {
-            if (out_error_message) {
-              *out_error_message = "Failed to write descriptor value into container '" + binding.target_container_name + "' for '" +
-                algorithm_profile.algorithm_name + "'.";
-            }
-            return false;
-          }
-        }
-      }
-    }
-
-    return true;
-  }
-
- private:
-  TemporaryTestSchema schema_{};
-};
-
-class TemporaryTestLineMotionIntervention final : public agent::IAlgorithmIntervention {
- public:
-  explicit TemporaryTestLineMotionIntervention(TemporaryTestInterventionSchema schema)
-    : schema_(std::move(schema)) {}
-
-  bool SupportsIntervention() const override {
-    return schema_.valid && !schema_.stage_specs.empty();
-  }
-
-  void FillAgentToAlgorithmSignal(
-    const agent::AgentTickContext& context,
-    AgentToAlgorithmSignal* out_signal) const override {
-    if (!out_signal) {
-      return;
-    }
-
-    *out_signal = {};
-    out_signal->needs_intervention = context.intervention_request && context.intervention_request->enabled;
-  }
-
-  bool GetInterventionStageSpecs(
-    std::vector<agent::AlgorithmInterventionStageSpec>* out_stage_specs) const override {
-    if (!out_stage_specs) {
-      return false;
-    }
-    *out_stage_specs = schema_.stage_specs;
-    return schema_.valid && !schema_.stage_specs.empty();
-  }
-
- private:
-  TemporaryTestInterventionSchema schema_{};
-};
-
-void _AdvancePositionContainer(algorithm::AlgorithmContainer* container) {
-  if (!container || container->storage_kind != algorithm::AlgorithmContainerStorageKind::Array) {
-    return;
-  }
-  if (container->element_stride < sizeof(float) * 3u) {
-    return;
-  }
-  if (container->bytes.size() < sizeof(float) * 3u) {
-    return;
-  }
-
-  const size_t element_count = container->element_stride == 0u
-    ? 0u
-    : container->bytes.size() / container->element_stride;
-  for (size_t index = 0; index < element_count; ++index) {
-    const size_t byte_offset = index * container->element_stride;
-    float xyz[3]{};
-    std::memcpy(xyz, container->bytes.data() + byte_offset, sizeof(xyz));
-    xyz[0] += 0.10f;
-    xyz[1] += 0.03f;
-    std::memcpy(container->bytes.data() + byte_offset, xyz, sizeof(xyz));
-  }
-}
-
-class TemporaryTestLineMotionMainThreadExecutor final : public agent::IAlgorithmtemporaryTestMainThreadExecutor {
- public:
-  bool temporaryTestExecuteOnMainThread(
+  bool ExecuteCpuAlgorithm(
     const agent::AgentTickContext& context,
     const algorithm::AlgorithmProfile& algorithm_profile,
     const AgentToAlgorithmSignal& agent_to_algorithm_signal,
@@ -794,46 +351,83 @@ class TemporaryTestLineMotionMainThreadExecutor final : public agent::IAlgorithm
       return false;
     }
 
-    algorithm::AlgorithmContainer* container = algorithm::FindAlgorithmContainer(algorithm_container_set, "a1");
-    if (!container) {
+    algorithm::AlgorithmContainer* point_x =
+      algorithm::FindAlgorithmContainer(algorithm_container_set, "point_x");
+    algorithm::AlgorithmContainer* point_y =
+      algorithm::FindAlgorithmContainer(algorithm_container_set, "point_y");
+    algorithm::AlgorithmContainer* point_z =
+      algorithm::FindAlgorithmContainer(algorithm_container_set, "point_z");
+    if (!AdvanceScalar(point_x, kLeftStep) ||
+        !AdvanceScalar(point_y, kUpStep) ||
+        !AdvanceScalar(point_z, 0.0f)) {
       return false;
     }
 
-    _AdvancePositionContainer(container);
     if (algorithm_to_agent_signal) {
       *algorithm_to_agent_signal = {};
     }
     if (debug_state) {
       debug_state->signals.push_back(algorithm_management::AdvancedAlgorithmDebugSignal{
         .name = "temporary_test_line_motion.body",
-        .payload = "Advanced a1 on the main thread.",
+        .payload = "Moved point_x/point_y toward the upper-left corner.",
       });
     }
     return true;
   }
 };
 
-void _DestroyIntervention(agent::IAlgorithmIntervention* intervention) {
-  delete intervention;
-}
-
-void _DestroyTemporaryTestExecutor(agent::IAlgorithmtemporaryTestMainThreadExecutor* executor) {
+void DestroyCpuExecutor(agent::IAlgorithmCpuExecutor* executor) {
   delete executor;
 }
 
 }  // namespace
 
 extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateBundle(
-  const algorithm_library_plugin::AlgorithmPluginRequest* request,
-  algorithm_library_plugin::AlgorithmPluginBundle* out_bundle) {
+  const algorithmManager::support::AlgorithmPluginRequest* request,
+  algorithmManager::support::AlgorithmPluginBundle* out_bundle) {
   if (!request || !out_bundle) {
     return false;
   }
 
   out_bundle->Clear();
   out_bundle->cpu_symbol = true;
+<<<<<<< HEAD
   out_bundle->gpu_symbol = true;
   out_bundle->temporary_test_executor = new TemporaryTestLineMotionMainThreadExecutor();
   out_bundle->destroy_temporary_test_executor = &_DestroyTemporaryTestExecutor;
   return true;
 }
+=======
+  out_bundle->gpu_symbol = false;
+  out_bundle->reflector = true;
+  out_bundle->intervention = true;
+  out_bundle->cpu_executor = new LineMotionCpuExecutor();
+  out_bundle->destroy_cpu_executor = &DestroyCpuExecutor;
+  return true;
+}
+
+extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateRuntimeReflector(
+  const algorithmManager::support::AlgorithmPluginRequest* request,
+  algorithm::AlgorithmReflector* out_reflector) {
+  if (!request || !out_reflector) {
+    return false;
+  }
+
+  std::shared_ptr<algorithm::AlgorithmReflector> runtime_reflector{};
+  algorithm::AlgorithmPackageLocation package_location{};
+  if (!algorithm::TryResolveAlgorithmPackageLocationForPluginCompile(
+        request->algorithm_name ? request->algorithm_name : "",
+        &package_location,
+        nullptr)) {
+    return false;
+  }
+  if (!algorithmManager::support::LoadAlgorithmPackageReflectorFromLocation(
+        package_location,
+        &runtime_reflector,
+        nullptr) || !runtime_reflector) {
+    return false;
+  }
+  *out_reflector = *runtime_reflector;
+  return true;
+}
+>>>>>>> 0e5193b (preciser control of digital)

@@ -1,0 +1,14 @@
+{
+  "algorithm_name": "v2a0_precision_grid_mask_demo",
+  "resource_bindings": [],
+  "descriptor_values": [
+    {
+      "descriptor_name": "packed_state_seed",
+      "scalar_value": 2147483649.0
+    },
+    {
+      "descriptor_name": "tick_count_seed",
+      "scalar_value": 0.0
+    }
+  ]
+}

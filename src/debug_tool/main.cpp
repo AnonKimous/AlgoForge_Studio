@@ -492,7 +492,6 @@ int main(int argc, char** argv) {
       }
       return 0;
     }
-
     if (runner_options.enabled) {
       return _RunPipelineRunner(runner_options) ? 0 : 1;
     }

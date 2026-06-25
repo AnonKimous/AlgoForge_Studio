@@ -1,0 +1,16 @@
+{
+  "algorithm_name": "minimal_tide_fastpath",
+  "generated_at": "2026-06-25T20:00:00",
+  "functions": [
+    {
+      "name": "fun",
+      "script_language": "pseudocode",
+      "script": "Read v1 as the current wave height input.\nWrite v2 as sin(v1) scaled to a visible tide value.\nKeep the logic minimal and continuous."
+    },
+    {
+      "name": "fun_render",
+      "script_language": "glsl",
+      "script": "Use v2 as the tide height.\nFill the area below the tide line with blue.\nLeave the area above it clear.\nThe tide line should move up and down with the sine-wave result."
+    }
+  ]
+}

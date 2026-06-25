@@ -2,6 +2,7 @@
 
 #include "algorithm_support/algorithm_abi.h"
 #include "algorithm_support/algorithm_data.h"
+#include "algorithm_support/algorithm_intervention_support.h"
 
 #include <memory>
 #include <string>
@@ -25,18 +26,41 @@ struct AlgorithmPluginRequest {
 
 struct AlgorithmPluginBundle {
   uint32_t api_version{kAlgorithmPluginApiVersion};
+  // Execution-time resource requirements, not execution-path selectors.
   bool cpu_symbol{true};
   bool gpu_symbol{true};
+  // Optional package-side systems that the mainline may load.
+  bool reflector{true};
+  bool intervention{true};
 
+<<<<<<< HEAD
   agent::IAlgorithmtemporaryTestMainThreadExecutor* temporary_test_executor{nullptr};
   void (*destroy_temporary_test_executor)(agent::IAlgorithmtemporaryTestMainThreadExecutor*){nullptr};
+=======
+  // Optional plugin-provided GPU executor. When null, mainline may fall back
+  // to the package intervention schema if `intervention` is enabled.
+  agent::IAlgorithmIntervention* gpu_executor{nullptr};
+  void (*destroy_gpu_executor)(agent::IAlgorithmIntervention*){nullptr};
+
+  agent::IAlgorithmCpuExecutor* cpu_executor{nullptr};
+  void (*destroy_cpu_executor)(agent::IAlgorithmCpuExecutor*){nullptr};
+>>>>>>> 0e5193b (preciser control of digital)
 
   void Clear() {
     api_version = kAlgorithmPluginApiVersion;
     cpu_symbol = true;
     gpu_symbol = true;
+<<<<<<< HEAD
     temporary_test_executor = nullptr;
     destroy_temporary_test_executor = nullptr;
+=======
+    reflector = true;
+    intervention = true;
+    gpu_executor = nullptr;
+    destroy_gpu_executor = nullptr;
+    cpu_executor = nullptr;
+    destroy_cpu_executor = nullptr;
+>>>>>>> 0e5193b (preciser control of digital)
   }
 };
 
@@ -45,10 +69,20 @@ using AlgorithmPluginCreateBundleFn = bool (*)(
   AlgorithmPluginBundle* out_bundle);
 
 struct AlgorithmPluginComponents {
+  // Execution-time resource requirements, not execution-path selectors.
   bool cpu_symbol{true};
   bool gpu_symbol{true};
+  // Optional package-side systems that the mainline may load.
+  bool reflector{true};
+  bool intervention{true};
 
+<<<<<<< HEAD
   std::shared_ptr<agent::IAlgorithmtemporaryTestMainThreadExecutor> temporary_test_executor{};
+=======
+  std::shared_ptr<algorithm::AlgorithmReflector> runtime_reflector{};
+  std::shared_ptr<agent::IAlgorithmIntervention> gpu_executor{};
+  std::shared_ptr<agent::IAlgorithmCpuExecutor> cpu_executor{};
+>>>>>>> 0e5193b (preciser control of digital)
 };
 
 bool TryLoadAlgorithmPluginComponents(
@@ -133,11 +167,6 @@ bool DecomposeAlgorithmPackageFromLocation(
   const std::vector<algorithm_management::AlgorithmResourceBinding>& resource_bindings,
   const std::vector<algorithm_management::AlgorithmDescriptorValue>& descriptor_values,
   algorithm::AlgorithmContainerSet* container_set,
-  std::string* out_error_message = nullptr);
-
-bool LoadAlgorithmInterventionFromLocation(
-  const algorithm::AlgorithmPackageLocation& package_location,
-  std::shared_ptr<agent::IAlgorithmIntervention>* out_intervention,
   std::string* out_error_message = nullptr);
 
 bool CreateAlgorithmObjectFromLocation(
@@ -291,9 +320,35 @@ class PipelineStageBridge {
 
 }  // namespace algorithm_support
 
-namespace algorithm_library_plugin = algorithm_support;
+namespace algorithmManager {
+namespace support {
+using ::algorithm_support::kAlgorithmPluginApiVersion;
+using ::algorithm_support::AlgorithmPluginBundle;
+using ::algorithm_support::AlgorithmPluginComponents;
+using ::algorithm_support::AlgorithmPluginCreateBundleFn;
+using ::algorithm_support::AlgorithmPluginCreateRuntimeReflectorFn;
+using ::algorithm_support::AlgorithmPluginRequest;
+using ::algorithm_support::PipelineStageBridge;
+using ::algorithm::AlgorithmRuntimeTransferBinding;
+using ::algorithm::AlgorithmRuntimeTransferEdge;
+using ::algorithm::AlgorithmRuntimeTransferMap;
+using ::algorithm_support::PipelineStageBridgeIngress;
+using ::algorithm_support::PipelineStageBridgeEgress;
+using ::algorithm_support::PipelineStageBridgeCaptureIngressDebugSet;
+using ::algorithm_support::PipelineStageBridgeCaptureEgressDebugSet;
+using ::algorithm_support::LoadAlgorithmPackageTransferMapFromLocation;
+using ::algorithm_support::TryLoadAlgorithmPluginComponents;
+using ::algorithm_support::LoadAlgorithmPackageReflectorFromLocation;
+using ::algorithm_support::QueryAlgorithmPackageRequestedBindingsFromLocation;
+using ::algorithm_support::LoadAlgorithmPackageDefaultBindingsFromLocation;
+using ::algorithm_support::DecomposeAlgorithmPackageFromLocation;
+using ::algorithm_support::LoadAlgorithmInterventionFromLocation;
+using ::algorithm_support::CreateAlgorithmObjectFromLocation;
+}  // namespace support
+}  // namespace algorithmManager
 
 namespace algorithm_management {
+using algorithm_support::kAlgorithmPluginApiVersion;
 using algorithm_support::AlgorithmPluginBundle;
 using algorithm_support::AlgorithmPluginComponents;
 using algorithm_support::AlgorithmPluginCreateBundleFn;
@@ -307,7 +362,14 @@ using algorithm_support::PipelineStageBridgeEgress;
 using algorithm_support::PipelineStageBridgeCaptureIngressDebugSet;
 using algorithm_support::PipelineStageBridgeCaptureEgressDebugSet;
 using algorithm_support::LoadAlgorithmPackageTransferMapFromLocation;
+using algorithm_support::TryLoadAlgorithmPluginComponents;
+using algorithm_support::LoadAlgorithmPackageReflectorFromLocation;
+using algorithm_support::QueryAlgorithmPackageRequestedBindingsFromLocation;
+using algorithm_support::DecomposeAlgorithmPackageFromLocation;
+using algorithm_support::LoadAlgorithmInterventionFromLocation;
 }  // namespace algorithm_management
+
+namespace algorithm_library_plugin = algorithmManager::support;
 
 #if defined(ALGORITHM_LIBRARY_PLUGIN_BUILD)
 #define ALGORITHM_LIBRARY_PLUGIN_API __declspec(dllexport)
@@ -318,8 +380,15 @@ using algorithm_support::LoadAlgorithmPackageTransferMapFromLocation;
 extern "C" {
 
 ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateBundle(
-  const algorithm_support::AlgorithmPluginRequest* request,
-  algorithm_support::AlgorithmPluginBundle* out_bundle);
+  const algorithmManager::support::AlgorithmPluginRequest* request,
+  algorithmManager::support::AlgorithmPluginBundle* out_bundle);
 
+<<<<<<< HEAD
+=======
+ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateRuntimeReflector(
+  const algorithmManager::support::AlgorithmPluginRequest* request,
+  algorithm::AlgorithmReflector* out_reflector);
+
+>>>>>>> 0e5193b (preciser control of digital)
 }
 

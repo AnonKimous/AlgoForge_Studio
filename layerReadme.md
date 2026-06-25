@@ -118,7 +118,7 @@ src/
 鈹?    鈹斺攢 README.md
 鈹溾攢 common_data/
 鈹溾攢 algorithm_support/
-鈹? 鈹溾攢 algorithm_intervention.h
+鈹? 鈹溾攢 algorithm_interaction_protocol.h
 鈹? 鈹斺攢 algorithm_protocol.h
 鈹溾攢 runtime_systems/
 鈹溾攢 sdk/
