@@ -221,10 +221,7 @@ foreach ($entry in $packageEntries) {
     }
 
     if ($runtimeFiles.Count -eq 0) {
-      if (Test-Path -LiteralPath $archivePath -PathType Leaf) {
-        continue
-      }
-      throw "No loose runtime files were found while packaging '$packageName', and no existing archive is available at $archivePath"
+      continue
     }
 
     foreach ($runtimeFile in $runtimeFiles) {

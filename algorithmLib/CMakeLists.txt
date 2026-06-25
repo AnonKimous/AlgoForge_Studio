@@ -22,6 +22,16 @@ get_filename_component(REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
 find_package(Vulkan REQUIRED)
 find_program(GLSLC glslc REQUIRED)
 include(FetchContent)
+include("${REPO_ROOT}/cmake/shared_dependencies.cmake")
+resolve_sdl3_dependency("${REPO_ROOT}")
+resolve_eigen_dependency("${REPO_ROOT}")
+resolve_imgui_dependency("${REPO_ROOT}")
+resolve_vkb_dependency("${REPO_ROOT}")
+resolve_vma_dependency("${REPO_ROOT}")
+resolve_spirv_reflect_dependency("${REPO_ROOT}")
+resolve_cjson_dependency("${REPO_ROOT}")
+
+if(0)
 set(SDL3_INCLUDE_DIR "${REPO_ROOT}/third_party/SDL-main/include" CACHE PATH "SDL3 include directory")
 set(SDL3_LIBRARY_DEBUG "" CACHE FILEPATH "SDL3 debug import/static library")
 set(SDL3_LIBRARY_RELEASE "" CACHE FILEPATH "SDL3 release import/static library")
@@ -76,6 +86,8 @@ else()
   set(SPIRV_REFLECT_SOURCE_DIR "${spirv_reflect_source_SOURCE_DIR}" CACHE PATH "SPIRV-Reflect source directory" FORCE)
 endif()
 
+endif()
+
 set(ALGORITHM_LIBRARY_SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/algorithmSrc" CACHE PATH "Root directory containing algorithm package source files")
 set(ALGORITHM_LIBRARY_RUNTIME_OUTPUT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/algorithmruntimeLib" CACHE PATH "Root directory for built algorithm runtime artifacts")
 file(TO_CMAKE_PATH "${ALGORITHM_LIBRARY_SOURCE_ROOT}" ALGORITHM_LIBRARY_SOURCE_ROOT)
@@ -86,7 +98,7 @@ require_file("${ALGORITHM_LIBRARY_SOURCE_ROOT}/algorithm_plugin_api.h" "Set ALGO
 
 set(PROJECT_INCLUDE_DIRS
   ${REPO_ROOT}/src
-  ${REPO_ROOT}/third_party/cjson
+  ${CJSON_SOURCE_DIR}
   ${SDL3_INCLUDE_DIR}
   ${EIGEN_INCLUDE_DIR}
   ${VMA_INCLUDE_DIR}
@@ -141,11 +153,11 @@ if(BUILD_ALGORITHM_SAMPLE_PLUGIN)
   add_library(algorithm_plugin_support_mirror STATIC
     "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}/algorithm_support/algorithm_package_location.cpp"
     "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}/algorithm_support/algorithm_plugin_support_minimal.cpp"
-    "${REPO_ROOT}/third_party/cjson/cJSON.c"
+    "${CJSON_SOURCE_DIR}/cJSON.c"
   )
   target_include_directories(algorithm_plugin_support_mirror PUBLIC
     "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}"
-    "${REPO_ROOT}/third_party/cjson"
+    "${CJSON_SOURCE_DIR}"
   )
 endif()
 

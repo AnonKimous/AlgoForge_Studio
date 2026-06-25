@@ -19,8 +19,19 @@ if(WIN32)
 endif()
 
 find_package(Vulkan REQUIRED)
-find_program(GLSLC glslc REQUIRED)
 include(FetchContent)
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/shared_dependencies.cmake")
+resolve_sdl3_dependency("${CMAKE_CURRENT_SOURCE_DIR}")
+resolve_eigen_dependency("${CMAKE_CURRENT_SOURCE_DIR}")
+resolve_imgui_dependency("${CMAKE_CURRENT_SOURCE_DIR}")
+resolve_vkb_dependency("${CMAKE_CURRENT_SOURCE_DIR}")
+resolve_vma_dependency("${CMAKE_CURRENT_SOURCE_DIR}")
+resolve_spirv_reflect_dependency("${CMAKE_CURRENT_SOURCE_DIR}")
+resolve_cjson_dependency("${CMAKE_CURRENT_SOURCE_DIR}")
+resolve_mimalloc_dependency("${CMAKE_CURRENT_SOURCE_DIR}")
+resolve_eastl_dependency("${CMAKE_CURRENT_SOURCE_DIR}")
+
+if(0)
 
 set(DEPS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party" CACHE PATH "Root path for third-party sources")
 
@@ -128,9 +139,12 @@ resolve_existing_path(_EIGEN_INCLUDE_DIR Eigen/Dense
 if(_EIGEN_INCLUDE_DIR)
   set(EIGEN_INCLUDE_DIR "${_EIGEN_INCLUDE_DIR}" CACHE PATH "Eigen include directory" FORCE)
 else()
-  message(STATUS "Eigen not found locally; fetching Eigen from GitLab.")
+  message(STATUS "Eigen not found locally; fetching Eigen from GitLab via git.")
   FetchContent_Declare(eigen_source
-    URL "https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.zip"
+    GIT_REPOSITORY "https://gitlab.com/libeigen/eigen.git"
+    GIT_TAG "3.4.0"
+    GIT_SHALLOW TRUE
+    GIT_SUBMODULES ""
   )
   FetchContent_MakeAvailable(eigen_source)
   set(EIGEN_INCLUDE_DIR "${eigen_source_SOURCE_DIR}" CACHE PATH "Eigen include directory" FORCE)
@@ -252,6 +266,7 @@ add_subdirectory(
   "${CMAKE_CURRENT_BINARY_DIR}/eastl-build"
   EXCLUDE_FROM_ALL
 )
+endif()
 
 set(CMAKE_HELPER_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated_cmake")
 file(MAKE_DIRECTORY "${CMAKE_HELPER_DIR}")
@@ -384,18 +399,7 @@ add_custom_command(TARGET sdk POST_BUILD
   VERBATIM
 )
 
-set(SHADER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
-set(SHADER_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/shaders)
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/data)
-file(TO_CMAKE_PATH "${SHADER_OUTPUT_DIR}/physics_convolution.comp.spv" SHADER_PHYSICS_CONV_PATH)
-
-add_custom_command(
-  OUTPUT ${SHADER_OUTPUT_DIR}/physics_convolution.comp.spv
-  COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADER_OUTPUT_DIR}
-  COMMAND ${GLSLC} -o ${SHADER_OUTPUT_DIR}/physics_convolution.comp.spv ${SHADER_DIR}/physics_convolution.comp
-  DEPENDS ${SHADER_DIR}/physics_convolution.comp
-  VERBATIM
-)
 
 add_executable(debugTool WIN32
   src/debug_tool/main.cpp
@@ -410,17 +414,10 @@ target_link_libraries(debugTool PRIVATE
 target_compile_definitions(debugTool PRIVATE
   WIN32_LEAN_AND_MEAN
   NOMINMAX
-  SHADER_PHYSICS_CONV_PATH="${SHADER_PHYSICS_CONV_PATH}"
 )
 
 if(WIN32)
   target_link_libraries(debugTool PRIVATE advapi32 user32 gdi32 shell32)
-
-  add_custom_command(TARGET debugTool POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${SHADER_OUTPUT_DIR}"
-    COMMAND ${GLSLC} -o "${SHADER_OUTPUT_DIR}/physics_convolution.comp.spv" "${SHADER_DIR}/physics_convolution.comp"
-    VERBATIM
-  )
 
   if(NOT TARGET SDL3::SDL3)
     add_custom_command(TARGET debugTool PRE_BUILD
