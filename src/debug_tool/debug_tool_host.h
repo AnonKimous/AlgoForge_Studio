@@ -204,9 +204,16 @@ struct AlgorithmRuntimeSummary {
   std::string algorithm_name;
   AlgorithmAssemblyState assembly_state{AlgorithmAssemblyState::Failed};
   std::string pipeline_name;
+  std::string pipeline_root_stage_name;
   uint32_t pipeline_stage_index{0u};
   uint32_t pipeline_stage_count{0u};
+  uint32_t pipeline_body_begin_stage_index{0u};
+  uint32_t pipeline_body_stage_count{0u};
+  uint32_t pipeline_effective_tail_stage_index{0u};
   bool pipeline_stage{false};
+  algorithm_management::AlgorithmPipelineWrapperRole pipeline_wrapper_role{
+    algorithm_management::AlgorithmPipelineWrapperRole::None};
+  bool pipeline_wrapper_empty{false};
   AlgorithmPipelineTopology pipeline_topology{AlgorithmPipelineTopology::NonCircular};
   AlgorithmPipelineSyncMode pipeline_sync_mode{AlgorithmPipelineSyncMode::Forced};
   uint32_t pipeline_active_stage_index{0u};

@@ -91,7 +91,7 @@
     "items": []
   },
   "intervention": {
-    "stages": {
+    "stage": {
       "resultRender": {
         "stage_name": "resultRender",
         "stage_kind": "resultRender",

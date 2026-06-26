@@ -63,14 +63,23 @@ bool LoadPackageRuntimeReflector(
   const cJSON* reflector = cJSON_GetObjectItemCaseSensitive(root, "reflector");
   if (!reflector || !cJSON_IsObject(reflector)) {
     cJSON_Delete(root);
+    out_reflector->Clear();
     if (out_error_message) {
-      *out_error_message = "Package JSON is missing reflector section: " + package_json_path.generic_string();
+      out_error_message->clear();
     }
-    return false;
+    return true;
   }
 
   const cJSON* items = cJSON_GetObjectItemCaseSensitive(reflector, "items");
-  if (!items || !cJSON_IsArray(items)) {
+  if (!items) {
+    cJSON_Delete(root);
+    out_reflector->Clear();
+    if (out_error_message) {
+      out_error_message->clear();
+    }
+    return true;
+  }
+  if (!cJSON_IsArray(items)) {
     cJSON_Delete(root);
     if (out_error_message) {
       *out_error_message = "Package reflector is missing items: " + package_json_path.generic_string();
@@ -266,6 +275,14 @@ bool LoadAlgorithmPackageReflectorFromLocation(
       *out_error_message = std::move(reflector_error_message);
     }
     return false;
+  }
+
+  if (reflector.empty()) {
+    out_reflector->reset();
+    if (out_error_message) {
+      out_error_message->clear();
+    }
+    return true;
   }
 
   *out_reflector = std::make_shared<algorithm::AlgorithmReflector>(std::move(reflector));

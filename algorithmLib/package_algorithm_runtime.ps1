@@ -84,6 +84,152 @@ function Get-SafeAlgoRelativePath {
   return $relativePath.Replace('\', '/')
 }
 
+function Convert-ToCIdentifier {
+  param([Parameter(Mandatory = $true)][string]$Text)
+
+  if ([string]::IsNullOrEmpty($Text)) {
+    throw "C identifier source text must not be empty."
+  }
+
+  $builder = New-Object System.Text.StringBuilder
+  for ($i = 0; $i -lt $Text.Length; ++$i) {
+    $ch = $Text[$i]
+    $isAsciiLetter =
+      ($ch -ge 'a' -and $ch -le 'z') -or
+      ($ch -ge 'A' -and $ch -le 'Z')
+    $isAsciiDigit = ($ch -ge '0' -and $ch -le '9')
+    $isUnderscore = $ch -eq '_'
+    if ($i -eq 0 -and $isAsciiDigit) {
+      [void]$builder.Append('_')
+    }
+    if ($isAsciiLetter -or $isAsciiDigit -or $isUnderscore) {
+      [void]$builder.Append($ch)
+    } else {
+      [void]$builder.Append('_')
+    }
+  }
+
+  $result = $builder.ToString()
+  if ([string]::IsNullOrEmpty($result)) {
+    throw "Failed to convert text to C identifier: $Text"
+  }
+  return $result
+}
+
+function Get-AlgorithmPluginBuildSpec {
+  param(
+    [Parameter(Mandatory = $true)][object]$PackageEntry
+  )
+
+  $sourceDir = [string]$PackageEntry.SourceDir
+  $packageName = [string]$PackageEntry.PackageName
+  $relativeDir = [string]$PackageEntry.RelativeDir
+
+  $effectivePluginSourceDir = $sourceDir
+  $shaderSources = @(
+    Get-ChildItem -LiteralPath $effectivePluginSourceDir -File -ErrorAction SilentlyContinue |
+      Where-Object { $_.Extension -in '.vert', '.frag' }
+  )
+  $pluginSources = @(
+    Get-ChildItem -LiteralPath $effectivePluginSourceDir -Filter '*_plugin.cpp' -File -ErrorAction SilentlyContinue
+  )
+
+  if ($shaderSources.Count -eq 0 -and $pluginSources.Count -eq 0) {
+    $stage0Dir = Join-Path $sourceDir ($packageName + '_stage0')
+    if (Test-Path -LiteralPath $stage0Dir -PathType Container) {
+      $effectivePluginSourceDir = $stage0Dir
+      $shaderSources = @(
+        Get-ChildItem -LiteralPath $effectivePluginSourceDir -File -ErrorAction SilentlyContinue |
+          Where-Object { $_.Extension -in '.vert', '.frag' }
+      )
+      $pluginSources = @(
+        Get-ChildItem -LiteralPath $effectivePluginSourceDir -Filter '*_plugin.cpp' -File -ErrorAction SilentlyContinue
+      )
+    }
+  }
+
+  if ($pluginSources.Count -gt 1) {
+    throw "Multiple plugin sources were found for package '$packageName' under '$effectivePluginSourceDir'."
+  }
+
+  if ($pluginSources.Count -eq 0) {
+    return [PSCustomObject]@{
+      HasPluginTarget = $false
+      RelativeDir = $relativeDir
+      PackageName = $packageName
+      RuntimeDir = [string]$PackageEntry.RuntimeDir
+      PluginTarget = ''
+      EffectivePluginSourceDir = $effectivePluginSourceDir
+    }
+  }
+
+  return [PSCustomObject]@{
+    HasPluginTarget = $true
+    RelativeDir = $relativeDir
+    PackageName = $packageName
+    RuntimeDir = [string]$PackageEntry.RuntimeDir
+    PluginTarget = (Convert-ToCIdentifier -Text $relativeDir) + '_plugin'
+    EffectivePluginSourceDir = $effectivePluginSourceDir
+  }
+}
+
+function Invoke-AlgorithmPluginBuild {
+  param(
+    [Parameter(Mandatory = $true)][string]$AlgorithmLibraryRoot,
+    [Parameter(Mandatory = $true)][string]$AlgorithmSourceRoot,
+    [Parameter(Mandatory = $true)][string]$AlgorithmRuntimeRoot,
+    [Parameter(Mandatory = $true)][object[]]$BuildSpecs
+  )
+
+  $pluginSpecs = @($BuildSpecs | Where-Object { $_.HasPluginTarget })
+  if ($pluginSpecs.Count -eq 0) {
+    return
+  }
+
+  $repoRoot = Split-Path -Path $AlgorithmLibraryRoot -Parent
+  if ([string]::IsNullOrWhiteSpace($repoRoot) -or -not (Test-Path -LiteralPath $repoRoot -PathType Container)) {
+    throw "Failed to resolve repository root for plugin build from '$AlgorithmLibraryRoot'."
+  }
+
+  $coreBuildDir = Join-Path $repoRoot 'build'
+  if (-not (Test-Path -LiteralPath $coreBuildDir -PathType Container)) {
+    throw "Core build directory does not exist for plugin build: $coreBuildDir"
+  }
+
+  $pluginBuildDir = Join-Path $AlgorithmLibraryRoot '.package_plugin_build'
+  if (Test-Path -LiteralPath $pluginBuildDir) {
+    Remove-Item -LiteralPath $pluginBuildDir -Recurse -Force
+  }
+
+  try {
+    & cmake -S $AlgorithmLibraryRoot -B $pluginBuildDir --fresh `
+      -DBUILD_ALGORITHM_SAMPLE_PLUGIN=ON `
+      -DCORE_BUILD_DIR="$coreBuildDir" `
+      -DALGORITHM_LIBRARY_SOURCE_ROOT="$AlgorithmSourceRoot" `
+      -DALGORITHM_LIBRARY_RUNTIME_OUTPUT_ROOT="$AlgorithmRuntimeRoot"
+    if ($LASTEXITCODE -ne 0) {
+      throw "Failed to configure algorithm plugin packaging build."
+    }
+
+    $builtTargets = @{}
+    foreach ($pluginSpec in $pluginSpecs) {
+      $pluginTarget = [string]$pluginSpec.PluginTarget
+      if ([string]::IsNullOrWhiteSpace($pluginTarget) -or $builtTargets.ContainsKey($pluginTarget)) {
+        continue
+      }
+      & cmake --build $pluginBuildDir --config Debug --target $pluginTarget --parallel
+      if ($LASTEXITCODE -ne 0) {
+        throw "Failed to build algorithm plugin target '$pluginTarget'."
+      }
+      $builtTargets[$pluginTarget] = $true
+    }
+  } finally {
+    if (Test-Path -LiteralPath $pluginBuildDir) {
+      Remove-Item -LiteralPath $pluginBuildDir -Recurse -Force
+    }
+  }
+}
+
 function Write-AlgoPackage {
   param(
     [Parameter(Mandatory = $true)][string]$ArchivePath,
@@ -146,6 +292,7 @@ function Write-AlgoPackage {
 
 $sourceRoot = Get-FullPath -PathText $AlgorithmSourceRoot
 $runtimeRoot = Get-FullPath -PathText $AlgorithmRuntimeRoot
+$algorithmLibraryRoot = Split-Path -Path $sourceRoot -Parent
 
 if (-not (Test-Path -LiteralPath $sourceRoot -PathType Container)) {
   throw "Algorithm source root does not exist: $sourceRoot"
@@ -185,6 +332,13 @@ if ($packageEntries.Count -eq 0) {
   throw "No built runtime package directories were found under $runtimeRoot"
 }
 
+$packageBuildSpecs = @($packageEntries | ForEach-Object { Get-AlgorithmPluginBuildSpec -PackageEntry $_ })
+Invoke-AlgorithmPluginBuild `
+  -AlgorithmLibraryRoot $algorithmLibraryRoot `
+  -AlgorithmSourceRoot $sourceRoot `
+  -AlgorithmRuntimeRoot $runtimeRoot `
+  -BuildSpecs $packageBuildSpecs
+
 $allRuntimePackageDirs = @($packageEntries | ForEach-Object { $_.RuntimeDir })
 $packageEntries = @($packageEntries | Sort-Object {
   ($_.RelativeDir -split '[\\/]').Count
@@ -214,8 +368,24 @@ foreach ($entry in $packageEntries) {
       Copy-Item -LiteralPath $defaultJsonPath -Destination (Join-Path $stagingDir 'default.json') -Force
     }
 
+    $packageDllCandidates = @(
+      (Join-Path (Join-Path $runtimeDir 'Debug') ($packageName + '.dll'))
+      (Join-Path $runtimeDir ($packageName + '.dll'))
+    )
+    $resolvedPackageDllPath = $null
+    foreach ($packageDllCandidate in $packageDllCandidates) {
+      if (Test-Path -LiteralPath $packageDllCandidate -PathType Leaf) {
+        $resolvedPackageDllPath = $packageDllCandidate
+        break
+      }
+    }
+    if ($null -eq $resolvedPackageDllPath) {
+      throw "Runtime package '$packageName' is missing its plugin DLL under '$runtimeDir'."
+    }
+
     $runtimeFiles = Get-ChildItem -LiteralPath $runtimeDir -Recurse -File | Where-Object {
       $_.Extension -ne '.algo' -and
+      $_.Extension -notin '.exp', '.lib', '.pdb', '.ilk', '.obj', '.manifest' -and
       ($nestedRuntimePackageDirs.Count -eq 0 -or
         -not (Test-PathUnderAnyRoot -ChildPath $_.FullName -RootPaths $nestedRuntimePackageDirs))
     }

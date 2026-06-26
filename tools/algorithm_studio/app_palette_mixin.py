@@ -97,20 +97,27 @@ class AlgorithmStudioPaletteMixin:
         ttk.Label(selection_name_row, text="Name").grid(row=0, column=0, sticky="w", padx=(0, 8))
         selection_name_entry = ttk.Entry(selection_name_row, textvariable=self.selection_name_var)
         selection_name_entry.grid(row=0, column=1, sticky="ew")
+        selection_name_entry.bind("<Return>", self._handle_selection_name_submit)
         self.selection_name_entry = selection_name_entry
         self._bind_palette_wheel(selection_name_row)
         self._bind_palette_wheel(selection_name_entry)
+        self.interface4agents_highlight_targets["renamenode"] = [
+            (
+                selection_name_entry,
+                {
+                    "highlightbackground": COLORS["accent"],
+                    "highlightcolor": COLORS["accent"],
+                    "highlightthickness": 3,
+                },
+            )
+        ]
 
         selection_buttons = ttk.Frame(selection_body)
         selection_buttons.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(8, 0))
         selection_buttons.columnconfigure(0, weight=1)
         selection_buttons.columnconfigure(1, weight=1)
-        selection_buttons.columnconfigure(2, weight=1)
-        ttk.Button(selection_buttons, text="Copy", command=self._copy_current_selection).grid(row=0, column=0, sticky="ew", padx=(0, 6), pady=(0, 6))
-        ttk.Button(selection_buttons, text="Merge", command=self._merge_current_selection).grid(row=0, column=1, sticky="ew", padx=6, pady=(0, 6))
-        ttk.Button(selection_buttons, text="整理", command=self._arrange_current_selection).grid(row=0, column=2, sticky="ew", padx=(6, 0), pady=(0, 6))
-        ttk.Button(selection_buttons, text="Delete", command=self._delete_current_selection).grid(row=1, column=0, sticky="ew", padx=(0, 6))
-        ttk.Button(selection_buttons, text="Paste", command=self._paste_selection_from_clipboard).grid(row=1, column=1, columnspan=2, sticky="ew", padx=(6, 0))
+        ttk.Button(selection_buttons, text="Merge", command=self._merge_current_selection).grid(row=0, column=0, sticky="ew", padx=(0, 6), pady=(0, 6))
+        ttk.Button(selection_buttons, text="整理", command=self._arrange_current_selection).grid(row=0, column=1, sticky="ew", padx=(6, 0), pady=(0, 6))
         self._bind_palette_wheel(selection_buttons)
         self.interface4agents_highlight_targets["createcosnode"] = [
             (
@@ -232,7 +239,7 @@ class AlgorithmStudioPaletteMixin:
             palette_scroll_frame,
             bg=COLORS["window"],
             highlightthickness=0,
-            width=280,
+            width=286,
         )
         palette_scrollbar = ttk.Scrollbar(palette_scroll_frame, orient="vertical", command=palette_canvas.yview)
         palette_canvas.configure(yscrollcommand=palette_scrollbar.set)
@@ -276,7 +283,7 @@ class AlgorithmStudioPaletteMixin:
             [
                 ("variable", "v", "Variable", "drag to canvas"),
                 ("array", "a", "Array", "drag to canvas"),
-                ("microcontainer", "m", "MicroContainer", "drag into v layout"),
+                ("micronode", "m", "MicroNode", "drag into v layout"),
             ],
         )
         self._create_palette_group(
@@ -284,20 +291,11 @@ class AlgorithmStudioPaletteMixin:
             1,
             "ToolNodes",
             [
-                ("reflector", "R", "Reflector", "drag to canvas"),
                 ("function", "ƒ", "Function", "drag to canvas"),
-                ("interventioner", "I", "Interventioner", "drag to canvas"),
             ],
         )
 
-        self._create_palette_group(
-            blueprint_frame,
-            2,
-            "MeshNode",
-            [
-                ("resnode", "M", "meshNode", "drag to canvas"),
-            ],
-        )
+        self.drag_palette_mode_var.set("blueprint" if self.canvas_view_mode == "container_overview" else "container_tree")
         self._refresh_container_tree_palette()
         self._refresh_operation_stack_panel()
         _sync_palette_scrollregion()
@@ -382,17 +380,36 @@ class AlgorithmStudioPaletteMixin:
             child.destroy()
         self._ensure_singleton_container_group(self.project)
         self._ensure_singleton_resource_group(self.project)
-        row = 0
-        for zone in self._scene_sync_zones():
+        self._normalize_container_scene_scopes()
+        self._create_palette_group(
+            self.palette_tree_frame,
+            0,
+            "ToolNodes",
+            [
+                ("function", "f", "Function", "drag to canvas"),
+            ],
+        )
+        self._create_palette_group(
+            self.palette_tree_frame,
+            1,
+            "MeshNode",
+            [
+                ("resnode", "M", "meshNode", "drag to canvas"),
+            ],
+        )
+        row = 2
+        for zone in ("algorithm", "resource"):
             root_group_name = self._sync_zone_root_group_name(zone)
             root_group = self._find_container_group(root_group_name)
             if root_group is None:
                 raise AssertionError(f"Missing root containerElement {root_group_name}")
+            inventory_scope = self._inventory_scene_scope_for_zone(zone)
             top_level_groups = [
                 group.name
                 for group in self.project.container_groups
                 if not self._is_hidden_root_group_name(group.name)
                 and self._sync_zone_for_node("containerelement", group.name) == zone
+                and self._container_group_scene_scope(group) == inventory_scope
                 and (
                     self._group_parent_group_name(group.name) is None
                     or self._is_hidden_root_group_name(str(self._group_parent_group_name(group.name) or ""))
@@ -402,27 +419,28 @@ class AlgorithmStudioPaletteMixin:
                 container.name
                 for container in self.project.containers
                 if self._sync_zone_for_node("container", container.name) == zone
+                and self._container_scene_scope(container) == inventory_scope
                 and (
                     self._container_parent_group_name(container.name) is None
                     or self._is_hidden_root_group_name(str(self._container_parent_group_name(container.name) or ""))
                 )
             ]
+            has_children = bool(top_level_groups or top_level_containers)
+            if zone == "resource" and not has_children:
+                continue
             section = ttk.LabelFrame(
                 self.palette_tree_frame,
                 text="Resource Containers" if zone == "resource" else "Algorithm Containers",
                 padding=8,
             )
             section.grid(row=row, column=0, sticky="ew", pady=(0, 12))
-            section.columnconfigure(0, weight=1)
+            section.columnconfigure(0, weight=1, minsize=268)
             self._bind_palette_wheel(section)
             section_row = 0
-            has_children = False
             for child_group_name in top_level_groups:
                 section_row = self._render_container_tree_palette_group(section, child_group_name, section_row, depth=0)
-                has_children = True
             for chain_names in self._container_tree_palette_chain_groups(top_level_containers):
                 section_row = self._render_container_tree_palette_container_chain(section, chain_names, section_row, depth=0)
-                has_children = True
             if not has_children:
                 empty_label = ttk.Label(section, text="No containers yet", foreground=COLORS["muted"])
                 empty_label.grid(row=0, column=0, sticky="w")
@@ -446,7 +464,89 @@ class AlgorithmStudioPaletteMixin:
             names = grouped_names[chain_key]
             names.sort(key=lambda name: int(getattr(self._find_container(name), "reuse_chain_index", 0)))
             chain_groups.append(names)
+        chain_groups.sort(key=self._container_tree_palette_chain_sort_key)
         return chain_groups
+
+    def _container_tree_palette_chain_sort_key(self, chain_names: list[str]) -> tuple[int, str, str]:
+        if not chain_names:
+            raise AssertionError("Container chain sort key requires at least one node.")
+        container = self._find_container(chain_names[0])
+        if container is None:
+            raise AssertionError(f"Missing container {chain_names[0]}")
+        kind_rank = 0 if container.kind == "variable" else 1
+        display_name = self._canvas_node_display_name(container, container.name)
+        return kind_rank, display_name, container.name
+
+    def _container_tree_palette_chain_key(self, container_name: str) -> str:
+        container = self._find_container(container_name)
+        if container is None:
+            raise AssertionError(f"Missing container {container_name}")
+        return self._container_shareptr_key(container)
+
+    def _container_tree_palette_chain_state(self, container_names: list[str]) -> tuple[str, bool, int, int]:
+        if not container_names:
+            raise AssertionError("Container chain state requires at least one node.")
+        chain_key = self._container_tree_palette_chain_key(container_names[0])
+        total = len(container_names)
+        revealed = bool(self.container_palette_chain_revealed.get(chain_key, False))
+        max_visible = min(total, 3)
+        visible_count = int(self.container_palette_chain_visible_count.get(chain_key, 1))
+        visible_count = max(1, min(visible_count, max_visible))
+        if not revealed:
+            visible_count = 1
+        max_offset = max(total - visible_count, 0)
+        offset = int(self.container_palette_chain_offset.get(chain_key, 0))
+        offset = max(0, min(offset, max_offset))
+        self.container_palette_chain_visible_count[chain_key] = visible_count
+        self.container_palette_chain_offset[chain_key] = offset
+        return chain_key, revealed, visible_count, offset
+
+    def _toggle_container_tree_palette_chain_revealed(self, container_name: str) -> None:
+        chain_names = self._container_reuse_chain_names(container_name)
+        chain_key, revealed, visible_count, _offset = self._container_tree_palette_chain_state(chain_names)
+        if len(chain_names) <= 1:
+            self._quick_view_container_chain(container_name)
+            return
+        next_revealed = not revealed
+        self.container_palette_chain_revealed[chain_key] = next_revealed
+        if next_revealed:
+            self.container_palette_chain_visible_count[chain_key] = max(2, min(len(chain_names), max(visible_count, 2)))
+        else:
+            self.container_palette_chain_visible_count[chain_key] = 1
+            self.container_palette_chain_offset[chain_key] = 0
+        self._refresh_container_tree_palette()
+
+    def _expand_container_tree_palette_chain(self, container_name: str) -> None:
+        chain_names = self._container_reuse_chain_names(container_name)
+        chain_key, _revealed, visible_count, _offset = self._container_tree_palette_chain_state(chain_names)
+        if len(chain_names) <= 1:
+            self._quick_view_container_chain(container_name)
+            return
+        self.container_palette_chain_revealed[chain_key] = True
+        self.container_palette_chain_visible_count[chain_key] = min(len(chain_names), max(2, visible_count + 1), 3)
+        self._refresh_container_tree_palette()
+
+    def _scroll_container_tree_palette_chain(self, event: tk.Event, container_name: str) -> str | None:
+        chain_names = self._container_reuse_chain_names(container_name)
+        chain_key, revealed, visible_count, offset = self._container_tree_palette_chain_state(chain_names)
+        if len(chain_names) <= visible_count or not revealed:
+            return None
+        delta = 0
+        if getattr(event, "delta", 0):
+            delta = -1 if int(event.delta) > 0 else 1
+        elif getattr(event, "num", 0) == 4:
+            delta = -1
+        elif getattr(event, "num", 0) == 5:
+            delta = 1
+        if delta == 0:
+            return None
+        max_offset = len(chain_names) - visible_count
+        next_offset = max(0, min(offset + delta, max_offset))
+        if next_offset == offset:
+            return None
+        self.container_palette_chain_offset[chain_key] = next_offset
+        self._refresh_container_tree_palette()
+        return "break"
 
     def _render_container_tree_palette_group(self, parent: ttk.Frame, group_name: str, row: int, *, depth: int) -> int:
         group = self._find_container_group(group_name)
@@ -500,80 +600,118 @@ class AlgorithmStudioPaletteMixin:
             )
             widget.bind("<B1-Motion>", self._palette_drag_motion)
             widget.bind("<ButtonRelease-1>", self._finish_palette_drag)
-            widget.bind("<Double-Button-1>", lambda _event, value=container_name: self._quick_view_container_chain(value))
+            widget.bind("<Double-Button-1>", lambda _event, value=container_name: self._expand_container_tree_palette_chain(value))
+            widget.bind("<Button-3>", lambda _event, value=container_name: self._toggle_container_tree_palette_chain_revealed(value))
+            widget.bind("<MouseWheel>", lambda event, value=container_name: self._scroll_container_tree_palette_chain(event, value), add="+")
+            widget.bind("<Button-4>", lambda event, value=container_name: self._scroll_container_tree_palette_chain(event, value), add="+")
+            widget.bind("<Button-5>", lambda event, value=container_name: self._scroll_container_tree_palette_chain(event, value), add="+")
             self._bind_palette_wheel(widget)
 
-    def _render_container_tree_palette_container_chain(self, parent: ttk.Frame, container_names: list[str], row: int, *, depth: int) -> int:
-        if not container_names:
-            raise AssertionError("Container chain row cannot be empty.")
-        if len(container_names) == 1:
-            return self._render_container_tree_palette_container(parent, container_names[0], row, depth=depth)
-        row_shell = tk.Frame(parent, bg=COLORS["window"])
-        row_shell.grid(row=row, column=0, sticky="ew", pady=(0, 6), padx=(depth * 18, 0))
-        self._bind_palette_wheel(row_shell)
-        for column, container_name in enumerate(container_names):
-            container = self._find_container(container_name)
-            if container is None:
-                raise AssertionError(f"Missing container {container_name}")
-            row_shell.columnconfigure(column, weight=1)
-            accent_color = COLORS["container"] if container.kind == "variable" else COLORS["container_array"]
-            tile = tk.Frame(row_shell, bg=COLORS["panel_alt"], highlightbackground=accent_color, highlightthickness=1)
-            tile.grid(row=0, column=column, sticky="nsew", padx=(0, 6) if column < len(container_names) - 1 else 0)
-            tile.columnconfigure(1, weight=1)
-            badge_label = tk.Label(tile, text="v" if container.kind == "variable" else "a", bg=COLORS["panel_alt"], fg=accent_color, width=2, anchor="center")
-            badge_label.grid(row=0, column=0, rowspan=2, padx=6, pady=6)
-            title_label = tk.Label(
-                tile,
-                text=self._canvas_node_display_name(container, container.name),
-                bg=COLORS["panel_alt"],
-                fg=COLORS["text"],
-                anchor="w",
-            )
-            title_label.grid(row=0, column=1, sticky="ew", pady=(6, 0), padx=(0, 6))
-            summary_label = tk.Label(
-                tile,
-                text=f"#{int(getattr(container, 'reuse_chain_index', 0)) + 1}",
-                bg=COLORS["panel_alt"],
-                fg=COLORS["muted"],
-                anchor="w",
-            )
-            summary_label.grid(row=1, column=1, sticky="ew", pady=(0, 6), padx=(0, 6))
-            self._bind_container_tree_palette_container_widgets((tile, badge_label, title_label, summary_label), container_name)
-        return row + 1
-
-    def _render_container_tree_palette_container(self, parent: ttk.Frame, container_name: str, row: int, *, depth: int) -> int:
+    def _render_container_tree_palette_container_tile(
+        self,
+        parent: tk.Frame,
+        container_name: str,
+        *,
+        show_chain_index: bool,
+        layout: str,
+        row_index: int = 0,
+        column: int = 0,
+    ) -> None:
         container = self._find_container(container_name)
         if container is None:
             raise AssertionError(f"Missing container {container_name}")
         accent_color = COLORS["container"] if container.kind == "variable" else COLORS["container_array"]
+        display_title = self._container_tree_palette_container_title(container)
         tile = tk.Frame(parent, bg=COLORS["panel_alt"], highlightbackground=accent_color, highlightthickness=1)
-        tile.grid(row=row, column=0, sticky="ew", pady=(0, 6), padx=(depth * 18, 0))
+        tile.grid(
+            row=row_index,
+            column=column,
+            sticky="nsew" if layout == "horizontal" else "ew",
+            padx=(0, 8) if layout == "horizontal" else 0,
+            pady=(0, 6) if layout == "vertical" else 0,
+        )
         tile.columnconfigure(1, weight=1)
 
-        badge_label = tk.Label(tile, text="v" if container.kind == "variable" else "a", bg=COLORS["panel_alt"], fg=accent_color, width=2, anchor="center")
+        badge_label = tk.Label(tile, text="v" if container.kind == "variable" else "a", bg=COLORS["panel_alt"], fg=accent_color, width=3, anchor="center")
         badge_label.grid(row=0, column=0, rowspan=2, padx=8, pady=8)
-
         title_label = tk.Label(
             tile,
-            text=self._canvas_node_display_name(container, container.name),
+            text=display_title,
             bg=COLORS["panel_alt"],
             fg=COLORS["text"],
             anchor="w",
+            font=("Segoe UI", 10, "bold"),
         )
-        title_label.grid(row=0, column=1, sticky="ew", pady=(8, 0))
-
-        preview = ", ".join(self._container_value_preview(container, 2))
+        title_label.grid(row=0, column=1, sticky="ew", pady=(7, 0), padx=(0, 8))
+        preview_text = ", ".join(self._container_value_preview(container, 2)) or ("variable" if container.kind == "variable" else "array")
+        summary_text = preview_text
         summary_label = tk.Label(
             tile,
-            text=preview or ("variable" if container.kind == "variable" else "array"),
+            text=summary_text,
             bg=COLORS["panel_alt"],
             fg=COLORS["muted"],
             anchor="w",
         )
-        summary_label.grid(row=1, column=1, sticky="ew", pady=(0, 8))
+        summary_label.grid(row=1, column=1, sticky="ew", pady=(0, 8), padx=(0, 8))
+        self._bind_container_tree_palette_container_widgets((tile, badge_label, title_label, summary_label), container_name)
 
-        self._bind_container_tree_palette_container_widgets((tile, badge_label, title_label, summary_label), container.name)
+    def _container_tree_palette_container_title(self, container: ContainerItem) -> str:
+        display_name = self._canvas_node_display_name(container, container.name)
+        reuse_index = int(getattr(container, "reuse_chain_index", 0))
+        if reuse_index <= 0:
+            return display_name
+        return f"{display_name}#{reuse_index - 1}"
+
+    def _render_container_tree_palette_container_chain(self, parent: ttk.Frame, container_names: list[str], row: int, *, depth: int) -> int:
+        if not container_names:
+            raise AssertionError("Container chain row cannot be empty.")
+        show_chain_index = len(container_names) > 1
+        _chain_key, _revealed, visible_count, offset = self._container_tree_palette_chain_state(container_names)
+        first_container = self._find_container(container_names[0])
+        if first_container is None:
+            raise AssertionError(f"Missing container {container_names[0]}")
+        if first_container.kind == "variable" and len(container_names) > 1:
+            visible_names = list(container_names)
+        else:
+            visible_names = container_names[offset:offset + visible_count]
+        if not visible_names:
+            visible_names = [container_names[0]]
+        if first_container.kind == "array":
+            row_shell = tk.Frame(parent, bg=COLORS["window"], highlightbackground="#ffffff", highlightthickness=1)
+            row_shell.grid(row=row, column=0, sticky="ew", pady=(0, 6), padx=(depth * 18, 0))
+            for column in range(3):
+                row_shell.columnconfigure(column, weight=1, uniform=f"array_chain_{row}")
+            self._bind_palette_wheel(row_shell)
+            self._bind_container_tree_palette_container_widgets((row_shell,), container_names[0])
+            for column, container_name in enumerate(visible_names):
+                self._render_container_tree_palette_container_tile(
+                    row_shell,
+                    container_name,
+                    show_chain_index=show_chain_index,
+                    layout="horizontal",
+                    row_index=0,
+                    column=column,
+                )
+            return row + 1
+        row_shell = tk.Frame(parent, bg=COLORS["window"], highlightbackground="#ffffff", highlightthickness=1)
+        row_shell.grid(row=row, column=0, sticky="ew", pady=(0, 6), padx=(depth * 18, 0))
+        for column in range(3):
+            row_shell.columnconfigure(column, weight=1, uniform=f"variable_chain_{row}")
+        self._bind_palette_wheel(row_shell)
+        self._bind_container_tree_palette_container_widgets((row_shell,), container_names[0])
+        for item_row, container_name in enumerate(visible_names):
+            self._render_container_tree_palette_container_tile(
+                row_shell,
+                container_name,
+                show_chain_index=show_chain_index,
+                layout="vertical",
+                row_index=item_row,
+                column=0,
+            )
         return row + 1
+
+    def _render_container_tree_palette_container(self, parent: ttk.Frame, container_name: str, row: int, *, depth: int) -> int:
+        return self._render_container_tree_palette_container_chain(parent, [container_name], row, depth=depth)
 
     def _toggle_container_tree_palette_group(self, group_name: str) -> None:
         self.container_palette_expanded[group_name] = not bool(self.container_palette_expanded.get(group_name, False))
@@ -712,6 +850,8 @@ class AlgorithmStudioPaletteMixin:
         self._ensure_singleton_container_group(self.project)
         self._ensure_singleton_resource_group(self.project)
         if normalized == self.canvas_view_mode:
+            self.drag_palette_mode_var.set("blueprint" if normalized == "container_overview" else "container_tree")
+            self._apply_drag_palette_mode_layout()
             self._refresh_scene_tabs()
             return
         self._store_canvas_viewport_state(self.canvas_view_mode)
@@ -731,8 +871,8 @@ class AlgorithmStudioPaletteMixin:
             self.selected_container_group_name = None
             if preserve_selected_stage_name and self._find_stage(preserve_selected_stage_name):
                 self.selected_stage_name = preserve_selected_stage_name
-        if normalized == "decomposer_overview" and self._find_rule("decomposer") is None:
-            self.project.decomposer_rules.append(DecomposerRule(name="decomposer", source="", target="", x=CANVAS_PADDING + 220.0, y=CANVAS_PADDING + 80.0))
+        self.drag_palette_mode_var.set("blueprint" if normalized == "container_overview" else "container_tree")
+        self._apply_drag_palette_mode_layout()
         self._refresh_scene_tabs()
         resolved_log_message = log_message or f"Switched to {self._canvas_view_mode_scene_label(normalized)}."
         self._log(resolved_log_message)
@@ -799,22 +939,26 @@ class AlgorithmStudioPaletteMixin:
             if not inside_canvas:
                 return
             kind = str(self.palette_drag_state["kind"])
-            if kind == "microcontainer":
+            if kind in {"microcontainer", "micronode"}:
                 self.palette_drag_state["active"] = True
-                self.palette_drag_state["name"] = "__microcontainer__"
+                self.palette_drag_state["name"] = "__micronode__"
                 return
             variant = self.palette_drag_state.get("variant")
             source_kind = self.palette_drag_state.get("source_kind")
             source_name = self.palette_drag_state.get("source_name")
             x, y = self._scene_point(event.x_root - left, event.y_root - top)
-            self._drop_palette_item(
-                kind,
-                x,
-                y,
-                variant=str(variant) if variant is not None else None,
-                source_kind=str(source_kind) if source_kind is not None else None,
-                source_name=str(source_name) if source_name is not None else None,
-            )
+            self._push_operation_recording_suppression("palette_drag")
+            try:
+                self._drop_palette_item(
+                    kind,
+                    x,
+                    y,
+                    variant=str(variant) if variant is not None else None,
+                    source_kind=str(source_kind) if source_kind is not None else None,
+                    source_name=str(source_name) if source_name is not None else None,
+                )
+            finally:
+                self._pop_operation_recording_suppression()
             name = self._palette_drag_selected_name(kind)
             if not name:
                 return
@@ -825,7 +969,11 @@ class AlgorithmStudioPaletteMixin:
         name = str(self.palette_drag_state["name"])
         if name:
             x, y = self._scene_point(event.x_root - left, event.y_root - top)
-            self._move_palette_drag_item(kind, name, x, y)
+            self._push_operation_recording_suppression("palette_drag")
+            try:
+                self._move_palette_drag_item(kind, name, x, y)
+            finally:
+                self._pop_operation_recording_suppression()
         self.palette_drag_state["waste_area"] = event.y_root < top
 
     def _finish_palette_drag(self, event: tk.Event) -> None:
@@ -844,10 +992,14 @@ class AlgorithmStudioPaletteMixin:
         bottom = top + self.canvas.winfo_height()
         active = bool(self.palette_drag_state.get("active"))
         name = str(self.palette_drag_state.get("name") or "")
-        if kind == "microcontainer":
+        if kind in {"microcontainer", "micronode"}:
             if left <= x_root <= right and top <= y_root <= bottom:
                 x, y = self._scene_point(x_root - left, y_root - top)
-                self._drop_palette_item(kind, x, y, variant=str(variant) if variant is not None else None)
+                self._push_operation_recording_suppression("palette_drag")
+                try:
+                    self._drop_palette_item(kind, x, y, variant=str(variant) if variant is not None else None)
+                finally:
+                    self._pop_operation_recording_suppression()
             self.palette_drag_state = None
             self._refresh_canvas_interaction_state(schedule_manifest_refresh=False)
             return
@@ -855,14 +1007,18 @@ class AlgorithmStudioPaletteMixin:
             source_kind = self.palette_drag_state.get("source_kind")
             source_name = self.palette_drag_state.get("source_name")
             x, y = self._scene_point(x_root - left, y_root - top)
-            self._drop_palette_item(
-                kind,
-                x,
-                y,
-                variant=str(variant) if variant is not None else None,
-                source_kind=str(source_kind) if source_kind is not None else None,
-                source_name=str(source_name) if source_name is not None else None,
-            )
+            self._push_operation_recording_suppression("palette_drag")
+            try:
+                self._drop_palette_item(
+                    kind,
+                    x,
+                    y,
+                    variant=str(variant) if variant is not None else None,
+                    source_kind=str(source_kind) if source_kind is not None else None,
+                    source_name=str(source_name) if source_name is not None else None,
+                )
+            finally:
+                self._pop_operation_recording_suppression()
             name = self._palette_drag_selected_name(kind)
             if name:
                 self.palette_drag_state["active"] = True
@@ -873,7 +1029,19 @@ class AlgorithmStudioPaletteMixin:
                 return
             name = str(self.palette_drag_state.get("name") or "")
         if active and name and y_root < top:
-            self._delete_palette_drag_item(kind, name)
+            self._push_operation_recording_suppression("palette_drag")
+            try:
+                self._delete_palette_drag_item(kind, name)
+            finally:
+                self._pop_operation_recording_suppression()
+        elif active and name and left <= x_root <= right and top <= y_root <= bottom:
+            if kind in {"container", "containerelement"}:
+                self._push_operation_recording_suppression("palette_drag")
+                try:
+                    self._attach_dragged_node_to_group_if_inside({"kind": kind, "name": name})
+                    self._sync_all_container_groups()
+                finally:
+                    self._pop_operation_recording_suppression()
         self.palette_drag_state = None
         self._refresh_canvas_interaction_state(schedule_manifest_refresh=False)
 
@@ -887,26 +1055,27 @@ class AlgorithmStudioPaletteMixin:
         source_kind: str | None = None,
         source_name: str | None = None,
     ) -> None:
-        if self.canvas_view_mode == "decomposer2container_overview":
+        normalized_source_kind = str(source_kind or "").strip().lower()
+        normalized_source_name = str(source_name or "").strip()
+        container_related_drag = kind in {"container", "containerelement", "variable", "array", "microcontainer", "micronode"} or normalized_source_kind in {"container", "containerelement"}
+        if self.canvas_view_mode == "decomposer2container_overview" and not container_related_drag:
             self._set_canvas_view_mode("graph", log_message="Switched back to algorithmScene for node placement.")
-        if self.canvas_view_mode == "container_overview" and kind not in {"variable", "array"}:
+        if self.canvas_view_mode == "container_overview" and kind not in {"variable", "array"} and not container_related_drag:
             self._set_canvas_view_mode("graph", log_message="Switched back to algorithmScene for tool-node placement.")
-        if self.canvas_view_mode == "reflector_overview" and kind not in {"variable", "array", "reflector"}:
+        if self.canvas_view_mode == "reflector_overview" and kind not in {"variable", "array", "reflector"} and not container_related_drag:
             self._set_canvas_view_mode("graph", log_message="Switched back to algorithmScene for tool-node placement.")
         if self.canvas_view_mode in {"interventioner_pretick", "interventioner_aftertick", "interventioner_render"} and kind in {"interventioner", "stage"}:
             self._set_canvas_view_mode("interventioner_overview", log_message="Switched to interventionerScene for stage placement.")
-        if self._is_interventioner_view_mode() and kind not in {"variable", "array", "function", "interventioner", "stage"}:
+        if self._is_interventioner_view_mode() and kind not in {"variable", "array", "function", "interventioner", "stage"} and not container_related_drag:
             self._set_canvas_view_mode("graph", log_message="Switched back to algorithmScene for tool-node placement.")
         if kind == "resnode" and self.canvas_view_mode not in {"decomposer_overview", "all_in_one"}:
             self._log("meshNode can only be placed in decomposerScene.")
             return
-        normalized_source_kind = str(source_kind or "").strip().lower()
-        normalized_source_name = str(source_name or "").strip()
         layout_target = self._container_layout_drop_target(x, y)
         if layout_target is not None:
-            if kind == "microcontainer":
+            if kind in {"microcontainer", "micronode"}:
                 if layout_target.kind != "variable":
-                    self._log("MicroContainer can only be dropped into an expanded v node.")
+                    self._log("MicroNode can only be dropped into an expanded v node.")
                     return
                 micro_name = self._preferred_layout_field_name(layout_target, "variable", "micro")
                 field_item = self._add_layout_field_to_container(
@@ -919,7 +1088,7 @@ class AlgorithmStudioPaletteMixin:
                 self.selected_container_name = layout_target.name
                 self.selected_container_group_name = None
                 self._refresh_all()
-                self._log(f"Added micro container to {layout_target.name}: {field_item.rule_text}.")
+                self._log(f"Added micronode to {layout_target.name}: {field_item.rule_text}.")
                 return
             if kind in {"variable", "array"} and not normalized_source_kind and not normalized_source_name:
                 field_item = self._add_layout_field_to_container(layout_target, kind)
@@ -942,6 +1111,10 @@ class AlgorithmStudioPaletteMixin:
                 self._refresh_all()
                 self._log(f"Added layout rule to {layout_target.name}: {field_item.rule_text}.")
                 return
+        if kind in {"variable", "array"} and not normalized_source_kind and not normalized_source_name:
+            if self._current_container_scene_scope() != self._inventory_scene_scope_for_zone("algorithm"):
+                self._log("Variable/Array can only be created in containerScene. Drag an existing container from Container Tree to use it here.")
+                return
         if normalized_source_kind or normalized_source_name:
             if normalized_source_kind not in {"container", "containerelement"} or not normalized_source_name:
                 raise AssertionError(f"Unsupported tree palette source: {source_kind}:{source_name}")
@@ -952,7 +1125,13 @@ class AlgorithmStudioPaletteMixin:
                 self.selected_container_name = duplicate_name
                 self.selected_container_group_name = None
             else:
-                duplicate_kind, duplicate_name = self._duplicate_canvas_node(normalized_source_kind, normalized_source_name, x=x, y=y)
+                duplicate_kind, duplicate_name = self._duplicate_canvas_node(
+                    normalized_source_kind,
+                    normalized_source_name,
+                    x=x,
+                    y=y,
+                    scene_scope=self._current_container_scene_scope(),
+                )
             if duplicate_kind == "containerelement":
                 self.selected_container_group_name = duplicate_name
                 self.selected_container_name = None
@@ -971,8 +1150,8 @@ class AlgorithmStudioPaletteMixin:
             else:
                 self._log(f"Cloned {normalized_source_kind} {normalized_source_name} into {duplicate_name}.")
             return
-        if kind == "microcontainer":
-            self._log("MicroContainer must be dropped into the layout area of an expanded v node.")
+        if kind in {"microcontainer", "micronode"}:
+            self._log("MicroNode must be dropped into the layout area of an expanded v node.")
             return
         zone = self._primary_sync_zone_for_view()
         if kind == "containerelement":
@@ -981,6 +1160,7 @@ class AlgorithmStudioPaletteMixin:
             if existing_group is not None:
                 existing_group.x = x
                 existing_group.y = y
+                existing_group.scene_scope = self._inventory_scene_scope_for_zone(zone)
                 self.selected_container_group_name = name
                 self.selected_container_name = None
                 self.selected_rule_name = None
@@ -988,9 +1168,16 @@ class AlgorithmStudioPaletteMixin:
                 self.selected_stage_name = None
                 self.selected_res_node_name = None
                 self._refresh_all()
-                self._log(f"Moved container {name}.")
+                self._log(f"Moved micronode {name}.")
                 return
-            group = ContainerGroupItem(name=name, x=x, y=y, width=360.0, height=220.0)
+            group = ContainerGroupItem(
+                name=name,
+                scene_scope=self._inventory_scene_scope_for_zone(zone),
+                x=x,
+                y=y,
+                width=360.0,
+                height=220.0,
+            )
             self.project.validate_container_group(group)
             self.project.container_groups.append(group)
             self.selected_container_group_name = name
@@ -1000,7 +1187,7 @@ class AlgorithmStudioPaletteMixin:
             self.selected_stage_name = None
             self.selected_res_node_name = None
             self._refresh_all()
-            self._log(f"Added container {name}.")
+            self._log(f"Added micronode {name}.")
             return
         if kind == "decomposer":
             name = self._singleton_ui_node_name(kind) or self.project.next_decomposer_name()
@@ -1030,6 +1217,7 @@ class AlgorithmStudioPaletteMixin:
             container = ContainerItem(
                 name=name,
                 kind=kind,
+                scene_scope=self._inventory_scene_scope_for_zone(zone),
                 x=x,
                 y=y,
             )
@@ -1047,6 +1235,7 @@ class AlgorithmStudioPaletteMixin:
             container = ContainerItem(
                 name=name,
                 kind=kind,
+                scene_scope=self._inventory_scene_scope_for_zone(zone),
                 stride=12,
                 x=x,
                 y=y,

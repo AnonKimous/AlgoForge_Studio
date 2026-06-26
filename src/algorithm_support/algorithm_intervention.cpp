@@ -140,8 +140,22 @@ _InterventionSchema _LoadInterventionSchema(const algorithm::AlgorithmPackageLoc
     return schema;
   }
 
-  const cJSON* stages = cJSON_GetObjectItemCaseSensitive(intervention, "stages");
-  if (!stages || !cJSON_IsObject(stages)) {
+  const cJSON* singular_stage = cJSON_GetObjectItemCaseSensitive(intervention, "stage");
+  const cJSON* plural_stages = cJSON_GetObjectItemCaseSensitive(intervention, "stages");
+  if (singular_stage && plural_stages) {
+    schema.error_message =
+      "Intervention section must not declare both 'stage' and 'stages': " + path.string();
+    cJSON_Delete(root);
+    return schema;
+  }
+
+  const cJSON* stages = singular_stage ? singular_stage : plural_stages;
+  if (!stages) {
+    cJSON_Delete(root);
+    return schema;
+  }
+  if (!cJSON_IsObject(stages)) {
+    schema.error_message = "Intervention stage section is invalid: " + path.string();
     cJSON_Delete(root);
     return schema;
   }

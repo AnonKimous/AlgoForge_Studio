@@ -14,9 +14,103 @@ LEGACY_ALGORITHM_NAME_PREFIX = "vxax"
 RESOURCE_ROOT_GROUP_NAME = "resourceRoot"
 ALGORITHM_SYNC_ZONE = "algorithm"
 RESOURCE_SYNC_ZONE = "resource"
+CONTAINER_SCENE_SCOPE_CONTAINER = "container_overview"
+CONTAINER_SCENE_SCOPE_DECOMPOSER = "decomposer_overview"
+CONTAINER_SCENE_SCOPE_D2C = "decomposer2container_overview"
+CONTAINER_SCENE_SCOPE_GRAPH = "graph"
+CONTAINER_SCENE_SCOPE_REFLECTOR = "reflector_overview"
+CONTAINER_SCENE_SCOPE_INTERVENTIONER = "interventioner_overview"
+CONTAINER_SCENE_SCOPE_ALL_IN_ONE = "all_in_one"
 
 
 class AlgorithmStudioIdentityMixin:
+    def _normalize_container_scene_scope(self, scope: str) -> str:
+        normalized = str(scope or "").strip().lower()
+        if not normalized:
+            return ""
+        if normalized in {"interventioner_pretick", "interventioner_aftertick", "interventioner_render"}:
+            return CONTAINER_SCENE_SCOPE_INTERVENTIONER
+        if normalized not in {
+            CONTAINER_SCENE_SCOPE_CONTAINER,
+            CONTAINER_SCENE_SCOPE_DECOMPOSER,
+            CONTAINER_SCENE_SCOPE_D2C,
+            CONTAINER_SCENE_SCOPE_GRAPH,
+            CONTAINER_SCENE_SCOPE_REFLECTOR,
+            CONTAINER_SCENE_SCOPE_INTERVENTIONER,
+            CONTAINER_SCENE_SCOPE_ALL_IN_ONE,
+        }:
+            raise AssertionError(f"Unsupported container scene scope: {scope}")
+        return normalized
+
+    def _inventory_scene_scope_for_zone(self, zone: str) -> str:
+        normalized_zone = self._normalize_sync_zone(zone)
+        if normalized_zone == RESOURCE_SYNC_ZONE:
+            return CONTAINER_SCENE_SCOPE_DECOMPOSER
+        return CONTAINER_SCENE_SCOPE_CONTAINER
+
+    def _current_container_scene_scope(self, view_mode: str | None = None) -> str:
+        normalized = str(view_mode or self.canvas_view_mode).strip().lower()
+        return self._normalize_container_scene_scope(normalized)
+
+    def _scene_scope_matches_view(self, scope: str, view_mode: str | None = None) -> bool:
+        normalized_scope = self._normalize_container_scene_scope(scope)
+        view_scope = self._current_container_scene_scope(view_mode)
+        return normalized_scope == view_scope
+
+    def _container_group_scene_scope(self, group: ContainerGroupItem) -> str:
+        raw_scope = self._normalize_container_scene_scope(str(getattr(group, "scene_scope", "") or ""))
+        if raw_scope:
+            return raw_scope
+        if self._is_hidden_root_group_name(group.name):
+            return self._inventory_scene_scope_for_zone(self._sync_zone_for_node("containerelement", group.name))
+        parent_name = self._group_parent_group_name(group.name)
+        if parent_name:
+            parent_group = self._find_container_group(parent_name)
+            if parent_group is None:
+                raise AssertionError(f"Missing parent containerElement {parent_name}")
+            return self._container_group_scene_scope(parent_group)
+        return self._inventory_scene_scope_for_zone(self._sync_zone_for_node("containerelement", group.name))
+
+    def _container_scene_scope(self, container: ContainerItem) -> str:
+        raw_scope = self._normalize_container_scene_scope(str(getattr(container, "scene_scope", "") or ""))
+        if raw_scope:
+            return raw_scope
+        parent_name = self._container_parent_group_name(container.name)
+        if parent_name:
+            parent_group = self._find_container_group(parent_name)
+            if parent_group is None:
+                raise AssertionError(f"Missing parent containerElement {parent_name}")
+            return self._container_group_scene_scope(parent_group)
+        return self._inventory_scene_scope_for_zone(self._sync_zone_for_node("container", container.name))
+
+    def _node_scene_scope(self, kind: str, name: str) -> str:
+        normalized_kind = str(kind).strip().lower()
+        normalized_name = str(name).strip()
+        if normalized_kind == "container":
+            container = self._find_container(normalized_name)
+            if container is None:
+                raise AssertionError(f"Missing container {normalized_name}")
+            return self._container_scene_scope(container)
+        if normalized_kind == "containerelement":
+            group = self._find_container_group(normalized_name)
+            if group is None:
+                raise AssertionError(f"Missing containerElement {normalized_name}")
+            return self._container_group_scene_scope(group)
+        raise AssertionError(f"Scene scope is only defined for container-like nodes, got {kind}:{name}")
+
+    def _set_node_scene_scope(self, item: object, scope: str) -> None:
+        normalized_scope = self._normalize_container_scene_scope(scope)
+        if isinstance(item, (ContainerItem, ContainerGroupItem)):
+            item.scene_scope = normalized_scope
+            return
+        raise AssertionError(f"Scene scope is only supported for container-like nodes, got {type(item).__name__}")
+
+    def _normalize_container_scene_scopes(self) -> None:
+        for group in self.project.container_groups:
+            group.scene_scope = self._container_group_scene_scope(group)
+        for container in self.project.containers:
+            container.scene_scope = self._container_scene_scope(container)
+
     def _normalize_sync_zone(self, zone: str) -> str:
         normalized = str(zone).strip().lower()
         if normalized not in {ALGORITHM_SYNC_ZONE, RESOURCE_SYNC_ZONE}:
@@ -90,7 +184,9 @@ class AlgorithmStudioIdentityMixin:
 
     def _scene_consumes_node_zone(self, kind: str, name: str, view_mode: str | None = None) -> bool:
         zone = self._sync_zone_for_node(kind, name)
-        return zone in self._scene_sync_zones(view_mode)
+        if zone not in self._scene_sync_zones(view_mode):
+            return False
+        return self._scene_scope_matches_view(self._node_scene_scope(kind, name), view_mode)
 
     def _next_container_name_for_zone(self, kind: str, zone: str) -> str:
         normalized_zone = self._normalize_sync_zone(zone)
@@ -190,25 +286,55 @@ class AlgorithmStudioIdentityMixin:
     def _ensure_singleton_container_group(self, project: ProjectState) -> None:
         root_group = next((group for group in project.container_groups if group.name == "container"), None)
         if root_group is None:
-            root_group = ContainerGroupItem(name="container", x=120.0, y=80.0, width=420.0, height=260.0, expand=True)
+            root_group = ContainerGroupItem(
+                name="container",
+                scene_scope=CONTAINER_SCENE_SCOPE_CONTAINER,
+                x=120.0,
+                y=80.0,
+                width=420.0,
+                height=260.0,
+                expand=True,
+            )
             project.container_groups.insert(0, root_group)
+        root_group.scene_scope = CONTAINER_SCENE_SCOPE_CONTAINER
+        inventory_scope = CONTAINER_SCENE_SCOPE_CONTAINER
         owned_container_names = {
             name
             for group in project.container_groups
             for name in list(group.variables) + list(group.arrays)
-            if group.name != "container" and not self._is_resource_group_name(group.name)
+            if group.name != "container"
+            and not self._is_resource_group_name(group.name)
+            and self._container_group_scene_scope(group) == inventory_scope
         }
         owned_group_names = {
             name
             for group in project.container_groups
             for name in group.groups
-            if group.name != "container" and not self._is_resource_group_name(group.name)
+            if group.name != "container"
+            and not self._is_resource_group_name(group.name)
+            and self._container_group_scene_scope(group) == inventory_scope
         }
-        direct_variables = list(root_group.variables)
-        direct_arrays = list(root_group.arrays)
-        direct_groups = [name for name in root_group.groups if name != "container"]
+        direct_variables = [
+            name
+            for name in root_group.variables
+            if (container := self._find_container(name)) is not None and self._container_scene_scope(container) == inventory_scope
+        ]
+        direct_arrays = [
+            name
+            for name in root_group.arrays
+            if (container := self._find_container(name)) is not None and self._container_scene_scope(container) == inventory_scope
+        ]
+        direct_groups = [
+            name
+            for name in root_group.groups
+            if name != "container"
+            and (group := self._find_container_group(name)) is not None
+            and self._container_group_scene_scope(group) == inventory_scope
+        ]
         for container in project.containers:
             if self._is_resource_container_name(container.name):
+                continue
+            if self._container_scene_scope(container) != inventory_scope:
                 continue
             if container.name in owned_container_names:
                 continue
@@ -225,6 +351,8 @@ class AlgorithmStudioIdentityMixin:
                 continue
             if self._is_resource_group_name(group.name):
                 continue
+            if self._container_group_scene_scope(group) != inventory_scope:
+                continue
             if group.name in owned_group_names:
                 continue
             if group.name not in direct_groups:
@@ -240,6 +368,8 @@ class AlgorithmStudioIdentityMixin:
         for container in project.containers:
             if self._is_resource_container_name(container.name):
                 continue
+            if self._container_scene_scope(container) != inventory_scope:
+                continue
             if container.name not in root_group.variables and container.name not in root_group.arrays:
                 continue
             has_member = True
@@ -248,7 +378,12 @@ class AlgorithmStudioIdentityMixin:
             right = max(right, container.x + NODE_WIDTH + 24.0)
             bottom = max(bottom, container.y + NODE_HEIGHT + 24.0)
         for group in project.container_groups:
-            if group.name == "container" or self._is_resource_group_name(group.name) or group.name not in root_group.groups:
+            if (
+                group.name == "container"
+                or self._is_resource_group_name(group.name)
+                or self._container_group_scene_scope(group) != inventory_scope
+                or group.name not in root_group.groups
+            ):
                 continue
             has_member = True
             left = min(left, group.x - 24.0)
@@ -264,25 +399,60 @@ class AlgorithmStudioIdentityMixin:
     def _ensure_singleton_resource_group(self, project: ProjectState) -> None:
         root_group = next((group for group in project.container_groups if group.name == RESOURCE_ROOT_GROUP_NAME), None)
         if root_group is None:
-            root_group = ContainerGroupItem(name=RESOURCE_ROOT_GROUP_NAME, x=120.0, y=80.0, width=420.0, height=260.0, expand=True)
+            root_group = ContainerGroupItem(
+                name=RESOURCE_ROOT_GROUP_NAME,
+                scene_scope=CONTAINER_SCENE_SCOPE_DECOMPOSER,
+                x=120.0,
+                y=80.0,
+                width=420.0,
+                height=260.0,
+                expand=True,
+            )
             project.container_groups.append(root_group)
+        root_group.scene_scope = CONTAINER_SCENE_SCOPE_DECOMPOSER
+        inventory_scope = CONTAINER_SCENE_SCOPE_DECOMPOSER
         owned_container_names = {
             name
             for group in project.container_groups
             for name in list(group.variables) + list(group.arrays)
-            if group.name != RESOURCE_ROOT_GROUP_NAME and self._is_resource_group_name(group.name)
+            if group.name != RESOURCE_ROOT_GROUP_NAME
+            and self._is_resource_group_name(group.name)
+            and self._container_group_scene_scope(group) == inventory_scope
         }
         owned_group_names = {
             name
             for group in project.container_groups
             for name in group.groups
-            if group.name != RESOURCE_ROOT_GROUP_NAME and self._is_resource_group_name(group.name)
+            if group.name != RESOURCE_ROOT_GROUP_NAME
+            and self._is_resource_group_name(group.name)
+            and self._container_group_scene_scope(group) == inventory_scope
         }
-        direct_variables = [name for name in root_group.variables if self._is_resource_container_name(name)]
-        direct_arrays = [name for name in root_group.arrays if self._is_resource_container_name(name)]
-        direct_groups = [name for name in root_group.groups if self._is_resource_group_name(name) and name != RESOURCE_ROOT_GROUP_NAME]
+        direct_variables = [
+            name
+            for name in root_group.variables
+            if self._is_resource_container_name(name)
+            and (container := self._find_container(name)) is not None
+            and self._container_scene_scope(container) == inventory_scope
+        ]
+        direct_arrays = [
+            name
+            for name in root_group.arrays
+            if self._is_resource_container_name(name)
+            and (container := self._find_container(name)) is not None
+            and self._container_scene_scope(container) == inventory_scope
+        ]
+        direct_groups = [
+            name
+            for name in root_group.groups
+            if self._is_resource_group_name(name)
+            and name != RESOURCE_ROOT_GROUP_NAME
+            and (group := self._find_container_group(name)) is not None
+            and self._container_group_scene_scope(group) == inventory_scope
+        ]
         for container in project.containers:
             if not self._is_resource_container_name(container.name):
+                continue
+            if self._container_scene_scope(container) != inventory_scope:
                 continue
             if container.name in owned_container_names:
                 continue
@@ -296,6 +466,8 @@ class AlgorithmStudioIdentityMixin:
                 raise AssertionError(f"Unsupported container kind: {container.kind}")
         for group in project.container_groups:
             if group.name == RESOURCE_ROOT_GROUP_NAME or not self._is_resource_group_name(group.name):
+                continue
+            if self._container_group_scene_scope(group) != inventory_scope:
                 continue
             if group.name in owned_group_names:
                 continue

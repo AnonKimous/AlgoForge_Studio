@@ -11,6 +11,104 @@ except ImportError:
 
 
 class AlgorithmStudioCanvasInteractionMixin:
+    def _canvas_click_matches_last_click(
+        self,
+        *,
+        kind: str | None,
+        node_name: str | None,
+        local_x: float,
+        local_y: float,
+    ) -> bool:
+        last_click = self.canvas_last_click_info
+        if not last_click or not kind or not node_name:
+            return False
+        if str(last_click.get("view") or "") != self.canvas_view_mode:
+            return False
+        if str(last_click.get("kind") or "") != kind or str(last_click.get("name") or "") != node_name:
+            return False
+        if time.monotonic() - float(last_click.get("time", 0.0)) > 0.4:
+            return False
+        dx = abs(local_x - float(last_click.get("local_x", local_x)))
+        dy = abs(local_y - float(last_click.get("local_y", local_y)))
+        return dx + dy <= 12.0
+
+    def _remember_canvas_click(
+        self,
+        *,
+        kind: str | None,
+        node_name: str | None,
+        local_x: float,
+        local_y: float,
+    ) -> None:
+        if not kind or not node_name:
+            self.canvas_last_click_info = None
+            return
+        self.canvas_last_click_info = {
+            "time": time.monotonic(),
+            "view": self.canvas_view_mode,
+            "kind": kind,
+            "name": node_name,
+            "local_x": local_x,
+            "local_y": local_y,
+        }
+
+    def _canvas_debug_tags_summary(self, tags: tuple[str, ...]) -> str:
+        if not tags:
+            return "<none>"
+        return ",".join(tags)
+
+    def _log_canvas_node_event(
+        self,
+        event_name: str,
+        *,
+        local_x: float,
+        local_y: float,
+        scene_x: float,
+        scene_y: float,
+        item_id: int | None,
+        tags: tuple[str, ...],
+        kind: str | None,
+        node_name: str | None,
+        extra: str = "",
+    ) -> None:
+        message = (
+            f"[canvas:{event_name}] view={self.canvas_view_mode} "
+            f"local=({local_x:.1f},{local_y:.1f}) scene=({scene_x:.1f},{scene_y:.1f}) "
+            f"item={item_id if item_id is not None else 'none'} "
+            f"kind={kind or '-'} name={node_name or '-'} tags={self._canvas_debug_tags_summary(tags)}"
+        )
+        if extra:
+            message += f" {extra}"
+        self._log(message)
+
+    def _node_drag_threshold_exceeded(self, drag_state: dict[str, Any], event: tk.Event) -> bool:
+        press_x = float(drag_state.get("press_x_root", drag_state.get("x_root", event.x_root)))
+        press_y = float(drag_state.get("press_y_root", drag_state.get("y_root", event.y_root)))
+        return abs(event.x_root - press_x) + abs(event.y_root - press_y) >= 6
+
+    def _container_double_click_hits_header(self, container: Any, tags: tuple[str, ...], scene_x: float, scene_y: float) -> bool:
+        raw_x = container.x or CANVAS_PADDING + 40
+        raw_y = container.y or CANVAS_PADDING + 40
+        x, y = self._container_display_origin("container", container.name, raw_x, raw_y)
+        width, _height = self._container_render_size(container)
+        header_height = 24.0 if self._is_node_expanded(container, default=False) else 32.0
+        header_hit = x <= scene_x <= x + width and y <= scene_y <= y + header_height
+        if "node_header" in tags:
+            return True
+        if any(tag.startswith("container_field:") for tag in tags):
+            return False
+        if any(tag.startswith("container_section:") for tag in tags) or "node_body" in tags:
+            self._log(
+                f"[container:header_hit_test] name={container.name} expanded={self._is_node_expanded(container, default=False)} "
+                f"scene=({scene_x:.1f},{scene_y:.1f}) header_hit={header_hit} tags={self._canvas_debug_tags_summary(tags)}"
+            )
+            return header_hit
+        self._log(
+            f"[container:header_hit_test] name={container.name} expanded={self._is_node_expanded(container, default=False)} "
+            f"scene=({scene_x:.1f},{scene_y:.1f}) header_hit={header_hit} tags={self._canvas_debug_tags_summary(tags)}"
+        )
+        return header_hit
+
     def _canvas_local_pointer(self, event: tk.Event) -> tuple[float, float]:
         if not self.canvas:
             raise AssertionError("Canvas is not initialized.")
@@ -55,6 +153,7 @@ class AlgorithmStudioCanvasInteractionMixin:
 
     def _on_canvas_click(self, event: tk.Event) -> None:
         if time.monotonic() < self.canvas_double_click_suppress_until:
+            self._log("[canvas:click] suppressed by double-click cooldown.")
             return
         if not self.canvas:
             return
@@ -64,12 +163,53 @@ class AlgorithmStudioCanvasInteractionMixin:
         scene_x, scene_y = self._scene_point(local_x, local_y)
         item_id = self._canvas_item_hit(local_x, local_y)
         tags: tuple[str, ...] = self.canvas.gettags(item_id) if item_id is not None else ()
+        kind, node_name = self._node_info_from_tags(tags)
+        if item_id is not None or kind or node_name:
+            self._log_canvas_node_event(
+                "click",
+                local_x=local_x,
+                local_y=local_y,
+                scene_x=scene_x,
+                scene_y=scene_y,
+                item_id=item_id,
+                tags=tags,
+                kind=kind,
+                node_name=node_name,
+            )
+        if self._canvas_click_matches_last_click(kind=kind, node_name=node_name, local_x=local_x, local_y=local_y):
+            self._log_canvas_node_event(
+                "synthetic_double_click",
+                local_x=local_x,
+                local_y=local_y,
+                scene_x=scene_x,
+                scene_y=scene_y,
+                item_id=item_id,
+                tags=tags,
+                kind=kind,
+                node_name=node_name,
+            )
+            self.canvas_last_click_info = None
+            self.canvas_ignore_native_double_until = time.monotonic() + 0.35
+            self._process_canvas_double_click(
+                local_x=local_x,
+                local_y=local_y,
+                scene_x=scene_x,
+                scene_y=scene_y,
+                item_id=item_id,
+                tags=tags,
+                kind=kind,
+                node_name=node_name,
+                source="synthetic",
+            )
+            return
         port_info = self._port_info_from_tags(tags)
         if port_info:
+            self.canvas_last_click_info = None
             self._start_connection_drag(port_info, event)
             return
         resize_info = self._resize_handle_info_from_tags(tags)
         if resize_info:
+            self.canvas_last_click_info = None
             resize_kind, resize_name = resize_info
             if resize_kind == "containerelement":
                 group = self._find_container_group(resize_name)
@@ -86,7 +226,7 @@ class AlgorithmStudioCanvasInteractionMixin:
                     "height": group.height,
                 }
                 return
-            if resize_kind in {"decomposer", "reflector", "resnode", "function", "functiontext", "interventioner", "stage"}:
+            if resize_kind in {"container", "decomposer", "reflector", "resnode", "function", "functiontext", "interventioner", "stage"}:
                 node = self._node_by_kind_name(resize_kind, resize_name)
                 if node is None:
                     raise AssertionError(f"Missing {resize_kind} node {resize_name}")
@@ -100,12 +240,22 @@ class AlgorithmStudioCanvasInteractionMixin:
                     "height": float(getattr(node, "height", BLUEPRINT_NODE_MIN_HEIGHT)),
                 }
                 return
-        kind, node_name = self._node_info_from_tags(tags)
         if kind and node_name:
+            self._remember_canvas_click(kind=kind, node_name=node_name, local_x=local_x, local_y=local_y)
             self._select_item_on_canvas(kind, node_name)
             should_drag = False
             if kind == "container":
-                should_drag = True
+                container = self._find_container(node_name)
+                if container is None:
+                    raise AssertionError(f"Missing container {node_name}")
+                if not self._is_node_expanded(container, default=False):
+                    should_drag = True
+                elif "node_header" in tags:
+                    should_drag = True
+                self._log(
+                    f"[canvas:click:container] name={node_name} expanded={self._is_node_expanded(container, default=False)} "
+                    f"should_drag={should_drag} tags={self._canvas_debug_tags_summary(tags)}"
+                )
             elif kind == "containerelement":
                 group = self._find_container_group(node_name)
                 if not group:
@@ -170,21 +320,22 @@ class AlgorithmStudioCanvasInteractionMixin:
                     "name": node_name,
                     "x_root": event.x_root,
                     "y_root": event.y_root,
+                    "press_x_root": event.x_root,
+                    "press_y_root": event.y_root,
                     "original_x": original_x,
                     "original_y": original_y,
+                    "drag_started": False,
+                    "waste_area": False,
+                    "doc_area": False,
                 }
                 if kind == "container":
                     self.node_drag_state["original_parent_group"] = self._container_parent_group_name(node_name)
                 elif kind == "containerelement":
                     self.node_drag_state["original_parent_group"] = self._group_parent_group_name(node_name)
-                if kind == "containerelement":
-                    self.container_group_drag_state = {
-                        "name": node_name,
-                        "x_root": event.x_root,
-                        "y_root": event.y_root,
-                    }
+                self._log(f"[canvas:drag_prepare] kind={kind} name={node_name} state={self.node_drag_state}")
             return
         if item_id is None:
+            self.canvas_last_click_info = None
             self.selection_state = None
             self._clear_highlighted_container_chain()
             self.selected_container_name = None
@@ -220,6 +371,7 @@ class AlgorithmStudioCanvasInteractionMixin:
             self._refresh_inspector()
             return
         self.node_drag_state = None
+        self.canvas_last_click_info = None
 
     def _on_canvas_drag(self, event: tk.Event) -> None:
         if not self.canvas:
@@ -265,6 +417,18 @@ class AlgorithmStudioCanvasInteractionMixin:
             return
         if not self.node_drag_state:
             return
+        if not bool(self.node_drag_state.get("drag_started")):
+            if not self._node_drag_threshold_exceeded(self.node_drag_state, event):
+                return
+            self.node_drag_state["drag_started"] = True
+            kind = str(self.node_drag_state["kind"])
+            if kind == "containerelement":
+                self.container_group_drag_state = {
+                    "name": str(self.node_drag_state["name"]),
+                    "x_root": event.x_root,
+                    "y_root": event.y_root,
+                }
+            self._log(f"[canvas:drag_start] kind={kind} name={self.node_drag_state['name']} state={self.node_drag_state}")
         dx = event.x_root - float(self.node_drag_state["x_root"])
         dy = event.y_root - float(self.node_drag_state["y_root"])
         kind = str(self.node_drag_state["kind"])
@@ -387,82 +551,129 @@ class AlgorithmStudioCanvasInteractionMixin:
             self._refresh_canvas_interaction_state()
             return
         if self.node_drag_state:
-            if bool(self.node_drag_state.get("doc_area")):
-                kind = str(self.node_drag_state.get("kind") or "")
-                name = str(self.node_drag_state.get("name") or "")
-                self._restore_dragged_node_position(self.node_drag_state)
-                self.node_drag_state = None
-                self.container_group_drag_state = None
-                self.container_group_resize_state = None
-                self.toolnode_resize_state = None
-                self._open_node_in_document_panel(kind, name)
-                self._refresh_canvas_interaction_state(schedule_manifest_refresh=False)
-                return
-            if bool(self.node_drag_state.get("waste_area")):
-                kind = str(self.node_drag_state.get("kind") or "")
-                name = str(self.node_drag_state.get("name") or "")
-                if kind == "container":
-                    self.selected_container_name = name
-                    self._delete_selected_container()
-                elif kind == "containerelement" and name != "container":
-                    self.selected_container_group_name = name
-                    self._delete_selected_container_group()
-                elif kind == "decomposer":
-                    self.selected_rule_name = name
-                    self._delete_selected_rule()
-                elif kind == "reflector":
-                    self.selected_reflector_name = name
-                    self._delete_selected_reflector()
-                elif kind == "resnode":
-                    self.selected_res_node_name = name
-                    self._delete_selected_res_node()
-                elif kind == "function":
-                    self.selected_function_name = name
-                    self._delete_selected_function()
-                elif kind == "functiontext":
-                    self.selected_function_text_name = name
-                    self._delete_selected_function_text()
-                elif kind in {"interventioner", "stage"}:
-                    self.selected_stage_name = name
-                    self._delete_selected_stage()
+            if not bool(self.node_drag_state.get("drag_started")):
                 self.node_drag_state = None
                 self.container_group_drag_state = None
                 self.container_group_resize_state = None
                 self.toolnode_resize_state = None
                 self._refresh_canvas_interaction_state(schedule_manifest_refresh=False)
                 return
-            if self.canvas_view_mode != "container_overview":
-                attached_to_new_parent = self._attach_dragged_node_to_group_if_inside(self.node_drag_state)
-                if not attached_to_new_parent:
-                    self._detach_dragged_node_if_outside_parent(self.node_drag_state)
-                self._sync_all_container_groups()
-            self.node_drag_state = None
-            self.container_group_drag_state = None
-            self.container_group_resize_state = None
-            self.toolnode_resize_state = None
-            self._refresh_canvas_interaction_state(sync_groups=self.canvas_view_mode != "container_overview")
-            return
+            self._push_operation_recording_suppression("canvas_drag")
+            try:
+                if bool(self.node_drag_state.get("doc_area")):
+                    kind = str(self.node_drag_state.get("kind") or "")
+                    name = str(self.node_drag_state.get("name") or "")
+                    self._restore_dragged_node_position(self.node_drag_state)
+                    self.node_drag_state = None
+                    self.container_group_drag_state = None
+                    self.container_group_resize_state = None
+                    self.toolnode_resize_state = None
+                    self._open_node_in_document_panel(kind, name)
+                    self._refresh_canvas_interaction_state(schedule_manifest_refresh=False)
+                    return
+                if bool(self.node_drag_state.get("waste_area")):
+                    kind = str(self.node_drag_state.get("kind") or "")
+                    name = str(self.node_drag_state.get("name") or "")
+                    if kind == "container":
+                        self.selected_container_name = name
+                        self._delete_selected_container()
+                    elif kind == "containerelement" and name != "container":
+                        self.selected_container_group_name = name
+                        self._delete_selected_container_group()
+                    elif kind == "decomposer":
+                        self.selected_rule_name = name
+                        self._delete_selected_rule()
+                    elif kind == "reflector":
+                        self.selected_reflector_name = name
+                        self._delete_selected_reflector()
+                    elif kind == "resnode":
+                        self.selected_res_node_name = name
+                        self._delete_selected_res_node()
+                    elif kind == "function":
+                        self.selected_function_name = name
+                        self._delete_selected_function()
+                    elif kind == "functiontext":
+                        self.selected_function_text_name = name
+                        self._delete_selected_function_text()
+                    elif kind in {"interventioner", "stage"}:
+                        self.selected_stage_name = name
+                        self._delete_selected_stage()
+                    self.node_drag_state = None
+                    self.container_group_drag_state = None
+                    self.container_group_resize_state = None
+                    self.toolnode_resize_state = None
+                    self._refresh_canvas_interaction_state(schedule_manifest_refresh=False)
+                    return
+                if self.canvas_view_mode != "container_overview":
+                    attached_to_new_parent = self._attach_dragged_node_to_group_if_inside(self.node_drag_state)
+                    if not attached_to_new_parent:
+                        self._detach_dragged_node_if_outside_parent(self.node_drag_state)
+                    self._sync_all_container_groups()
+                self.node_drag_state = None
+                self.container_group_drag_state = None
+                self.container_group_resize_state = None
+                self.toolnode_resize_state = None
+                self._refresh_canvas_interaction_state(sync_groups=self.canvas_view_mode != "container_overview")
+                return
+            finally:
+                self._pop_operation_recording_suppression()
         self.node_drag_state = None
 
-    def _on_canvas_double_click(self, event: tk.Event) -> str:
+    def _process_canvas_double_click(
+        self,
+        *,
+        local_x: float,
+        local_y: float,
+        scene_x: float,
+        scene_y: float,
+        item_id: int | None,
+        tags: tuple[str, ...],
+        kind: str | None,
+        node_name: str | None,
+        source: str,
+    ) -> str:
         if not self.canvas:
             return "break"
         self._reset_canvas_interaction_states()
-        local_x, local_y = self._canvas_local_pointer(event)
-        scene_x, scene_y = self._scene_point(local_x, local_y)
-        item_id = self._canvas_item_hit(local_x, local_y)
-        if item_id is None:
-            item_id = self._canvas_item_hit_nearby(local_x, local_y, radius=14)
-        tags: tuple[str, ...] = ()
-        kind: str | None = None
-        node_name: str | None = None
-        if item_id is not None:
-            tags = self.canvas.gettags(item_id)
-            kind, node_name = self._node_info_from_tags(tags)
-        if not kind or not node_name:
-            kind, node_name = self._fallback_node_hit_at_scene_point(scene_x, scene_y)
-            if not kind or not node_name:
+        resolved_item_id = item_id
+        resolved_tags = tags
+        resolved_kind = kind
+        resolved_node_name = node_name
+        if resolved_item_id is None:
+            resolved_item_id = self._canvas_item_hit_nearby(local_x, local_y, radius=14)
+            if resolved_item_id is not None:
+                resolved_tags = self.canvas.gettags(resolved_item_id)
+                resolved_kind, resolved_node_name = self._node_info_from_tags(resolved_tags)
+        if not resolved_kind or not resolved_node_name:
+            resolved_kind, resolved_node_name = self._fallback_node_hit_at_scene_point(scene_x, scene_y)
+            if not resolved_kind or not resolved_node_name:
+                self._log_canvas_node_event(
+                    f"{source}_double_click_miss",
+                    local_x=local_x,
+                    local_y=local_y,
+                    scene_x=scene_x,
+                    scene_y=scene_y,
+                    item_id=resolved_item_id,
+                    tags=resolved_tags,
+                    kind=resolved_kind,
+                    node_name=resolved_node_name,
+                )
                 return "break"
+        self._log_canvas_node_event(
+            f"{source}_double_click",
+            local_x=local_x,
+            local_y=local_y,
+            scene_x=scene_x,
+            scene_y=scene_y,
+            item_id=resolved_item_id,
+            tags=resolved_tags,
+            kind=resolved_kind,
+            node_name=resolved_node_name,
+        )
+        self.canvas_last_click_info = None
+        kind = resolved_kind
+        node_name = resolved_node_name
+        tags = resolved_tags
         self._select_item_on_canvas(kind, node_name)
         if kind == "container":
             container = self._find_container(node_name)
@@ -473,11 +684,15 @@ class AlgorithmStudioCanvasInteractionMixin:
                 self._open_container_layout_field_editor(container, field_index)
                 self.canvas_double_click_suppress_until = time.monotonic() + 0.25
                 return "break"
-            if not self._is_node_expanded(container, default=False):
+            header_hit = self._container_double_click_hits_header(container, tags, scene_x, scene_y)
+            self._log(
+                f"[canvas:double_click:container] name={node_name} expanded={self._is_node_expanded(container, default=False)} "
+                f"header_hit={header_hit} tags={self._canvas_debug_tags_summary(tags)}"
+            )
+            if header_hit:
                 self._toggle_canvas_node_expand(kind, node_name)
-                self.canvas_double_click_suppress_until = time.monotonic() + 0.25
-                return "break"
-            self._toggle_canvas_node_expand(kind, node_name)
+            else:
+                self._handle_canvas_node_body_double_click(kind, node_name, tags)
             self.canvas_double_click_suppress_until = time.monotonic() + 0.25
             return "break"
         if "node_header" in tags or "group_header" in tags:
@@ -486,6 +701,29 @@ class AlgorithmStudioCanvasInteractionMixin:
             self._handle_canvas_node_body_double_click(kind, node_name, tags)
         self.canvas_double_click_suppress_until = time.monotonic() + 0.25
         return "break"
+
+    def _on_canvas_double_click(self, event: tk.Event) -> str:
+        if time.monotonic() < self.canvas_ignore_native_double_until:
+            self._log("[canvas:native_double_click] ignored because synthetic double-click already handled.")
+            return "break"
+        if not self.canvas:
+            return "break"
+        local_x, local_y = self._canvas_local_pointer(event)
+        scene_x, scene_y = self._scene_point(local_x, local_y)
+        item_id = self._canvas_item_hit(local_x, local_y)
+        tags: tuple[str, ...] = self.canvas.gettags(item_id) if item_id is not None else ()
+        kind, node_name = self._node_info_from_tags(tags)
+        return self._process_canvas_double_click(
+            local_x=local_x,
+            local_y=local_y,
+            scene_x=scene_x,
+            scene_y=scene_y,
+            item_id=item_id,
+            tags=tags,
+            kind=kind,
+            node_name=node_name,
+            source="native",
+        )
 
     def _toggle_canvas_node_expand(self, kind: str, node_name: str) -> None:
         item: Any | None = None
@@ -509,10 +747,11 @@ class AlgorithmStudioCanvasInteractionMixin:
             raise AssertionError(f"Missing node for expand toggle: {kind}:{node_name}")
         if not hasattr(item, "expand"):
             raise AssertionError(f"Node does not support expand: {kind}:{node_name}")
-        item.expand = not bool(getattr(item, "expand"))
+        before = bool(getattr(item, "expand"))
+        item.expand = not before
         self._refresh_all()
         state = "expanded" if item.expand else "collapsed"
-        self._log(f"{kind}:{node_name} {state}.")
+        self._log(f"[canvas:toggle_expand] kind={kind} name={node_name} before={before} after={bool(item.expand)} state={state}")
 
     def _on_canvas_right_press(self, event: tk.Event) -> None:
         if not self.canvas:
@@ -523,14 +762,15 @@ class AlgorithmStudioCanvasInteractionMixin:
             kind, node_name = self._node_info_from_tags(tags)
             if kind in {"container", "decomposer", "reflector", "resnode", "function", "functiontext", "interventioner", "stage"}:
                 self._select_item_on_canvas(kind, node_name)
-                self.container_copy_drag_state = {
-                    "kind": self._normalize_selected_kind(kind),
-                    "source_name": node_name,
-                    "start_x": event.x,
-                    "start_y": event.y,
-                    "started": False,
-                    "duplicate_name": "",
-                }
+                if self.canvas_view_mode != "container_overview":
+                    self.container_copy_drag_state = {
+                        "kind": self._normalize_selected_kind(kind),
+                        "source_name": node_name,
+                        "start_x": event.x,
+                        "start_y": event.y,
+                        "started": False,
+                        "duplicate_name": "",
+                    }
             return
         self.canvas_pan_state = {
             "x": event.x,
@@ -649,6 +889,7 @@ class AlgorithmStudioCanvasInteractionMixin:
         self._select_item_on_canvas(kind, node_name)
         menu = tk.Menu(self.root, tearoff=0)
         if kind == "container":
+            menu.add_command(label="Rename...", command=lambda: self._prompt_rename_canvas_node(kind, node_name))
             menu.add_command(label="Show details", command=lambda: self._open_canvas_detail_panel(kind, node_name))
             menu.add_command(label="Highlight first->last path", command=lambda: self._highlight_container_chain_path(node_name))
             menu.add_command(label="Duplicate", command=self._duplicate_selected_container)
@@ -657,31 +898,39 @@ class AlgorithmStudioCanvasInteractionMixin:
             menu.add_separator()
             menu.add_command(label="Delete", command=self._delete_selected_container)
         elif kind == "containerelement":
+            if node_name != "container":
+                menu.add_command(label="Rename...", command=lambda: self._prompt_rename_canvas_node(kind, node_name))
             menu.add_command(label="Show details", command=lambda: self._show_container_group_details(node_name))
             if node_name != "container":
                 menu.add_separator()
                 menu.add_command(label="Delete", command=self._delete_selected_container_group)
         elif kind == "decomposer":
+            menu.add_command(label="Rename...", command=lambda: self._prompt_rename_canvas_node(kind, node_name))
             menu.add_command(label="Duplicate", command=lambda: self._duplicate_canvas_node_and_refresh("decomposer", node_name))
             menu.add_separator()
             menu.add_command(label="Delete", command=self._delete_selected_rule)
         elif kind == "reflector":
+            menu.add_command(label="Rename...", command=lambda: self._prompt_rename_canvas_node(kind, node_name))
             menu.add_command(label="Duplicate", command=lambda: self._duplicate_canvas_node_and_refresh("reflector", node_name))
             menu.add_separator()
             menu.add_command(label="Delete", command=self._delete_selected_reflector)
         elif kind == "resnode":
+            menu.add_command(label="Rename...", command=lambda: self._prompt_rename_canvas_node(kind, node_name))
             menu.add_command(label="Duplicate", command=lambda: self._duplicate_canvas_node_and_refresh("resnode", node_name))
             menu.add_separator()
             menu.add_command(label="Delete", command=self._delete_selected_res_node)
         elif kind == "function":
+            menu.add_command(label="Rename...", command=lambda: self._prompt_rename_canvas_node(kind, node_name))
             menu.add_command(label="Duplicate", command=lambda: self._duplicate_canvas_node_and_refresh("function", node_name))
             menu.add_separator()
             menu.add_command(label="Delete", command=self._delete_selected_function)
         elif kind == "functiontext":
+            menu.add_command(label="Rename...", command=lambda: self._prompt_rename_canvas_node(kind, node_name))
             menu.add_command(label="Duplicate", command=lambda: self._duplicate_canvas_node_and_refresh("functiontext", node_name))
             menu.add_separator()
             menu.add_command(label="Delete", command=self._delete_selected_function_text)
         elif kind in {"interventioner", "stage"}:
+            menu.add_command(label="Rename...", command=lambda: self._prompt_rename_canvas_node("interventioner", node_name))
             menu.add_command(label="Duplicate", command=lambda: self._duplicate_canvas_node_and_refresh("interventioner", node_name))
             menu.add_separator()
             menu.add_command(label="Delete", command=self._delete_selected_stage)

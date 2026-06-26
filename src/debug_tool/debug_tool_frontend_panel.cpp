@@ -1570,18 +1570,10 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
     !selected_algorithm_summary->pipeline_name.empty();
   const bool selected_runtime_is_normal =
     selected_algorithm_summary && !selected_algorithm_summary->pipeline_stage;
-  std::string selected_runtime_pipeline_root_algorithm_name{};
-  if (selected_runtime_is_pipeline && selected_algorithm_summary) {
-    for (const debug_tool::AlgorithmRuntimeSummary& candidate : selected_agent_summary.algorithms) {
-      if (!candidate.pipeline_stage ||
-          candidate.pipeline_name != selected_algorithm_summary->pipeline_name ||
-          candidate.pipeline_stage_index != 0u) {
-        continue;
-      }
-      selected_runtime_pipeline_root_algorithm_name = candidate.algorithm_name;
-      break;
-    }
-  }
+  const std::string selected_runtime_pipeline_root_algorithm_name =
+    selected_runtime_is_pipeline && selected_algorithm_summary
+      ? selected_algorithm_summary->pipeline_root_stage_name
+      : std::string{};
   const bool selected_runtime_pipeline_matches_requested =
     selected_runtime_is_pipeline &&
     !selected_runtime_pipeline_root_algorithm_name.empty() &&
@@ -1835,7 +1827,6 @@ void DebugToolFrontendPanel::DrawAlgorithmPreviewUi(IDebugToolHost& host) {
   if (preview_size.x > 0.0f && preview_size.y > 0.0f) {
     host.SetRenderPreviewExtent(preview_size);
   }
-  ImGui::TextWrapped("%s", host.render_preview_debug_summary().c_str());
   if (host.has_render_preview_texture()) {
     ImGui::Image(host.render_preview_texture_id(), preview_size);
   } else {

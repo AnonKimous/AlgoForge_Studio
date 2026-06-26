@@ -14,8 +14,6 @@ inline bool CreateBundle(
   out_bundle->Clear();
   out_bundle->cpu_symbol = false;
   out_bundle->gpu_symbol = true;
-<<<<<<< HEAD
-=======
   out_bundle->reflector = true;
   out_bundle->intervention = true;
   return true;
@@ -43,7 +41,6 @@ inline bool CreateRuntimeReflector(
     return false;
   }
   *out_reflector = *runtime_reflector;
->>>>>>> 0e5193b (preciser control of digital)
   return true;
 }
 

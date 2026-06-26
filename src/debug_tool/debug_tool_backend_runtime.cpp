@@ -101,7 +101,7 @@ std::string _HotReloadBuildCommand(const std::string& algorithm_name) {
 }
 
 std::string _ResolveAlgorithmShaderPath(
-  const std::string& algorithm_name,
+  const agent::AlgorithmObject& object,
   const std::string& shader_path) {
   if (shader_path.empty()) {
     return {};
@@ -112,18 +112,26 @@ std::string _ResolveAlgorithmShaderPath(
     return path.string();
   }
 
-  ::algorithm::AlgorithmPackageLocation package_location{};
-  std::string error_message;
-  const bool resolved = algorithm_management::TryResolveAlgorithmPackageLocation(
-    algorithm_name,
-    &package_location,
-    &error_message);
-  DEBUG_TOOL_ASSERT(resolved, "Failed to resolve algorithm package location for shader path.");
-  if (!resolved || package_location.runtime_package_root.empty()) {
+  std::filesystem::path runtime_package_root(object.runtime_package_root_path);
+  if (runtime_package_root.empty()) {
+    ::algorithm::AlgorithmPackageLocation package_location{};
+    std::string error_message;
+    const bool resolved = algorithm_management::TryResolveAlgorithmPackageLocation(
+      object.algorithm_profile.algorithm_name,
+      &package_location,
+      &error_message);
+    DEBUG_TOOL_ASSERT(resolved, "Failed to resolve algorithm package location for shader path.");
+    if (!resolved) {
+      return {};
+    }
+    runtime_package_root = package_location.runtime_package_root;
+  }
+  if (runtime_package_root.empty()) {
+    DEBUG_TOOL_ASSERT(false, "Runtime package root is empty for shader path.");
     return {};
   }
 
-  return (package_location.runtime_package_root / path).lexically_normal().string();
+  return (runtime_package_root / path).lexically_normal().string();
 }
 
 std::string _ResolveShaderBinaryPath(const std::string& shader_path) {
@@ -340,6 +348,254 @@ debug_tool::PipelineStageBridgeDebugSummary _ToDebugToolPipelineStageBridgeDebug
   return out_summary;
 }
 
+bool _TryGetMountedPipelineRegistration(
+  const agent::AlgorithmObject& object,
+  algorithm_management::CpuPipelineRegistration* out_registration) {
+  if (!out_registration) {
+    return false;
+  }
+  *out_registration = {};
+  if (!object.pipeline_stage || object.pipeline_name.empty()) {
+    return false;
+  }
+  return algorithm_management::AlgorithmScheduler::Instance().TryGetPipelineRegistration(
+    object.pipeline_name,
+    out_registration);
+}
+
+bool _TryFindPipelineGroupRange(
+  const agent::Agent& managed_agent,
+  size_t anchor_index,
+  size_t* out_begin_index,
+  size_t* out_end_index) {
+  if (!out_begin_index || !out_end_index || anchor_index >= managed_agent.algorithm_count()) {
+    return false;
+  }
+
+  const agent::AlgorithmObject* anchor = managed_agent.algorithm_object(anchor_index);
+  if (!anchor || !anchor->pipeline_stage || anchor->pipeline_name.empty()) {
+    return false;
+  }
+
+  size_t begin_index = anchor_index;
+  while (begin_index > 0u) {
+    const agent::AlgorithmObject* previous = managed_agent.algorithm_object(begin_index - 1u);
+    const agent::AlgorithmObject* current = managed_agent.algorithm_object(begin_index);
+    if (!previous ||
+        !current ||
+        !previous->pipeline_stage ||
+        previous->pipeline_name != anchor->pipeline_name ||
+        previous->pipeline_stage_index + 1u != current->pipeline_stage_index) {
+      break;
+    }
+    --begin_index;
+  }
+
+  size_t end_index = anchor_index + 1u;
+  while (end_index < managed_agent.algorithm_count()) {
+    const agent::AlgorithmObject* previous = managed_agent.algorithm_object(end_index - 1u);
+    const agent::AlgorithmObject* next = managed_agent.algorithm_object(end_index);
+    if (!previous ||
+        !next ||
+        !next->pipeline_stage ||
+        next->pipeline_name != anchor->pipeline_name ||
+        previous->pipeline_stage_index + 1u != next->pipeline_stage_index) {
+      break;
+    }
+    ++end_index;
+  }
+
+  *out_begin_index = begin_index;
+  *out_end_index = end_index;
+  return true;
+}
+
+bool _TryLoadInterventionStageSpecs(
+  const agent::AlgorithmObject& object,
+  std::vector<agent::AlgorithmInterventionStageSpec>* out_stage_specs) {
+  if (!out_stage_specs) {
+    return false;
+  }
+  out_stage_specs->clear();
+  if (!object.intervention) {
+    return true;
+  }
+  std::vector<agent::AlgorithmInterventionStageSpec> stage_specs;
+  if (!object.intervention->GetInterventionStageSpecs(&stage_specs) || stage_specs.empty()) {
+    return true;
+  }
+  *out_stage_specs = std::move(stage_specs);
+  return true;
+}
+
+bool _ContainsResultRenderStage(const std::vector<agent::AlgorithmInterventionStageSpec>& stage_specs) {
+  for (const agent::AlgorithmInterventionStageSpec& stage_spec : stage_specs) {
+    if (stage_spec.stage_kind == agent::AlgorithmInterventionStageKind::ResultRender) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void _AppendUniquePipelineStageIndex(
+  size_t candidate_index,
+  std::unordered_set<size_t>* seen_indices,
+  std::vector<size_t>* ordered_indices) {
+  if (!seen_indices || !ordered_indices) {
+    return;
+  }
+  if (seen_indices->insert(candidate_index).second) {
+    ordered_indices->push_back(candidate_index);
+  }
+}
+
+void _AppendPipelineSummaryInterventionStages(
+  const agent::Agent& managed_agent,
+  size_t stage_index,
+  const algorithm_management::CpuPipelineRegistration& registration,
+  std::vector<agent::AlgorithmInterventionStageSpec>* out_stage_specs) {
+  if (!out_stage_specs) {
+    return;
+  }
+
+  size_t pipeline_begin_index = 0u;
+  size_t pipeline_end_index = 0u;
+  if (!_TryFindPipelineGroupRange(managed_agent, stage_index, &pipeline_begin_index, &pipeline_end_index)) {
+    return;
+  }
+
+  const size_t body_begin_index =
+    pipeline_begin_index + static_cast<size_t>(registration.body_begin_stage_index);
+  const size_t body_stage_count = static_cast<size_t>(registration.body_stage_count);
+  const size_t body_end_index = body_begin_index + body_stage_count;
+  const size_t effective_tail_index =
+    pipeline_begin_index + static_cast<size_t>(registration.effective_tail_stage_index);
+
+  if (static_cast<size_t>(registration.body_begin_stage_index) > 0u && pipeline_begin_index < pipeline_end_index) {
+    const agent::AlgorithmObject* wrapper_begin = managed_agent.algorithm_object(pipeline_begin_index);
+    if (wrapper_begin) {
+      std::vector<agent::AlgorithmInterventionStageSpec> wrapper_begin_specs;
+      if (_TryLoadInterventionStageSpecs(*wrapper_begin, &wrapper_begin_specs) &&
+          !wrapper_begin_specs.empty()) {
+        out_stage_specs->insert(
+          out_stage_specs->end(),
+          wrapper_begin_specs.begin(),
+          wrapper_begin_specs.end());
+      }
+    }
+  }
+
+  const bool has_wrapper_end =
+    effective_tail_index >= body_end_index &&
+    effective_tail_index < pipeline_end_index;
+  if (has_wrapper_end) {
+    const agent::AlgorithmObject* wrapper_end = managed_agent.algorithm_object(effective_tail_index);
+    if (wrapper_end) {
+      std::vector<agent::AlgorithmInterventionStageSpec> wrapper_end_specs;
+      if (_TryLoadInterventionStageSpecs(*wrapper_end, &wrapper_end_specs) &&
+          !wrapper_end_specs.empty()) {
+        out_stage_specs->insert(
+          out_stage_specs->end(),
+          wrapper_end_specs.begin(),
+          wrapper_end_specs.end());
+      }
+    }
+  }
+}
+
+bool _TryResolveRenderPreviewSource(
+  const agent::Agent& managed_agent,
+  size_t selected_index,
+  size_t* out_source_index,
+  std::vector<agent::AlgorithmInterventionStageSpec>* out_stage_specs,
+  std::string* out_error_message) {
+  if (!out_source_index || !out_stage_specs) {
+    if (out_error_message) {
+      *out_error_message = "Preview source output pointer is null.";
+    }
+    return false;
+  }
+
+  *out_source_index = selected_index;
+  out_stage_specs->clear();
+  const agent::AlgorithmObject* selected_object = managed_agent.algorithm_object(selected_index);
+  if (!selected_object) {
+    if (out_error_message) {
+      *out_error_message = "Selected algorithm object is unavailable.";
+    }
+    return false;
+  }
+
+  if (!selected_object->pipeline_stage || selected_object->pipeline_name.empty()) {
+    if (!_TryLoadInterventionStageSpecs(*selected_object, out_stage_specs) || out_stage_specs->empty()) {
+      if (out_error_message) {
+        *out_error_message = "Algorithm intervention did not expose any stages.";
+      }
+      return false;
+    }
+    if (out_error_message) {
+      out_error_message->clear();
+    }
+    return true;
+  }
+
+  size_t pipeline_begin_index = 0u;
+  size_t pipeline_end_index = 0u;
+  if (!_TryFindPipelineGroupRange(managed_agent, selected_index, &pipeline_begin_index, &pipeline_end_index)) {
+    if (out_error_message) {
+      *out_error_message = "Mounted pipeline stage range is unavailable.";
+    }
+    return false;
+  }
+
+  algorithm_management::CpuPipelineRegistration registration{};
+  const bool has_registration = _TryGetMountedPipelineRegistration(*selected_object, &registration);
+  std::unordered_set<size_t> seen_indices{};
+  std::vector<size_t> candidate_indices{};
+  if (has_registration) {
+    const size_t effective_tail_index =
+      pipeline_begin_index + static_cast<size_t>(registration.effective_tail_stage_index);
+    if (effective_tail_index < pipeline_end_index) {
+      _AppendUniquePipelineStageIndex(effective_tail_index, &seen_indices, &candidate_indices);
+    }
+
+    const size_t body_begin_index =
+      pipeline_begin_index + static_cast<size_t>(registration.body_begin_stage_index);
+    if (body_begin_index < pipeline_end_index) {
+      _AppendUniquePipelineStageIndex(body_begin_index, &seen_indices, &candidate_indices);
+    }
+  }
+  _AppendUniquePipelineStageIndex(selected_index, &seen_indices, &candidate_indices);
+  for (size_t index = pipeline_end_index; index > pipeline_begin_index; --index) {
+    _AppendUniquePipelineStageIndex(index - 1u, &seen_indices, &candidate_indices);
+  }
+
+  for (size_t candidate_index : candidate_indices) {
+    const agent::AlgorithmObject* candidate = managed_agent.algorithm_object(candidate_index);
+    if (!candidate) {
+      continue;
+    }
+    std::vector<agent::AlgorithmInterventionStageSpec> stage_specs;
+    if (!_TryLoadInterventionStageSpecs(*candidate, &stage_specs) || stage_specs.empty()) {
+      continue;
+    }
+    if (!_ContainsResultRenderStage(stage_specs)) {
+      continue;
+    }
+    *out_source_index = candidate_index;
+    *out_stage_specs = std::move(stage_specs);
+    if (out_error_message) {
+      out_error_message->clear();
+    }
+    return true;
+  }
+
+  if (out_error_message) {
+    *out_error_message = "Mounted pipeline did not contain any drawable preview stage.";
+  }
+  return false;
+}
+
 debug_tool::AlgorithmRuntimeSummary _ToDebugToolAlgorithmRuntimeSummary(
   const agent::Agent& managed_agent,
   size_t algorithm_index) {
@@ -353,9 +609,12 @@ debug_tool::AlgorithmRuntimeSummary _ToDebugToolAlgorithmRuntimeSummary(
   summary.algorithm_name = object->algorithm_profile.algorithm_name;
   summary.assembly_state = _ToDebugToolAlgorithmAssemblyState(managed_agent.algorithm_assembly_state(algorithm_index));
   summary.pipeline_name = object->pipeline_name;
+  summary.pipeline_root_stage_name = object->algorithm_profile.algorithm_name;
   summary.pipeline_stage_index = object->pipeline_stage_index;
   summary.pipeline_stage_count = object->pipeline_stage_count;
   summary.pipeline_stage = object->pipeline_stage;
+  summary.pipeline_wrapper_role = object->pipeline_wrapper_role;
+  summary.pipeline_wrapper_empty = object->pipeline_wrapper_empty;
   summary.pipeline_topology =
     static_cast<debug_tool::AlgorithmPipelineTopology>(
       static_cast<int>(object->pipeline_topology));
@@ -385,6 +644,16 @@ debug_tool::AlgorithmRuntimeSummary _ToDebugToolAlgorithmRuntimeSummary(
   summary.mount_mode = static_cast<debug_tool::AlgorithmMountMode>(static_cast<int>(object->mount_mode));
   summary.execution_preference =
     static_cast<debug_tool::AlgorithmExecutionPreference>(static_cast<int>(object->execution_preference));
+  algorithm_management::CpuPipelineRegistration registration{};
+  const bool has_registration = _TryGetMountedPipelineRegistration(*object, &registration);
+  if (has_registration) {
+    summary.pipeline_root_stage_name = registration.root_stage_name.empty()
+      ? object->algorithm_profile.algorithm_name
+      : registration.root_stage_name;
+    summary.pipeline_body_begin_stage_index = registration.body_begin_stage_index;
+    summary.pipeline_body_stage_count = registration.body_stage_count;
+    summary.pipeline_effective_tail_stage_index = registration.effective_tail_stage_index;
+  }
   if (runtime_state) {
     summary.agent_to_algorithm_signal = runtime_state->agent_to_algorithm_signal;
     summary.algorithm_to_agent_signal = runtime_state->algorithm_to_agent_signal;
@@ -410,21 +679,33 @@ debug_tool::AlgorithmRuntimeSummary _ToDebugToolAlgorithmRuntimeSummary(
   if (reflection_snapshot) {
     summary.reflection_snapshot = _ToDebugToolReflectionSnapshot(*reflection_snapshot);
   }
-  if (object->intervention) {
-    std::vector<algorithm_management::AlgorithmInterventionStageSpec> stage_specs;
-    if (object->intervention->GetInterventionStageSpecs(&stage_specs)) {
-      summary.intervention_stage_summaries.reserve(stage_specs.size());
-      for (const algorithm_management::AlgorithmInterventionStageSpec& stage_spec : stage_specs) {
-        debug_tool::AlgorithmInterventionStageSummary stage_summary{};
-        stage_summary.stage_name = stage_spec.stage_name;
-        stage_summary.stage_kind = stage_spec.stage_kind;
-        stage_summary.functions = stage_spec.functions;
-        stage_summary.used_algorithm_containers = stage_spec.used_algorithm_containers;
-        stage_summary.vertex_shader_path = stage_spec.shader.vertex_shader_path;
-        stage_summary.fragment_shader_path = stage_spec.shader.fragment_shader_path;
-        stage_summary.pipeline_kind = stage_spec.shader.pipeline_kind;
-        summary.intervention_stage_summaries.push_back(std::move(stage_summary));
-      }
+  std::vector<algorithm_management::AlgorithmInterventionStageSpec> stage_specs;
+  const bool primary_pipeline_stage =
+    object->pipeline_stage &&
+    !object->pipeline_name.empty() &&
+    object->pipeline_stage_index == 0u;
+  if (primary_pipeline_stage && has_registration) {
+    _AppendPipelineSummaryInterventionStages(
+      managed_agent,
+      algorithm_index,
+      registration,
+      &stage_specs);
+  } else {
+    _TryLoadInterventionStageSpecs(*object, &stage_specs);
+  }
+  summary.has_intervention = !stage_specs.empty();
+  if (!stage_specs.empty()) {
+    summary.intervention_stage_summaries.reserve(stage_specs.size());
+    for (const algorithm_management::AlgorithmInterventionStageSpec& stage_spec : stage_specs) {
+      debug_tool::AlgorithmInterventionStageSummary stage_summary{};
+      stage_summary.stage_name = stage_spec.stage_name;
+      stage_summary.stage_kind = stage_spec.stage_kind;
+      stage_summary.functions = stage_spec.functions;
+      stage_summary.used_algorithm_containers = stage_spec.used_algorithm_containers;
+      stage_summary.vertex_shader_path = stage_spec.shader.vertex_shader_path;
+      stage_summary.fragment_shader_path = stage_spec.shader.fragment_shader_path;
+      stage_summary.pipeline_kind = stage_spec.shader.pipeline_kind;
+      summary.intervention_stage_summaries.push_back(std::move(stage_summary));
     }
   }
   if (runtime_state && runtime_state->bridge_debug_set.valid) {
@@ -522,9 +803,20 @@ bool _FindMountedPipelineInstanceName(
     if (!object ||
         !object->pipeline_stage ||
         object->pipeline_stage_index != 0u ||
-        object->algorithm_profile.algorithm_name != pipeline_algorithm_name ||
         object->pipeline_topology != agent::AlgorithmPipelineTopology::Circular ||
         _IsPipelineResourceBatchSubmissionName(object->pipeline_name)) {
+      continue;
+    }
+
+    algorithm_management::CpuPipelineRegistration registration{};
+    if (!_TryGetMountedPipelineRegistration(*object, &registration)) {
+      DEBUG_TOOL_ASSERT(false, "Mounted pipeline registration is unavailable.");
+      if (out_error_message) {
+        *out_error_message = "Mounted pipeline registration is unavailable.";
+      }
+      return false;
+    }
+    if (registration.root_stage_name != pipeline_algorithm_name) {
       continue;
     }
     if (matched) {
@@ -1622,22 +1914,39 @@ bool DebugToolBackendRuntime::BuildRenderPreviewRequest(
   }
 
   const agent::AlgorithmObject* object = managed_agent->algorithm_object(algorithm_index);
-  if (!object || !object->intervention) {
+  if (!object) {
     if (out_error_message) {
-      *out_error_message = "Algorithm has no intervention for preview rendering.";
+      *out_error_message = "Algorithm is unavailable for preview rendering.";
     }
     return false;
   }
-  const std::string algorithm_name = object->algorithm_profile.algorithm_name;
 
+  size_t preview_source_index = algorithm_index;
   std::vector<agent::AlgorithmInterventionStageSpec> stage_specs;
-  if (!object->intervention->GetInterventionStageSpecs(&stage_specs) || stage_specs.empty()) {
+  if (!_TryResolveRenderPreviewSource(
+        *managed_agent,
+        algorithm_index,
+        &preview_source_index,
+        &stage_specs,
+        out_error_message)) {
+    return false;
+  }
+
+  const agent::AlgorithmObject* preview_object = managed_agent->algorithm_object(preview_source_index);
+  if (!preview_object) {
+    DEBUG_TOOL_ASSERT(false, "Preview source algorithm object is unavailable.");
+    if (out_error_message) {
+      *out_error_message = "Preview source algorithm object is unavailable.";
+    }
+    return false;
+  }
+
+  if (stage_specs.empty()) {
     if (out_error_message) {
       *out_error_message = "Algorithm intervention did not expose any stages.";
     }
     return false;
   }
-
   const agent::AlgorithmInterventionStageSpec* result_stage = nullptr;
   for (const agent::AlgorithmInterventionStageSpec& stage_spec : stage_specs) {
     if (stage_spec.stage_kind == agent::AlgorithmInterventionStageKind::ResultRender) {
@@ -1658,7 +1967,7 @@ bool DebugToolBackendRuntime::BuildRenderPreviewRequest(
     return false;
   }
 
-  const AlgorithmContainerSet* container_set = object->container_set();
+  const AlgorithmContainerSet* container_set = preview_object->container_set();
   if (!container_set) {
     DEBUG_TOOL_ASSERT(false, "Algorithm container set is unavailable for preview rendering.");
     if (out_error_message) {
@@ -1669,23 +1978,25 @@ bool DebugToolBackendRuntime::BuildRenderPreviewRequest(
 
   const agent::AlgorithmReflectionSnapshot* reflection_snapshot = nullptr;
   algorithm_management::CpuPipelineRuntimeState pipeline_runtime_state{};
-  if (object->pipeline_stage &&
-      object->pipeline_stage_index == 0u &&
-      !object->pipeline_name.empty() &&
+  if (preview_object->pipeline_stage &&
+      preview_object->pipeline_stage_index == 0u &&
+      !preview_object->pipeline_name.empty() &&
       algorithm_management::TryGetMountedPipelineRuntime(
-        object->pipeline_name,
+        preview_object->pipeline_name,
         managed_agent->agent_name(),
         &pipeline_runtime_state) &&
       pipeline_runtime_state.exit_reflection_snapshot_valid) {
     reflection_snapshot = &pipeline_runtime_state.exit_reflection_snapshot;
-  } else if (managed_agent->algorithm_runtime_state(algorithm_index) &&
-      managed_agent->algorithm_runtime_state(algorithm_index)->reflection_snapshot.valid) {
-    reflection_snapshot = &managed_agent->algorithm_runtime_state(algorithm_index)->reflection_snapshot;
+  } else if (managed_agent->algorithm_runtime_state(preview_source_index) &&
+      managed_agent->algorithm_runtime_state(preview_source_index)->reflection_snapshot.valid) {
+    reflection_snapshot = &managed_agent->algorithm_runtime_state(preview_source_index)->reflection_snapshot;
   }
 
   out_request->stage_name = result_stage->stage_name;
-  out_request->vertex_shader_path = _ResolveAlgorithmShaderPath(algorithm_name, result_stage->shader.vertex_shader_path);
-  out_request->fragment_shader_path = _ResolveAlgorithmShaderPath(algorithm_name, result_stage->shader.fragment_shader_path);
+  out_request->vertex_shader_path =
+    _ResolveAlgorithmShaderPath(*preview_object, result_stage->shader.vertex_shader_path);
+  out_request->fragment_shader_path =
+    _ResolveAlgorithmShaderPath(*preview_object, result_stage->shader.fragment_shader_path);
   const std::string vertex_shader_binary_path = _ResolveShaderBinaryPath(out_request->vertex_shader_path);
   const std::string fragment_shader_binary_path = _ResolveShaderBinaryPath(out_request->fragment_shader_path);
   if (!_IsReadableNonEmptyFile(vertex_shader_binary_path)) {

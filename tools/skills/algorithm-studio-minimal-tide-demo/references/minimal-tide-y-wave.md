@@ -5,6 +5,15 @@ Use this reference when the user wants the shortest possible tide walkthrough.
 The goal is not completeness.
 The goal is to get one tiny algorithm built and visible as fast as possible.
 
+## Current UI Assumption
+
+Teach against the current Algorithm Studio layout only.
+
+- `containerScene` uses the left `Drag Palette` in `Blueprint` mode by default.
+- `interventionerScene` uses the left `Drag Palette` in `Container Tree` mode by default.
+- Do not describe legacy add buttons, old side panels, or stale fixed UI positions.
+- If a step depends on dragging, tell the user which left-palette section to use right now.
+
 ## Canonical Names
 
 - `algorithm_name`: `minimal_tide_fastpath`
@@ -26,6 +35,9 @@ highlight scene container
 
 Then tell the user:
 
+- stay in `containerScene`
+- use the left `Drag Palette`
+- it should already be in `Blueprint` mode
 - create `v1`
 - `v1` means wave height
 
@@ -37,6 +49,7 @@ highlight v add
 
 Then tell the user:
 
+- drag the `v` tile from `Blueprint > Container`
 - create `v2`
 - `v1` is the input
 - `v2` is the output/result
@@ -49,6 +62,7 @@ highlight createNode function
 
 Then tell the user:
 
+- drag `fun` from `Blueprint > ToolNodes`
 - create one `fun`
 - write a short text script that says the output follows a sine wave
 
@@ -77,7 +91,8 @@ highlight scene interventioner
 Then tell the user:
 
 - switch to `interventionerScene`
-- bring `v2` into that scene
+- the left `Drag Palette` should now show `Container Tree` automatically
+- drag `v2` from `Algorithm Containers` into that scene
 - `v2` now means the computed result buffer
 
 ### 6. Create the display `fun`
@@ -88,6 +103,8 @@ highlight createNode function
 
 Then tell the user:
 
+- keep using the left palette in the current scene
+- drag one `fun` tile into the intervention canvas
 - create one more `fun`
 - write a display shader
 - that shader should fill the lower screen in blue and move with the sine wave

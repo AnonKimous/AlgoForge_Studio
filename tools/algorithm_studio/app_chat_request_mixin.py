@@ -16,25 +16,17 @@ class AlgorithmStudioChatRequestMixin:
         return re.sub(r"```interface4agents\s*.*?```", "", str(text or ""), flags=re.IGNORECASE | re.DOTALL)
 
     def _compact_followup_history_for_model(self) -> str:
+        if self.agent_client.conversation_history_mode() == "server_managed":
+            return ""
         items = self._chat_user_assistant_items()
         if not items:
             return "(empty)"
-        first_user: dict[str, object] | None = None
         latest_assistant: dict[str, object] | None = None
-        for item in items:
-            if str(item.get("role") or "") == "user":
-                first_user = item
-                break
         for item in reversed(items):
             if str(item.get("role") or "") == "assistant":
                 latest_assistant = item
                 break
         sections: list[str] = []
-        if first_user is not None:
-            user_text = self._strip_interface4agents_blocks(str(first_user.get("content") or "")).strip()
-            compact_user = self._compact_activity_text(user_text, limit=320)
-            if compact_user:
-                sections.append("Original teaching goal:\n" + compact_user)
         if latest_assistant is not None:
             assistant_text = self._strip_interface4agents_blocks(str(latest_assistant.get("content") or "")).strip()
             compact_assistant = self._compact_activity_text(assistant_text, limit=420)
@@ -85,6 +77,7 @@ class AlgorithmStudioChatRequestMixin:
         status_text: str,
         log_message: str,
         compact_history: bool = False,
+        teaching_mode: bool = False,
     ) -> None:
         if self.chat_busy:
             self._log("Agent request already in progress.")
@@ -108,6 +101,7 @@ class AlgorithmStudioChatRequestMixin:
             self.pending_chat_request_message_id = self.chat_message_serial + 1
         else:
             self.pending_chat_request_message_id = None
+        self.chat_request_teaching_mode = bool(teaching_mode)
         self.chat_busy = True
         if append_user_message:
             self._append_chat_message("user", user_visible_content, attachments=resolved_attachments)
@@ -154,6 +148,7 @@ class AlgorithmStudioChatRequestMixin:
             status_text=f"Sent to {self.agent_client.provider}; waiting for reply...",
             log_message=f"Chat request sent via {self.agent_client.provider}.",
             compact_history=False,
+            teaching_mode=False,
         )
 
     def _latest_assistant_message_content(self) -> str:
@@ -194,6 +189,10 @@ class AlgorithmStudioChatRequestMixin:
             [
                 "Continue the current step-by-step UI teaching flow.",
                 "First read the latest operation stack in the context above.",
+                "Treat this as a continuation of the existing thread, not a fresh task.",
+                "Do not restart from the originally mentioned skill, plugin, or setup routine unless the latest user request explicitly changes it.",
+                "Teaching mode is active: do not perform scene-editing commands for the user.",
+                "Only emit highlight commands, then explain the next manual UI step in plain text.",
                 "If the latest user operations complete your previous instruction, move to the next single step.",
                 "Before explaining that next step, emit exactly one matching interface4agents highlight for the UI target when supported.",
                 "If the latest user operations do not complete your previous instruction, stay on the same step and re-highlight only that same UI target.",
@@ -227,6 +226,7 @@ class AlgorithmStudioChatRequestMixin:
                 status_text=f"Operation stack updated; asking {self.agent_client.provider} to continue...",
                 log_message=f"Auto-continue request sent via {self.agent_client.provider} from operation stack.",
                 compact_history=True,
+                teaching_mode=True,
             )
 
         self.operation_stack_auto_followup_after_id = self.root.after(450, run_followup)
@@ -270,6 +270,7 @@ class AlgorithmStudioChatRequestMixin:
     def _release_chat_request(self) -> None:
         self.chat_busy = False
         self.pending_chat_request_message_id = None
+        self.chat_request_teaching_mode = False
         if self.chat_send_button:
             self.chat_send_button.configure(state="normal")
         self._refresh_pending_chat_message_controls()

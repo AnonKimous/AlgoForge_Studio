@@ -217,6 +217,9 @@ class AlgorithmStudioApp(
         self.canvas_camera_y: float = 0.0
         self.canvas_scaled_font_cache: dict[tuple[str, float], tkfont.Font] = {}
         self.canvas_double_click_suppress_until: float = 0.0
+        self.canvas_ignore_native_double_until: float = 0.0
+        self.canvas_last_click_info: dict[str, Any] | None = None
+        self.message_center_handlers: dict[str, Any] = {}
         self.palette_shell: ttk.Frame | None = None
         self.palette_canvas: tk.Canvas | None = None
         self.palette_inner_frame: ttk.Frame | None = None
@@ -290,6 +293,9 @@ class AlgorithmStudioApp(
         self.sidebar_collapsed_var = tk.BooleanVar(value=False)
         self.agent_ready_var = tk.BooleanVar(value=False)
         self.container_palette_expanded: dict[str, bool] = {}
+        self.container_palette_chain_revealed: dict[str, bool] = {}
+        self.container_palette_chain_visible_count: dict[str, int] = {}
+        self.container_palette_chain_offset: dict[str, int] = {}
         self.chat_history: list[dict[str, Any]] = []
         self.chat_message_serial = 0
         self.chat_embedded_widgets: list[tk.Widget] = []
@@ -301,6 +307,7 @@ class AlgorithmStudioApp(
         self.chat_attachments: list[dict[str, str]] = []
         self.chat_attachment_summary_var = tk.StringVar(value="No attachments.")
         self.chat_busy = False
+        self.chat_request_teaching_mode = False
         self.status_var = tk.StringVar(value="Ready.")
         self.welcome_status_var = tk.StringVar(value="Choose how to connect to an agent.")
         self.execution_panel_collapsed_var = tk.BooleanVar(value=False)
@@ -373,6 +380,7 @@ class AlgorithmStudioApp(
         self.detail_panel_state: dict[str, Any] | None = None
         self._initialize_runtime_logging()
         self._install_runtime_exception_hooks()
+        self._initialize_message_center()
         self.access_rules_path = resolve_access_rules_path()
         self._apply_saved_settings()
         self._configure_style()
@@ -386,6 +394,152 @@ class AlgorithmStudioApp(
         self._refresh_all()
         self._log("Algorithm Studio started.")
         self._log(f"Runtime log file: {self.runtime_log_path}")
+
+    def _initialize_message_center(self) -> None:
+        self.message_center_handlers = {
+            "selection.copy": self._message_center_copy_selection,
+            "selection.paste": self._message_center_paste_selection,
+            "selection.delete": self._message_center_delete_selection,
+        }
+
+    def _dispatch_message_center(self, command: str, **payload: Any) -> Any:
+        handler = self.message_center_handlers.get(command)
+        if handler is None:
+            raise AssertionError(f"Unhandled message center command: {command}")
+        return handler(**payload)
+
+    def _widget_consumes_canvas_shortcuts(self, widget: tk.Widget | None) -> bool:
+        current = widget
+        editable_classes = {"Text", "Entry", "TEntry", "Spinbox", "TCombobox", "Combobox"}
+        while current is not None:
+            if current.winfo_class() in editable_classes:
+                return True
+            current = current.master
+        return False
+
+    def _pointer_scene_position(self) -> tuple[float, float] | None:
+        if not self.canvas:
+            raise AssertionError("Canvas is not initialized.")
+        x_root = float(self.canvas.winfo_pointerx())
+        y_root = float(self.canvas.winfo_pointery())
+        left = float(self.canvas.winfo_rootx())
+        top = float(self.canvas.winfo_rooty())
+        right = left + float(self.canvas.winfo_width())
+        bottom = top + float(self.canvas.winfo_height())
+        if not (left <= x_root <= right and top <= y_root <= bottom):
+            return None
+        return self._scene_point(x_root - left, y_root - top)
+
+    def _store_containers_in_selection_clipboard(self, names: list[str], *, anchor_x: float, anchor_y: float) -> None:
+        containers: list[dict[str, Any]] = []
+        for name in names:
+            container = self._find_container(name)
+            if container is None:
+                raise AssertionError(f"Missing container {name}")
+            containers.append(
+                {
+                    "name": container.name,
+                    "kind": container.kind,
+                    "origin_name": self._container_origin_name(container),
+                    "node_name": self._container_node_name(container),
+                    "count": container.count,
+                    "stride": container.stride,
+                    "value": container.value,
+                    "values": list(container.values),
+                    "structure": list(container.structure),
+                    "layout_fields": copy.deepcopy(container.layout_fields),
+                    "view_offset": container.view_offset,
+                    "x": container.x,
+                    "y": container.y,
+                    "width": container.width,
+                    "height": container.height,
+                    "expand": container.expand,
+                }
+            )
+        self.selection_clipboard = {
+            "containers": containers,
+            "anchor_x": float(anchor_x),
+            "anchor_y": float(anchor_y),
+        }
+
+    def _message_center_copy_selection(self) -> None:
+        if self.selection_state:
+            self._copy_current_selection()
+            return
+        if self.selected_container_name:
+            container = self._find_container(self.selected_container_name)
+            if container is None:
+                raise AssertionError(f"Missing selected container {self.selected_container_name}")
+            self._store_containers_in_selection_clipboard([container.name], anchor_x=float(container.x), anchor_y=float(container.y))
+            self._log(f"Copied container {container.name} to the clipboard.")
+            return
+        self._log("No eligible selection to copy.")
+
+    def _message_center_paste_selection(self) -> None:
+        position = self._pointer_scene_position()
+        if position is None:
+            self._log("Paste shortcut requires the mouse pointer to be over the scene canvas.")
+            return
+        self._paste_selection_from_clipboard(*position)
+
+    def _message_center_delete_selection(self) -> None:
+        if self.selection_state:
+            self._delete_current_selection()
+            return
+        selected_node = self._current_selected_node_identity()
+        if selected_node is None:
+            self._log("No eligible selection to delete.")
+            return
+        kind, name = selected_node
+        if kind == "container":
+            self.selected_container_name = name
+            self._delete_selected_container()
+            return
+        if kind == "containerelement":
+            self.selected_container_group_name = name
+            self._delete_selected_container_group()
+            return
+        if kind == "decomposer":
+            self.selected_rule_name = name
+            self._delete_selected_rule()
+            return
+        if kind == "reflector":
+            self.selected_reflector_name = name
+            self._delete_selected_reflector()
+            return
+        if kind == "resnode":
+            self.selected_res_node_name = name
+            self._delete_selected_res_node()
+            return
+        if kind == "function":
+            self.selected_function_name = name
+            self._delete_selected_function()
+            return
+        if kind == "functiontext":
+            self.selected_function_text_name = name
+            self._delete_selected_function_text()
+            return
+        if kind == "interventioner":
+            self.selected_stage_name = name
+            self._delete_selected_stage()
+            return
+        raise AssertionError(f"Unsupported delete shortcut target: {kind}:{name}")
+
+    def _handle_message_center_shortcut(self, event: tk.Event, command: str) -> str | None:
+        widget = event.widget if isinstance(event.widget, tk.Widget) else None
+        if self._widget_consumes_canvas_shortcuts(widget):
+            return None
+        self._dispatch_message_center(command)
+        return "break"
+
+    def _handle_copy_shortcut(self, event: tk.Event) -> str | None:
+        return self._handle_message_center_shortcut(event, "selection.copy")
+
+    def _handle_paste_shortcut(self, event: tk.Event) -> str | None:
+        return self._handle_message_center_shortcut(event, "selection.paste")
+
+    def _handle_delete_shortcut(self, event: tk.Event) -> str | None:
+        return self._handle_message_center_shortcut(event, "selection.delete")
 
     def _configure_style(self) -> None:
         configure_style(self)
@@ -564,6 +718,11 @@ class AlgorithmStudioApp(
         self.canvas.bind("<ButtonRelease-1>", self._on_canvas_release)
         self.root.bind_all("<B1-Motion>", self._on_canvas_drag, add="+")
         self.root.bind_all("<ButtonRelease-1>", self._on_canvas_release, add="+")
+        self.root.bind_all("<Control-c>", self._handle_copy_shortcut, add="+")
+        self.root.bind_all("<Control-C>", self._handle_copy_shortcut, add="+")
+        self.root.bind_all("<Control-v>", self._handle_paste_shortcut, add="+")
+        self.root.bind_all("<Control-V>", self._handle_paste_shortcut, add="+")
+        self.root.bind_all("<Delete>", self._handle_delete_shortcut, add="+")
         self.canvas.bind("<Double-Button-1>", self._on_canvas_double_click)
         self.canvas.bind("<MouseWheel>", self._on_canvas_mouse_wheel)
         self.canvas.bind("<Button-4>", self._on_canvas_mouse_wheel)
@@ -629,13 +788,13 @@ class AlgorithmStudioApp(
         document_graph_canvas.bind("<Configure>", lambda _event: self._refresh_document_graph_view())
         self.document_graph_canvas = document_graph_canvas
         split.add(canvas_frame, minsize=260)
-        split.add(document_frame, minsize=180)
+        split.add(document_frame, minsize=140)
 
         def _set_initial_document_split() -> None:
             if not self.scene_document_pane:
                 return
             total_height = max(int(frame.winfo_height()), 600)
-            self.scene_document_pane.sash_place(0, 0, int(total_height * 0.62))
+            self.scene_document_pane.sash_place(0, 0, int(total_height * 0.74))
 
         self.root.after(0, _set_initial_document_split)
         self._refresh_document_panel_header()
@@ -944,13 +1103,20 @@ class AlgorithmStudioApp(
             self.palette_blueprint_frame.grid_remove()
             if not self.palette_tree_frame.winfo_ismapped():
                 self.palette_tree_frame.grid(row=0, column=0, sticky="ew")
-            self.drag_palette_hint_label.configure(text="Double-click a parent to expand it, then drag children into the canvas")
+            self.drag_palette_hint_label.configure(text="Drag fun / meshNode / container tree nodes into the canvas")
             self._refresh_container_tree_palette()
         else:
             self.palette_tree_frame.grid_remove()
             if not self.palette_blueprint_frame.winfo_ismapped():
                 self.palette_blueprint_frame.grid(row=0, column=0, sticky="ew")
-            self.drag_palette_hint_label.configure(text="Drag blueprint nodes into the canvas")
+            blueprint_children = list(self.palette_blueprint_frame.winfo_children())
+            for index, child in enumerate(blueprint_children):
+                if index == 0:
+                    if not child.winfo_ismapped():
+                        child.grid()
+                else:
+                    child.grid_remove()
+            self.drag_palette_hint_label.configure(text="Drag container nodes into the canvas")
         for button_mode, button in self.drag_palette_mode_buttons.items():
             active = button_mode == mode
             button.configure(
@@ -1272,9 +1438,9 @@ class AlgorithmStudioApp(
         script_assets = self._function_script_assets()
 
         stage_lookup = {stage.name: stage for stage in self.project.intervention_stages}
-        stages_payload = manifest.get("intervention", {}).get("stages", {})
+        stages_payload = manifest.get("intervention", {}).get("stage", {})
         if not isinstance(stages_payload, dict):
-            raise RuntimeError("intervention.stages must be an object before build.")
+            raise RuntimeError("intervention.stage must be an object before build.")
         for stage_name, stage_payload in stages_payload.items():
             if not isinstance(stage_payload, dict):
                 raise RuntimeError(f"Stage payload must be an object: {stage_name}")
@@ -1500,8 +1666,13 @@ class AlgorithmStudioApp(
             raise RuntimeError("algorithm-studio-tool blocks are disabled. Use interface4agents only.")
         summaries: list[str] = []
         failures: list[str] = []
+        deferred_commands: list[str] = []
+        teaching_mode = bool(getattr(self, "chat_request_teaching_mode", False))
         for tokens in command_calls:
             command_text = " ".join(tokens).strip()
+            if teaching_mode and not command_text.lower().startswith("highlight "):
+                deferred_commands.append(command_text)
+                continue
             try:
                 self._push_operation_source("agent")
                 try:
@@ -1522,6 +1693,11 @@ class AlgorithmStudioApp(
                     self._record_operation("agent", f"interface4agents failed: {command_text} -> {failure_text}")
                 self._log(f"interface4agents failed: {command_text} -> {failure_text}")
                 continue
+        if deferred_commands:
+            preview = ", ".join(deferred_commands[:3])
+            if len(deferred_commands) > 3:
+                preview += ", ..."
+            summaries.append(f"Teaching mode left these actions for you to do manually: {preview}.")
         for payload in tool_calls:
             tool_name = str(payload.get("tool") or "").strip()
             try:
@@ -1677,7 +1853,14 @@ class AlgorithmStudioApp(
                 self.selected_container_group_name = name
                 self._refresh_all()
                 return f"Reused containerElement {name}."
-            group = ContainerGroupItem(name=name, x=self._agent_tool_float(payload, "x", x_default), y=self._agent_tool_float(payload, "y", y_default), width=self._agent_tool_float(payload, "width", 360.0), height=self._agent_tool_float(payload, "height", 220.0))
+            group = ContainerGroupItem(
+                name=name,
+                scene_scope=self._current_container_scene_scope(),
+                x=self._agent_tool_float(payload, "x", x_default),
+                y=self._agent_tool_float(payload, "y", y_default),
+                width=self._agent_tool_float(payload, "width", 360.0),
+                height=self._agent_tool_float(payload, "height", 220.0),
+            )
             self.project.validate_container_group(group)
             self.project.container_groups.append(group)
             self.selected_container_group_name = name
@@ -1696,6 +1879,7 @@ class AlgorithmStudioApp(
             container = ContainerItem(
                 name=name,
                 kind=kind,
+                scene_scope=self._inventory_scene_scope_for_zone(self._sync_zone_for_node("container", name)),
                 count=count,
                 stride=stride,
                 value=str(payload.get("value") or ""),
@@ -2661,9 +2845,344 @@ class AlgorithmStudioApp(
         default_selection_name = self._next_group_name_for_zone(self._selection_sync_zone(self.selection_state))
         if self.selection_state:
             self.selection_name_var.set(str(self.selection_state.get("suggested_name") or default_selection_name))
-        elif not self.selection_name_var.get().strip():
-            self.selection_name_var.set(default_selection_name)
+        else:
+            selected_node = self._current_selected_node_identity()
+            if selected_node is not None:
+                self.selection_name_var.set(self._selection_name_value_for_node(selected_node[0], selected_node[1]))
+            elif not self.selection_name_var.get().strip():
+                self.selection_name_var.set(default_selection_name)
         self._render_selection_editor()
+
+    @staticmethod
+    def _replace_name_in_list(values: list[str], old_name: str, new_name: str) -> list[str]:
+        return [new_name if value == old_name else value for value in values]
+
+    def _current_selected_node_identity(self) -> tuple[str, str] | None:
+        if self.selection_state:
+            return None
+        if self.selected_container_group_name:
+            return "containerelement", self.selected_container_group_name
+        if self.selected_container_name:
+            return "container", self.selected_container_name
+        if self.selected_rule_name:
+            return "decomposer", self.selected_rule_name
+        if self.selected_reflector_name:
+            return "reflector", self.selected_reflector_name
+        if self.selected_res_node_name:
+            return "resnode", self.selected_res_node_name
+        if self.selected_function_name:
+            return "function", self.selected_function_name
+        if self.selected_function_text_name:
+            return "functiontext", self.selected_function_text_name
+        if self.selected_stage_name:
+            return "interventioner", self.selected_stage_name
+        return None
+
+    def _sync_document_target_after_node_rename(self, kind: str, old_name: str, new_name: str) -> None:
+        normalized_kind = self._normalize_selected_kind(kind)
+        if (
+            str(self.document_editor_target_kind or "").strip().lower() == normalized_kind
+            and str(self.document_editor_target_name or "").strip() == old_name
+        ):
+            self.document_editor_target_name = new_name
+
+    def _rename_connections_for_kind(self, kind: str, old_name: str, new_name: str) -> None:
+        for connection in self.project.connections:
+            if connection.source_kind == kind and connection.source_name == old_name:
+                connection.source_name = new_name
+            if connection.target_kind == kind and connection.target_name == old_name:
+                connection.target_name = new_name
+
+    def _rename_basic_container_node_name(self, container: ContainerItem, node_name: str) -> str:
+        self._ensure_container_naming_state(container)
+        target_node_name = str(node_name).strip()
+        if not target_node_name:
+            raise RuntimeError("Basic node nodeName cannot be empty.")
+        container.node_name = target_node_name
+        return target_node_name
+
+    def _rename_container_node(self, container: ContainerItem, new_name: str) -> str:
+        self._ensure_container_naming_state(container)
+        if self._is_standard_container_node(container):
+            return self._rename_basic_container_node_name(container, new_name)
+        target_name = str(new_name).strip() or container.name
+        if target_name == container.name:
+            return target_name
+        existing = self._find_container(target_name)
+        if existing is not None and existing is not container:
+            raise RuntimeError(f"Container name already exists: {target_name}")
+        old_name = container.name
+        container.name = target_name
+        for group in self.project.container_groups:
+            group.variables = self._replace_name_in_list(group.variables, old_name, target_name)
+            group.arrays = self._replace_name_in_list(group.arrays, old_name, target_name)
+        for rule in self.project.decomposer_rules:
+            if rule.source == old_name:
+                rule.source = target_name
+            if rule.target == old_name:
+                rule.target = target_name
+        for reflector in self.project.reflector_items:
+            reflector.direct_from = self._replace_name_in_list(reflector.direct_from, old_name, target_name)
+            reflector.direct_to = self._replace_name_in_list(reflector.direct_to, old_name, target_name)
+            if container.kind == "variable":
+                reflector.inputs_varity = self._replace_name_in_list(reflector.inputs_varity, old_name, target_name)
+            elif container.kind == "array":
+                reflector.inputs_array = self._replace_name_in_list(reflector.inputs_array, old_name, target_name)
+            if reflector.output_name == old_name:
+                reflector.output_name = target_name
+        for stage in self.project.intervention_stages:
+            if container.kind == "variable":
+                stage.used_variables = self._replace_name_in_list(stage.used_variables, old_name, target_name)
+            elif container.kind == "array":
+                stage.used_arrays = self._replace_name_in_list(stage.used_arrays, old_name, target_name)
+        self._rename_connections_for_kind("container", old_name, target_name)
+        for group in self.project.container_groups:
+            self.project.validate_container_group(group)
+        if self.selected_container_name == old_name:
+            self.selected_container_name = target_name
+        if self.selection_state:
+            if container.kind == "variable":
+                self.selection_state["variables"] = self._replace_name_in_list(list(self.selection_state.get("variables", [])), old_name, target_name)
+            elif container.kind == "array":
+                self.selection_state["arrays"] = self._replace_name_in_list(list(self.selection_state.get("arrays", [])), old_name, target_name)
+        self._sync_document_target_after_node_rename("container", old_name, target_name)
+        container.origin_name = target_name
+        return target_name
+
+    def _rename_container_group_node(self, group: ContainerGroupItem, new_name: str) -> str:
+        if self._is_hidden_root_group_name(group.name):
+            raise RuntimeError(f"ContainerElement {group.name} is reserved and cannot be renamed.")
+        target_name = str(new_name).strip() or group.name
+        if self._is_hidden_root_group_name(target_name):
+            raise RuntimeError(f"ContainerElement name is reserved: {target_name}")
+        if target_name == group.name:
+            return target_name
+        existing = self._find_container_group(target_name)
+        if existing is not None and existing is not group:
+            raise RuntimeError(f"ContainerElement name already exists: {target_name}")
+        old_name = group.name
+        group.name = target_name
+        for candidate in self.project.container_groups:
+            candidate.groups = self._replace_name_in_list(candidate.groups, old_name, target_name)
+        self._rename_connections_for_kind("containerelement", old_name, target_name)
+        for candidate in self.project.container_groups:
+            self.project.validate_container_group(candidate)
+        if self.selected_container_group_name == old_name:
+            self.selected_container_group_name = target_name
+        if self.selection_state:
+            self.selection_state["groups"] = self._replace_name_in_list(list(self.selection_state.get("groups", [])), old_name, target_name)
+            scope_group = str(self.selection_state.get("scope_group") or "").strip()
+            if scope_group == old_name:
+                self.selection_state["scope_group"] = target_name
+        self._sync_document_target_after_node_rename("containerelement", old_name, target_name)
+        return target_name
+
+    def _rename_decomposer_rule_node(self, rule: DecomposerRule, new_name: str) -> str:
+        target_name = str(new_name).strip() or rule.name
+        if target_name == rule.name:
+            return target_name
+        existing = self._find_rule(target_name)
+        if existing is not None and existing is not rule:
+            raise RuntimeError(f"Decomposer name already exists: {target_name}")
+        old_name = rule.name
+        rule.name = target_name
+        self._rename_connections_for_kind("decomposer", old_name, target_name)
+        if self.selected_rule_name == old_name:
+            self.selected_rule_name = target_name
+        self._sync_document_target_after_node_rename("decomposer", old_name, target_name)
+        return target_name
+
+    def _rename_reflector_node(self, item: ReflectorItem, new_name: str) -> str:
+        target_name = str(new_name).strip() or item.name
+        if target_name == item.name:
+            return target_name
+        existing = self._find_reflector(target_name)
+        if existing is not None and existing is not item:
+            raise RuntimeError(f"Reflector name already exists: {target_name}")
+        old_name = item.name
+        item.name = target_name
+        self._rename_connections_for_kind("reflector", old_name, target_name)
+        if self.selected_reflector_name == old_name:
+            self.selected_reflector_name = target_name
+        self._sync_document_target_after_node_rename("reflector", old_name, target_name)
+        return target_name
+
+    def _rename_res_node(self, item: ResourceNodeItem, new_name: str) -> str:
+        target_name = str(new_name).strip() or item.name
+        if target_name == item.name:
+            return target_name
+        existing = self._find_res_node(target_name)
+        if existing is not None and existing is not item:
+            raise RuntimeError(f"resNode name already exists: {target_name}")
+        old_name = item.name
+        item.name = target_name
+        self._rename_connections_for_kind("resnode", old_name, target_name)
+        if self.selected_res_node_name == old_name:
+            self.selected_res_node_name = target_name
+        if self.selection_state:
+            self.selection_state["resnodes"] = self._replace_name_in_list(list(self.selection_state.get("resnodes", [])), old_name, target_name)
+        self._sync_document_target_after_node_rename("resnode", old_name, target_name)
+        return target_name
+
+    def _rename_function_text_node(self, item: FunctionTextItem, new_name: str) -> str:
+        target_name = str(new_name).strip() or item.name
+        if target_name == item.name:
+            return target_name
+        existing = self._find_function_text_item(target_name)
+        if existing is not None and existing is not item:
+            raise RuntimeError(f"Text node name already exists: {target_name}")
+        old_name = item.name
+        item.name = target_name
+        if self.selected_function_text_name == old_name:
+            self.selected_function_text_name = target_name
+        self._sync_document_target_after_node_rename("functiontext", old_name, target_name)
+        return target_name
+
+    def _rename_stage_node(self, stage: InterventionStage, new_name: str) -> str:
+        target_name = str(new_name).strip() or stage.name
+        if target_name == stage.name:
+            return target_name
+        existing = self._find_stage(target_name)
+        if existing is not None and existing is not stage:
+            raise RuntimeError(f"Interventioner name already exists: {target_name}")
+        old_name = stage.name
+        stage.name = target_name
+        self._rename_connections_for_kind("interventioner", old_name, target_name)
+        self._rename_connections_for_kind("stage", old_name, target_name)
+        if self.selected_stage_name == old_name:
+            self.selected_stage_name = target_name
+        self._sync_document_target_after_node_rename("interventioner", old_name, target_name)
+        return target_name
+
+    def _rename_node(self, kind: str, old_name: str, new_name: str) -> str:
+        normalized_kind = self._normalize_selected_kind(str(kind).strip().lower())
+        source_name = str(old_name).strip()
+        target_name = str(new_name).strip()
+        if not source_name:
+            raise RuntimeError("Node rename requires the original node name.")
+        if not target_name:
+            raise RuntimeError("Node rename requires the new node name.")
+        if normalized_kind == "container":
+            item = self._find_container(source_name)
+            if item is None:
+                raise RuntimeError(f"Container not found: {source_name}")
+            resolved_name = self._rename_container_node(item, target_name)
+        elif normalized_kind == "containerelement":
+            item = self._find_container_group(source_name)
+            if item is None:
+                raise RuntimeError(f"ContainerElement not found: {source_name}")
+            resolved_name = self._rename_container_group_node(item, target_name)
+        elif normalized_kind == "decomposer":
+            item = self._find_rule(source_name)
+            if item is None:
+                raise RuntimeError(f"Decomposer not found: {source_name}")
+            resolved_name = self._rename_decomposer_rule_node(item, target_name)
+        elif normalized_kind == "reflector":
+            item = self._find_reflector(source_name)
+            if item is None:
+                raise RuntimeError(f"Reflector not found: {source_name}")
+            resolved_name = self._rename_reflector_node(item, target_name)
+        elif normalized_kind == "resnode":
+            item = self._find_res_node(source_name)
+            if item is None:
+                raise RuntimeError(f"resNode not found: {source_name}")
+            resolved_name = self._rename_res_node(item, target_name)
+        elif normalized_kind == "function":
+            item = self._find_function_frame(source_name)
+            if item is None:
+                raise RuntimeError(f"Function not found: {source_name}")
+            self._rename_function_frame(item, target_name)
+            resolved_name = item.name
+            self._sync_document_target_after_node_rename("function", source_name, resolved_name)
+        elif normalized_kind == "functiontext":
+            item = self._find_function_text_item(source_name)
+            if item is None:
+                raise RuntimeError(f"Text node not found: {source_name}")
+            resolved_name = self._rename_function_text_node(item, target_name)
+        elif normalized_kind == "interventioner":
+            item = self._find_stage(source_name)
+            if item is None:
+                raise RuntimeError(f"Interventioner not found: {source_name}")
+            resolved_name = self._rename_stage_node(item, target_name)
+        else:
+            raise RuntimeError(f"Unsupported node kind for rename: {kind}")
+        self._sync_selected_nodes()
+        self._refresh_all()
+        self._log(f"Renamed {normalized_kind}:{source_name} -> {resolved_name}.")
+        return resolved_name
+
+    def _resolve_unique_node_identity(self, node_name: str) -> tuple[str, str]:
+        normalized_name = str(node_name).strip()
+        if not normalized_name:
+            raise RuntimeError("Node name is required.")
+        selected_node = self._current_selected_node_identity()
+        if selected_node is not None:
+            selected_kind, selected_name = selected_node
+            if selected_name == normalized_name:
+                return selected_node
+            if selected_kind == "container":
+                selected_container = self._find_container(selected_name)
+                if (
+                    selected_container is not None
+                    and self._is_standard_container_node(selected_container)
+                    and self._container_node_name(selected_container) == normalized_name
+                ):
+                    return selected_node
+        matches: list[tuple[str, str]] = []
+        for kind, name, item in self.project.iter_nodes():
+            normalized_kind = self._normalize_selected_kind(kind)
+            if name == normalized_name:
+                matches.append((normalized_kind, name))
+                continue
+            if normalized_kind == "container" and isinstance(item, ContainerItem):
+                if self._is_standard_container_node(item) and self._container_node_name(item) == normalized_name:
+                    matches.append((normalized_kind, name))
+        if not matches:
+            raise RuntimeError(f"Node not found: {normalized_name}")
+        unique_matches = list(dict.fromkeys(matches))
+        if len(unique_matches) > 1:
+            raise RuntimeError(f"Node name is ambiguous, please select it first: {normalized_name}")
+        return unique_matches[0]
+
+    def _interface4agents_rename_node(self, old_name: str, new_name: str) -> str:
+        kind, resolved_name = self._resolve_unique_node_identity(old_name)
+        renamed = self._rename_node(kind, resolved_name, new_name)
+        return f"Renamed {kind}:{resolved_name} -> {renamed}."
+
+    def _prompt_rename_canvas_node(self, kind: str, node_name: str) -> None:
+        normalized_kind = self._normalize_selected_kind(kind)
+        current_value = self._selection_name_value_for_node(normalized_kind, node_name)
+        prompt = f"Rename {normalized_kind} {node_name}:"
+        selection_name = node_name
+        if normalized_kind == "container":
+            container = self._find_container(node_name)
+            if container is None:
+                raise AssertionError(f"Missing container {node_name}")
+            if self._is_standard_container_node(container):
+                prompt = f"Set nodeName for {self._container_origin_name(container)}:"
+                selection_name = node_name
+        target_value = simpledialog.askstring("Rename node", prompt, initialvalue=current_value)
+        if target_value is None:
+            return
+        renamed = self._rename_node(normalized_kind, node_name, target_value)
+        if normalized_kind != "container":
+            selection_name = renamed
+        self.selection_name_var.set(self._selection_name_value_for_node(normalized_kind, selection_name))
+
+    def _handle_selection_name_submit(self, _event: tk.Event | None = None) -> str:
+        try:
+            if self.selection_state:
+                self._log("Batch selection naming stays in Merge. Rename a single node before pressing Enter here.")
+                return "break"
+            selected_node = self._current_selected_node_identity()
+            if selected_node is None:
+                self._log("No single node is selected for rename.")
+                return "break"
+            kind, old_name = selected_node
+            self._rename_node(kind, old_name, self.selection_name_var.get().strip())
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("Rename node error", str(exc))
+        return "break"
 
     def _render_selection_editor(self) -> None:
         if self.selection_editor_frame:
@@ -2748,11 +3267,11 @@ class AlgorithmStudioApp(
                     f"count: {len(self.selection_state.get('groups', [])) + len(self.selection_state.get('variables', [])) + len(self.selection_state.get('arrays', [])) + len(self.selection_state.get('resnodes', []))}",
                     "",
                     "Actions:",
-                    "- Copy: store the current batch",
                     "- Merge: build a custom variable from the batch",
                     "- Arrange: stack the current batch from top to bottom",
+                    "- Ctrl+C: store the current batch",
                     "- Delete: remove the selected containers",
-                    "- Paste: duplicate copied containers on the canvas",
+                    "- Ctrl+V: duplicate copied containers at the mouse position",
                 ]
             )
         if self.selected_container_group_name:
@@ -2771,7 +3290,8 @@ class AlgorithmStudioApp(
                 return "\n".join(
                     [
                         "Selected container",
-                        f"name: {container.name}",
+                        f"nodeName: {(self._container_node_name(container) or '-') if self._is_standard_container_node(container) else self._canvas_node_display_name(container, container.name)}",
+                        f"originName: {self._container_origin_name(container)}",
                         f"kind: {container.kind}",
                         f"count: {container.count}",
                         f"stride: {container.stride}",
@@ -2889,35 +3409,13 @@ class AlgorithmStudioApp(
         if not selection:
             self._log("No batch selection to copy.")
             return
-        containers: list[dict[str, Any]] = []
         names = list(selection.get("variables", [])) + list(selection.get("arrays", []))
-        for name in names:
-            container = self._find_container(name)
-            if container:
-                containers.append(
-                    {
-                        "name": container.name,
-                        "kind": container.kind,
-                        "count": container.count,
-                        "stride": container.stride,
-                        "value": container.value,
-                        "values": list(container.values),
-                        "structure": list(container.structure),
-                        "layout_fields": copy.deepcopy(container.layout_fields),
-                        "view_offset": container.view_offset,
-                        "x": container.x,
-                        "y": container.y,
-                        "width": container.width,
-                        "height": container.height,
-                        "expand": container.expand,
-                    }
-                )
-        self.selection_clipboard = {
-            "containers": containers,
-            "anchor_x": float(selection.get("rect", (0.0, 0.0, 0.0, 0.0))[0]),
-            "anchor_y": float(selection.get("rect", (0.0, 0.0, 0.0, 0.0))[1]),
-        }
-        self._log(f"Copied {len(containers)} container(s) from the batch selection.")
+        self._store_containers_in_selection_clipboard(
+            names,
+            anchor_x=float(selection.get("rect", (0.0, 0.0, 0.0, 0.0))[0]),
+            anchor_y=float(selection.get("rect", (0.0, 0.0, 0.0, 0.0))[1]),
+        )
+        self._log(f"Copied {len(names)} container(s) from the batch selection.")
 
     def _merge_current_selection(self) -> None:
         selection = self._current_batch_selection()
@@ -2929,13 +3427,26 @@ class AlgorithmStudioApp(
         name = self.selection_name_var.get().strip() or default_group_name
         if self._find_container_group(name):
             raise AssertionError(f"ContainerElement {name} already exists.")
+        selection_scope_candidates = {
+            self._node_scene_scope("containerelement", group_name)
+            for group_name in selection.get("groups", [])
+        }
+        selection_scope_candidates.update(
+            self._node_scene_scope("container", container_name)
+            for container_name in list(selection.get("variables", [])) + list(selection.get("arrays", []))
+        )
+        if len(selection_scope_candidates) > 1:
+            raise AssertionError(f"Selection spans multiple scene scopes: {sorted(selection_scope_candidates)}")
+        selection_scene_scope = next(iter(selection_scope_candidates), self._inventory_scene_scope_for_zone(zone))
         default_parent_group_name = self._sync_zone_root_group_name(zone)
         parent_group_name = str(selection.get("scope_group") or default_parent_group_name).strip() or default_parent_group_name
-        if self._find_container_group(parent_group_name) is None:
+        attach_to_parent = selection_scene_scope == self._inventory_scene_scope_for_zone(zone) or bool(selection.get("scope_group"))
+        if attach_to_parent and self._find_container_group(parent_group_name) is None:
             raise AssertionError(f"Parent containerElement {parent_group_name} does not exist.")
         rect = selection.get("rect", (0.0, 0.0, 0.0, 0.0))
         group = ContainerGroupItem(
             name=name,
+            scene_scope=selection_scene_scope,
             x=float(rect[0]),
             y=float(rect[1]),
             width=max(220.0, float(rect[2]) - float(rect[0])),
@@ -2947,11 +3458,12 @@ class AlgorithmStudioApp(
             self._remove_container_from_parent_group(container_name)
         self._pack_container_group_contents(group)
         self.project.container_groups.append(group)
-        self._add_group_to_parent_group(group.name, parent_group_name)
-        parent_group = self._find_container_group(parent_group_name)
-        if not parent_group:
-            raise AssertionError(f"Parent containerElement {parent_group_name} does not exist.")
-        self._pack_container_group_contents(parent_group)
+        if attach_to_parent:
+            self._add_group_to_parent_group(group.name, parent_group_name)
+            parent_group = self._find_container_group(parent_group_name)
+            if not parent_group:
+                raise AssertionError(f"Parent containerElement {parent_group_name} does not exist.")
+            self._pack_container_group_contents(parent_group)
         self.project.validate_container_group(group)
         self.selection_state = None
         self.selected_container_group_name = group.name
@@ -3066,6 +3578,9 @@ class AlgorithmStudioApp(
             duplicate = ContainerItem(
                 name=name,
                 kind=kind,
+                origin_name=name,
+                node_name=str(entry.get("node_name") or entry.get("alias_name") or ""),
+                scene_scope=self._current_container_scene_scope(),
                 count=int(entry["count"]),
                 stride=int(entry["stride"]),
                 value=str(entry["value"]),
@@ -3133,10 +3648,43 @@ class AlgorithmStudioApp(
         return None
 
     def _canvas_node_display_name(self, item: Any, fallback_name: str) -> str:
+        if isinstance(item, ContainerItem):
+            self._ensure_container_naming_state(item)
+            node_name = str(getattr(item, "node_name", "") or "").strip()
+            if node_name:
+                return node_name
         display_name = str(getattr(item, "display_name", "") or "").strip()
         if display_name:
             return display_name
         return fallback_name
+
+    def _ensure_container_naming_state(self, container: ContainerItem) -> None:
+        if not str(getattr(container, "origin_name", "") or "").strip():
+            container.origin_name = container.name
+        if not hasattr(container, "node_name"):
+            legacy_alias_name = str(getattr(container, "alias_name", "") or "").strip()
+            container.node_name = legacy_alias_name
+
+    def _is_standard_container_node(self, container: ContainerItem) -> bool:
+        return self._parse_standard_container_name(container.name) is not None
+
+    def _container_origin_name(self, container: ContainerItem) -> str:
+        self._ensure_container_naming_state(container)
+        return str(container.origin_name or container.name)
+
+    def _container_node_name(self, container: ContainerItem) -> str:
+        self._ensure_container_naming_state(container)
+        return str(container.node_name or "").strip()
+
+    def _selection_name_value_for_node(self, kind: str, name: str) -> str:
+        if kind == "container":
+            container = self._find_container(name)
+            if container is None:
+                raise AssertionError(f"Missing container {name}")
+            if self._is_standard_container_node(container):
+                return self._container_node_name(container)
+            return container.name
+        return name
 
     def _preserve_duplicate_display_name(self, source: Any, duplicate: Any) -> None:
         display_name = self._canvas_node_display_name(source, str(getattr(source, "name", "") or "").strip())
@@ -3451,6 +3999,7 @@ class AlgorithmStudioApp(
         container = ContainerItem(
             name=name,
             kind=kind,
+            scene_scope=self._inventory_scene_scope_for_zone(self._primary_sync_zone_for_view()),
             count=count,
             stride=stride,
             x=CANVAS_PADDING + 20 + len(self.project.containers) * 18,
@@ -3483,6 +4032,7 @@ class AlgorithmStudioApp(
             container = ContainerItem(
                 name=name,
                 kind=kind,
+                scene_scope=self._inventory_scene_scope_for_zone(self._primary_sync_zone_for_view()),
                 count=count,
                 stride=stride,
                 x=CANVAS_PADDING + 30 + len(self.project.containers) * 18,
@@ -3515,6 +4065,7 @@ class AlgorithmStudioApp(
         *,
         x: float | None = None,
         y: float | None = None,
+        scene_scope: str | None = None,
     ) -> ContainerItem:
         source_chain_id = container.reuse_chain_id or self.project.next_container_reuse_chain_id()
         if not container.reuse_chain_id:
@@ -3523,14 +4074,17 @@ class AlgorithmStudioApp(
         duplicate = copy.deepcopy(container)
         duplicate.name = self.project.next_resource_container_name(container.kind) if self._is_resource_container_name(container.name) else self.project.next_container_name(container.kind)
         self._preserve_duplicate_display_name(container, duplicate)
+        duplicate.origin_name = duplicate.name if self._is_standard_container_node(duplicate) else duplicate.name
         duplicate.reuse_chain_id = source_chain_id
         duplicate.reuse_chain_index = self._container_reuse_chain_next_index(source_chain_id)
         duplicate.x = container.x + 36 if x is None else x
         duplicate.y = container.y + 36 if y is None else y
+        duplicate.scene_scope = self._container_scene_scope(container) if scene_scope is None else self._normalize_container_scene_scope(scene_scope)
         self.project.containers.append(duplicate)
         return duplicate
 
     def _ensure_container_shareptr_identity(self, container: ContainerItem) -> None:
+        self._ensure_container_naming_state(container)
         if str(container.reuse_chain_id or "").strip():
             return
         container.reuse_chain_id = self.project.next_container_reuse_chain_id()
@@ -3542,9 +4096,10 @@ class AlgorithmStudioApp(
         *,
         x: float | None = None,
         y: float | None = None,
+        scene_scope: str | None = None,
     ) -> ContainerItem:
         self._ensure_container_shareptr_identity(container)
-        return self._duplicate_container_with_reuse(container, x=x, y=y)
+        return self._duplicate_container_with_reuse(container, x=x, y=y, scene_scope=scene_scope)
 
     def _extract_or_duplicate_container_for_drag(
         self,
@@ -3557,14 +4112,26 @@ class AlgorithmStudioApp(
         if container is None:
             raise AssertionError(f"Missing container {container_name}")
         parent_name = self._container_parent_group_name(container_name)
-        if parent_name and not self._is_hidden_root_group_name(parent_name):
+        inventory_scope = self._inventory_scene_scope_for_zone(self._sync_zone_for_node("container", container_name))
+        if (
+            parent_name
+            and not self._is_hidden_root_group_name(parent_name)
+            and self._current_container_scene_scope() == inventory_scope
+            and self._container_scene_scope(container) == inventory_scope
+        ):
             detached = self._detach_container_from_group(container_name, parent_name)
             if not detached:
                 raise AssertionError(f"Failed to detach {container_name} from {parent_name}")
+            container.scene_scope = inventory_scope
             container.x = float(x)
             container.y = float(y)
             return container.name, True
-        duplicate = self._duplicate_container_shareptr_node(container, x=float(x), y=float(y))
+        duplicate = self._duplicate_container_shareptr_node(
+            container,
+            x=float(x),
+            y=float(y),
+            scene_scope=self._current_container_scene_scope(),
+        )
         return duplicate.name, False
 
     def _container_reuse_chain_names(self, container_name: str) -> list[str]:
@@ -3711,6 +4278,7 @@ class AlgorithmStudioApp(
         *,
         x: float | None = None,
         y: float | None = None,
+        scene_scope: str | None = None,
     ) -> str:
         source_root = self._find_container_group(group_name)
         if source_root is None:
@@ -3719,6 +4287,7 @@ class AlgorithmStudioApp(
             raise AssertionError(f"Hidden root group cannot be duplicated: {group_name}")
         zone = self._sync_zone_for_node("containerelement", group_name)
         root_group_name = self._sync_zone_root_group_name(zone)
+        target_scope = self._container_group_scene_scope(source_root) if scene_scope is None else self._normalize_container_scene_scope(scene_scope)
         base_x = source_root.x + 36.0 if x is None else float(x)
         base_y = source_root.y + 36.0 if y is None else float(y)
         source_root_x = float(source_root.x)
@@ -3733,6 +4302,7 @@ class AlgorithmStudioApp(
             duplicate_group.variables = []
             duplicate_group.arrays = []
             duplicate_group.groups = []
+            duplicate_group.scene_scope = target_scope
             duplicate_group.x = base_x + (float(source_group.x) - source_root_x)
             duplicate_group.y = base_y + (float(source_group.y) - source_root_y)
             self.project.container_groups.append(duplicate_group)
@@ -3745,6 +4315,7 @@ class AlgorithmStudioApp(
                     source_container,
                     x=base_x + (float(source_container.x) - source_root_x),
                     y=base_y + (float(source_container.y) - source_root_y),
+                    scene_scope=target_scope,
                 )
                 self._add_container_to_group(duplicate_container.name, duplicate_group.name)
 
@@ -3755,7 +4326,8 @@ class AlgorithmStudioApp(
             return duplicate_group.name
 
         duplicate_root_name = clone_group_recursive(group_name)
-        self._add_group_to_parent_group(duplicate_root_name, root_group_name)
+        if target_scope == self._inventory_scene_scope_for_zone(zone):
+            self._add_group_to_parent_group(duplicate_root_name, root_group_name)
         duplicate_root = self._find_container_group(duplicate_root_name)
         if duplicate_root is None:
             raise AssertionError(f"Missing duplicated containerElement {duplicate_root_name}")
@@ -3769,16 +4341,17 @@ class AlgorithmStudioApp(
         *,
         x: float | None = None,
         y: float | None = None,
+        scene_scope: str | None = None,
     ) -> tuple[str, str]:
         normalized_kind = self._normalize_selected_kind(kind)
         if normalized_kind == "containerelement":
-            duplicate_name = self._duplicate_container_group_tree(name, x=x, y=y)
+            duplicate_name = self._duplicate_container_group_tree(name, x=x, y=y, scene_scope=scene_scope)
             return "containerelement", duplicate_name
         if normalized_kind == "container":
             source = self._find_container(name)
             if source is None:
                 raise AssertionError(f"Missing container {name}")
-            duplicate = self._duplicate_container_shareptr_node(source, x=x, y=y)
+            duplicate = self._duplicate_container_shareptr_node(source, x=x, y=y, scene_scope=scene_scope)
             return "container", duplicate.name
         if normalized_kind == "decomposer":
             source = self._find_rule(name)
@@ -4096,7 +4669,7 @@ class AlgorithmStudioApp(
         self._delete_container_group_recursive(group.name)
         self.selected_container_group_name = None
         self._refresh_all()
-        self._log(f"Deleted containerElement {group.name}.")
+        self._log(f"Deleted micronode {group.name}.")
 
     def _delete_container_group_recursive(self, name: str) -> None:
         group = self._find_container_group(name)
@@ -5466,6 +6039,7 @@ class AlgorithmStudioApp(
         node.y = float(getattr(node, "y", 0.0)) + dy
 
     def _draw_child_clip_masks(self, canvas: tk.Canvas) -> None:
+        clip_bleed = 2.0
         for kind, name, _item in self.project.iter_nodes():
             if kind not in {"container", "containerelement"}:
                 continue
@@ -5484,24 +6058,24 @@ class AlgorithmStudioApp(
             child_left, child_top, child_right, child_bottom = self._node_bounds(kind, name)
             clip_left, clip_top, clip_right, clip_bottom = self._group_body_bounds(parent_group)
             if child_left < clip_left:
-                self._create_scene_clip_mask(canvas, child_left, child_top, clip_left, child_bottom)
+                self._create_scene_clip_mask(canvas, child_left - clip_bleed, child_top - clip_bleed, clip_left + clip_bleed, child_bottom + clip_bleed)
             if child_right > clip_right:
-                self._create_scene_clip_mask(canvas, clip_right, child_top, child_right, child_bottom)
+                self._create_scene_clip_mask(canvas, clip_right - clip_bleed, child_top - clip_bleed, child_right + clip_bleed, child_bottom + clip_bleed)
             if child_top < clip_top:
                 self._create_scene_clip_mask(
                     canvas,
-                    max(child_left, clip_left),
-                    child_top,
-                    min(child_right, clip_right),
-                    clip_top,
+                    max(child_left, clip_left) - clip_bleed,
+                    child_top - clip_bleed,
+                    min(child_right, clip_right) + clip_bleed,
+                    clip_top + clip_bleed,
                 )
             if child_bottom > clip_bottom:
                 self._create_scene_clip_mask(
                     canvas,
-                    max(child_left, clip_left),
-                    clip_bottom,
-                    min(child_right, clip_right),
-                    child_bottom,
+                    max(child_left, clip_left) - clip_bleed,
+                    clip_bottom - clip_bleed,
+                    min(child_right, clip_right) + clip_bleed,
+                    child_bottom + clip_bleed,
                 )
 
     def _clip_mask_fill_for_span(self, left: float, right: float) -> str:
@@ -5644,8 +6218,15 @@ class AlgorithmStudioApp(
         base_height = float(self.toolnode_resize_state["height"])
         start_x = float(self.toolnode_resize_state["x_root"])
         start_y = float(self.toolnode_resize_state["y_root"])
-        node.width = max(320.0, base_width + self._scene_delta(x_root - start_x))
-        node.height = max(180.0, base_height + self._scene_delta(y_root - start_y))
+        next_width = base_width + self._scene_delta(x_root - start_x)
+        next_height = base_height + self._scene_delta(y_root - start_y)
+        if kind == "container":
+            min_width, min_height = self._container_min_render_size(node)
+        else:
+            min_width = 320.0
+            min_height = 180.0
+        node.width = max(min_width, next_width)
+        node.height = max(min_height, next_height)
         self._refresh_canvas_drag_preview()
 
     def _node_center(self, kind: str, name: str) -> tuple[float, float]:
@@ -5798,7 +6379,7 @@ class AlgorithmStudioApp(
         if not group:
             raise AssertionError(f"Missing containerElement {name}")
         lines = [
-            "Selected container" if group.name == "container" else "Selected custom variable",
+            "Selected container" if group.name == "container" else "Selected micronode",
             f"name: {group.name}",
             f"canvas: ({int(group.x)}, {int(group.y)})",
             f"size: {int(group.width)} x {int(group.height)}",
@@ -6312,58 +6893,66 @@ class AlgorithmStudioApp(
         self.canvas_item_to_name.clear()
         self.canvas_port_positions.clear()
         self.canvas_connection_item_to_index.clear()
-        for group in sorted(self.project.container_groups, key=lambda item: item.width * item.height, reverse=True):
-            if not self._is_node_visible_in_current_view("containerelement", group.name):
-                continue
-            item_id = self._draw_container_group_node(canvas, group)
-            self.canvas_container_group_nodes[group.name] = item_id
-            self.canvas_item_to_name[item_id] = group.name
-        for container in self.project.containers:
-            if not self._is_node_visible_in_current_view("container", container.name):
-                continue
-            item_id = self._draw_container_node(canvas, container)
-            self.canvas_nodes[container.name] = item_id
-            self.canvas_item_to_name[item_id] = container.name
-        for item in self.project.res_nodes:
-            if not self._is_node_visible_in_current_view("resnode", item.name):
-                continue
-            item_id = self._draw_res_node(canvas, item)
-            self.canvas_nodes[item.name] = item_id
-            self.canvas_item_to_name[item_id] = item.name
-        for item in self.project.reflector_items:
-            if not self._is_node_visible_in_current_view("reflector", item.name):
-                continue
-            item_id = self._draw_reflector_node(canvas, item)
-            self.canvas_nodes[item.name] = item_id
-            self.canvas_item_to_name[item_id] = item.name
-        for item in self.project.function_frames:
-            if not self._is_node_visible_in_current_view("function", item.name):
-                continue
-            item_id = self._draw_function_frame_node(canvas, item)
-            self.canvas_nodes[item.name] = item_id
-            self.canvas_item_to_name[item_id] = item.name
-        for item in self.project.function_text_items:
-            if not self._is_node_visible_in_current_view("functiontext", item.name):
-                continue
-            item_id = self._draw_function_text_node(canvas, item)
-            self.canvas_nodes[item.name] = item_id
-            self.canvas_item_to_name[item_id] = item.name
-        for stage in self.project.intervention_stages:
-            if not self._is_node_visible_in_current_view("interventioner", stage.name):
-                continue
-            item_id = self._draw_stage_node(canvas, stage)
-            self.canvas_nodes[stage.name] = item_id
-            self.canvas_item_to_name[item_id] = stage.name
-        self._draw_selected_node_highlights(canvas)
-        self._draw_child_clip_masks(canvas)
-        canvas.tag_raise("clip_mask")
-        self._draw_group_clip_overlays(canvas)
-        canvas.tag_raise("group_clip_overlay")
-        canvas.tag_raise("group_resize_handle")
-        canvas.tag_raise("node_resize_handle")
-        self._draw_connections(canvas)
-        if self.connection_drag_state:
-            self._draw_connection_drag_preview(canvas)
+        if self.canvas_view_mode == "decomposer2container_overview":
+            self._draw_d2c_story_scene(canvas, width, height)
+        else:
+            for group in sorted(self.project.container_groups, key=lambda item: item.width * item.height, reverse=True):
+                if not self._is_node_visible_in_current_view("containerelement", group.name):
+                    continue
+                item_id = self._draw_container_group_node(canvas, group)
+                self.canvas_container_group_nodes[group.name] = item_id
+                self.canvas_item_to_name[item_id] = group.name
+            for container in self.project.containers:
+                if not self._is_node_visible_in_current_view("container", container.name):
+                    continue
+                item_id = self._draw_container_node(canvas, container)
+                self.canvas_nodes[container.name] = item_id
+                self.canvas_item_to_name[item_id] = container.name
+            for rule in self.project.decomposer_rules:
+                if not self._is_node_visible_in_current_view("decomposer", rule.name):
+                    continue
+                item_id = self._draw_decomposer_node(canvas, rule)
+                self.canvas_nodes[rule.name] = item_id
+                self.canvas_item_to_name[item_id] = rule.name
+            for item in self.project.res_nodes:
+                if not self._is_node_visible_in_current_view("resnode", item.name):
+                    continue
+                item_id = self._draw_res_node(canvas, item)
+                self.canvas_nodes[item.name] = item_id
+                self.canvas_item_to_name[item_id] = item.name
+            for item in self.project.reflector_items:
+                if not self._is_node_visible_in_current_view("reflector", item.name):
+                    continue
+                item_id = self._draw_reflector_node(canvas, item)
+                self.canvas_nodes[item.name] = item_id
+                self.canvas_item_to_name[item_id] = item.name
+            for item in self.project.function_frames:
+                if not self._is_node_visible_in_current_view("function", item.name):
+                    continue
+                item_id = self._draw_function_frame_node(canvas, item)
+                self.canvas_nodes[item.name] = item_id
+                self.canvas_item_to_name[item_id] = item.name
+            for item in self.project.function_text_items:
+                if not self._is_node_visible_in_current_view("functiontext", item.name):
+                    continue
+                item_id = self._draw_function_text_node(canvas, item)
+                self.canvas_nodes[item.name] = item_id
+                self.canvas_item_to_name[item_id] = item.name
+            for stage in self.project.intervention_stages:
+                if not self._is_node_visible_in_current_view("interventioner", stage.name):
+                    continue
+                item_id = self._draw_stage_node(canvas, stage)
+                self.canvas_nodes[stage.name] = item_id
+                self.canvas_item_to_name[item_id] = stage.name
+            self._draw_selected_node_highlights(canvas)
+            self._draw_connections(canvas)
+            if self.connection_drag_state:
+                self._draw_connection_drag_preview(canvas)
+            self._draw_child_clip_masks(canvas)
+            self._draw_group_clip_overlays(canvas)
+            canvas.tag_raise("clip_mask")
+            canvas.tag_raise("group_clip_overlay")
+            canvas.tag_raise("group_resize_handle")
         zoom = self._canvas_zoom_factor()
         if abs(zoom - 1.0) >= 1e-6:
             canvas.scale("all", 0.0, 0.0, zoom, zoom)
@@ -6372,6 +6961,10 @@ class AlgorithmStudioApp(
             canvas.move("all", self.canvas_camera_x, self.canvas_camera_y)
         canvas.tag_raise("connection")
         canvas.tag_raise("connection_preview")
+        if self.canvas_view_mode != "decomposer2container_overview":
+            canvas.tag_raise("clip_mask")
+            canvas.tag_raise("group_clip_overlay")
+            canvas.tag_raise("group_resize_handle")
         self._draw_drag_delete_warning(canvas)
 
     def _draw_selected_node_highlights(self, canvas: tk.Canvas) -> None:
@@ -6467,13 +7060,14 @@ class AlgorithmStudioApp(
         raw_x = group.x or CANVAS_PADDING + 20
         raw_y = group.y or CANVAS_PADDING + 20
         x, y = self._container_display_origin("containerelement", group.name, raw_x, raw_y)
+        title = "container" if group.name == "container" else f"micronode {group.name}"
         if not self._is_node_expanded(group):
             width, _height = self._container_group_render_size(group)
             return self._draw_collapsed_port_node(
                 canvas,
                 "containerelement",
                 group.name,
-                "container" if group.name == "container" else group.name,
+                title,
                 [
                     f"v: {len(group.variables)}",
                     f"a: {len(group.arrays)}",
@@ -6499,10 +7093,9 @@ class AlgorithmStudioApp(
             x + width,
             y + height,
             radius,
-            fill="#141a22",
+            fill="#05070c",
             outline=outline,
             width=2,
-            dash=(4, 3),
             tags=(node_tag, "group_node", "group_body"),
         )
         header_height = 30
@@ -6530,7 +7123,7 @@ class AlgorithmStudioApp(
             y + 7,
             anchor="nw",
             fill=COLORS["window"],
-            text="container" if group.name == "container" else group.name,
+            text=title,
             font=("Segoe UI", 12, "bold"),
             tags=(f"text_of_{item_id}", node_tag, "group_header", "draggable"),
         )
@@ -6610,14 +7203,6 @@ class AlgorithmStudioApp(
             canvas.create_line(grid_left, y, grid_right, y, fill=COLORS["grid"], width=1, tags=("grid",))
 
         if self.canvas_view_mode == "decomposer2container_overview":
-            divider_x = self._d2c_divider_x()
-            canvas.create_rectangle(grid_left, grid_top, divider_x, grid_bottom, fill="#12161f", outline="", tags=("grid_overlay_bg",))
-            canvas.create_rectangle(divider_x, grid_top, grid_right, grid_bottom, fill="#141a22", outline="", tags=("grid_overlay_bg",))
-            canvas.create_line(divider_x, grid_top, divider_x, grid_bottom, fill=COLORS["accent"], width=2, dash=(10, 10), tags=("grid_overlay_divider",))
-            canvas.tag_lower("grid_overlay_bg")
-            right_half_width = max(grid_right - divider_x, 1.0)
-            canvas.create_text(divider_x * 0.5, viewport_top + 18 / zoom, anchor="center", fill=COLORS["good"], text="decomposer side", font=("Segoe UI", 10, "bold"), tags=("grid_overlay_label",))
-            canvas.create_text(divider_x + right_half_width * 0.5, viewport_top + 18 / zoom, anchor="center", fill=COLORS["container"], text="container side", font=("Segoe UI", 10, "bold"), tags=("grid_overlay_label",))
             left_hint = "d2cScene"
         elif self.canvas_view_mode == "container_overview":
             left_hint = "containerScene"
@@ -6638,7 +7223,305 @@ class AlgorithmStudioApp(
         else:
             left_hint = "algorithmScene"
         canvas.create_text(viewport_left + 24 / zoom, viewport_top + 18 / zoom, anchor="w", fill=COLORS["muted"], text=left_hint, font=("Segoe UI", 10), tags=("grid_overlay_label",))
+        if self.canvas_view_mode == "decomposer2container_overview":
+            canvas.create_text(
+                (viewport_left + viewport_right) * 0.5,
+                viewport_top + 18 / zoom,
+                anchor="center",
+                fill=COLORS["text"],
+                text="descriptor/resource initialization flow",
+                font=("Segoe UI", 10, "bold"),
+                tags=("grid_overlay_label",),
+            )
         canvas.create_text(viewport_right - 24 / zoom, viewport_top + 18 / zoom, anchor="e", fill=COLORS["muted"], text="right click: delete / duplicate", font=("Segoe UI", 10), tags=("grid_overlay_label",))
+
+    def _d2c_focus_container(self) -> ContainerItem | None:
+        if self.selected_container_name:
+            container = self._find_container(self.selected_container_name)
+            if container is not None:
+                return container
+        if self.project.containers:
+            return self.project.containers[0]
+        return None
+
+    def _d2c_focus_rule(self) -> DecomposerRule | None:
+        if self.selected_rule_name:
+            rule = self._find_rule(self.selected_rule_name)
+            if rule is not None:
+                return rule
+        if self.project.decomposer_rules:
+            return self.project.decomposer_rules[0]
+        return None
+
+    def _d2c_focus_res_node(self) -> ResourceNodeItem | None:
+        if self.selected_res_node_name:
+            res_node = self._find_res_node(self.selected_res_node_name)
+            if res_node is not None:
+                return res_node
+        if self.project.res_nodes:
+            return self.project.res_nodes[0]
+        return None
+
+    def _d2c_descriptor_story_lines(self, rule: DecomposerRule | None) -> list[str]:
+        if rule is None:
+            return [
+                "mapKind: -",
+                "source: -",
+                "target: -",
+                "descriptorScript: add a decomposer rule to explain layout initialization",
+            ]
+        lines = [
+            f"mapKind: {rule.map_kind or 'v2v'}",
+            f"source: {rule.source or '-'}",
+            f"target: {rule.target or '-'}",
+        ]
+        script_lines = [line.strip() for line in rule.descriptor_script.splitlines() if line.strip()]
+        if script_lines:
+            lines.append("descriptorScript:")
+            lines.extend([f"  {line}" for line in script_lines[:5]])
+        else:
+            lines.append("descriptorScript: -")
+        return lines
+
+    def _d2c_resource_story_lines(self, rule: DecomposerRule | None, res_node: ResourceNodeItem | None) -> list[str]:
+        resource_kind = "mesh"
+        outputs: list[str] = []
+        if res_node is not None:
+            resource_kind = res_node.resource_kind or "mesh"
+            outputs = self._resource_output_ports(resource_kind, res_node.outputs)
+        lines = [
+            f"resourceKind: {resource_kind}",
+            f"resourceMode: {(rule.resource_mode if rule is not None else '') or 'default'}",
+            f"outputs: {', '.join(outputs) if outputs else '-'}",
+        ]
+        resource_script = "" if rule is None else rule.resource_script
+        script_lines = [line.strip() for line in resource_script.splitlines() if line.strip()]
+        if script_lines:
+            lines.append("resourceScript:")
+            lines.extend([f"  {line}" for line in script_lines[:5]])
+        else:
+            lines.append("resourceScript: -")
+        schema_lines = self._schema_detail_lines(self.project.decomposer_res)
+        if schema_lines:
+            lines.append("resourceSchema:")
+            lines.extend([f"  {line}" for line in schema_lines[:4]])
+        else:
+            lines.append("resourceSchema: {}")
+        return lines
+
+    def _d2c_container_story_lines(self, container: ContainerItem | None) -> list[str]:
+        if container is None:
+            return [
+                "container: -",
+                "layout: add a variable/array container to see initialization targets",
+                "values: -",
+            ]
+        lines = [
+            f"container: {self._canvas_node_display_name(container, container.name)}",
+            f"shape: {container.kind} x{max(int(container.count), 1)} stride {max(int(container.stride), 1)}",
+        ]
+        layout_lines = self._container_layout_field_summary_lines(container, limit=4)
+        if layout_lines:
+            lines.append("layout:")
+            lines.extend([f"  {line}" for line in layout_lines[:4]])
+        else:
+            lines.append("layout: -")
+        value_lines = self._container_value_preview(container, 3)
+        lines.append("values:")
+        lines.extend([f"  {line}" for line in value_lines[:3]])
+        return lines
+
+    def _draw_d2c_story_node(
+        self,
+        canvas: tk.Canvas,
+        x: float,
+        y: float,
+        title: str,
+        body_title: str,
+        body_lines: list[str],
+        header_fill: str,
+        *,
+        inputs: list[str] | None = None,
+        outputs: list[str] | None = None,
+        width: float = 420.0,
+    ) -> dict[str, Any]:
+        input_ports = inputs or []
+        output_ports = outputs or []
+        radius = 14.0
+        width = max(width, 360.0)
+        text_rows = max(len(body_lines), 1)
+        port_rows = max(len(input_ports), len(output_ports), 1)
+        height = max(220.0, 112.0 + max(text_rows, port_rows) * 24.0)
+        outline = header_fill
+        header_height = 36.0
+        item_tag = "d2c_story_node"
+
+        self._create_rounded_rect(
+            canvas,
+            x,
+            y,
+            x + width,
+            y + height,
+            radius,
+            fill="#05070c",
+            outline=outline,
+            width=2,
+            tags=(item_tag,),
+        )
+        self._draw_top_rounded_header(
+            canvas,
+            x + 2,
+            y + 2,
+            x + width - 2,
+            y + header_height,
+            max(radius - 2.0, 4.0),
+            fill=header_fill,
+            tags=(item_tag,),
+        )
+        canvas.create_line(x + 3, y + header_height, x + width - 3, y + header_height, fill="#d5def3", width=1, tags=(item_tag,))
+        canvas.create_text(x + 14, y + 10, anchor="nw", fill="#ffffff", text=title, font=("Segoe UI", 13, "bold"), tags=(item_tag,))
+
+        body_top = y + header_height
+        body_bottom = y + height
+        left_w = 118.0 if input_ports else 26.0
+        right_w = 136.0 if output_ports else 26.0
+        content_left = x + left_w
+        content_right = x + width - right_w
+
+        canvas.create_text(x + 10, body_top + 10, anchor="nw", fill="#dbe6ff", text="IN", font=("Segoe UI", 10, "bold"), tags=(item_tag,))
+        canvas.create_text(content_left + 10, body_top + 10, anchor="nw", fill="#dbe6ff", text=body_title, font=("Segoe UI", 10, "bold"), tags=(item_tag,))
+        canvas.create_text(x + width - 10, body_top + 10, anchor="ne", fill="#dbe6ff", text="OUT", font=("Segoe UI", 10, "bold"), tags=(item_tag,))
+        canvas.create_rectangle(content_left, body_top + 34, content_right, body_bottom - 10, fill=COLORS["canvas"], outline=COLORS["grid"], width=1, tags=(item_tag,))
+
+        for grid_x in range(int(content_left + 12), int(content_right - 8), 18):
+            canvas.create_line(grid_x, body_top + 38, grid_x, body_bottom - 14, fill="#18202a", width=1, tags=(item_tag,))
+        for grid_y in range(int(body_top + 42), int(body_bottom - 12), 18):
+            canvas.create_line(content_left + 4, grid_y, content_right - 4, grid_y, fill="#18202a", width=1, tags=(item_tag,))
+
+        for index, port_name in enumerate(input_ports):
+            port_y = body_top + 42 + index * 26
+            canvas.create_oval(x + 10, port_y, x + 24, port_y + 14, fill=header_fill, outline=header_fill, tags=(item_tag,))
+            canvas.create_text(x + 30, port_y - 1, anchor="nw", fill="#ffffff", text=port_name, font=("Segoe UI", 10), width=max(left_w - 36.0, 24.0), justify="left", tags=(item_tag,))
+
+        for index, port_name in enumerate(output_ports):
+            port_y = body_top + 42 + index * 26
+            port_x = x + width - 24
+            canvas.create_oval(port_x, port_y, port_x + 14, port_y + 14, fill=header_fill, outline=header_fill, tags=(item_tag,))
+            canvas.create_text(port_x - 6, port_y - 1, anchor="ne", fill="#ffffff", text=port_name, font=("Segoe UI", 10), width=max(right_w - 36.0, 24.0), justify="right", tags=(item_tag,))
+
+        canvas.create_text(
+            content_left + 10,
+            body_top + 44,
+            anchor="nw",
+            fill="#ffffff",
+            text="\n".join(body_lines) if body_lines else "-",
+            font=("Segoe UI", 10),
+            width=max(content_right - content_left - 20.0, 120.0),
+            justify="left",
+            tags=(item_tag,),
+        )
+        return {
+            "bounds": (x, y, x + width, y + height),
+            "input_centers": {name: (x + 17.0, body_top + 49 + index * 26) for index, name in enumerate(input_ports)},
+            "output_centers": {name: (x + width - 17.0, body_top + 49 + index * 26) for index, name in enumerate(output_ports)},
+        }
+
+    def _draw_d2c_story_connection(
+        self,
+        canvas: tk.Canvas,
+        start: tuple[float, float],
+        end: tuple[float, float],
+        *,
+        color: str,
+        label: str,
+        bend: float = 120.0,
+    ) -> None:
+        sx, sy = start
+        tx, ty = end
+        control_x0 = sx + bend
+        control_x1 = tx - bend
+        canvas.create_line(
+            sx,
+            sy,
+            control_x0,
+            sy,
+            control_x1,
+            ty,
+            tx,
+            ty,
+            fill=color,
+            width=3,
+            smooth=True,
+            splinesteps=24,
+            arrow=tk.LAST,
+            tags=("d2c_story_connection",),
+        )
+        canvas.create_text(
+            (sx + tx) * 0.5,
+            (sy + ty) * 0.5 - 12.0,
+            anchor="s",
+            fill=color,
+            text=label,
+            font=("Segoe UI", 10, "bold"),
+            tags=("d2c_story_connection",),
+        )
+
+    def _draw_d2c_story_scene(self, canvas: tk.Canvas, width: int, height: int) -> None:
+        zoom = self._canvas_zoom_factor()
+        viewport_left = (-self.canvas_camera_x) / zoom
+        viewport_top = (-self.canvas_camera_y) / zoom
+        scene_width = max(float(width) / zoom, 1320.0)
+        origin_x = viewport_left + 72.0
+        origin_y = viewport_top + 88.0
+
+        rule = self._d2c_focus_rule()
+        res_node = self._d2c_focus_res_node()
+        container = self._d2c_focus_container()
+
+        descriptor_node = self._draw_d2c_story_node(
+            canvas,
+            origin_x,
+            origin_y,
+            "Descriptor Decomposer",
+            "LAYOUT METHOD",
+            self._d2c_descriptor_story_lines(rule),
+            COLORS["descriptor"],
+            outputs=["layout"],
+            width=440.0,
+        )
+        resource_node = self._draw_d2c_story_node(
+            canvas,
+            origin_x,
+            origin_y + 300.0,
+            "Resource Decomposer",
+            "VALUE METHOD",
+            self._d2c_resource_story_lines(rule, res_node),
+            COLORS["resource"],
+            outputs=["payload"],
+            width=440.0,
+        )
+        container_x = max(origin_x + 560.0, viewport_left + scene_width * 0.56)
+        container_node = self._draw_d2c_story_node(
+            canvas,
+            container_x,
+            origin_y + 142.0,
+            "Container Initialization",
+            "RESULT SNAPSHOT",
+            self._d2c_container_story_lines(container),
+            COLORS["container"],
+            inputs=["layout", "payload"],
+            outputs=["slots"],
+            width=500.0,
+        )
+
+        descriptor_out = descriptor_node["output_centers"].get("layout")
+        resource_out = resource_node["output_centers"].get("payload")
+        layout_in = container_node["input_centers"].get("layout")
+        payload_in = container_node["input_centers"].get("payload")
+        if descriptor_out is not None and layout_in is not None:
+            self._draw_d2c_story_connection(canvas, descriptor_out, layout_in, color=COLORS["descriptor"], label="layout rules")
+        if resource_out is not None and payload_in is not None:
+            self._draw_d2c_story_connection(canvas, resource_out, payload_in, color=COLORS["resource"], label="decoded values")
 
     def _draw_node_card(
         self,
@@ -7012,6 +7895,17 @@ class AlgorithmStudioApp(
             tags=(f"node:container:{container.name}", port_tag),
         )
         self._register_port("container", container.name, "out", "out", port_x, port_y)
+        handle_size = 10
+        handle_id = canvas.create_rectangle(
+            x + width - handle_size - 4,
+            y + height - handle_size - 4,
+            x + width - 4,
+            y + height - 4,
+            fill=COLORS["accent"],
+            outline=COLORS["accent"],
+            tags=(node_tag, "node_resize_handle", f"resize_handle:container:{container.name}"),
+        )
+        canvas.tag_raise(handle_id)
         return item_id
 
     def _draw_decomposer_node(self, canvas: tk.Canvas, rule: DecomposerRule) -> int:

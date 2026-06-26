@@ -33,40 +33,34 @@ struct AlgorithmPluginBundle {
   bool reflector{true};
   bool intervention{true};
 
-<<<<<<< HEAD
-  agent::IAlgorithmtemporaryTestMainThreadExecutor* temporary_test_executor{nullptr};
-  void (*destroy_temporary_test_executor)(agent::IAlgorithmtemporaryTestMainThreadExecutor*){nullptr};
-=======
-  // Optional plugin-provided GPU executor. When null, mainline may fall back
-  // to the package intervention schema if `intervention` is enabled.
-  agent::IAlgorithmIntervention* gpu_executor{nullptr};
-  void (*destroy_gpu_executor)(agent::IAlgorithmIntervention*){nullptr};
+  // Optional plugin-provided GPU exec provider. When null, mainline may fall
+  // back to the package `exec` schema when `gpu_symbol` is enabled.
+  agent::IAlgorithmGpuExecutor* gpu_executor{nullptr};
+  void (*destroy_gpu_executor)(agent::IAlgorithmGpuExecutor*){nullptr};
 
   agent::IAlgorithmCpuExecutor* cpu_executor{nullptr};
   void (*destroy_cpu_executor)(agent::IAlgorithmCpuExecutor*){nullptr};
->>>>>>> 0e5193b (preciser control of digital)
 
   void Clear() {
     api_version = kAlgorithmPluginApiVersion;
     cpu_symbol = true;
     gpu_symbol = true;
-<<<<<<< HEAD
-    temporary_test_executor = nullptr;
-    destroy_temporary_test_executor = nullptr;
-=======
     reflector = true;
     intervention = true;
     gpu_executor = nullptr;
     destroy_gpu_executor = nullptr;
     cpu_executor = nullptr;
     destroy_cpu_executor = nullptr;
->>>>>>> 0e5193b (preciser control of digital)
   }
 };
 
 using AlgorithmPluginCreateBundleFn = bool (*)(
   const AlgorithmPluginRequest* request,
   AlgorithmPluginBundle* out_bundle);
+
+using AlgorithmPluginCreateRuntimeReflectorFn = bool (*)(
+  const AlgorithmPluginRequest* request,
+  algorithm::AlgorithmReflector* out_reflector);
 
 struct AlgorithmPluginComponents {
   // Execution-time resource requirements, not execution-path selectors.
@@ -76,13 +70,20 @@ struct AlgorithmPluginComponents {
   bool reflector{true};
   bool intervention{true};
 
-<<<<<<< HEAD
-  std::shared_ptr<agent::IAlgorithmtemporaryTestMainThreadExecutor> temporary_test_executor{};
-=======
   std::shared_ptr<algorithm::AlgorithmReflector> runtime_reflector{};
-  std::shared_ptr<agent::IAlgorithmIntervention> gpu_executor{};
+  std::shared_ptr<agent::IAlgorithmGpuExecutor> gpu_executor{};
   std::shared_ptr<agent::IAlgorithmCpuExecutor> cpu_executor{};
->>>>>>> 0e5193b (preciser control of digital)
+};
+
+struct AlgorithmPipelineWrapperStageSpec {
+  bool declared{false};
+  std::string algorithm_name;
+};
+
+struct AlgorithmPipelineWrapperSpec {
+  bool declared{false};
+  AlgorithmPipelineWrapperStageSpec stage_begin{};
+  AlgorithmPipelineWrapperStageSpec stage_end{};
 };
 
 bool TryLoadAlgorithmPluginComponents(
@@ -93,6 +94,11 @@ bool TryLoadAlgorithmPluginComponents(
 bool LoadAlgorithmPackageReflectorFromLocation(
   const algorithm::AlgorithmPackageLocation& package_location,
   std::shared_ptr<algorithm::AlgorithmReflector>* out_reflector,
+  std::string* out_error_message = nullptr);
+
+bool LoadAlgorithmGpuExecutorFromLocation(
+  const algorithm::AlgorithmPackageLocation& package_location,
+  std::shared_ptr<agent::IAlgorithmGpuExecutor>* out_gpu_executor,
   std::string* out_error_message = nullptr);
 
 bool LoadAlgorithmPackageTransferMapFromLocation(
@@ -172,6 +178,11 @@ bool DecomposeAlgorithmPackageFromLocation(
 bool CreateAlgorithmObjectFromLocation(
   const algorithm::AlgorithmPackageLocation& package_location,
   agent::AlgorithmObject* out_group,
+  std::string* out_error_message = nullptr);
+
+bool LoadAlgorithmPipelineWrapperSpecFromLocation(
+  const algorithm::AlgorithmPackageLocation& package_location,
+  AlgorithmPipelineWrapperSpec* out_wrapper_spec,
   std::string* out_error_message = nullptr);
 
 class PipelineStageBridge {
@@ -327,6 +338,8 @@ using ::algorithm_support::AlgorithmPluginBundle;
 using ::algorithm_support::AlgorithmPluginComponents;
 using ::algorithm_support::AlgorithmPluginCreateBundleFn;
 using ::algorithm_support::AlgorithmPluginCreateRuntimeReflectorFn;
+using ::algorithm_support::AlgorithmPipelineWrapperSpec;
+using ::algorithm_support::AlgorithmPipelineWrapperStageSpec;
 using ::algorithm_support::AlgorithmPluginRequest;
 using ::algorithm_support::PipelineStageBridge;
 using ::algorithm::AlgorithmRuntimeTransferBinding;
@@ -339,6 +352,7 @@ using ::algorithm_support::PipelineStageBridgeCaptureEgressDebugSet;
 using ::algorithm_support::LoadAlgorithmPackageTransferMapFromLocation;
 using ::algorithm_support::TryLoadAlgorithmPluginComponents;
 using ::algorithm_support::LoadAlgorithmPackageReflectorFromLocation;
+using ::algorithm_support::LoadAlgorithmGpuExecutorFromLocation;
 using ::algorithm_support::QueryAlgorithmPackageRequestedBindingsFromLocation;
 using ::algorithm_support::LoadAlgorithmPackageDefaultBindingsFromLocation;
 using ::algorithm_support::DecomposeAlgorithmPackageFromLocation;
@@ -352,6 +366,8 @@ using algorithm_support::kAlgorithmPluginApiVersion;
 using algorithm_support::AlgorithmPluginBundle;
 using algorithm_support::AlgorithmPluginComponents;
 using algorithm_support::AlgorithmPluginCreateBundleFn;
+using algorithm_support::AlgorithmPipelineWrapperSpec;
+using algorithm_support::AlgorithmPipelineWrapperStageSpec;
 using algorithm_support::AlgorithmPluginRequest;
 using algorithm_support::PipelineStageBridge;
 using ::algorithm::AlgorithmRuntimeTransferBinding;
@@ -364,6 +380,7 @@ using algorithm_support::PipelineStageBridgeCaptureEgressDebugSet;
 using algorithm_support::LoadAlgorithmPackageTransferMapFromLocation;
 using algorithm_support::TryLoadAlgorithmPluginComponents;
 using algorithm_support::LoadAlgorithmPackageReflectorFromLocation;
+using algorithm_support::LoadAlgorithmGpuExecutorFromLocation;
 using algorithm_support::QueryAlgorithmPackageRequestedBindingsFromLocation;
 using algorithm_support::DecomposeAlgorithmPackageFromLocation;
 using algorithm_support::LoadAlgorithmInterventionFromLocation;
@@ -383,12 +400,8 @@ ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateBundle(
   const algorithmManager::support::AlgorithmPluginRequest* request,
   algorithmManager::support::AlgorithmPluginBundle* out_bundle);
 
-<<<<<<< HEAD
-=======
 ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateRuntimeReflector(
   const algorithmManager::support::AlgorithmPluginRequest* request,
   algorithm::AlgorithmReflector* out_reflector);
-
->>>>>>> 0e5193b (preciser control of digital)
 }
 

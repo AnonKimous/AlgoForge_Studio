@@ -884,12 +884,6 @@ extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateBundle(
   out_bundle->Clear();
   out_bundle->cpu_symbol = true;
   out_bundle->gpu_symbol = true;
-<<<<<<< HEAD
-  out_bundle->temporary_test_executor = new CollisionDemoMainThreadExecutor();
-  out_bundle->destroy_temporary_test_executor = &_DestroyTemporaryTestExecutor;
-  return true;
-}
-=======
   out_bundle->reflector = true;
   out_bundle->intervention = true;
   out_bundle->cpu_executor = new CollisionDemoCpuExecutor();
@@ -921,4 +915,3 @@ extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateRuntimeReflec
   *out_reflector = *runtime_reflector;
   return true;
 }
->>>>>>> 0e5193b (preciser control of digital)

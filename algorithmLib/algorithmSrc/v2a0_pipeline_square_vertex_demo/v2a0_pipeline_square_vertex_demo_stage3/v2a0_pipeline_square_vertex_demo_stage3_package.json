@@ -43,39 +43,38 @@
       }
     ]
   },
-  "intervention": {
-    "stages": {
-      "resultRender": {
-        "stage_name": "resultRender",
-        "stage_kind": "resultRender",
-        "used_algorithm_containers": {
-          "arrays": [
-            {
-              "name": "v1",
-              "kind": "variable",
-              "tuple_width": 1,
-              "required": true
-            },
-            {
-              "name": "v2",
-              "kind": "variable",
-              "tuple_width": 1,
-              "required": true
-            },
-            {
-              "name": "v3",
-              "kind": "variable",
-              "tuple_width": 1,
-              "required": true
-            }
-          ]
+  "exec": {
+    "stage_name": "exec",
+    "used_algorithm_containers": {
+      "arrays": [
+        {
+          "name": "v1",
+          "kind": "variable",
+          "tuple_width": 1,
+          "required": true
         },
-        "shader": {
-          "pipeline": "graphics",
-          "vertex": "v2a0_pipeline_square_vertex_demo_stage3_gpu_tick.vert",
-          "fragment": "v2a0_pipeline_square_vertex_demo_stage3_gpu_tick.frag"
+        {
+          "name": "v2",
+          "kind": "variable",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "v3",
+          "kind": "variable",
+          "tuple_width": 1,
+          "required": true
         }
-      },
+      ]
+    },
+    "shader": {
+      "pipeline": "graphics",
+      "vertex": "v2a0_pipeline_square_vertex_demo_stage3_gpu_tick.vert",
+      "fragment": "v2a0_pipeline_square_vertex_demo_stage3_gpu_tick.frag"
+    }
+  },
+  "intervention": {
+    "stage": {
       "resultRender": {
         "stage_name": "resultRender",
         "stage_kind": "resultRender",

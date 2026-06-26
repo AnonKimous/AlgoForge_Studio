@@ -21,6 +21,9 @@ Do not add extra structure, cleanup, arranging, or side explanations.
 - If the operation stack is available, read it before choosing the next step.
 - Keep the flow brutally short.
 - Do not add mesh nodes, reflector nodes, decomposer nodes, extra container groups, or extra cleanup steps unless the user explicitly asks for them.
+- Do not describe legacy UI positions or old add-button flows.
+- In the current UI, `containerScene` defaults the left `Drag Palette` to `Blueprint`, while `interventionerScene` defaults it to `Container Tree`.
+- When teaching drag actions, describe the current left palette mode and the node tile the user should drag, not an old fixed panel position.
 
 ## Mandatory Teaching Order
 
@@ -34,6 +37,7 @@ Use this exact fast path:
 4. Tell the user the algorithm itself is already done.
    If they want visualization, point them to `interventionerScene`.
 5. Tell the user to switch to `interventionerScene`, then bring `v2` into that scene.
+   Tell them this now comes from the left `Container Tree`.
    `v2` now means the computed result buffer.
 6. Tell the user to create one more `fun` node and write a display shader that fills the lower screen in blue and follows the sine wave.
 7. Tell the user to press `Build`.
@@ -41,6 +45,14 @@ Use this exact fast path:
 ## Highlight Rule
 
 Before each supported step, emit exactly one `highlight`.
+
+The highlight should match the current UI layout.
+When needed, explain the live location in words after the highlight:
+
+- `highlight scene container` points at the `containerScene` tab.
+- `highlight v add` points at the left `Drag Palette > Blueprint > Container > v`.
+- `highlight createNode function` points at the left palette `fun` tile in the current mode.
+- `highlight scene interventioner` points at the `interventionerScene` tab.
 
 Good examples:
 

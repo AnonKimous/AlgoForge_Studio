@@ -78,6 +78,14 @@ COMMAND_SPECS: tuple[AgentCommandSpec, ...] = (
         highlight_target="canvas",
     ),
     AgentCommandSpec(
+        name="reNameNode",
+        usage="reNameNode <oriNodeName> <newNodeName>",
+        location="Selection panel > Name",
+        summary="Rename the currently known node and update its references.",
+        highlight_target="renamenode",
+        aliases=("renamenode",),
+    ),
+    AgentCommandSpec(
         name="scene",
         usage="scene main | scene container | scene decomposer | scene reflector | scene interventioner | scene pretick | scene aftertick | scene render | scene d2c | scene all",
         location="Canvas header > scene tabs",
@@ -427,6 +435,16 @@ def _execute_hot_review_command(app: Any, _args: list[str]) -> str:
     return _call(app, "_interface4agents_hot_review")
 
 
+def _execute_rename_node_command(app: Any, args: list[str]) -> str:
+    if len(args) < 2:
+        raise RuntimeError("reNameNode requires <oriNodeName> and <newNodeName>.")
+    old_name = args[0].strip()
+    new_name = args[1].strip()
+    if not old_name or not new_name:
+        raise RuntimeError("reNameNode requires non-empty node names.")
+    return _call(app, "_interface4agents_rename_node", old_name, new_name)
+
+
 def _execute_highlight_named_node_command(app: Any, args: list[str]) -> str:
     if not args:
         raise RuntimeError("highlight requires a node name.")
@@ -503,6 +521,8 @@ def execute_interface4agents_command(app: Any, tokens: list[str]) -> str:
         return _execute_scene_command(app, args)
     if command == "hotreview":
         return _execute_hot_review_command(app, args)
+    if command == "renamenode":
+        return _execute_rename_node_command(app, args)
     if command == "highlight":
         return _execute_highlight_command(app, args)
     raise RuntimeError(f"Unsupported interface4agents command: {command}")

@@ -95,6 +95,12 @@ enum class AlgorithmPipelineSyncMode {
   NonForced = 1,
 };
 
+enum class AlgorithmPipelineWrapperRole {
+  None = 0,
+  Begin = 1,
+  End = 2,
+};
+
 using AlgorithmPipelineSubmissionMode = AlgorithmPipelineTopology;
 
 enum class AlgorithmJobPriority {
@@ -141,6 +147,9 @@ struct CpuPipelineRegistration {
   std::string pipeline_name;
   std::string root_stage_name;
   uint32_t stage_count{0u};
+  uint32_t body_begin_stage_index{0u};
+  uint32_t body_stage_count{0u};
+  uint32_t effective_tail_stage_index{0u};
   AlgorithmPipelineTopology topology{AlgorithmPipelineTopology::NonCircular};
   AlgorithmPipelineSyncMode sync_mode{AlgorithmPipelineSyncMode::Forced};
   uint32_t max_concurrent_stage0_submissions{0u};
@@ -252,6 +261,26 @@ struct AlgorithmInterventionPackageDebugState {
   AlgorithmToAgentSignal algorithm_to_agent_signal{};
 };
 
+struct AlgorithmGpuExecContainerBinding {
+  std::string container_name;
+  std::string container_kind;
+  uint32_t tuple_width{0u};
+  bool required{true};
+};
+
+struct AlgorithmGpuExecShaderSpec {
+  std::string vertex_shader_path;
+  std::string fragment_shader_path;
+  std::string pipeline_kind;
+};
+
+struct AlgorithmGpuExecSpec {
+  std::string stage_name{"exec"};
+  std::vector<std::string> functions;
+  std::vector<AlgorithmGpuExecContainerBinding> used_algorithm_containers;
+  AlgorithmGpuExecShaderSpec shader;
+};
+
 struct AgentTickContext {
   const InputState* input{nullptr};
   Vec2 mouse_pixel{};
@@ -297,6 +326,7 @@ struct AgentTickResult {
 
 class IAlgorithmPackageSupport;
 class IAlgorithmCpuExecutor;
+class IAlgorithmGpuExecutor;
 class IAlgorithmIntervention;
 class AlgorithmObject;
 
@@ -323,6 +353,7 @@ class AlgorithmObject {
   }
 
   algorithm::AlgorithmProfile algorithm_profile{};
+  std::string runtime_package_root_path;
   std::shared_ptr<IAlgorithmPackageSupport> reflector;
   std::shared_ptr<algorithm::AlgorithmReflector> algorithm_reflector;
   std::shared_ptr<algorithm::AlgorithmRuntimeTransferMap> runtime_transfer_map;
@@ -331,6 +362,8 @@ class AlgorithmObject {
   std::string pipeline_name;
   uint32_t pipeline_stage_index{0u};
   uint32_t pipeline_stage_count{0u};
+  AlgorithmPipelineWrapperRole pipeline_wrapper_role{AlgorithmPipelineWrapperRole::None};
+  bool pipeline_wrapper_empty{false};
   bool pipeline_stage_debug_all{true};
   uint32_t pipeline_stage_debug_index{0u};
   AlgorithmPipelineTopology pipeline_topology{AlgorithmPipelineTopology::NonCircular};
@@ -343,6 +376,7 @@ class AlgorithmObject {
   AlgorithmMountMode mount_mode{AlgorithmMountMode::Direct};
   AlgorithmExecutionPreference execution_preference{AlgorithmExecutionPreference::Gpu};
   AlgorithmTickLifetime tick_lifetime{AlgorithmTickLifetime::Continuous};
+  std::shared_ptr<IAlgorithmGpuExecutor> gpu_executor;
   std::shared_ptr<IAlgorithmCpuExecutor> cpu_executor;
   std::shared_ptr<IAlgorithmIntervention> intervention;
 
@@ -416,6 +450,13 @@ class IAlgorithmCpuExecutor {
     AlgorithmPackageDebugState* debug_state) = 0;
 };
 
+class IAlgorithmGpuExecutor {
+ public:
+  virtual ~IAlgorithmGpuExecutor() = default;
+
+  virtual bool GetGpuExecSpec(AlgorithmGpuExecSpec* out_spec) const = 0;
+};
+
 enum class AlgorithmInterventionStageKind {
   ResultRender = 0,
   PreExecution = 1,
@@ -472,6 +513,7 @@ using ::algorithm_management::AlgorithmExecutionPreference;
 using ::algorithm_management::AlgorithmPipelineSubmissionMode;
 using ::algorithm_management::AlgorithmPipelineTopology;
 using ::algorithm_management::AlgorithmPipelineSyncMode;
+using ::algorithm_management::AlgorithmPipelineWrapperRole;
 using ::algorithm_management::CpuPipelineInterStageBufferRuntimeState;
 using ::algorithm_management::CpuPipelineRegistration;
 using ::algorithm_management::CpuPipelineRuntimeState;
@@ -481,6 +523,9 @@ using ::algorithm_management::AlgorithmInterventionPackageDebugState;
 using ::algorithm_management::AlgorithmInterventionShaderSpec;
 using ::algorithm_management::AlgorithmInterventionStageKind;
 using ::algorithm_management::AlgorithmInterventionStageSpec;
+using ::algorithm_management::AlgorithmGpuExecContainerBinding;
+using ::algorithm_management::AlgorithmGpuExecShaderSpec;
+using ::algorithm_management::AlgorithmGpuExecSpec;
 using ::algorithm_management::AlgorithmMountMode;
 using ::algorithm_management::AlgorithmPipelineStageSubmission;
 using ::algorithm_management::AlgorithmPipelineStageRuntimeStat;
@@ -497,6 +542,7 @@ using ::algorithm_management::AlgorithmResourceBinding;
 using ::algorithm_management::IAlgorithmIntervention;
 using ::algorithm_management::IAlgorithmPackageSupport;
 using ::algorithm_management::IAlgorithmCpuExecutor;
+using ::algorithm_management::IAlgorithmGpuExecutor;
 using ::algorithm_management::IComplexAlgorithmPackageSupport;
 using ::algorithm_management::ISimpleAlgorithmPackageSupport;
 namespace support {}
@@ -525,6 +571,9 @@ using algorithmManager::AlgorithmInterventionPackageDebugState;
 using algorithmManager::AlgorithmInterventionShaderSpec;
 using algorithmManager::AlgorithmInterventionStageKind;
 using algorithmManager::AlgorithmInterventionStageSpec;
+using algorithmManager::AlgorithmGpuExecContainerBinding;
+using algorithmManager::AlgorithmGpuExecShaderSpec;
+using algorithmManager::AlgorithmGpuExecSpec;
 using algorithmManager::AlgorithmMountMode;
 using algorithmManager::AlgorithmPipelineStageSubmission;
 using algorithmManager::AlgorithmPipelineStageRuntimeStat;
@@ -541,6 +590,7 @@ using algorithmManager::AlgorithmResourceBinding;
 using algorithmManager::IAlgorithmIntervention;
 using algorithmManager::IAlgorithmPackageSupport;
 using algorithmManager::IAlgorithmCpuExecutor;
+using algorithmManager::IAlgorithmGpuExecutor;
 using algorithmManager::IComplexAlgorithmPackageSupport;
 using algorithmManager::ISimpleAlgorithmPackageSupport;
 }  // namespace agent

@@ -119,6 +119,7 @@ class AlgorithmStudioContainerGroupMixin:
         if not group:
             raise AssertionError(f"Missing containerElement {group_name}")
         self._remove_container_from_parent_group(container_name)
+        container.scene_scope = self._container_group_scene_scope(group)
         if container.kind == "variable":
             if container_name not in group.variables:
                 group.variables.append(container_name)
@@ -146,6 +147,25 @@ class AlgorithmStudioContainerGroupMixin:
         if not parent_group:
             raise AssertionError(f"Missing containerElement {parent_name}")
         self._remove_group_from_parent_group(group_name)
+        child_group = self._find_container_group(group_name)
+        if child_group is None:
+            raise AssertionError(f"Missing containerElement {group_name}")
+        target_scope = self._container_group_scene_scope(parent_group)
+
+        def _apply_group_scope_recursive(current_group_name: str) -> None:
+            current_group = self._find_container_group(current_group_name)
+            if current_group is None:
+                raise AssertionError(f"Missing containerElement {current_group_name}")
+            current_group.scene_scope = target_scope
+            for container_name in list(current_group.variables) + list(current_group.arrays):
+                container = self._find_container(container_name)
+                if container is None:
+                    raise AssertionError(f"Missing container {container_name}")
+                container.scene_scope = target_scope
+            for child_name in current_group.groups:
+                _apply_group_scope_recursive(child_name)
+
+        _apply_group_scope_recursive(group_name)
         if group_name not in parent_group.groups:
             parent_group.groups.append(group_name)
 
@@ -212,8 +232,6 @@ class AlgorithmStudioContainerGroupMixin:
             return False
         if kind in {"container", "containerelement"} and self._node_has_collapsed_ancestor(kind, name):
             return False
-        if kind == "decomposer":
-            return False
         if self.canvas_view_mode == "graph":
             if kind == "resnode":
                 return False
@@ -235,8 +253,6 @@ class AlgorithmStudioContainerGroupMixin:
             if kind in {"interventioner", "stage"}:
                 return self._find_stage(name) is not None
         if self.canvas_view_mode == "decomposer_overview":
-            if kind == "decomposer":
-                return self._find_rule(name) is not None
             if kind == "resnode":
                 return self._find_res_node(name) is not None
             return False
@@ -308,8 +324,10 @@ class AlgorithmStudioContainerGroupMixin:
         self.project.validate_container_group(group)
 
     def _sync_all_container_groups(self) -> None:
+        self._normalize_container_scene_scopes()
         self._ensure_singleton_container_group(self.project)
         self._ensure_singleton_resource_group(self.project)
+        self._normalize_container_scene_scopes()
         self.project.sync_container_groups_from_geometry()
 
     def _create_container_group_from_selection(self, name: str, x: float, y: float, width: float, height: float) -> ContainerGroupItem:

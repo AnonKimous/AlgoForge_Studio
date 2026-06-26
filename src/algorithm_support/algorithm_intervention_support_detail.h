@@ -8,6 +8,7 @@
 #include "cJSON.h"
 
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <string>
 #include <utility>
@@ -16,6 +17,21 @@
 namespace algorithm_support::intervention_detail {
 
 namespace fs = std::filesystem;
+
+inline bool ShouldEmitPipelineRunnerProbe(const std::string& algorithm_name) {
+  return algorithm_name.find("v2a0_pipeline_square_vertex_demo") != std::string::npos ||
+    algorithm_name.find("runner_mount") != std::string::npos;
+}
+
+inline void AppendPipelineRunnerProbe(const std::string& file_name, const std::string& line) {
+  const fs::path path = fs::path("D:/gptsandbox/artifacts/pipeline_runner") / file_name;
+  std::error_code ec;
+  fs::create_directories(path.parent_path(), ec);
+  std::ofstream file(path, std::ios::binary | std::ios::app);
+  if (file) {
+    file << line << '\n';
+  }
+}
 
 struct InterventionSchema {
   std::vector<agent::AlgorithmInterventionStageSpec> stage_specs;
@@ -59,10 +75,16 @@ inline bool ParseInterventionStageKind(
 inline InterventionSchema LoadInterventionSchema(const algorithm::AlgorithmPackageLocation& package_location) {
   InterventionSchema schema{};
   const std::string algorithm_name = AlgorithmNameFromLocation(package_location);
+  const bool emit_runner_probe = ShouldEmitPipelineRunnerProbe(algorithm_name);
   const fs::path path = algorithm::package_paths::ResolvePackageJsonPath(
     package_location.package_root,
     package_location.manifest_path,
     algorithm_name);
+  if (emit_runner_probe) {
+    AppendPipelineRunnerProbe(
+      "intervention_loader_probe.log",
+      "load.begin algorithm=" + algorithm_name + " path=" + path.string());
+  }
   if (path.empty()) {
     schema.error_message = "Failed to resolve package JSON file.";
     return schema;
@@ -73,28 +95,58 @@ inline InterventionSchema LoadInterventionSchema(const algorithm::AlgorithmPacka
     schema.error_message = "Failed to read package JSON file: " + path.string();
     return schema;
   }
+  if (emit_runner_probe) {
+    AppendPipelineRunnerProbe(
+      "intervention_loader_probe.log",
+      "load.read.end size=" + std::to_string(json_text.size()));
+  }
 
   cJSON* root = cJSON_Parse(json_text.c_str());
   if (!root) {
     schema.error_message = "Failed to parse package JSON file: " + path.string();
     return schema;
   }
+  if (emit_runner_probe) {
+    AppendPipelineRunnerProbe("intervention_loader_probe.log", "load.parse.end");
+  }
 
   const cJSON* intervention = cJSON_GetObjectItemCaseSensitive(root, "intervention");
   if (!intervention || !cJSON_IsObject(intervention)) {
-    schema.error_message = "Package JSON file " + path.string() + " is missing an 'intervention' object.";
     cJSON_Delete(root);
     return schema;
   }
 
-  const cJSON* stages = cJSON_GetObjectItemCaseSensitive(intervention, "stages");
-  if (!stages || !cJSON_IsObject(stages)) {
-    schema.error_message = "Intervention section in package JSON file " + path.string() + " is missing a 'stages' object.";
+  const cJSON* singular_stage = cJSON_GetObjectItemCaseSensitive(intervention, "stage");
+  const cJSON* plural_stages = cJSON_GetObjectItemCaseSensitive(intervention, "stages");
+  if (singular_stage && plural_stages) {
+    schema.error_message =
+      "Intervention section must not declare both 'stage' and 'stages': " + path.string();
+    cJSON_Delete(root);
+    return schema;
+  }
+
+  const cJSON* stages = singular_stage ? singular_stage : plural_stages;
+  if (!stages) {
+    cJSON_Delete(root);
+    return schema;
+  }
+  if (emit_runner_probe) {
+    AppendPipelineRunnerProbe(
+      "intervention_loader_probe.log",
+      "load.stage_section.end source=" + std::string(singular_stage ? "stage" : "stages"));
+  }
+  if (!cJSON_IsObject(stages)) {
+    schema.error_message = "Intervention stage section is invalid: " + path.string();
     cJSON_Delete(root);
     return schema;
   }
 
   for (const cJSON* stage_item = stages->child; stage_item; stage_item = stage_item->next) {
+    if (emit_runner_probe) {
+      AppendPipelineRunnerProbe(
+        "intervention_loader_probe.log",
+        "load.stage_item.begin key=" + std::string(stage_item && stage_item->string ? stage_item->string : "<null>"));
+    }
     if (!stage_item || !cJSON_IsObject(stage_item) || !stage_item->string) {
       continue;
     }
@@ -194,12 +246,20 @@ inline InterventionSchema LoadInterventionSchema(const algorithm::AlgorithmPacka
     }
 
     schema.stage_specs.push_back(std::move(stage_spec));
+    if (emit_runner_probe) {
+      AppendPipelineRunnerProbe(
+        "intervention_loader_probe.log",
+        "load.stage_item.end key=" + stage_key);
+    }
   }
 
   cJSON_Delete(root);
   schema.valid = !schema.stage_specs.empty();
-  if (!schema.valid && schema.error_message.empty()) {
-    schema.error_message = path.string() + " does not contain any intervention stages.";
+  if (emit_runner_probe) {
+    AppendPipelineRunnerProbe(
+      "intervention_loader_probe.log",
+      "load.end valid=" + std::string(schema.valid ? "true" : "false") +
+      " count=" + std::to_string(schema.stage_specs.size()));
   }
   return schema;
 }
@@ -251,6 +311,13 @@ inline bool LoadAlgorithmInterventionFromLocationImpl(
 
   const InterventionSchema schema = LoadInterventionSchema(package_location);
   if (!schema.valid) {
+    if (schema.error_message.empty()) {
+      out_intervention->reset();
+      if (out_error_message) {
+        out_error_message->clear();
+      }
+      return true;
+    }
     if (out_error_message) {
       *out_error_message = schema.error_message.empty()
         ? "Failed to load intervention schema from package location."

@@ -31,19 +31,8 @@ void _ClearAlgorithmSchedulerForRuntimeShutdown() {
   algorithm_management::ClearAlgorithmScheduler();
 }
 
-bool _IsGpuExecutionStage(const agent::AlgorithmInterventionStageSpec& stage) {
-  return stage.stage_kind == agent::AlgorithmInterventionStageKind::PostExecution &&
-    (stage.stage_name == "afterTick" || stage.stage_name == "aftertick");
-}
-
-bool _HasRuntimeGpuStagePayload(const agent::AlgorithmInterventionStageSpec& stage) {
-  return !stage.shader.vertex_shader_path.empty() ||
-    !stage.shader.fragment_shader_path.empty() ||
-    !stage.used_algorithm_containers.empty();
-}
-
 bool _ResolveRuntimeGpuShaderPath(
-  const std::string& algorithm_name,
+  const ::agent::AlgorithmObject& object,
   const std::string& shader_path,
   std::string* out_resolved_path,
   std::string* out_error_message) {
@@ -69,33 +58,88 @@ bool _ResolveRuntimeGpuShaderPath(
     return true;
   }
 
-  ::algorithm::AlgorithmPackageLocation package_location{};
-  std::string resolve_error_message;
-  if (!TryResolveAlgorithmPackageLocation(
-        algorithm_name,
-        &package_location,
-        &resolve_error_message)) {
-    if (out_error_message) {
-      *out_error_message = resolve_error_message.empty()
-        ? ("Failed to resolve algorithm package location for '" + algorithm_name + "'.")
-        : std::move(resolve_error_message);
+  std::filesystem::path runtime_package_root(object.runtime_package_root_path);
+  if (runtime_package_root.empty()) {
+    ::algorithm::AlgorithmPackageLocation package_location{};
+    std::string resolve_error_message;
+    if (!TryResolveAlgorithmPackageLocation(
+          object.algorithm_profile.algorithm_name,
+          &package_location,
+          &resolve_error_message)) {
+      if (out_error_message) {
+        *out_error_message = resolve_error_message.empty()
+          ? ("Failed to resolve algorithm package location for '" + object.algorithm_profile.algorithm_name + "'.")
+          : std::move(resolve_error_message);
+      }
+      return false;
     }
-    return false;
+    runtime_package_root = package_location.runtime_package_root;
   }
-  if (package_location.runtime_package_root.empty()) {
+  if (runtime_package_root.empty()) {
     if (out_error_message) {
-      *out_error_message = "Algorithm runtime package root is empty for '" + algorithm_name + "'.";
+      *out_error_message =
+        "Algorithm runtime package root is empty for '" + object.algorithm_profile.algorithm_name + "'.";
     }
     return false;
   }
 
-  *out_resolved_path = (package_location.runtime_package_root / path).lexically_normal().string();
+  *out_resolved_path = (runtime_package_root / path).lexically_normal().string();
   if (out_resolved_path->empty()) {
     if (out_error_message) {
-      *out_error_message = "Failed to resolve GPU shader path for '" + algorithm_name + "'.";
+      *out_error_message =
+        "Failed to resolve GPU shader path for '" + object.algorithm_profile.algorithm_name + "'.";
     }
     return false;
   }
+  if (out_error_message) {
+    out_error_message->clear();
+  }
+  return true;
+}
+
+bool _TryLoadRuntimeGpuExecSpec(
+  const ::agent::AlgorithmObject& object,
+  agent::AlgorithmGpuExecSpec* out_spec,
+  bool* out_has_gpu_exec,
+  std::string* out_error_message) {
+  if (!out_spec || !out_has_gpu_exec) {
+    if (out_error_message) {
+      *out_error_message = "Runtime GPU exec spec output pointer is null.";
+    }
+    return false;
+  }
+
+  *out_spec = {};
+  *out_has_gpu_exec = false;
+  if (!object.gpu_executor) {
+    if (out_error_message) {
+      out_error_message->clear();
+    }
+    return true;
+  }
+  if (!object.gpu_executor->GetGpuExecSpec(out_spec)) {
+    if (out_error_message) {
+      *out_error_message = "GPU executor failed to provide its exec specification.";
+    }
+    return false;
+  }
+  if (out_spec->shader.vertex_shader_path.empty() ||
+      out_spec->shader.fragment_shader_path.empty()) {
+    if (out_error_message) {
+      *out_error_message = "GPU exec stage is missing shader paths.";
+    }
+    return false;
+  }
+  if (out_spec->used_algorithm_containers.empty()) {
+    if (out_error_message) {
+      *out_error_message = "GPU exec stage does not bind any containers.";
+    }
+    return false;
+  }
+  if (out_spec->stage_name.empty()) {
+    out_spec->stage_name = "exec";
+  }
+  *out_has_gpu_exec = true;
   if (out_error_message) {
     out_error_message->clear();
   }
@@ -117,82 +161,48 @@ bool _TryBuildRuntimeGpuStageJob(
 
   *out_job = {};
   *out_has_gpu_stage = false;
-  if (!object.intervention) {
-    if (out_error_message) {
-      out_error_message->clear();
-    }
-    return true;
-  }
-
-  std::vector<agent::AlgorithmInterventionStageSpec> stage_specs;
-  if (!object.intervention->GetInterventionStageSpecs(&stage_specs) || stage_specs.empty()) {
-    if (out_error_message) {
-      out_error_message->clear();
-    }
-    return true;
-  }
-
-  const agent::AlgorithmInterventionStageSpec* gpu_stage = nullptr;
-  for (const agent::AlgorithmInterventionStageSpec& stage_spec : stage_specs) {
-    if (!_IsGpuExecutionStage(stage_spec)) {
-      continue;
-    }
-    // Debug tooling may inject an empty afterTick placeholder. Skip it unless
-    // the manifest actually provides runtime GPU shader/container payload.
-    if (!_HasRuntimeGpuStagePayload(stage_spec)) {
-      continue;
-    }
-    gpu_stage = &stage_spec;
-    break;
-  }
-  if (!gpu_stage) {
-    if (out_error_message) {
-      out_error_message->clear();
-    }
-    return true;
-  }
-
-  *out_has_gpu_stage = true;
-  if (gpu_stage->shader.vertex_shader_path.empty() || gpu_stage->shader.fragment_shader_path.empty()) {
-    if (out_error_message) {
-      *out_error_message = "GPU tick stage is missing shader paths.";
-    }
+  agent::AlgorithmGpuExecSpec gpu_exec_spec{};
+  if (!_TryLoadRuntimeGpuExecSpec(
+        object,
+        &gpu_exec_spec,
+        out_has_gpu_stage,
+        out_error_message)) {
     return false;
   }
-  if (gpu_stage->used_algorithm_containers.empty()) {
+  if (!*out_has_gpu_stage) {
     if (out_error_message) {
-      *out_error_message = "GPU tick stage does not bind any containers.";
+      out_error_message->clear();
     }
-    return false;
+    return true;
   }
 
-  out_job->debug_name = object.algorithm_profile.algorithm_name + "::" + gpu_stage->stage_name;
+  out_job->debug_name = object.algorithm_profile.algorithm_name + "::" + gpu_exec_spec.stage_name;
   out_job->shader_namespace = object.algorithm_profile.algorithm_name;
-  out_job->stage_name = gpu_stage->stage_name;
+  out_job->stage_name = gpu_exec_spec.stage_name;
   out_job->execution_key = container_set;
   if (!_ResolveRuntimeGpuShaderPath(
-        object.algorithm_profile.algorithm_name,
-        gpu_stage->shader.vertex_shader_path,
+        object,
+        gpu_exec_spec.shader.vertex_shader_path,
         &out_job->vertex_shader_path,
         out_error_message)) {
     return false;
   }
   if (!_ResolveRuntimeGpuShaderPath(
-        object.algorithm_profile.algorithm_name,
-        gpu_stage->shader.fragment_shader_path,
+        object,
+        gpu_exec_spec.shader.fragment_shader_path,
         &out_job->fragment_shader_path,
         out_error_message)) {
     return false;
   }
 
-  out_job->buffer_bindings.reserve(gpu_stage->used_algorithm_containers.size());
-  for (const agent::AlgorithmInterventionContainerBinding& binding : gpu_stage->used_algorithm_containers) {
+  out_job->buffer_bindings.reserve(gpu_exec_spec.used_algorithm_containers.size());
+  for (const agent::AlgorithmGpuExecContainerBinding& binding : gpu_exec_spec.used_algorithm_containers) {
     algorithm::AlgorithmContainer* container = FindAlgorithmContainer(container_set, binding.container_name);
     if (!container) {
       if (out_error_message) {
         *out_error_message = binding.required
-          ? ("GPU tick stage is missing container '" + binding.container_name + "'.")
-          : ("GPU tick optional container '" + binding.container_name +
+          ? ("GPU exec stage is missing container '" + binding.container_name + "'.")
+          : ("GPU exec optional container '" + binding.container_name +
               "' is not supported because runtime GPU bindings must stay positional.");
       }
       return false;
@@ -200,8 +210,8 @@ bool _TryBuildRuntimeGpuStageJob(
     if (container->element_stride == 0u || container->bytes.empty()) {
       if (out_error_message) {
         *out_error_message = binding.required
-          ? ("GPU tick stage container '" + binding.container_name + "' has no data.")
-          : ("GPU tick optional container '" + binding.container_name +
+          ? ("GPU exec stage container '" + binding.container_name + "' has no data.")
+          : ("GPU exec optional container '" + binding.container_name +
               "' has no data, and sparse GPU bindings are not supported.");
       }
       return false;
@@ -303,21 +313,10 @@ bool ExecuteGpuAlgorithmObject(
 }
 
 bool HasExecutableGpuAlgorithmStage(const ::agent::AlgorithmObject& object) {
-  if (!object.intervention) {
-    return false;
-  }
-
-  std::vector<agent::AlgorithmInterventionStageSpec> stage_specs;
-  if (!object.intervention->GetInterventionStageSpecs(&stage_specs)) {
-    return false;
-  }
-
-  for (const agent::AlgorithmInterventionStageSpec& stage_spec : stage_specs) {
-    if (_IsGpuExecutionStage(stage_spec) && _HasRuntimeGpuStagePayload(stage_spec)) {
-      return true;
-    }
-  }
-  return false;
+  agent::AlgorithmGpuExecSpec gpu_exec_spec{};
+  bool has_gpu_exec = false;
+  return _TryLoadRuntimeGpuExecSpec(object, &gpu_exec_spec, &has_gpu_exec, nullptr) &&
+    has_gpu_exec;
 }
 
 bool SynchronizeGpuAlgorithmObject(

@@ -3,6 +3,8 @@
 #include <chrono>
 #include <cassert>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -362,6 +364,21 @@ using PipelineInterStageBufferRuntimeState = CpuPipelineInterStageBufferRuntimeS
 constexpr float kPipelineNoProgressStallSeconds = 1.0f;
 constexpr uint64_t kFnvOffsetBasis64 = 1469598103934665603ull;
 constexpr uint64_t kFnvPrime64 = 1099511628211ull;
+
+inline bool ShouldEmitPipelineRunnerProbe(const std::string& pipeline_name) {
+  return pipeline_name.find("::runner_mount") != std::string::npos;
+}
+
+inline void AppendPipelineRunnerProbe(const std::string& file_name, const std::string& line) {
+  const std::filesystem::path path =
+    std::filesystem::path("D:/gptsandbox/artifacts/pipeline_runner") / file_name;
+  std::error_code ec;
+  std::filesystem::create_directories(path.parent_path(), ec);
+  std::ofstream file(path, std::ios::binary | std::ios::app);
+  if (file) {
+    file << line << '\n';
+  }
+}
 
 inline uint64_t HashBytes(uint64_t hash, const void* data, size_t size) {
   const auto* bytes = static_cast<const unsigned char*>(data);
@@ -752,6 +769,76 @@ inline bool CopyPipelineCircularLoopback(
   return true;
 }
 
+inline bool CopyWholeStandardContainerLayout(
+  const algorithm::AlgorithmContainerSet& source_container_set,
+  algorithm::AlgorithmContainerSet* target_container_set,
+  std::string* out_error_message) {
+  if (!target_container_set) {
+    if (out_error_message) {
+      *out_error_message = "Pipeline wrapper standard container target is unavailable.";
+    }
+    return false;
+  }
+  if (!source_container_set.standard_layout.enabled() ||
+      !target_container_set->standard_layout.enabled()) {
+    if (out_error_message) {
+      *out_error_message = "Pipeline wrapper standard container copy requires standard layouts.";
+    }
+    return false;
+  }
+  if (source_container_set.standard_layout.variable_count != target_container_set->standard_layout.variable_count ||
+      source_container_set.standard_layout.array_count != target_container_set->standard_layout.array_count) {
+    if (out_error_message) {
+      *out_error_message = "Pipeline wrapper standard container layout count mismatch.";
+    }
+    return false;
+  }
+  for (uint32_t i = 0u; i < source_container_set.standard_layout.variable_count; ++i) {
+    const std::string slot_name = source_container_set.standard_layout.MakeVariableName(i);
+    const algorithm::AlgorithmContainer* source_container =
+      algorithm::FindAlgorithmContainer(source_container_set, slot_name);
+    algorithm::AlgorithmContainer* target_container =
+      algorithm::FindAlgorithmContainer(target_container_set, slot_name);
+    if (!source_container || !target_container) {
+      if (out_error_message) {
+        *out_error_message = "Pipeline wrapper copy is missing standard variable slot '" + slot_name + "'.";
+      }
+      return false;
+    }
+    if (!algorithm::HasSameContainerStructure(*source_container, *target_container)) {
+      if (out_error_message) {
+        *out_error_message = "Pipeline wrapper variable slot structure mismatch at '" + slot_name + "'.";
+      }
+      return false;
+    }
+    std::memcpy(target_container->bytes.data(), source_container->bytes.data(), source_container->bytes.size());
+  }
+  for (uint32_t i = 0u; i < source_container_set.standard_layout.array_count; ++i) {
+    const std::string slot_name = source_container_set.standard_layout.MakeArrayName(i);
+    const algorithm::AlgorithmContainer* source_container =
+      algorithm::FindAlgorithmContainer(source_container_set, slot_name);
+    algorithm::AlgorithmContainer* target_container =
+      algorithm::FindAlgorithmContainer(target_container_set, slot_name);
+    if (!source_container || !target_container) {
+      if (out_error_message) {
+        *out_error_message = "Pipeline wrapper copy is missing standard array slot '" + slot_name + "'.";
+      }
+      return false;
+    }
+    if (!algorithm::HasSameContainerStructure(*source_container, *target_container)) {
+      if (out_error_message) {
+        *out_error_message = "Pipeline wrapper array slot structure mismatch at '" + slot_name + "'.";
+      }
+      return false;
+    }
+    std::memcpy(target_container->bytes.data(), source_container->bytes.data(), source_container->bytes.size());
+  }
+  if (out_error_message) {
+    out_error_message->clear();
+  }
+  return true;
+}
+
 inline void UpdatePipelineGroupProgressState(
   const PipelineGroupProgressState& previous_state,
   uint64_t current_signature,
@@ -828,6 +915,32 @@ struct BuiltAlgorithmMount {
   std::shared_ptr<algorithm::AlgorithmContainerSet> container_set{};
   std::string error_message;
   bool ok{false};
+};
+
+class NoOpPipelineWrapperCpuExecutor final : public ::algorithm_management::IAlgorithmCpuExecutor {
+ public:
+  bool ExecuteCpuAlgorithm(
+    const AgentTickContext& context,
+    const algorithm::AlgorithmProfile& algorithm_profile,
+    const AgentToAlgorithmSignal& agent_to_algorithm_signal,
+    algorithm::AlgorithmContainerSet* algorithm_container_set,
+    AlgorithmToAgentSignal* algorithm_to_agent_signal,
+    AlgorithmPackageDebugState* debug_state) override {
+    (void)context;
+    (void)algorithm_profile;
+    (void)agent_to_algorithm_signal;
+    (void)algorithm_container_set;
+    if (algorithm_to_agent_signal) {
+      *algorithm_to_agent_signal = {};
+    }
+    if (debug_state) {
+      debug_state->signals.push_back(::algorithm_management::AdvancedAlgorithmDebugSignal{
+        .name = "pipeline_wrapper.noop",
+        .payload = "Executed wrapper no-op executor.",
+      });
+    }
+    return true;
+  }
 };
 
 inline std::string StandardLayoutKey(const algorithm::AlgorithmContainerSet& container_set) {
@@ -914,6 +1027,81 @@ inline BuiltAlgorithmMount BuildAlgorithmMount(
   result.object = std::move(object);
   result.container_set = std::move(container_set_handle);
   result.ok = true;
+  return result;
+}
+
+inline BuiltAlgorithmMount BuildEmptyPipelineWrapperMount(
+  const ::algorithm_management::AlgorithmObject& body_stage0_object,
+  const std::string& wrapper_algorithm_name,
+  ::algorithm_management::AlgorithmPipelineWrapperRole wrapper_role,
+  ::algorithm_management::AlgorithmExecutionPreference execution_preference) {
+  BuiltAlgorithmMount result{};
+  if (!body_stage0_object.container_set()) {
+    result.error_message = "Pipeline body stage0 container set is unavailable for wrapper mount.";
+    return result;
+  }
+
+  result.object.algorithm_profile.algorithm_name = wrapper_algorithm_name;
+  result.object.algorithm_profile.container_manifest_name = wrapper_algorithm_name;
+  result.object.mount_mode = ::algorithm_management::AlgorithmMountMode::Pipeline;
+  result.object.execution_preference = execution_preference;
+  result.object.cpu_symbol = true;
+  result.object.gpu_symbol = false;
+  result.object.cpu_executor = std::make_shared<NoOpPipelineWrapperCpuExecutor>();
+  result.object.pipeline_wrapper_role = wrapper_role;
+  result.object.pipeline_wrapper_empty = true;
+  result.object.shared_container_set = std::make_shared<algorithm::AlgorithmContainerSet>();
+  algorithm::CopyAlgorithmContainerSet(*body_stage0_object.container_set(), result.object.shared_container_set.get());
+  result.container_set = result.object.shared_container_set;
+  result.ok = true;
+  return result;
+}
+
+inline std::string DefaultPipelineWrapperAlgorithmName(
+  const std::string& root_algorithm_name,
+  ::algorithm_management::AlgorithmPipelineWrapperRole wrapper_role) {
+  const char* suffix = wrapper_role == ::algorithm_management::AlgorithmPipelineWrapperRole::Begin
+    ? "_stageBegin"
+    : "_stageEnd";
+  return root_algorithm_name + suffix;
+}
+
+inline BuiltAlgorithmMount BuildPipelineWrapperMount(
+  const ::algorithm::AlgorithmPackageLocation& root_package_location,
+  const ::agent::AlgorithmObject& body_stage0_object,
+  const algorithm_support::AlgorithmPipelineWrapperStageSpec& stage_spec,
+  ::algorithm_management::AlgorithmPipelineWrapperRole wrapper_role,
+  ::algorithm_management::AlgorithmExecutionPreference execution_preference,
+  std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>* standard_shared_container_sets) {
+  const std::string root_algorithm_name = root_package_location.algorithm_name.empty()
+    ? root_package_location.manifest_name
+    : root_package_location.algorithm_name;
+  std::string wrapper_algorithm_name = stage_spec.algorithm_name;
+  if (wrapper_algorithm_name.empty()) {
+    wrapper_algorithm_name = DefaultPipelineWrapperAlgorithmName(root_algorithm_name, wrapper_role);
+  }
+
+  ::algorithm::AlgorithmPackageLocation wrapper_package_location{};
+  if (!TryResolveAlgorithmPackageLocation(wrapper_algorithm_name, &wrapper_package_location, nullptr)) {
+    return BuildEmptyPipelineWrapperMount(
+      body_stage0_object,
+      wrapper_algorithm_name,
+      wrapper_role,
+      execution_preference);
+  }
+
+  BuiltAlgorithmMount result = BuildAlgorithmMount(
+    wrapper_algorithm_name,
+    {},
+    {},
+    ::algorithm_management::AlgorithmMountMode::Pipeline,
+    execution_preference,
+    standard_shared_container_sets);
+  if (!result.ok) {
+    return result;
+  }
+  result.object.pipeline_wrapper_role = wrapper_role;
+  result.object.pipeline_wrapper_empty = false;
   return result;
 }
 
@@ -1805,10 +1993,17 @@ inline bool AlgorithmScheduler::SubmitAlgorithmObject(
     }
     return false;
   }
+  const bool emit_runner_probe =
+    pipeline_scheduler_detail::ShouldEmitPipelineRunnerProbe(object.pipeline_name);
 
   if (object.execution_preference == AlgorithmExecutionPreference::Gpu &&
       object.gpu_symbol &&
       HasExecutableGpuAlgorithmStage(object)) {
+    if (emit_runner_probe) {
+      pipeline_scheduler_detail::AppendPipelineRunnerProbe(
+        "scheduler_submit_probe.log",
+        "submit.branch=gpu_exec stage=" + object.algorithm_profile.algorithm_name);
+    }
     if (!ExecuteGpuAlgorithmObject(
           object,
           container_set,
@@ -1835,6 +2030,11 @@ inline bool AlgorithmScheduler::SubmitAlgorithmObject(
       object.gpu_symbol &&
       !HasExecutableGpuAlgorithmStage(object) &&
       !object.cpu_executor) {
+    if (emit_runner_probe) {
+      pipeline_scheduler_detail::AppendPipelineRunnerProbe(
+        "scheduler_submit_probe.log",
+        "submit.branch=missing_gpu_exec stage=" + object.algorithm_profile.algorithm_name);
+    }
     if (out_error_message) {
       *out_error_message = "Ready GPU algorithm does not expose an executable GPU stage.";
     }
@@ -1842,6 +2042,11 @@ inline bool AlgorithmScheduler::SubmitAlgorithmObject(
   }
 
   if (!object.cpu_symbol || !object.cpu_executor) {
+    if (emit_runner_probe) {
+      pipeline_scheduler_detail::AppendPipelineRunnerProbe(
+        "scheduler_submit_probe.log",
+        "submit.branch=missing_cpu_exec stage=" + object.algorithm_profile.algorithm_name);
+    }
     if (out_error_message) {
       *out_error_message = "Ready CPU algorithm is missing its CPU executor.";
     }
@@ -1895,6 +2100,9 @@ inline bool AlgorithmScheduler::RegisterPipeline(
   if (found != pipeline_registrations_.end()) {
     if (found->second.root_stage_name != registration.root_stage_name ||
         found->second.stage_count != registration.stage_count ||
+        found->second.body_begin_stage_index != registration.body_begin_stage_index ||
+        found->second.body_stage_count != registration.body_stage_count ||
+        found->second.effective_tail_stage_index != registration.effective_tail_stage_index ||
         found->second.topology != registration.topology ||
         found->second.sync_mode != registration.sync_mode ||
         found->second.max_concurrent_stage0_submissions != registration.max_concurrent_stage0_submissions ||
@@ -2108,9 +2316,53 @@ inline bool AlgorithmScheduler::MountPipelineAlgorithmObjects(
     set_error("Pipeline name is already in use.");
     return false;
   }
+  const bool emit_runner_probe = pipeline_scheduler_detail::ShouldEmitPipelineRunnerProbe(pipeline_name);
+  if (emit_runner_probe) {
+    pipeline_scheduler_detail::AppendPipelineRunnerProbe(
+      "scheduler_mount_probe.log",
+      "mount.begin pipeline=" + pipeline_name +
+      " owner=" + owner_agent_name +
+      " stage_submissions=" + std::to_string(stage_submissions.size()));
+  }
 
-  std::vector<pipeline_scheduler_detail::BuiltAlgorithmMount> built_stages{};
-  built_stages.reserve(stage_submissions.size());
+  ::algorithm::AlgorithmPackageLocation root_package_location{};
+  std::string root_location_error_message;
+  if (!TryResolveAlgorithmPackageLocation(
+        stage_submissions.front().stage_name,
+        &root_package_location,
+        &root_location_error_message)) {
+    set_error(root_location_error_message.empty()
+      ? ("Failed to resolve pipeline root algorithm package location for '" + stage_submissions.front().stage_name + "'.")
+      : std::move(root_location_error_message));
+    return false;
+  }
+  if (emit_runner_probe) {
+    pipeline_scheduler_detail::AppendPipelineRunnerProbe(
+      "scheduler_mount_probe.log",
+      "mount.root_location.end algorithm=" + stage_submissions.front().stage_name);
+  }
+
+  algorithm_support::AlgorithmPipelineWrapperSpec wrapper_spec{};
+  std::string wrapper_error_message;
+  if (!algorithm_support::LoadAlgorithmPipelineWrapperSpecFromLocation(
+        root_package_location,
+        &wrapper_spec,
+        &wrapper_error_message)) {
+    set_error(wrapper_error_message.empty()
+      ? "Failed to load pipeline wrapper spec."
+      : std::move(wrapper_error_message));
+    return false;
+  }
+  if (emit_runner_probe) {
+    pipeline_scheduler_detail::AppendPipelineRunnerProbe(
+      "scheduler_mount_probe.log",
+      "mount.wrapper_spec.end declared=" + std::string(wrapper_spec.declared ? "true" : "false") +
+      " begin=" + (wrapper_spec.stage_begin.algorithm_name.empty() ? "<empty>" : wrapper_spec.stage_begin.algorithm_name) +
+      " end=" + (wrapper_spec.stage_end.algorithm_name.empty() ? "<empty>" : wrapper_spec.stage_end.algorithm_name));
+  }
+
+  std::vector<pipeline_scheduler_detail::BuiltAlgorithmMount> built_body_stages{};
+  built_body_stages.reserve(stage_submissions.size());
   std::unordered_set<std::string> seen_stage_names{};
   bool pipeline_supports_circular_submission = false;
   for (size_t stage_index = 0u; stage_index < stage_submissions.size(); ++stage_index) {
@@ -2136,6 +2388,11 @@ inline bool AlgorithmScheduler::MountPipelineAlgorithmObjects(
       set_error(built_mount.error_message);
       return false;
     }
+    if (emit_runner_probe) {
+      pipeline_scheduler_detail::AppendPipelineRunnerProbe(
+        "scheduler_mount_probe.log",
+        "mount.body_stage_built name=" + stage_submission.stage_name);
+    }
     if (!built_mount.container_set || !built_mount.container_set->standard_layout.enabled()) {
       set_error("Pipeline stage standard container layout is unavailable: " + stage_submission.stage_name);
       return false;
@@ -2147,25 +2404,18 @@ inline bool AlgorithmScheduler::MountPipelineAlgorithmObjects(
       return false;
     }
 
-    built_mount.object.mount_mode = ::algorithm_management::AlgorithmMountMode::Pipeline;
-    built_mount.object.pipeline_stage = true;
-    built_mount.object.pipeline_name = pipeline_name;
-    built_mount.object.pipeline_stage_index = static_cast<uint32_t>(stage_index);
-    built_mount.object.pipeline_stage_count = static_cast<uint32_t>(stage_submissions.size());
-    built_mount.object.pipeline_topology = topology;
-    built_mount.object.pipeline_sync_mode = sync_mode;
     if (stage_index == 0u &&
         built_mount.object.runtime_transfer_map &&
         built_mount.object.runtime_transfer_map->SupportsCircularTick()) {
       pipeline_supports_circular_submission = true;
     }
-    built_stages.push_back(std::move(built_mount));
+    built_body_stages.push_back(std::move(built_mount));
   }
 
   std::shared_ptr<algorithm::AlgorithmRuntimeTransferMap> shared_pipeline_transfer_map{};
   std::string transfer_map_error_message;
   if (!pipeline_scheduler_detail::TryBuildMountedPipelineTransferMap(
-        built_stages,
+        built_body_stages,
         &shared_pipeline_transfer_map,
         &transfer_map_error_message)) {
     set_error(transfer_map_error_message.empty()
@@ -2173,10 +2423,15 @@ inline bool AlgorithmScheduler::MountPipelineAlgorithmObjects(
       : std::move(transfer_map_error_message));
     return false;
   }
+  if (emit_runner_probe) {
+    pipeline_scheduler_detail::AppendPipelineRunnerProbe(
+      "scheduler_mount_probe.log",
+      "mount.transfer_map.end");
+  }
   ALGORITHM_SCHEDULER_ASSERT(
     shared_pipeline_transfer_map && shared_pipeline_transfer_map->valid,
     "Mounted pipeline runtime transfer map must be valid.");
-  for (pipeline_scheduler_detail::BuiltAlgorithmMount& built_stage : built_stages) {
+  for (pipeline_scheduler_detail::BuiltAlgorithmMount& built_stage : built_body_stages) {
     built_stage.object.runtime_transfer_map = shared_pipeline_transfer_map;
   }
 
@@ -2185,6 +2440,70 @@ inline bool AlgorithmScheduler::MountPipelineAlgorithmObjects(
     set_error("This pipeline algorithm does not support circular pipeline submission.");
     return false;
   }
+
+  std::vector<pipeline_scheduler_detail::BuiltAlgorithmMount> built_stages{};
+  const bool has_wrapper_nodes = wrapper_spec.declared;
+  built_stages.reserve(stage_submissions.size() + (has_wrapper_nodes ? 2u : 0u));
+  if (has_wrapper_nodes) {
+    pipeline_scheduler_detail::BuiltAlgorithmMount wrapper_begin_mount =
+      pipeline_scheduler_detail::BuildPipelineWrapperMount(
+        root_package_location,
+        built_body_stages.front().object,
+        wrapper_spec.stage_begin,
+        ::algorithm_management::AlgorithmPipelineWrapperRole::Begin,
+        execution_preference,
+        standard_shared_container_sets);
+    if (!wrapper_begin_mount.ok) {
+      set_error(wrapper_begin_mount.error_message.empty()
+        ? "Failed to build pipeline wrapper begin mount."
+        : std::move(wrapper_begin_mount.error_message));
+      return false;
+    }
+    if (emit_runner_probe) {
+      pipeline_scheduler_detail::AppendPipelineRunnerProbe(
+        "scheduler_mount_probe.log",
+        "mount.wrapper_begin_built algorithm=" + wrapper_begin_mount.object.algorithm_profile.algorithm_name +
+        " empty=" + std::string(wrapper_begin_mount.object.pipeline_wrapper_empty ? "true" : "false"));
+    }
+    built_stages.push_back(std::move(wrapper_begin_mount));
+  }
+  for (pipeline_scheduler_detail::BuiltAlgorithmMount& built_body_stage : built_body_stages) {
+    built_stages.push_back(std::move(built_body_stage));
+  }
+  if (has_wrapper_nodes) {
+    pipeline_scheduler_detail::BuiltAlgorithmMount wrapper_end_mount =
+      pipeline_scheduler_detail::BuildPipelineWrapperMount(
+        root_package_location,
+        built_stages[has_wrapper_nodes ? 1u : 0u].object,
+        wrapper_spec.stage_end,
+        ::algorithm_management::AlgorithmPipelineWrapperRole::End,
+        execution_preference,
+        standard_shared_container_sets);
+    if (!wrapper_end_mount.ok) {
+      set_error(wrapper_end_mount.error_message.empty()
+        ? "Failed to build pipeline wrapper end mount."
+        : std::move(wrapper_end_mount.error_message));
+      return false;
+    }
+    if (emit_runner_probe) {
+      pipeline_scheduler_detail::AppendPipelineRunnerProbe(
+        "scheduler_mount_probe.log",
+        "mount.wrapper_end_built algorithm=" + wrapper_end_mount.object.algorithm_profile.algorithm_name +
+        " empty=" + std::string(wrapper_end_mount.object.pipeline_wrapper_empty ? "true" : "false"));
+    }
+    built_stages.push_back(std::move(wrapper_end_mount));
+  }
+  if (emit_runner_probe) {
+    pipeline_scheduler_detail::AppendPipelineRunnerProbe(
+      "scheduler_mount_probe.log",
+      "mount.stage_vector.end total=" + std::to_string(built_stages.size()));
+  }
+
+  const size_t pipeline_total_stage_count = built_stages.size();
+  const size_t pipeline_body_begin_stage_index = has_wrapper_nodes ? 1u : 0u;
+  const size_t pipeline_body_stage_count = built_body_stages.size();
+  const size_t pipeline_effective_tail_stage_index =
+    has_wrapper_nodes ? (pipeline_total_stage_count - 1u) : (pipeline_total_stage_count - 1u);
 
   const size_t pipeline_begin_index = mounted_objects->size();
   const size_t previous_runtime_state_count = inout_runtime_states->size();
@@ -2211,13 +2530,13 @@ inline bool AlgorithmScheduler::MountPipelineAlgorithmObjects(
     inout_assembly_states->resize(previous_assembly_state_count);
   };
 
-  for (size_t i = 0u; i < stage_submissions.size(); ++i) {
+  for (size_t i = 0u; i < built_stages.size(); ++i) {
     const size_t stage_index = pipeline_begin_index + i;
     (*mounted_objects)[stage_index].mount_mode = ::algorithm_management::AlgorithmMountMode::Pipeline;
     (*mounted_objects)[stage_index].pipeline_stage = true;
     (*mounted_objects)[stage_index].pipeline_name = pipeline_name;
     (*mounted_objects)[stage_index].pipeline_stage_index = static_cast<uint32_t>(i);
-    (*mounted_objects)[stage_index].pipeline_stage_count = static_cast<uint32_t>(stage_submissions.size());
+    (*mounted_objects)[stage_index].pipeline_stage_count = static_cast<uint32_t>(pipeline_total_stage_count);
     (*mounted_objects)[stage_index].pipeline_topology = topology;
     (*mounted_objects)[stage_index].pipeline_sync_mode = sync_mode;
     (*inout_assembly_states)[stage_index] = ::algorithm_management::AlgorithmAssemblyState::Ready;
@@ -2231,7 +2550,7 @@ inline bool AlgorithmScheduler::MountPipelineAlgorithmObjects(
     common_data::DefaultPipelineMaxConcurrentStage0Submissions();
   pipeline_runtime_state.mandatory_stage_buffer_slot_name =
     shared_pipeline_transfer_map->pipeline_shared_stage_buffer_slot_name;
-  pipeline_runtime_state.stage_has_data.assign(stage_submissions.size(), false);
+  pipeline_runtime_state.stage_has_data.assign(pipeline_total_stage_count, false);
   if (topology == ::algorithm_management::AlgorithmPipelineTopology::NonCircular &&
       !pipeline_runtime_state.stage_has_data.empty()) {
     pipeline_runtime_state.stage_has_data.front() = true;
@@ -2240,8 +2559,8 @@ inline bool AlgorithmScheduler::MountPipelineAlgorithmObjects(
   pipeline_scheduler_detail::PipelineLaneRuntimeState initial_lane_state{};
   std::string lane_error_message;
   if (!pipeline_scheduler_detail::TryBuildInitialPipelineLaneRuntimeState(
-        (*mounted_objects)[pipeline_begin_index],
-        stage_submissions.size(),
+        (*mounted_objects)[pipeline_begin_index + pipeline_body_begin_stage_index],
+        pipeline_total_stage_count,
         owner_agent_name,
         topology == ::algorithm_management::AlgorithmPipelineTopology::Circular,
         pipeline_runtime_state.next_lane_id,
@@ -2254,6 +2573,11 @@ inline bool AlgorithmScheduler::MountPipelineAlgorithmObjects(
       : std::move(lane_error_message));
     return false;
   }
+  if (emit_runner_probe) {
+    pipeline_scheduler_detail::AppendPipelineRunnerProbe(
+      "scheduler_mount_probe.log",
+      "mount.initial_lane.end");
+  }
   if (topology == ::algorithm_management::AlgorithmPipelineTopology::NonCircular &&
       !initial_lane_state.stage_has_data.empty()) {
     initial_lane_state.stage_has_data.front() = true;
@@ -2265,8 +2589,12 @@ inline bool AlgorithmScheduler::MountPipelineAlgorithmObjects(
   const bool registered = RegisterPipeline(
     ::algorithm_management::CpuPipelineRegistration{
       .pipeline_name = pipeline_name,
-      .root_stage_name = (*mounted_objects)[pipeline_begin_index].algorithm_profile.algorithm_name,
-      .stage_count = static_cast<uint32_t>(stage_submissions.size()),
+      .root_stage_name = (*mounted_objects)[pipeline_begin_index + pipeline_body_begin_stage_index]
+        .algorithm_profile.algorithm_name,
+      .stage_count = static_cast<uint32_t>(pipeline_total_stage_count),
+      .body_begin_stage_index = static_cast<uint32_t>(pipeline_body_begin_stage_index),
+      .body_stage_count = static_cast<uint32_t>(pipeline_body_stage_count),
+      .effective_tail_stage_index = static_cast<uint32_t>(pipeline_effective_tail_stage_index),
       .topology = topology,
       .sync_mode = sync_mode,
       .max_concurrent_stage0_submissions =
@@ -2279,6 +2607,11 @@ inline bool AlgorithmScheduler::MountPipelineAlgorithmObjects(
     rollback_mount_vectors();
     return false;
   }
+  if (emit_runner_probe) {
+    pipeline_scheduler_detail::AppendPipelineRunnerProbe(
+      "scheduler_mount_probe.log",
+      "mount.registration.end");
+  }
 
   const bool runtime_registered = RegisterPipelineRuntime(
     pipeline_name,
@@ -2289,9 +2622,19 @@ inline bool AlgorithmScheduler::MountPipelineAlgorithmObjects(
     rollback_mount_vectors();
     return false;
   }
+  if (emit_runner_probe) {
+    pipeline_scheduler_detail::AppendPipelineRunnerProbe(
+      "scheduler_mount_probe.log",
+      "mount.runtime_registration.end");
+  }
 
   if (out_begin_index) {
     *out_begin_index = pipeline_begin_index;
+  }
+  if (emit_runner_probe) {
+    pipeline_scheduler_detail::AppendPipelineRunnerProbe(
+      "scheduler_mount_probe.log",
+      "mount.end begin_index=" + std::to_string(pipeline_begin_index));
   }
   if (out_error_message) {
     out_error_message->clear();
@@ -2321,6 +2664,11 @@ inline bool AlgorithmScheduler::EnqueueMountedPipelineStage0Submission(
     set_error("Pipeline name must not be empty.");
     return false;
   }
+  CpuPipelineRegistration registration{};
+  if (!TryGetPipelineRegistration(pipeline_name, &registration)) {
+    set_error("Mounted pipeline registration is unavailable.");
+    return false;
+  }
 
   std::vector<::algorithm_management::AlgorithmObject>& algorithm_objects = *mounted_objects;
   size_t pipeline_begin_index = algorithm_objects.size();
@@ -2335,7 +2683,13 @@ inline bool AlgorithmScheduler::EnqueueMountedPipelineStage0Submission(
     return false;
   }
 
-  ::algorithm_management::AlgorithmObject& stage0_object = algorithm_objects[pipeline_begin_index];
+  const size_t body_stage0_index = pipeline_begin_index + static_cast<size_t>(registration.body_begin_stage_index);
+  if (body_stage0_index >= pipeline_end_index) {
+    set_error("Mounted pipeline body stage0 is unavailable.");
+    return false;
+  }
+
+  ::algorithm_management::AlgorithmObject& stage0_object = algorithm_objects[body_stage0_index];
   if (stage0_object.execution_preference == ::algorithm_management::AlgorithmExecutionPreference::Cpu) {
     if (!EnqueuePipelineStage0Submission(
           pipeline_name,
@@ -2477,8 +2831,8 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
   *out_pipeline_processing_failed = false;
 
   ::algorithm_management::AlgorithmObject& root_object = algorithm_objects[begin_index];
-  const bool pipeline_uses_inter_stage_buffer =
-    root_object.execution_preference == ::algorithm_management::AlgorithmExecutionPreference::Cpu;
+  const bool emit_runner_probe =
+    pipeline_scheduler_detail::ShouldEmitPipelineRunnerProbe(root_object.pipeline_name);
 
   CpuPipelineRegistration registration{};
   CpuPipelineRuntimeState pipeline_state{};
@@ -2506,12 +2860,30 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
   const bool pipeline_stage_debug_all = root_object.pipeline_stage_debug_all;
   const uint32_t pipeline_stage_debug_index = root_object.pipeline_stage_debug_index;
   const size_t pipeline_stage_count = end_index - begin_index;
+  const size_t body_begin_index = begin_index + static_cast<size_t>(registration.body_begin_stage_index);
+  const size_t body_stage_count = static_cast<size_t>(registration.body_stage_count);
+  const size_t body_end_index = body_begin_index + body_stage_count;
+  const size_t effective_tail_index = begin_index + static_cast<size_t>(registration.effective_tail_stage_index);
+  const bool has_wrapper_begin = static_cast<size_t>(registration.body_begin_stage_index) > 0u;
+  const bool has_wrapper_end = effective_tail_index >= body_end_index && effective_tail_index < end_index;
+  ALGORITHM_SCHEDULER_ASSERT(
+    body_begin_index < end_index && body_stage_count > 0u && body_end_index <= end_index,
+    "Mounted pipeline body stage range is invalid.");
+  if (body_begin_index >= end_index || body_stage_count == 0u || body_end_index > end_index) {
+    set_error("Mounted pipeline body stage range is invalid.");
+    out_pipeline_signal->stop_requested = true;
+    *out_pipeline_processing_failed = true;
+    return false;
+  }
+  ::algorithm_management::AlgorithmObject& body_stage0_object = algorithm_objects[body_begin_index];
+  const bool pipeline_uses_inter_stage_buffer =
+    body_stage0_object.execution_preference == ::algorithm_management::AlgorithmExecutionPreference::Cpu;
 
   if (pipeline_state.lanes.empty()) {
     pipeline_scheduler_detail::PipelineLaneRuntimeState fallback_lane_state{};
     std::string fallback_lane_error_message;
     if (!pipeline_scheduler_detail::TryBuildInitialPipelineLaneRuntimeState(
-          algorithm_objects[begin_index],
+          body_stage0_object,
           pipeline_stage_count,
           owner_agent_name,
           pipeline_state.topology == ::algorithm_management::AlgorithmPipelineTopology::Circular,
@@ -2579,9 +2951,9 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
     progress_state.stage_runtime_stats.clear();
   }
 
-  algorithm_objects[begin_index].SetContainerSet(primary_lane_state->standard_container_set);
-  algorithm_objects[begin_index].resource_bindings = primary_lane_state->resource_bindings;
-  algorithm_objects[begin_index].descriptor_values = primary_lane_state->descriptor_values;
+  body_stage0_object.SetContainerSet(primary_lane_state->standard_container_set);
+  body_stage0_object.resource_bindings = primary_lane_state->resource_bindings;
+  body_stage0_object.descriptor_values = primary_lane_state->descriptor_values;
 
   std::vector<bool> current_stage_has_data = primary_lane_state->stage_has_data;
   std::vector<bool> next_stage_has_data(pipeline_stage_count, false);
@@ -2615,7 +2987,7 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
       stage0_is_ready &&
       !pipeline_state.pending_stage0_submissions.empty() &&
       (pipeline_stage_debug_all || pipeline_stage_debug_index == 0u)) {
-    ::algorithm_management::AlgorithmObject& stage0_object = algorithm_objects[begin_index];
+    ::algorithm_management::AlgorithmObject& stage0_object = body_stage0_object;
     CpuPendingPipelineStage0Submission submission =
       std::move(pipeline_state.pending_stage0_submissions.front());
     pipeline_state.pending_stage0_submissions.erase(pipeline_state.pending_stage0_submissions.begin());
@@ -2841,6 +3213,27 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
     ::algorithm_management::AlgorithmObject& object = algorithm_objects[index];
     ::algorithm_management::AgentAlgorithmRuntimeState& runtime_state = updated_runtime_states[index];
     const auto stage_begin = std::chrono::steady_clock::now();
+    if (emit_runner_probe) {
+      pipeline_scheduler_detail::AppendPipelineRunnerProbe(
+        "scheduler_tick_probe.log",
+        "tick.ingress.begin stage=" + object.algorithm_profile.algorithm_name);
+    }
+    if (object.pipeline_wrapper_role != ::algorithm_management::AlgorithmPipelineWrapperRole::None) {
+      object.SetContainerSet(primary_lane_state->standard_container_set);
+      object.resource_bindings = primary_lane_state->resource_bindings;
+      object.descriptor_values = primary_lane_state->descriptor_values;
+      if (emit_runner_probe) {
+        pipeline_scheduler_detail::AppendPipelineRunnerProbe(
+          "scheduler_tick_probe.log",
+          "tick.ingress.wrapper_passthrough stage=" + object.algorithm_profile.algorithm_name);
+      }
+      const auto stage_end = std::chrono::steady_clock::now();
+      pipeline_scheduler_detail::AddPipelineStageRuntimeElapsed(
+        pipeline_stage_runtime_stats,
+        object.algorithm_profile.algorithm_name,
+        std::chrono::duration<float>(stage_end - stage_begin).count());
+      continue;
+    }
     algorithm_support::PipelineStageBridge bridge(object.runtime_transfer_map);
     std::string ingress_error_message;
     const bool ingress_ok = pipeline_uses_inter_stage_buffer
@@ -2871,6 +3264,11 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
       set_error(failure_message);
       *out_pipeline_processing_failed = true;
       return false;
+    }
+    if (emit_runner_probe) {
+      pipeline_scheduler_detail::AppendPipelineRunnerProbe(
+        "scheduler_tick_probe.log",
+        "tick.ingress.end stage=" + object.algorithm_profile.algorithm_name);
     }
     std::string ingress_debug_error_message;
     if (!bridge.CaptureIngressDebugSet(
@@ -2911,6 +3309,11 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
       index < assembly_states.size() &&
       assembly_states[index] == ::algorithm_management::AlgorithmAssemblyState::Ready;
     const auto stage_begin = std::chrono::steady_clock::now();
+    if (emit_runner_probe) {
+      pipeline_scheduler_detail::AppendPipelineRunnerProbe(
+        "scheduler_tick_probe.log",
+        "tick.execute.begin stage=" + object.algorithm_profile.algorithm_name);
+    }
     if (!pipeline_scheduler_detail::TickAlgorithmObject(
           object,
           context,
@@ -2930,6 +3333,11 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
       *out_pipeline_processing_failed = true;
       return false;
     }
+    if (emit_runner_probe) {
+      pipeline_scheduler_detail::AppendPipelineRunnerProbe(
+        "scheduler_tick_probe.log",
+        "tick.execute.end stage=" + object.algorithm_profile.algorithm_name);
+    }
     const auto stage_end = std::chrono::steady_clock::now();
     pipeline_scheduler_detail::AddPipelineStageRuntimeElapsed(
       pipeline_stage_runtime_stats,
@@ -2943,6 +3351,11 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
   for (size_t index : executable_indices) {
     ::algorithm_management::AlgorithmObject& object = algorithm_objects[index];
     const algorithm::AlgorithmContainerSet* source_container_set = object.container_set();
+    if (emit_runner_probe) {
+      pipeline_scheduler_detail::AppendPipelineRunnerProbe(
+        "scheduler_tick_probe.log",
+        "tick.egress.begin stage=" + object.algorithm_profile.algorithm_name);
+    }
     if (!source_container_set) {
       ALGORITHM_SCHEDULER_ASSERT(
         false,
@@ -2964,8 +3377,109 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
     algorithm_support::PipelineStageBridge bridge(object.runtime_transfer_map);
     const auto stage_begin = std::chrono::steady_clock::now();
     const size_t stage_offset = index - begin_index;
-    const bool is_last_stage = stage_offset + 1u == pipeline_stage_count;
-    if (is_last_stage) {
+    const bool is_wrapper_begin =
+      object.pipeline_wrapper_role == ::algorithm_management::AlgorithmPipelineWrapperRole::Begin;
+    const bool is_wrapper_end =
+      object.pipeline_wrapper_role == ::algorithm_management::AlgorithmPipelineWrapperRole::End;
+    const bool is_body_last_stage = index + 1u == body_end_index;
+    const bool is_effective_tail_stage = index == effective_tail_index;
+    if (is_wrapper_begin) {
+      if (stage_offset + 1u < next_stage_has_data.size()) {
+        next_stage_has_data[stage_offset + 1u] = true;
+      }
+    } else if (is_wrapper_end) {
+      if (pipeline_scheduler_detail::CollectPipelineExitReflectionSnapshot(
+            object.pipeline_name.empty() ? object.algorithm_profile.algorithm_name : object.pipeline_name,
+            *source_container_set,
+            &updated_runtime_states[index].reflection_snapshot)) {
+        updated_runtime_states[index].reflection_snapshot_cached = false;
+        pipeline_state.exit_reflection_snapshot = updated_runtime_states[index].reflection_snapshot;
+        pipeline_state.exit_reflection_snapshot_valid = true;
+      } else {
+        updated_runtime_states[index].reflection_snapshot.Clear();
+        pipeline_state.exit_reflection_snapshot.Clear();
+        pipeline_state.exit_reflection_snapshot_valid = false;
+      }
+    } else if (is_body_last_stage && has_wrapper_end) {
+      if (!pipeline_scheduler_detail::CopyWholeStandardContainerLayout(
+            *source_container_set,
+            primary_lane_state->standard_container_set.get(),
+            &egress_error_message)) {
+        const std::string failure_message = egress_error_message.empty()
+          ? std::string("Failed to copy pipeline body tail output into wrapper tail input.")
+          : std::move(egress_error_message);
+        ALGORITHM_SCHEDULER_ASSERT(false, failure_message.c_str());
+        updated_runtime_states[index].algorithm_to_agent_signal.stop_requested = true;
+        pipeline_scheduler_detail::SetPipelineStageRuntimeReason(
+          pipeline_stage_runtime_stats,
+          object.algorithm_profile.algorithm_name,
+          "Egress failed: " + failure_message);
+        pipeline_scheduler_detail::MergeAlgorithmToAgentSignal(
+          updated_runtime_states[index].algorithm_to_agent_signal,
+          out_pipeline_signal);
+        set_error(failure_message);
+        *out_pipeline_processing_failed = true;
+        return false;
+      }
+      if (stage_offset + 1u < next_stage_has_data.size()) {
+        next_stage_has_data[stage_offset + 1u] = true;
+      }
+      if (pipeline_state.topology == ::algorithm_management::AlgorithmPipelineTopology::Circular) {
+        const bool emit_loopback_ok = pipeline_uses_inter_stage_buffer
+          ? bridge.EmitToNextStage(
+              object.algorithm_profile.algorithm_name,
+              *source_container_set,
+              &primary_lane_state->inter_stage_buffer,
+              &stage_container_sets,
+              &egress_error_message)
+          : bridge.EmitToNextStage(
+              object.algorithm_profile.algorithm_name,
+              *source_container_set,
+              &stage_container_sets,
+              &egress_error_message);
+        if (!emit_loopback_ok) {
+          const std::string failure_message = egress_error_message.empty()
+            ? std::string("Failed to emit circular pipeline stage output.")
+            : std::move(egress_error_message);
+          ALGORITHM_SCHEDULER_ASSERT(false, failure_message.c_str());
+          updated_runtime_states[index].algorithm_to_agent_signal.stop_requested = true;
+          pipeline_scheduler_detail::SetPipelineStageRuntimeReason(
+            pipeline_stage_runtime_stats,
+            object.algorithm_profile.algorithm_name,
+            "Egress failed: " + failure_message);
+          pipeline_scheduler_detail::MergeAlgorithmToAgentSignal(
+            updated_runtime_states[index].algorithm_to_agent_signal,
+            out_pipeline_signal);
+          set_error(failure_message);
+          *out_pipeline_processing_failed = true;
+          return false;
+        }
+        std::string loopback_error_message;
+        if (!pipeline_scheduler_detail::CopyPipelineCircularLoopback(
+              *source_container_set,
+              object.runtime_transfer_map->pipeline_shared_variable_count,
+              object.runtime_transfer_map->pipeline_shared_array_count,
+              &algorithm_objects[body_begin_index],
+              &loopback_error_message)) {
+          const std::string failure_message = loopback_error_message.empty()
+            ? std::string("Failed to emit circular pipeline loopback output.")
+            : std::move(loopback_error_message);
+          ALGORITHM_SCHEDULER_ASSERT(false, failure_message.c_str());
+          updated_runtime_states[index].algorithm_to_agent_signal.stop_requested = true;
+          pipeline_scheduler_detail::SetPipelineStageRuntimeReason(
+            pipeline_stage_runtime_stats,
+            object.algorithm_profile.algorithm_name,
+            "Egress failed: " + failure_message);
+          pipeline_scheduler_detail::MergeAlgorithmToAgentSignal(
+            updated_runtime_states[index].algorithm_to_agent_signal,
+            out_pipeline_signal);
+          set_error(failure_message);
+          *out_pipeline_processing_failed = true;
+          return false;
+        }
+        next_stage_has_data[has_wrapper_begin ? 1u : 0u] = true;
+      }
+    } else if (is_effective_tail_stage) {
       if (pipeline_scheduler_detail::CollectPipelineExitReflectionSnapshot(
             object.pipeline_name.empty() ? object.algorithm_profile.algorithm_name : object.pipeline_name,
             *source_container_set,
@@ -3013,7 +3527,7 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
               *source_container_set,
               object.runtime_transfer_map->pipeline_shared_variable_count,
               object.runtime_transfer_map->pipeline_shared_array_count,
-              &algorithm_objects[begin_index],
+              &algorithm_objects[body_begin_index],
               &loopback_error_message)) {
           const std::string failure_message = loopback_error_message.empty()
             ? std::string("Failed to emit circular pipeline loopback output.")
@@ -3064,6 +3578,20 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
         return false;
       }
       next_stage_has_data[stage_offset + 1u] = true;
+    }
+
+    if (object.pipeline_wrapper_role != ::algorithm_management::AlgorithmPipelineWrapperRole::None) {
+      if (emit_runner_probe) {
+        pipeline_scheduler_detail::AppendPipelineRunnerProbe(
+          "scheduler_tick_probe.log",
+          "tick.egress.wrapper_end stage=" + object.algorithm_profile.algorithm_name);
+      }
+      const auto stage_end = std::chrono::steady_clock::now();
+      pipeline_scheduler_detail::AddPipelineStageRuntimeElapsed(
+        pipeline_stage_runtime_stats,
+        object.algorithm_profile.algorithm_name,
+        std::chrono::duration<float>(stage_end - stage_begin).count());
+      continue;
     }
 
     std::string egress_debug_error_message;
@@ -3118,6 +3646,11 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
       pipeline_stage_runtime_stats,
       object.algorithm_profile.algorithm_name,
       std::chrono::duration<float>(stage_end - stage_begin).count());
+    if (emit_runner_probe) {
+      pipeline_scheduler_detail::AppendPipelineRunnerProbe(
+        "scheduler_tick_probe.log",
+        "tick.egress.end stage=" + object.algorithm_profile.algorithm_name);
+    }
   }
 
   pipeline_scheduler_detail::CommitPipelineStageStateToPrimaryLane(&pipeline_state, next_stage_has_data);

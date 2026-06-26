@@ -55,12 +55,14 @@ class MockAgentClient:
         self.context_compression_enabled = True
         self._provider_session_signature: tuple[str, str, str] | None = None
         self._openai_previous_response_id: str | None = None
+        self._codex_session_id: str | None = None
         self._active_process: subprocess.Popen[str] | None = None
         self._cancel_requested = False
 
     def reset_session_state(self) -> None:
         self._provider_session_signature = None
         self._openai_previous_response_id = None
+        self._codex_session_id = None
 
     def request_cancel(self) -> bool:
         self._cancel_requested = True
@@ -71,8 +73,15 @@ class MockAgentClient:
         return True
 
     def _provider_signature(self) -> tuple[str, str, str]:
+        mode = self.provider.strip().lower()
+        if mode == "codex":
+            return (
+                mode,
+                self.codex_command.strip(),
+                self.model.strip(),
+            )
         return (
-            self.provider.strip().lower(),
+            mode,
             self.base_url.strip(),
             self.model.strip(),
         )
@@ -82,6 +91,7 @@ class MockAgentClient:
         if signature != self._provider_session_signature:
             self._provider_session_signature = signature
             self._openai_previous_response_id = None
+            self._codex_session_id = None
 
     def _api_provider_kind(self) -> str:
         base_url = self.base_url.strip()
@@ -97,6 +107,8 @@ class MockAgentClient:
 
     def conversation_history_mode(self) -> str:
         mode = self.provider.strip().lower()
+        if mode == "codex" and self._codex_session_id:
+            return "server_managed"
         if mode != "api":
             return "local_adaptive"
         api_kind = self._api_provider_kind()
@@ -818,6 +830,32 @@ class MockAgentClient:
             return None
         return compact
 
+    def _extract_codex_session_id(self, event: dict[str, Any]) -> str | None:
+        def _walk(value: Any, *, scope: str = "", depth: int = 0) -> str | None:
+            if depth > 5:
+                return None
+            if isinstance(value, dict):
+                for key, nested in value.items():
+                    normalized_key = str(key).strip().lower()
+                    text = str(nested).strip() if not isinstance(nested, (dict, list)) else ""
+                    if normalized_key in {"session_id", "sessionid", "thread_id", "threadid", "conversation_id", "conversationid"} and text:
+                        return text
+                    if normalized_key == "id" and scope in {"session", "thread", "conversation"} and text:
+                        return text
+                for key, nested in value.items():
+                    found = _walk(nested, scope=str(key).strip().lower(), depth=depth + 1)
+                    if found:
+                        return found
+                return None
+            if isinstance(value, list):
+                for item in value:
+                    found = _walk(item, scope=scope, depth=depth + 1)
+                    if found:
+                        return found
+            return None
+
+        return _walk(event)
+
     def _codex_activity_update(self, event: dict[str, Any]) -> tuple[str | None, str | None]:
         event_type = str(event.get("type") or "").strip().lower()
         if not event_type:
@@ -1028,26 +1066,40 @@ class MockAgentClient:
         command = _resolve_codex_command(self.codex_command)
         if not Path(command).exists():
             raise RuntimeError(f"Codex command not found: {command}")
+        self._sync_provider_session_state()
         fd, output_path = tempfile.mkstemp(prefix="algorithm_studio_codex_", suffix=".txt")
         os.close(fd)
         Path(output_path).unlink(missing_ok=True)
-        args = [
-            command,
-            "exec",
-            "--cd",
-            str(PROJECT_ROOT),
-            "--color",
-            "never",
-            "--json",
-            "--output-last-message",
-            output_path,
-        ]
+        resume_session_id = str(self._codex_session_id or "").strip()
+        if resume_session_id:
+            args = [
+                command,
+                "exec",
+                "resume",
+                "--json",
+                "--output-last-message",
+                output_path,
+            ]
+        else:
+            args = [
+                command,
+                "exec",
+                "--cd",
+                str(PROJECT_ROOT),
+                "--color",
+                "never",
+                "--json",
+                "--output-last-message",
+                output_path,
+            ]
         model = self.model.strip()
         if model:
             args.extend(["--model", model])
         for attachment in attachments:
             if attachment["kind"] == "image":
                 args.extend(["--image", attachment["path"]])
+        if resume_session_id:
+            args.append(resume_session_id)
         args.append("-")
         stdin_prompt = self._build_prompt(
             project,
@@ -1065,6 +1117,7 @@ class MockAgentClient:
         try:
             process = subprocess.Popen(
                 args,
+                cwd=str(PROJECT_ROOT),
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -1094,6 +1147,9 @@ class MockAgentClient:
                     event = json.loads(line_text)
                 except json.JSONDecodeError:
                     continue
+                session_id = self._extract_codex_session_id(event)
+                if session_id:
+                    self._codex_session_id = session_id
                 tag, summary = self._codex_activity_update(event)
                 if summary and tag:
                     _emit_agent_event(event_callback, "activity.update", detail=summary, tag=tag)
@@ -1108,6 +1164,9 @@ class MockAgentClient:
             raise RuntimeError("Request cancelled.")
         if return_code != 0:
             error_message = last_error_message or f"Codex command failed (exit {return_code})."
+            lowered_error = error_message.lower()
+            if resume_session_id and "session" in lowered_error and ("not found" in lowered_error or "no such" in lowered_error or "unknown" in lowered_error):
+                raise RuntimeError("Saved Codex session is unavailable. Clear chat history and retry.") from None
             raise RuntimeError(error_message) from None
         if output:
             return output

@@ -31,6 +31,9 @@ class ContainerFieldItem:
 class ContainerItem:
     name: str
     kind: str
+    origin_name: str = ""
+    node_name: str = ""
+    scene_scope: str = ""
     count: int = 1
     stride: int = 4
     value: str = ""
@@ -54,6 +57,7 @@ class ContainerGroupItem:
     variables: list[str] = field(default_factory=list)
     arrays: list[str] = field(default_factory=list)
     groups: list[str] = field(default_factory=list)
+    scene_scope: str = ""
     x: float = 0.0
     y: float = 0.0
     width: float = 360.0
@@ -713,9 +717,16 @@ class ProjectState:
                 "y": float(getattr(item, "y", 0.0)),
                 "expand": bool(getattr(item, "expand", True)),
             }
-            if kind == "containerelement":
+            if kind == "container":
+                entry["width"] = float(getattr(item, "width", 0.0))
+                entry["height"] = float(getattr(item, "height", 0.0))
+                entry["nodeName"] = str(getattr(item, "node_name", ""))
+                entry["originName"] = str(getattr(item, "origin_name", "") or name)
+                entry["sceneScope"] = str(getattr(item, "scene_scope", ""))
+            elif kind == "containerelement":
                 entry["width"] = float(getattr(item, "width", 360.0))
                 entry["height"] = float(getattr(item, "height", 220.0))
+                entry["sceneScope"] = str(getattr(item, "scene_scope", ""))
             elif kind in {"decomposer", "reflector", "resnode", "interventioner", "function", "functiontext"}:
                 entry["width"] = float(getattr(item, "width", 360.0))
                 entry["height"] = float(getattr(item, "height", 220.0))
@@ -737,6 +748,7 @@ class ProjectState:
                 "variables": list(group.variables),
                 "arrays": list(group.arrays),
                 "groups": list(group.groups),
+                "sceneScope": group.scene_scope,
                 "x": group.x,
                 "y": group.y,
                 "width": group.width,
@@ -827,6 +839,9 @@ class ProjectState:
         variable_array_section: dict[str, Any] = {}
         for container in self.containers:
             entry = {
+                "nodeName": container.node_name,
+                "originName": container.origin_name or container.name,
+                "sceneScope": container.scene_scope,
                 "count": container.count,
                 "stride": container.stride,
                 "value": container.value,
@@ -1070,6 +1085,9 @@ class ProjectState:
                     ContainerItem(
                         name=str(name),
                         kind="variable",
+                        node_name=str(entry.get("nodeName") or entry.get("aliasName") or ""),
+                        origin_name=str(entry.get("originName") or name),
+                        scene_scope=str(entry.get("sceneScope") or ""),
                         count=int(entry.get("count", 1)),
                         stride=int(entry.get("stride", 4)),
                         value=str(entry.get("value") or ""),
@@ -1103,6 +1121,9 @@ class ProjectState:
                     ContainerItem(
                         name=str(name),
                         kind="array",
+                        node_name=str(entry.get("nodeName") or entry.get("aliasName") or ""),
+                        origin_name=str(entry.get("originName") or name),
+                        scene_scope=str(entry.get("sceneScope") or ""),
                         count=int(entry.get("count", 1)),
                         stride=int(entry.get("stride", 4)),
                         value=str(entry.get("value") or ""),
@@ -1142,6 +1163,7 @@ class ProjectState:
                         variables=[str(value) for value in variables_value],
                         arrays=[str(value) for value in arrays_value],
                         groups=[str(value) for value in groups_value],
+                        scene_scope=str(entry.get("sceneScope") or ""),
                         x=float(entry.get("x", 0.0)),
                         y=float(entry.get("y", 0.0)),
                         width=float(entry.get("width", 360.0)),
@@ -1329,6 +1351,11 @@ class ProjectState:
                     if isinstance(item, ContainerItem):
                         item.width = float(entry.get("width", getattr(item, "width", 0.0)))
                         item.height = float(entry.get("height", getattr(item, "height", 0.0)))
+                        item.node_name = str(entry.get("nodeName") or entry.get("aliasName") or getattr(item, "node_name", ""))
+                        item.origin_name = str(entry.get("originName") or getattr(item, "origin_name", "") or item.name)
+                        item.scene_scope = str(entry.get("sceneScope") or getattr(item, "scene_scope", ""))
+                    if isinstance(item, ContainerGroupItem):
+                        item.scene_scope = str(entry.get("sceneScope") or getattr(item, "scene_scope", ""))
                     if hasattr(item, "expand") and "expand" in entry:
                         item.expand = cls._expand_flag(entry.get("expand"), bool(getattr(item, "expand", True)))
 

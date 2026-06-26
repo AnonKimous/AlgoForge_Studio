@@ -1,4 +1,5 @@
 #include "algorithm_support/algorithm_protocol.h"
+#include "algorithm_support/algorithm_gpu_exec_support_detail.h"
 #include "algorithm_support/algorithm_intervention_support_detail.h"
 #include "algorithm_support/algorithm_package_location.h"
 #include "algorithm_support/algorithm_package_paths.h"
@@ -1559,14 +1560,23 @@ bool _LoadPackageRuntimeReflector(
   const cJSON* reflector = cJSON_GetObjectItemCaseSensitive(root, "reflector");
   if (!reflector || !cJSON_IsObject(reflector)) {
     cJSON_Delete(root);
+    out_reflector->Clear();
     if (out_error_message) {
-      *out_error_message = "Package JSON is missing reflector section: " + package_json_path.generic_string();
+      out_error_message->clear();
     }
-    return false;
+    return true;
   }
 
   const cJSON* items = cJSON_GetObjectItemCaseSensitive(reflector, "items");
-  if (!items || !cJSON_IsArray(items)) {
+  if (!items) {
+    cJSON_Delete(root);
+    out_reflector->Clear();
+    if (out_error_message) {
+      out_error_message->clear();
+    }
+    return true;
+  }
+  if (!cJSON_IsArray(items)) {
     cJSON_Delete(root);
     if (out_error_message) {
       *out_error_message = "Package reflector is missing items: " + package_json_path.generic_string();
@@ -1804,6 +1814,38 @@ struct PackageDefaultSchema {
   std::string error_message;
 };
 
+algorithm_support::AlgorithmPipelineWrapperStageSpec _LoadWrapperStageSpec(
+  const cJSON* wrapper_stage_object,
+  const char* stage_key) {
+  algorithm_support::AlgorithmPipelineWrapperStageSpec stage_spec{};
+  if (!wrapper_stage_object || !stage_key || !*stage_key) {
+    return stage_spec;
+  }
+
+  const cJSON* stage_item = cJSON_GetObjectItemCaseSensitive(wrapper_stage_object, stage_key);
+  if (!stage_item) {
+    return stage_spec;
+  }
+
+  stage_spec.declared = true;
+  if (cJSON_IsString(stage_item) && stage_item->valuestring) {
+    stage_spec.algorithm_name = json_utils::TrimText(stage_item->valuestring);
+    return stage_spec;
+  }
+  if (!cJSON_IsObject(stage_item)) {
+    return stage_spec;
+  }
+
+  stage_spec.algorithm_name = json_utils::TrimText(json_utils::GetStringField(stage_item, "algorithm_name"));
+  if (stage_spec.algorithm_name.empty()) {
+    stage_spec.algorithm_name = json_utils::TrimText(json_utils::GetStringField(stage_item, "algorithm"));
+  }
+  if (stage_spec.algorithm_name.empty()) {
+    stage_spec.algorithm_name = json_utils::TrimText(json_utils::GetStringField(stage_item, "name"));
+  }
+  return stage_spec;
+}
+
 PackageDefaultSchema _LoadPackageDefaultSchema(
   const algorithm::AlgorithmPackageLocation& package_location) {
   PackageDefaultSchema schema{};
@@ -1948,6 +1990,86 @@ bool LoadAlgorithmInterventionFromLocation(
     out_error_message);
 }
 
+bool LoadAlgorithmGpuExecutorFromLocation(
+  const algorithm::AlgorithmPackageLocation& package_location,
+  std::shared_ptr<agent::IAlgorithmGpuExecutor>* out_gpu_executor,
+  std::string* out_error_message) {
+  return gpu_exec_detail::LoadAlgorithmGpuExecutorFromLocationImpl(
+    package_location,
+    out_gpu_executor,
+    out_error_message);
+}
+
+bool LoadAlgorithmPipelineWrapperSpecFromLocation(
+  const algorithm::AlgorithmPackageLocation& package_location,
+  AlgorithmPipelineWrapperSpec* out_wrapper_spec,
+  std::string* out_error_message) {
+  if (!out_wrapper_spec) {
+    if (out_error_message) {
+      *out_error_message = "Pipeline wrapper spec output pointer is null.";
+    }
+    return false;
+  }
+
+  *out_wrapper_spec = {};
+  const std::string algorithm_name = package_location.algorithm_name.empty()
+    ? package_location.manifest_name
+    : package_location.algorithm_name;
+  const fs::path package_json_path = algorithm::package_paths::ResolvePackageJsonPath(
+    package_location.package_root,
+    package_location.manifest_path,
+    algorithm_name);
+  if (package_json_path.empty()) {
+    if (out_error_message) {
+      *out_error_message = "Failed to resolve package JSON file for pipeline wrapper spec.";
+    }
+    return false;
+  }
+
+  const std::string json_text = json_utils::ReadAlgorithmPackageJsonFile(package_json_path);
+  if (json_text.empty()) {
+    if (out_error_message) {
+      *out_error_message = "Failed to read package JSON file: " + package_json_path.generic_string();
+    }
+    return false;
+  }
+
+  cJSON* root = cJSON_Parse(json_text.c_str());
+  if (!root) {
+    if (out_error_message) {
+      *out_error_message = "Failed to parse package JSON file: " + package_json_path.generic_string();
+    }
+    return false;
+  }
+
+  const cJSON* wrapper = cJSON_GetObjectItemCaseSensitive(root, "wrapper");
+  if (!wrapper || !cJSON_IsObject(wrapper)) {
+    cJSON_Delete(root);
+    if (out_error_message) {
+      out_error_message->clear();
+    }
+    return true;
+  }
+
+  const cJSON* wrapper_stage = cJSON_GetObjectItemCaseSensitive(wrapper, "stage");
+  if (!wrapper_stage || !cJSON_IsObject(wrapper_stage)) {
+    cJSON_Delete(root);
+    if (out_error_message) {
+      out_error_message->clear();
+    }
+    return true;
+  }
+
+  out_wrapper_spec->declared = true;
+  out_wrapper_spec->stage_begin = _LoadWrapperStageSpec(wrapper_stage, "stageBegin");
+  out_wrapper_spec->stage_end = _LoadWrapperStageSpec(wrapper_stage, "stageEnd");
+  cJSON_Delete(root);
+  if (out_error_message) {
+    out_error_message->clear();
+  }
+  return true;
+}
+
 bool LoadAlgorithmPackageReflectorFromLocation(
   const algorithm::AlgorithmPackageLocation& package_location,
   std::shared_ptr<algorithm::AlgorithmReflector>* out_reflector,
@@ -1966,6 +2088,14 @@ bool LoadAlgorithmPackageReflectorFromLocation(
       *out_error_message = std::move(reflector_error_message);
     }
     return false;
+  }
+
+  if (reflector.empty()) {
+    out_reflector->reset();
+    if (out_error_message) {
+      out_error_message->clear();
+    }
+    return true;
   }
 
   *out_reflector = std::make_shared<algorithm::AlgorithmReflector>(std::move(reflector));
@@ -2049,6 +2179,7 @@ bool CreateAlgorithmObjectFromLocation(
   group.algorithm_profile.container_manifest_name = package_location.manifest_name.empty()
     ? package_location.algorithm_name
     : package_location.manifest_name;
+  group.runtime_package_root_path = package_location.runtime_package_root.generic_string();
 
   if (emit_runner_probe) {
     _AppendPipelineRunnerProbe(
@@ -2059,26 +2190,10 @@ bool CreateAlgorithmObjectFromLocation(
   if (!_LoadAlgorithmObjectMountMetadata(package_location, &mount_metadata, out_error_message)) {
     return false;
   }
-<<<<<<< HEAD
-  if (emit_runner_probe) {
-    _AppendPipelineRunnerProbe("package_loader_probe.log", "create_from_location.container_set.end");
-    _AppendPipelineRunnerProbe("package_loader_probe.log", "create_from_location.tick_lifetime.begin");
-  }
-
-  std::shared_ptr<algorithm::AlgorithmReflector> algorithm_reflector{};
-  if (!LoadAlgorithmPackageReflectorFromLocation(package_location, &algorithm_reflector, out_error_message)) {
-    return false;
-  }
-  group.algorithm_reflector = std::move(algorithm_reflector);
-
-  algorithm_management::AlgorithmTickLifetime tick_lifetime = algorithm_management::AlgorithmTickLifetime::Continuous;
-  if (!_LoadPackageRuntimeLifetime(package_location, &tick_lifetime, out_error_message)) {
-=======
   if (!mount_metadata.valid || !mount_metadata.container_template) {
     if (out_error_message) {
       *out_error_message = "Algorithm mount metadata is invalid.";
     }
->>>>>>> 0e5193b (preciser control of digital)
     return false;
   }
   group.shared_container_set = std::make_shared<algorithm::AlgorithmContainerSet>();
@@ -2096,11 +2211,29 @@ bool CreateAlgorithmObjectFromLocation(
         std::string(mount_metadata.has_runtime_transfer_map ? "true" : "false"));
   }
 
-  std::shared_ptr<agent::IAlgorithmIntervention> intervention{};
-  if (!LoadAlgorithmInterventionFromLocation(package_location, &intervention, out_error_message)) {
+  std::shared_ptr<agent::IAlgorithmIntervention> package_intervention{};
+  if (!LoadAlgorithmInterventionFromLocation(
+        package_location,
+        &package_intervention,
+        out_error_message)) {
     return false;
   }
-  group.intervention = std::move(intervention);
+  std::shared_ptr<agent::IAlgorithmGpuExecutor> package_gpu_executor{};
+  if (!LoadAlgorithmGpuExecutorFromLocation(
+        package_location,
+        &package_gpu_executor,
+        out_error_message)) {
+    return false;
+  }
+  group.intervention = package_intervention;
+  group.gpu_executor = package_gpu_executor;
+  if (emit_runner_probe) {
+    _AppendPipelineRunnerProbe(
+      "package_loader_probe.log",
+      "create_from_location.intervention_load.end present=" +
+        std::string(group.intervention ? "true" : "false") +
+        " gpu_exec=" + std::string(group.gpu_executor ? "true" : "false"));
+  }
 
   auto _ApplyLaunchOnceReflectionPolicy = [&group]() {
     if (group.tick_lifetime == algorithmManager::AlgorithmTickLifetime::LaunchOnceThenHold &&
@@ -2109,6 +2242,20 @@ bool CreateAlgorithmObjectFromLocation(
       group.algorithm_reflector->refresh_mode = algorithm::AlgorithmReflectionRefreshMode::CaptureOnceAfterCompletion;
     }
   };
+  if (emit_runner_probe) {
+    _AppendPipelineRunnerProbe(
+      "package_loader_probe.log",
+      "create_from_location.plugin_check.begin has_plugin=" +
+        std::string(package_location.has_plugin_module ? "true" : "false") +
+        " path=" + package_location.plugin_module_path.string());
+  }
+
+  if (!package_location.has_plugin_module || package_location.plugin_module_path.empty()) {
+    if (out_error_message) {
+      *out_error_message = "Algorithm package is missing its plugin module: " + probe_algorithm_name;
+    }
+    return false;
+  }
 
   AlgorithmPluginComponents plugin_components{};
   std::string plugin_error_message;
@@ -2127,22 +2274,13 @@ bool CreateAlgorithmObjectFromLocation(
     }
     group.cpu_symbol = plugin_components.cpu_symbol;
     group.gpu_symbol = plugin_components.gpu_symbol;
-<<<<<<< HEAD
-    group.temporaryTest_main_thread_executor = plugin_components.temporary_test_executor;
-=======
     group.cpu_executor = plugin_components.cpu_executor;
-    if (plugin_components.gpu_executor) {
-      group.intervention = plugin_components.gpu_executor;
-    } else if (plugin_components.intervention) {
-      std::shared_ptr<agent::IAlgorithmIntervention> package_intervention{};
-      if (!LoadAlgorithmInterventionFromLocation(
-            package_location,
-            &package_intervention,
-            out_error_message)) {
-        return false;
-      }
-      group.intervention = std::move(package_intervention);
-    }
+    group.gpu_executor = plugin_components.gpu_executor
+      ? plugin_components.gpu_executor
+      : (plugin_components.gpu_symbol ? package_gpu_executor : std::shared_ptr<agent::IAlgorithmGpuExecutor>{});
+    group.intervention = plugin_components.intervention
+      ? package_intervention
+      : std::shared_ptr<agent::IAlgorithmIntervention>{};
     if (plugin_components.runtime_reflector &&
         !plugin_components.runtime_reflector->empty()) {
       group.algorithm_reflector = std::move(plugin_components.runtime_reflector);
@@ -2159,7 +2297,6 @@ bool CreateAlgorithmObjectFromLocation(
     if (group.intervention) {
       _AppendHiddenInterventionSignalContainer(group.shared_container_set.get());
     }
->>>>>>> 0e5193b (preciser control of digital)
     *out_group = std::move(group);
     if (out_error_message) {
       out_error_message->clear();
@@ -2172,20 +2309,10 @@ bool CreateAlgorithmObjectFromLocation(
     }
     return false;
   }
-  if (emit_runner_probe) {
-    _AppendPipelineRunnerProbe("package_loader_probe.log", "create_from_location.plugin_load.end fallback");
-  }
-
-  group.cpu_symbol = true;
-  group.gpu_symbol = true;
-
-  _ApplyLaunchOnceReflectionPolicy();
-
-  *out_group = std::move(group);
   if (out_error_message) {
-    out_error_message->clear();
+    *out_error_message = "Algorithm plugin load returned no components: " + probe_algorithm_name;
   }
-  return true;
+  return false;
 }
 
 bool LoadAlgorithmPackageDefaultBindingsFromLocation(
@@ -2260,13 +2387,9 @@ using CreateBundleFn = bool (*)(
   const algorithmManager::support::AlgorithmPluginRequest* request,
   algorithmManager::support::AlgorithmPluginBundle* out_bundle);
 
-<<<<<<< HEAD
-=======
 using CreateRuntimeReflectorFn = bool (*)(
   const algorithmManager::support::AlgorithmPluginRequest* request,
   algorithm::AlgorithmReflector* out_reflector);
-
->>>>>>> 0e5193b (preciser control of digital)
 void _SetErrorMessage(std::string* out_error_message, std::string message) {
   if (out_error_message) {
     *out_error_message = std::move(message);
@@ -2379,15 +2502,6 @@ bool TryLoadAlgorithmPluginComponents(
   out_components->reflector = bundle.reflector;
   out_components->intervention = bundle.intervention;
 
-<<<<<<< HEAD
-  if (bundle.temporary_test_executor && bundle.destroy_temporary_test_executor) {
-    out_components->temporary_test_executor = _WrapPluginObject(
-      bundle.temporary_test_executor,
-      bundle.destroy_temporary_test_executor,
-      module_guard);
-  }
-
-=======
   if (bundle.gpu_executor && bundle.destroy_gpu_executor) {
     out_components->gpu_executor = _WrapPluginObject(
       bundle.gpu_executor,
@@ -2411,8 +2525,6 @@ bool TryLoadAlgorithmPluginComponents(
         std::make_shared<algorithm::AlgorithmReflector>(std::move(runtime_reflector));
     }
   }
-
->>>>>>> 0e5193b (preciser control of digital)
   _SetErrorMessage(out_error_message, {});
   return true;
 }

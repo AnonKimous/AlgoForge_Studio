@@ -430,6 +430,55 @@ class AlgorithmStudioEditorDialogMixin:
         title = "Linked Inputs" if direction == "input" else "Linked Outputs"
         return f"{title} for {function_name}\n\n" + "\n\n".join(blocks)
 
+    def _function_link_preview_items(self, function_name: str, direction: str) -> list[tuple[str, str, str]]:
+        if direction not in {"input", "output"}:
+            raise AssertionError(f"Unsupported function link direction: {direction}")
+        items: list[tuple[str, str, str]] = []
+        if direction == "input":
+            connections = [
+                connection
+                for connection in self.project.connections
+                if connection.target_kind == "function" and connection.target_name == function_name
+            ]
+            connections.sort(key=lambda connection: (connection.target_port, connection.source_kind, connection.source_name, connection.source_port))
+            for connection in connections:
+                text = f"{connection.target_port or 'in'} <- {connection.source_kind}:{connection.source_name}"
+                items.append((text, connection.source_kind, connection.source_name))
+        else:
+            connections = [
+                connection
+                for connection in self.project.connections
+                if connection.source_kind == "function" and connection.source_name == function_name
+            ]
+            connections.sort(key=lambda connection: (connection.source_port, connection.target_kind, connection.target_name, connection.target_port))
+            for connection in connections:
+                text = f"{connection.source_port or 'out'} -> {connection.target_kind}:{connection.target_name}"
+                items.append((text, connection.target_kind, connection.target_name))
+        return items
+
+    def _function_link_preview_color(self, kind: str, name: str) -> str:
+        normalized_kind = str(kind or "").strip().lower()
+        if normalized_kind == "container":
+            container = self._find_container(str(name).strip())
+            if container is not None and container.kind == "array":
+                return COLORS["container_array"]
+            return COLORS["container"]
+        if normalized_kind == "containerelement":
+            return COLORS["accent"]
+        if normalized_kind == "decomposer":
+            return COLORS["descriptor"]
+        if normalized_kind == "reflector":
+            return COLORS["accent_2"]
+        if normalized_kind == "resnode":
+            return COLORS["resource"]
+        if normalized_kind in {"interventioner", "stage"}:
+            return COLORS["stage"]
+        if normalized_kind == "function":
+            return COLORS["agent"]
+        if normalized_kind == "functiontext":
+            return COLORS["muted"]
+        return COLORS["edge"]
+
     def _open_container_editor(self, container: ContainerItem, focus_section: str | None = None) -> None:
         dialog = tk.Toplevel(self.root)
         dialog.title(f"Container {container.name}")
@@ -797,23 +846,14 @@ class AlgorithmStudioEditorDialogMixin:
         linked_in_toolbar = ttk.Frame(linked_in_frame)
         linked_in_toolbar.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
         linked_in_toolbar.columnconfigure(0, weight=1)
-        linked_in_text = tk.Text(
+        linked_in_items = tk.Frame(
             linked_in_frame,
-            wrap="word",
-            height=5,
             bg=COLORS["canvas"],
-            fg=COLORS["text"],
-            insertbackground=COLORS["text"],
             relief="flat",
             borderwidth=0,
-            highlightthickness=1,
-            highlightbackground=COLORS["grid"],
-            highlightcolor=COLORS["accent"],
+            highlightthickness=0,
         )
-        linked_in_text.grid(row=1, column=0, sticky="nsew")
-        linked_in_scroll = ttk.Scrollbar(linked_in_frame, orient="vertical", command=linked_in_text.yview)
-        linked_in_scroll.grid(row=1, column=1, sticky="ns")
-        linked_in_text.configure(yscrollcommand=linked_in_scroll.set, state="disabled")
+        linked_in_items.grid(row=1, column=0, sticky="nsew")
 
         linked_out_frame = ttk.LabelFrame(linked_column, text="Linked Out", padding=6)
         linked_out_frame.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
@@ -822,59 +862,25 @@ class AlgorithmStudioEditorDialogMixin:
         linked_out_toolbar = ttk.Frame(linked_out_frame)
         linked_out_toolbar.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
         linked_out_toolbar.columnconfigure(0, weight=1)
-        linked_out_text = tk.Text(
+        linked_out_items = tk.Frame(
             linked_out_frame,
-            wrap="word",
-            height=5,
             bg=COLORS["canvas"],
-            fg=COLORS["text"],
-            insertbackground=COLORS["text"],
             relief="flat",
             borderwidth=0,
-            highlightthickness=1,
-            highlightbackground=COLORS["grid"],
-            highlightcolor=COLORS["accent"],
+            highlightthickness=0,
         )
-        linked_out_text.grid(row=1, column=0, sticky="nsew")
-        linked_out_scroll = ttk.Scrollbar(linked_out_frame, orient="vertical", command=linked_out_text.yview)
-        linked_out_scroll.grid(row=1, column=1, sticky="ns")
-        linked_out_text.configure(yscrollcommand=linked_out_scroll.set, state="disabled")
+        linked_out_items.grid(row=1, column=0, sticky="nsew")
 
         script_frame = ttk.LabelFrame(body, text="Script / Pseudocode", padding=8)
         script_frame.grid(row=3, column=0, sticky="nsew", pady=(12, 0))
         script_frame.columnconfigure(0, weight=1)
-        script_frame.rowconfigure(3, weight=1)
+        script_frame.rowconfigure(2, weight=1)
 
         node_info_label = ttk.Label(script_frame, foreground=COLORS["muted"], anchor="w")
         node_info_label.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
 
-        notes_frame = ttk.LabelFrame(script_frame, text="Linked Notes", padding=6)
-        notes_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 8))
-        notes_frame.columnconfigure(0, weight=1)
-        notes_frame.rowconfigure(0, weight=1)
-        notes_text = tk.Text(
-            notes_frame,
-            wrap="word",
-            height=4,
-            bg=COLORS["panel_alt"],
-            fg=COLORS["text"],
-            insertbackground=COLORS["text"],
-            relief="flat",
-            borderwidth=0,
-            highlightthickness=1,
-            highlightbackground=COLORS["grid"],
-            highlightcolor=COLORS["accent"],
-        )
-        notes_text.grid(row=0, column=0, sticky="nsew")
-        linked_text_item = self._find_function_text_for_function(item.name)
-        if linked_text_item is not None:
-            notes_text.insert("1.0", linked_text_item.text)
-        notes_scroll = ttk.Scrollbar(notes_frame, orient="vertical", command=notes_text.yview)
-        notes_scroll.grid(row=0, column=1, sticky="ns")
-        notes_text.configure(yscrollcommand=notes_scroll.set)
-
         script_toolbar = ttk.Frame(script_frame)
-        script_toolbar.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        script_toolbar.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 8))
         script_toolbar.columnconfigure(0, weight=1)
         script_text = tk.Text(
             script_frame,
@@ -891,12 +897,12 @@ class AlgorithmStudioEditorDialogMixin:
             font=("Consolas", 10),
             undo=False,
         )
-        script_text.grid(row=3, column=0, sticky="nsew")
+        script_text.grid(row=2, column=0, sticky="nsew")
         script_text.insert("1.0", item.script)
         script_scroll_y = ttk.Scrollbar(script_frame, orient="vertical", command=script_text.yview)
-        script_scroll_y.grid(row=3, column=1, sticky="ns")
+        script_scroll_y.grid(row=2, column=1, sticky="ns")
         script_scroll_x = ttk.Scrollbar(script_frame, orient="horizontal", command=script_text.xview)
-        script_scroll_x.grid(row=4, column=0, sticky="ew")
+        script_scroll_x.grid(row=3, column=0, sticky="ew")
         script_text.configure(yscrollcommand=script_scroll_y.set, xscrollcommand=script_scroll_x.set)
 
         button_row = ttk.Frame(body)
@@ -923,21 +929,41 @@ class AlgorithmStudioEditorDialogMixin:
             expected_output_text.delete("1.0", tk.END)
             expected_output_text.insert("1.0", loaded_text)
 
-        def set_linked_nodes_preview(widget: tk.Text, direction: str) -> None:
-            try:
-                loaded_text = self._load_function_linked_text(item.name, direction)
-            except RuntimeError:
-                loaded_text = f"No linked {direction} nodes."
-            except Exception as exc:  # noqa: BLE001
-                loaded_text = str(exc)
-            widget.configure(state="normal")
-            widget.delete("1.0", tk.END)
-            widget.insert("1.0", loaded_text)
-            widget.configure(state="disabled")
+        def set_linked_nodes_preview(parent: tk.Frame, direction: str) -> None:
+            for child in list(parent.winfo_children()):
+                child.destroy()
+            preview_items = self._function_link_preview_items(item.name, direction)
+            if not preview_items:
+                empty_label = tk.Label(
+                    parent,
+                    text=f"No linked {direction} nodes.",
+                    anchor="w",
+                    bg=COLORS["canvas"],
+                    fg=COLORS["muted"],
+                    padx=8,
+                    pady=6,
+                )
+                empty_label.grid(row=0, column=0, sticky="ew")
+                return
+            parent.columnconfigure(0, weight=1)
+            for index, (line_text, node_kind, node_name) in enumerate(preview_items):
+                item_bg = self._function_link_preview_color(node_kind, node_name)
+                label = tk.Label(
+                    parent,
+                    text=line_text,
+                    anchor="w",
+                    justify="left",
+                    bg=item_bg,
+                    fg="#ffffff",
+                    padx=10,
+                    pady=6,
+                    relief="flat",
+                )
+                label.grid(row=index, column=0, sticky="ew", pady=(0, 6 if index < len(preview_items) - 1 else 0))
 
         def refresh_linked_node_views() -> None:
-            set_linked_nodes_preview(linked_in_text, "input")
-            set_linked_nodes_preview(linked_out_text, "output")
+            set_linked_nodes_preview(linked_in_items, "input")
+            set_linked_nodes_preview(linked_out_items, "output")
 
         def refresh_node_info_bar(_event: tk.Event | None = None) -> None:
             name_text = name_entry.get().strip() or item.name
@@ -972,15 +998,6 @@ class AlgorithmStudioEditorDialogMixin:
             item.expected_input = expected_input_text.get("1.0", tk.END).strip()
             item.expected_output = expected_output_text.get("1.0", tk.END).strip()
             item.script = script_text.get("1.0", tk.END).strip()
-
-            notes_value = notes_text.get("1.0", tk.END).strip()
-            text_item = self._find_function_text_for_function(item.name)
-            if notes_value:
-                if text_item is None:
-                    text_item = self._ensure_function_text_item(item.name)
-                text_item.text = notes_value
-            elif text_item is not None:
-                text_item.text = ""
 
         def save() -> None:
             try:

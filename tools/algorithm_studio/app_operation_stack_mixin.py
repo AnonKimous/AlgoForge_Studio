@@ -10,6 +10,23 @@ except ImportError:
 
 
 class AlgorithmStudioOperationStackMixin:
+    def _push_operation_recording_suppression(self, reason: str) -> None:
+        normalized_reason = str(reason or "").strip() or "unspecified"
+        stack = getattr(self, "operation_recording_suppression_stack", None)
+        if stack is None:
+            stack = []
+            self.operation_recording_suppression_stack = stack
+        stack.append(normalized_reason)
+
+    def _pop_operation_recording_suppression(self) -> None:
+        stack = getattr(self, "operation_recording_suppression_stack", None)
+        if not stack:
+            raise AssertionError("Operation recording suppression stack is empty.")
+        stack.pop()
+
+    def _operation_recording_is_suppressed(self) -> bool:
+        return bool(getattr(self, "operation_recording_suppression_stack", []))
+
     def _cancel_operation_stack_auto_followup(self) -> None:
         after_id = self.operation_stack_auto_followup_after_id
         if after_id is None:
@@ -61,10 +78,14 @@ class AlgorithmStudioOperationStackMixin:
         compact = " ".join(str(message or "").split()).strip()
         if not compact:
             return False
+        if self._operation_recording_is_suppressed():
+            return False
         lowered = compact.lower()
         if normalized_source == "agent":
             return False
         if normalized_source == "system":
+            return False
+        if lowered.startswith("[canvas:"):
             return False
         if lowered.startswith("highlight:"):
             return False

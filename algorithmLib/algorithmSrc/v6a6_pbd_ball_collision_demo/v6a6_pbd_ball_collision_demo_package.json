@@ -187,6 +187,59 @@
       }
     ]
   },
+  "exec": {
+    "stage_name": "exec",
+    "functions": [
+      "BuildBvh",
+      "SolvePbdCollisionStep"
+    ],
+    "used_algorithm_containers": {
+      "arrays": [
+        {
+          "name": "ball_pos_x",
+          "kind": "array",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "ball_pos_y",
+          "kind": "array",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "ball_vel_x",
+          "kind": "array",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "ball_vel_y",
+          "kind": "array",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "bvh_x",
+          "kind": "array",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "bvh_y",
+          "kind": "array",
+          "tuple_width": 1,
+          "required": true
+        }
+      ],
+      "variables": []
+    },
+    "shader": {
+      "pipeline": "graphics",
+      "vertex": "v6a6_pbd_ball_collision_demo_after_tick.vert",
+      "fragment": "v6a6_pbd_ball_collision_demo_after_tick.frag"
+    }
+  },
   "intervention": {
     "stages": {
       "preTick": {
@@ -195,60 +248,6 @@
         "functions": [
           "InitializeCollisionState"
         ]
-      },
-      "resultRender": {
-        "stage_name": "resultRender",
-        "stage_kind": "resultRender",
-        "functions": [
-          "BuildBvh",
-          "SolvePbdCollisionStep"
-        ],
-        "used_algorithm_containers": {
-          "arrays": [
-            {
-              "name": "ball_pos_x",
-              "kind": "array",
-              "tuple_width": 1,
-              "required": true
-            },
-            {
-              "name": "ball_pos_y",
-              "kind": "array",
-              "tuple_width": 1,
-              "required": true
-            },
-            {
-              "name": "ball_vel_x",
-              "kind": "array",
-              "tuple_width": 1,
-              "required": true
-            },
-            {
-              "name": "ball_vel_y",
-              "kind": "array",
-              "tuple_width": 1,
-              "required": true
-            },
-            {
-              "name": "bvh_x",
-              "kind": "array",
-              "tuple_width": 1,
-              "required": true
-            },
-            {
-              "name": "bvh_y",
-              "kind": "array",
-              "tuple_width": 1,
-              "required": true
-            }
-          ],
-          "variables": []
-        },
-        "shader": {
-          "pipeline": "graphics",
-          "vertex": "v6a6_pbd_ball_collision_demo_after_tick.vert",
-          "fragment": "v6a6_pbd_ball_collision_demo_after_tick.frag"
-        }
       },
       "resultRender": {
         "stage_name": "resultRender",
