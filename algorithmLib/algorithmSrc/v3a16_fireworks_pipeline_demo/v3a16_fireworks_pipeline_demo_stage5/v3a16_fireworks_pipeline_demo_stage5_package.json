@@ -1,0 +1,445 @@
+{
+  "algorithm_name": "v3a16_fireworks_pipeline_demo_stage5",
+  "globalCfg": {
+    "solvePrecision": "32",
+    "defaultPrecision": "32"
+  },
+  "container": {
+    "variable": 3,
+    "variableArray": {
+      "shell_pos_x": {
+        "count": 512
+      },
+      "shell_pos_y": {
+        "count": 512
+      },
+      "shell_vel_x": {
+        "count": 512
+      },
+      "shell_vel_y": {
+        "count": 512
+      },
+      "shell_state": {
+        "count": 512
+      },
+      "shell_age": {
+        "count": 512
+      },
+      "shell_life": {
+        "count": 512
+      },
+      "shell_seed": {
+        "count": 512
+      },
+      "spark_pos_x": {
+        "count": 512
+      },
+      "spark_pos_y": {
+        "count": 512
+      },
+      "spark_vel_x": {
+        "count": 512
+      },
+      "spark_vel_y": {
+        "count": 512
+      },
+      "spark_state": {
+        "count": 512
+      },
+      "spark_age": {
+        "count": 512
+      },
+      "spark_life": {
+        "count": 512
+      },
+      "spark_seed": {
+        "count": 512
+      }
+    }
+  },
+  "decomposer": {
+    "res": {},
+    "description": []
+  },
+  "reflector": {
+    "name": "fireworks_state",
+    "functionName": "direct",
+    "items": [
+      {
+        "name": "v1",
+        "from": ["v1"],
+        "to": ["v1"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "v2",
+        "from": ["v2"],
+        "to": ["v2"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "v3",
+        "from": ["v3"],
+        "to": ["v3"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "shell_pos_x",
+        "from": ["shell_pos_x"],
+        "to": ["shell_pos_x"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "shell_pos_y",
+        "from": ["shell_pos_y"],
+        "to": ["shell_pos_y"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "shell_vel_x",
+        "from": ["shell_vel_x"],
+        "to": ["shell_vel_x"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "shell_vel_y",
+        "from": ["shell_vel_y"],
+        "to": ["shell_vel_y"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "shell_state",
+        "from": ["shell_state"],
+        "to": ["shell_state"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "shell_age",
+        "from": ["shell_age"],
+        "to": ["shell_age"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "shell_life",
+        "from": ["shell_life"],
+        "to": ["shell_life"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "shell_seed",
+        "from": ["shell_seed"],
+        "to": ["shell_seed"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "spark_pos_x",
+        "from": ["spark_pos_x"],
+        "to": ["spark_pos_x"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "spark_pos_y",
+        "from": ["spark_pos_y"],
+        "to": ["spark_pos_y"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "spark_vel_x",
+        "from": ["spark_vel_x"],
+        "to": ["spark_vel_x"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "spark_vel_y",
+        "from": ["spark_vel_y"],
+        "to": ["spark_vel_y"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "spark_state",
+        "from": ["spark_state"],
+        "to": ["spark_state"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "spark_age",
+        "from": ["spark_age"],
+        "to": ["spark_age"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "spark_life",
+        "from": ["spark_life"],
+        "to": ["spark_life"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "spark_seed",
+        "from": ["spark_seed"],
+        "to": ["spark_seed"],
+        "reflectFun": "direct"
+      }
+    ]
+  },
+  "exec": {
+    "stage_name": "exec",
+    "used_algorithm_containers": {
+      "arrays": [
+        {
+          "name": "shell_pos_x",
+          "kind": "array",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "shell_pos_y",
+          "kind": "array",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "shell_vel_x",
+          "kind": "array",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "shell_vel_y",
+          "kind": "array",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "shell_state",
+          "kind": "array",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "shell_age",
+          "kind": "array",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "shell_life",
+          "kind": "array",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "shell_seed",
+          "kind": "array",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "spark_pos_x",
+          "kind": "array",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "spark_pos_y",
+          "kind": "array",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "spark_vel_x",
+          "kind": "array",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "spark_vel_y",
+          "kind": "array",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "spark_state",
+          "kind": "array",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "spark_age",
+          "kind": "array",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "spark_life",
+          "kind": "array",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "spark_seed",
+          "kind": "array",
+          "tuple_width": 1,
+          "required": true
+        }
+        ],
+      "variables": [
+        {
+          "name": "v1",
+          "kind": "variable",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "v2",
+          "kind": "variable",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "v3",
+          "kind": "variable",
+          "tuple_width": 1,
+          "required": true
+        }
+      ]
+    },
+    "shader": {
+      "pipeline": "graphics",
+      "vertex": "v3a16_fireworks_pipeline_demo_stage5_gpu_tick.vert",
+      "fragment": "v3a16_fireworks_pipeline_demo_stage5_gpu_tick.frag"
+    }
+  },
+  "runtime": {
+    "pipeline": {
+      "supportsCircularTick": true,
+      "mappings": {
+        "v3a16_fireworks_pipeline_demo->v3a16_fireworks_pipeline_demo_stage1": {
+          "shell_pos_x": "shell_pos_x",
+          "shell_pos_y": "shell_pos_y",
+          "shell_vel_x": "shell_vel_x",
+          "shell_vel_y": "shell_vel_y",
+          "shell_state": "shell_state",
+          "shell_age": "shell_age",
+          "shell_life": "shell_life",
+          "shell_seed": "shell_seed",
+          "spark_pos_x": "spark_pos_x",
+          "spark_pos_y": "spark_pos_y",
+          "spark_vel_x": "spark_vel_x",
+          "spark_vel_y": "spark_vel_y",
+          "spark_state": "spark_state",
+          "spark_age": "spark_age",
+          "spark_life": "spark_life",
+          "spark_seed": "spark_seed",
+          "v1": "v1",
+          "v2": "v2",
+          "v3": "v3"
+        },
+        "v3a16_fireworks_pipeline_demo_stage1->v3a16_fireworks_pipeline_demo_stage2": {
+          "shell_pos_x": "shell_pos_x",
+          "shell_pos_y": "shell_pos_y",
+          "shell_vel_x": "shell_vel_x",
+          "shell_vel_y": "shell_vel_y",
+          "shell_state": "shell_state",
+          "shell_age": "shell_age",
+          "shell_life": "shell_life",
+          "shell_seed": "shell_seed",
+          "spark_pos_x": "spark_pos_x",
+          "spark_pos_y": "spark_pos_y",
+          "spark_vel_x": "spark_vel_x",
+          "spark_vel_y": "spark_vel_y",
+          "spark_state": "spark_state",
+          "spark_age": "spark_age",
+          "spark_life": "spark_life",
+          "spark_seed": "spark_seed",
+          "v1": "v1",
+          "v2": "v2",
+          "v3": "v3"
+        },
+        "v3a16_fireworks_pipeline_demo_stage2->v3a16_fireworks_pipeline_demo_stage3": {
+          "shell_pos_x": "shell_pos_x",
+          "shell_pos_y": "shell_pos_y",
+          "shell_vel_x": "shell_vel_x",
+          "shell_vel_y": "shell_vel_y",
+          "shell_state": "shell_state",
+          "shell_age": "shell_age",
+          "shell_life": "shell_life",
+          "shell_seed": "shell_seed",
+          "spark_pos_x": "spark_pos_x",
+          "spark_pos_y": "spark_pos_y",
+          "spark_vel_x": "spark_vel_x",
+          "spark_vel_y": "spark_vel_y",
+          "spark_state": "spark_state",
+          "spark_age": "spark_age",
+          "spark_life": "spark_life",
+          "spark_seed": "spark_seed",
+          "v1": "v1",
+          "v2": "v2",
+          "v3": "v3"
+        },
+        "v3a16_fireworks_pipeline_demo_stage3->v3a16_fireworks_pipeline_demo_stage4": {
+          "shell_pos_x": "shell_pos_x",
+          "shell_pos_y": "shell_pos_y",
+          "shell_vel_x": "shell_vel_x",
+          "shell_vel_y": "shell_vel_y",
+          "shell_state": "shell_state",
+          "shell_age": "shell_age",
+          "shell_life": "shell_life",
+          "shell_seed": "shell_seed",
+          "spark_pos_x": "spark_pos_x",
+          "spark_pos_y": "spark_pos_y",
+          "spark_vel_x": "spark_vel_x",
+          "spark_vel_y": "spark_vel_y",
+          "spark_state": "spark_state",
+          "spark_age": "spark_age",
+          "spark_life": "spark_life",
+          "spark_seed": "spark_seed",
+          "v1": "v1",
+          "v2": "v2",
+          "v3": "v3"
+        },
+        "v3a16_fireworks_pipeline_demo_stage4->v3a16_fireworks_pipeline_demo_stage5": {
+          "shell_pos_x": "shell_pos_x",
+          "shell_pos_y": "shell_pos_y",
+          "shell_vel_x": "shell_vel_x",
+          "shell_vel_y": "shell_vel_y",
+          "shell_state": "shell_state",
+          "shell_age": "shell_age",
+          "shell_life": "shell_life",
+          "shell_seed": "shell_seed",
+          "spark_pos_x": "spark_pos_x",
+          "spark_pos_y": "spark_pos_y",
+          "spark_vel_x": "spark_vel_x",
+          "spark_vel_y": "spark_vel_y",
+          "spark_state": "spark_state",
+          "spark_age": "spark_age",
+          "spark_life": "spark_life",
+          "spark_seed": "spark_seed",
+          "v1": "v1",
+          "v2": "v2",
+          "v3": "v3"
+        },
+        "v3a16_fireworks_pipeline_demo_stage5->v3a16_fireworks_pipeline_demo_stageEnd": {
+          "shell_pos_x": "shell_pos_x",
+          "shell_pos_y": "shell_pos_y",
+          "shell_vel_x": "shell_vel_x",
+          "shell_vel_y": "shell_vel_y",
+          "shell_state": "shell_state",
+          "shell_age": "shell_age",
+          "shell_life": "shell_life",
+          "shell_seed": "shell_seed",
+          "spark_pos_x": "spark_pos_x",
+          "spark_pos_y": "spark_pos_y",
+          "spark_vel_x": "spark_vel_x",
+          "spark_vel_y": "spark_vel_y",
+          "spark_state": "spark_state",
+          "spark_age": "spark_age",
+          "spark_life": "spark_life",
+          "spark_seed": "spark_seed",
+          "v1": "v1",
+          "v2": "v2",
+          "v3": "v3"
+        }
+      }
+    }
+  }
+}
