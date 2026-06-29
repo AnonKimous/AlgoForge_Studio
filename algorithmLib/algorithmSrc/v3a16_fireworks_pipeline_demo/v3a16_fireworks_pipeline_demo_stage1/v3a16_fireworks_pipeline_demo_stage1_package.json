@@ -418,7 +418,7 @@
           "v2": "v2",
           "v3": "v3"
         },
-        "v3a16_fireworks_pipeline_demo_stage5->v3a16_fireworks_pipeline_demo_stageEnd": {
+        "v3a16_fireworks_pipeline_demo_stage5->v3a16_fireworks_pipeline_demo_stage6": {
           "shell_pos_x": "shell_pos_x",
           "shell_pos_y": "shell_pos_y",
           "shell_vel_x": "shell_vel_x",

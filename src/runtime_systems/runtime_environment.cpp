@@ -129,6 +129,14 @@ bool RuntimeEnvironment::HasRenderPreviewTexture() const {
   return imgui_runtime_ ? imgui_runtime_->HasRenderPreviewTexture() : false;
 }
 
+bool RuntimeEnvironment::ReadbackRenderPreviewTexture(
+  std::vector<std::byte>* out_rgba,
+  ImVec2* out_size) {
+  return imgui_runtime_
+    ? imgui_runtime_->ReadbackRenderPreviewTexture(out_rgba, out_size)
+    : false;
+}
+
 std::string RuntimeEnvironment::RenderPreviewDebugSummary() const {
   return imgui_runtime_ ? imgui_runtime_->RenderPreviewDebugSummary() : std::string("preview=uninitialized");
 }

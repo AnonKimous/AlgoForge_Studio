@@ -33,6 +33,7 @@ class PreviewRenderer {
   bool HasRequest() const;
   bool Record(VkCommandBuffer command_buffer);
   bool HasTexture() const;
+  bool ReadbackTexture(std::vector<std::byte>* out_rgba, VkExtent2D* out_extent) const;
   std::string DebugSummary() const;
   VkDescriptorSet PreviewTextureDescriptorSet() const;
   VkExtent2D PreviewTextureExtent() const;
@@ -51,6 +52,13 @@ class PreviewRenderer {
   };
 
   struct PreviewBufferResource {
+    VkBuffer buffer{VK_NULL_HANDLE};
+    VmaAllocation allocation{VK_NULL_HANDLE};
+    VmaAllocationInfo allocation_info{};
+    VkDeviceSize size_bytes{0u};
+  };
+
+  struct PreviewReadbackResource {
     VkBuffer buffer{VK_NULL_HANDLE};
     VmaAllocation allocation{VK_NULL_HANDLE};
     VmaAllocationInfo allocation_info{};
@@ -80,8 +88,10 @@ class PreviewRenderer {
   bool CreateTarget();
   void DestroyPipeline();
   void DestroyTarget();
+  void DestroyReadback();
   bool RecreateBuffers();
   bool UpdateBuffers();
+  bool EnsureReadbackBuffer();
   bool UploadBuffer(
     PreviewBufferResource* buffer_resource,
     const RenderPreviewBuffer& source_buffer);
@@ -95,6 +105,7 @@ class PreviewRenderer {
   RenderPreviewRequest request_{};
   PreviewTargetResource target_{};
   PreviewPipelineResource pipeline_{};
+  PreviewReadbackResource readback_{};
   VkExtent2D requested_extent_{1024u, 1024u};
   bool target_extent_dirty_{false};
 };

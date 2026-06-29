@@ -397,6 +397,26 @@ bool ImGuiVulkanRuntime::HasRenderPreviewTexture() const {
   return preview_renderer_ ? preview_renderer_->HasTexture() : false;
 }
 
+bool ImGuiVulkanRuntime::ReadbackRenderPreviewTexture(
+  std::vector<std::byte>* out_rgba,
+  ImVec2* out_size) {
+  if (!out_rgba) {
+    return false;
+  }
+  if (!preview_renderer_ || device_ == VK_NULL_HANDLE) {
+    return false;
+  }
+  CheckVkResult(vkDeviceWaitIdle(device_));
+  VkExtent2D extent{};
+  if (!preview_renderer_->ReadbackTexture(out_rgba, &extent)) {
+    return false;
+  }
+  if (out_size) {
+    *out_size = ImVec2(static_cast<float>(extent.width), static_cast<float>(extent.height));
+  }
+  return true;
+}
+
 std::string ImGuiVulkanRuntime::RenderPreviewDebugSummary() const {
   if (!preview_renderer_) {
     return "preview_renderer=uninitialized";

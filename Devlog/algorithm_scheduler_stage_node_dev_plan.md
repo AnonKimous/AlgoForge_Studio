@@ -95,8 +95,8 @@
 
 ## 关联文档
 
-- 现状与冲突检查：[algorithm_scheduler_stage_node_refactor_conflict_check.md](/D:/gptsandbox/algorithm_scheduler_stage_node_refactor_conflict_check.md)
-- 当前统一口径：[devtask.md](/D:/gptsandbox/devtask.md)
+- 现状与冲突检查：[algorithm_scheduler_stage_node_refactor_conflict_check.md](/D:/gptsandbox/Devlog/algorithm_scheduler_stage_node_refactor_conflict_check.md)
+- 当前统一口径：[devtask.md](/D:/gptsandbox/Devlog/devtask.md)
 
 ## 一句话结论
 

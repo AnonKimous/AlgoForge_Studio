@@ -120,7 +120,11 @@ class AgentManager {
   void StartTicking();
   void PauseTicking();
   bool tick_enabled() const { return tick_enabled_; }
-  bool Tick(const InputState& input, Vec2 mouse_pixel, float dt_seconds);
+  bool Tick(
+    const InputState& input,
+    Vec2 mouse_pixel,
+    float dt_seconds,
+    Vec2 render_preview_extent = Vec2{1024.0f, 1024.0f});
   bool CollectAlgorithmReflection(
     size_t agent_index,
     size_t algorithm_index,

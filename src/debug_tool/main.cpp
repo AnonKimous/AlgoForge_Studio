@@ -24,7 +24,11 @@ struct PipelineRunnerOptions {
   bool enabled{false};
   std::string algorithm_name{"v2a0_pipeline_square_vertex_demo"};
   std::string pipeline_name{};
-  uint32_t ticks{12u};
+  uint32_t ticks{24u};
+  uint32_t preview_width{640u};
+  uint32_t preview_height{480u};
+  std::string preview_output_path{
+    "D:/gptsandbox/artifacts/pipeline_runner/render_preview.ppm"};
   debug_tool::AlgorithmExecutionPreference execution_preference{
     debug_tool::AlgorithmExecutionPreference::Gpu};
 };
@@ -79,6 +83,38 @@ std::optional<float> _FindScalarValue(
     return std::nullopt;
   }
   return std::nullopt;
+}
+
+const debug_tool::AlgorithmReflectionValue* _FindReflectionValue(
+  const debug_tool::AlgorithmReflectionSnapshot& snapshot,
+  const char* container_name) {
+  if (!container_name) {
+    return nullptr;
+  }
+  for (const debug_tool::AlgorithmReflectionValue& value : snapshot.variables) {
+    if (value.container_name == container_name) {
+      return &value;
+    }
+  }
+  for (const debug_tool::AlgorithmReflectionValue& value : snapshot.variable_arrays) {
+    if (value.container_name == container_name) {
+      return &value;
+    }
+  }
+  return nullptr;
+}
+
+std::optional<float> _ReadArrayFloatValue(
+  const debug_tool::AlgorithmReflectionSnapshot& snapshot,
+  const char* container_name,
+  size_t index) {
+  const debug_tool::AlgorithmReflectionValue* value = _FindReflectionValue(snapshot, container_name);
+  if (!value || value->bytes.size() < (index + 1u) * sizeof(float)) {
+    return std::nullopt;
+  }
+  float scalar = 0.0f;
+  std::memcpy(&scalar, value->bytes.data() + index * sizeof(float), sizeof(float));
+  return scalar;
 }
 
 PositionSample _ExtractPositionSample(const debug_tool::AlgorithmReflectionSnapshot& snapshot) {
@@ -136,6 +172,53 @@ bool _ParseExecutionPreference(
   return false;
 }
 
+bool _WritePpmImage(
+  const std::filesystem::path& output_path,
+  const std::vector<std::byte>& rgba_bytes,
+  uint32_t width,
+  uint32_t height) {
+  if (width == 0u || height == 0u) {
+    return false;
+  }
+
+  const size_t pixel_count = static_cast<size_t>(width) * static_cast<size_t>(height);
+  const size_t required_size = pixel_count * 4u;
+  if (rgba_bytes.size() < required_size) {
+    return false;
+  }
+
+  std::error_code ec;
+  std::filesystem::create_directories(output_path.parent_path(), ec);
+  if (ec) {
+    return false;
+  }
+
+  std::ofstream output(output_path, std::ios::binary | std::ios::trunc);
+  if (!output) {
+    return false;
+  }
+
+  output << "P6\n" << width << ' ' << height << "\n255\n";
+  for (uint32_t y = 0u; y < height; ++y) {
+    const uint32_t source_y = height - 1u - y;
+    for (uint32_t x = 0u; x < width; ++x) {
+      const size_t pixel_index =
+        (static_cast<size_t>(source_y) * static_cast<size_t>(width) + static_cast<size_t>(x)) * 4u;
+      const char rgb[3]{
+        static_cast<char>(rgba_bytes[pixel_index + 0u]),
+        static_cast<char>(rgba_bytes[pixel_index + 1u]),
+        static_cast<char>(rgba_bytes[pixel_index + 2u]),
+      };
+      output.write(rgb, sizeof(rgb));
+      if (!output) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
 bool _ParsePipelineRunnerOptions(
   int argc,
   char** argv,
@@ -185,6 +268,36 @@ bool _ParsePipelineRunnerOptions(
       ++i;
       continue;
     }
+    if (argument == "--preview-width") {
+      if (i + 1 >= argc || !_ParseUInt32(argv[i + 1], &options.preview_width) || options.preview_width == 0u) {
+        if (out_error_message) {
+          *out_error_message = "--preview-width requires a positive integer value.";
+        }
+        return false;
+      }
+      ++i;
+      continue;
+    }
+    if (argument == "--preview-height") {
+      if (i + 1 >= argc || !_ParseUInt32(argv[i + 1], &options.preview_height) || options.preview_height == 0u) {
+        if (out_error_message) {
+          *out_error_message = "--preview-height requires a positive integer value.";
+        }
+        return false;
+      }
+      ++i;
+      continue;
+    }
+    if (argument == "--preview-output") {
+      if (i + 1 >= argc || !argv[i + 1] || !*argv[i + 1]) {
+        if (out_error_message) {
+          *out_error_message = "--preview-output requires a non-empty value.";
+        }
+        return false;
+      }
+      options.preview_output_path = argv[++i];
+      continue;
+    }
     if (argument == "--execution") {
       if (i + 1 >= argc || !_ParseExecutionPreference(argv[i + 1], &options.execution_preference)) {
         if (out_error_message) {
@@ -199,7 +312,9 @@ bool _ParsePipelineRunnerOptions(
       std::cout
         << "Usage:\n"
         << "  debugTool.exe --pipeline-runner "
-        << "[--algorithm <name>] [--pipeline-name <name>] [--ticks <count>] [--execution cpu|gpu]\n";
+        << "[--algorithm <name>] [--pipeline-name <name>] [--ticks <count>] "
+        << "[--preview-width <px>] [--preview-height <px>] [--preview-output <path>] "
+        << "[--execution cpu|gpu]\n";
       return false;
     }
   }
@@ -226,6 +341,25 @@ void _PrintReflectionSnapshot(const debug_tool::AlgorithmReflectionSnapshot& sna
   for (const debug_tool::AlgorithmReflectionValue& value : snapshot.variable_arrays) {
     std::cout << "      array " << value.container_name << " bytes=" << value.bytes.size() << '\n';
   }
+  for (size_t index = 0u; index < 8u; ++index) {
+    const std::optional<float> spark_state = _ReadArrayFloatValue(snapshot, "spark_state", index);
+    if (!spark_state.has_value() || *spark_state <= 0.5f) {
+      continue;
+    }
+    const std::optional<float> spark_x = _ReadArrayFloatValue(snapshot, "spark_pos_x", index);
+    const std::optional<float> spark_y = _ReadArrayFloatValue(snapshot, "spark_pos_y", index);
+    const std::optional<float> spark_life = _ReadArrayFloatValue(snapshot, "spark_life", index);
+    if (spark_x.has_value() && spark_y.has_value()) {
+      std::cout
+        << "      sample.spark[" << index << "] state=" << *spark_state
+        << " pos=(" << *spark_x << ", " << *spark_y << ')';
+      if (spark_life.has_value()) {
+        std::cout << " life=" << *spark_life;
+      }
+      std::cout << '\n';
+    }
+    break;
+  }
 }
 
 void _PrintBridgeDebugSummary(const debug_tool::PipelineStageBridgeDebugSummary& bridge_summary) {
@@ -249,6 +383,25 @@ void _PrintBridgeDebugSummary(const debug_tool::PipelineStageBridgeDebugSummary&
       << "        " << binding.source_stage_name << ':' << binding.source_container_name
       << " -> " << binding.target_stage_name << ':' << binding.target_container_name << '\n';
   }
+  if (bridge_summary.has_stage_output_reflection_snapshot) {
+    for (size_t index = 0u; index < 8u; ++index) {
+      const std::optional<float> spark_state =
+        _ReadArrayFloatValue(bridge_summary.stage_output_reflection_snapshot, "spark_state", index);
+      if (!spark_state.has_value() || *spark_state <= 0.5f) {
+        continue;
+      }
+      const std::optional<float> spark_x =
+        _ReadArrayFloatValue(bridge_summary.stage_output_reflection_snapshot, "spark_pos_x", index);
+      const std::optional<float> spark_y =
+        _ReadArrayFloatValue(bridge_summary.stage_output_reflection_snapshot, "spark_pos_y", index);
+      if (spark_x.has_value() && spark_y.has_value()) {
+        std::cout
+          << "      bridge.sample.spark[" << index << "] stage_out=("
+          << *spark_x << ", " << *spark_y << ")\n";
+      }
+      break;
+    }
+  }
 }
 
 bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
@@ -265,6 +418,7 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
   const std::filesystem::path agent_mount_probe_path = log_directory / "agent_mount_probe.log";
   const std::filesystem::path progress_path = log_directory / "progress_probe.log";
   const std::filesystem::path log_path = log_directory / "last_run.log";
+  const std::filesystem::path preview_output_path(options.preview_output_path);
   std::filesystem::remove(package_loader_probe_path, ec);
   ec.clear();
   std::filesystem::remove(backend_attach_probe_path, ec);
@@ -274,6 +428,8 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
   std::filesystem::remove(progress_path, ec);
   ec.clear();
   std::filesystem::remove(log_path, ec);
+  ec.clear();
+  std::filesystem::remove(preview_output_path, ec);
   ec.clear();
   const auto append_progress = [&](const std::string& line) {
     std::ofstream progress_file(progress_path, std::ios::binary | std::ios::app);
@@ -331,14 +487,14 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
   const std::string mounted_pipeline_name = _BuildRunnerPipelineName(options);
   const std::string submission_name = _BuildRunnerSubmissionName(options);
 
-  size_t mounted_algorithm_index = 0u;
+  size_t mounted_pipeline_index = 0u;
   if (!runtime.AttachPipelinePackageToAgent(
         0u,
         mounted_pipeline_name,
         options.algorithm_name,
         resource_bindings,
         descriptor_values,
-        &mounted_algorithm_index,
+        &mounted_pipeline_index,
         &error_message,
         options.execution_preference)) {
     throw std::runtime_error(
@@ -354,7 +510,7 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
         options.algorithm_name,
         resource_bindings,
         descriptor_values,
-        &mounted_algorithm_index,
+        nullptr,
         &error_message,
         options.execution_preference)) {
     throw std::runtime_error(
@@ -366,12 +522,16 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
 
   runtime.StartTicking();
   append_progress("ticking_started");
+  runtime.SetRenderPreviewExtent(
+    ImVec2(static_cast<float>(options.preview_width), static_cast<float>(options.preview_height)));
+  append_progress("preview_extent_set");
 
   std::cout
     << "pipeline_runner.begin algorithm=" << options.algorithm_name
     << " pipeline=" << mounted_pipeline_name
     << " execution=" << _ExecutionPreferenceName(options.execution_preference)
     << " ticks=" << options.ticks
+    << " preview=" << options.preview_width << 'x' << options.preview_height
     << " defaults=" << (has_default_file ? "true" : "false") << '\n';
 
   std::optional<PositionSample> first_valid_position{};
@@ -446,6 +606,68 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
   runtime.PauseTicking();
   append_progress("ticking_paused");
 
+  runtime_systems::RenderPreviewRequest preview_request{};
+  if (!runtime.BuildRenderPreviewRequest(0u, mounted_pipeline_index, &preview_request, &error_message)) {
+    throw std::runtime_error(
+      error_message.empty()
+        ? "Failed to build render preview request for mounted pipeline."
+        : error_message);
+  }
+  if (!preview_request.valid) {
+    throw std::runtime_error("Render preview request is invalid after pipeline execution.");
+  }
+  runtime.SetRenderPreviewRequest(std::move(preview_request));
+  append_progress("preview_request_set");
+
+  if (!runtime.runtime_environment().Tick()) {
+    throw std::runtime_error("Runtime environment failed while rendering the preview frame.");
+  }
+  append_progress("preview_frame_rendered");
+
+  if (!runtime.has_render_preview_texture()) {
+    throw std::runtime_error(
+      "Render preview texture was not created. summary=" + runtime.render_preview_debug_summary());
+  }
+
+  std::vector<std::byte> preview_rgba{};
+  ImVec2 preview_size{};
+  if (!runtime.runtime_environment().ReadbackRenderPreviewTexture(&preview_rgba, &preview_size)) {
+    throw std::runtime_error(
+      "Failed to read back render preview texture. summary=" + runtime.render_preview_debug_summary());
+  }
+  append_progress("preview_readback_complete");
+
+  const uint32_t preview_width = static_cast<uint32_t>(preview_size.x);
+  const uint32_t preview_height = static_cast<uint32_t>(preview_size.y);
+  if (preview_width == 0u || preview_height == 0u) {
+    throw std::runtime_error("Render preview readback returned an empty extent.");
+  }
+  const size_t preview_pixel_count =
+    static_cast<size_t>(preview_width) * static_cast<size_t>(preview_height);
+  if (preview_rgba.size() < preview_pixel_count * 4u) {
+    throw std::runtime_error("Render preview readback returned fewer bytes than expected.");
+  }
+
+  size_t non_empty_pixel_count = 0u;
+  for (size_t pixel_index = 0u; pixel_index < preview_pixel_count; ++pixel_index) {
+    const size_t byte_index = pixel_index * 4u;
+    if (preview_rgba[byte_index + 0u] != std::byte{0} ||
+        preview_rgba[byte_index + 1u] != std::byte{0} ||
+        preview_rgba[byte_index + 2u] != std::byte{0} ||
+        preview_rgba[byte_index + 3u] != std::byte{0}) {
+      ++non_empty_pixel_count;
+    }
+  }
+  if (non_empty_pixel_count == 0u) {
+    throw std::runtime_error(
+      "Render preview frame is empty. summary=" + runtime.render_preview_debug_summary());
+  }
+  if (!_WritePpmImage(preview_output_path, preview_rgba, preview_width, preview_height)) {
+    throw std::runtime_error(
+      "Failed to write render preview image: " + preview_output_path.string());
+  }
+  append_progress("preview_image_written");
+
   if (first_valid_position.has_value() && last_valid_position.valid && !observed_motion) {
     throw std::runtime_error(
       "Pipeline runner observed stable reflected position across all ticks. The demo did not move.");
@@ -457,6 +679,10 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
       << " first=(" << first_valid_position->x << ", " << first_valid_position->y << ')'
       << " last=(" << last_valid_position.x << ", " << last_valid_position.y << ')';
   }
+  std::cout
+    << " preview_pixels=" << non_empty_pixel_count
+    << " preview_path=" << preview_output_path.string()
+    << " preview_summary=" << runtime.render_preview_debug_summary();
   std::cout << '\n';
   std::cout.flush();
   std::cout.rdbuf(original_cout_buffer);

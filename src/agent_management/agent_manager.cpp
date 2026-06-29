@@ -241,7 +241,11 @@ bool _SignalBlocksTick(
 class AgentTicker {
  public:
   void Init(std::shared_ptr<agent::Agent> agent);
-  void Tick(const InputState& input, Vec2 mouse_pixel, float dt_seconds);
+  void Tick(
+    const InputState& input,
+    Vec2 mouse_pixel,
+    float dt_seconds,
+    Vec2 render_preview_extent);
   void Destroy();
 
   void ApplyInterventionRequest(const InteractionInterventionRequest& request);
@@ -268,7 +272,8 @@ void AgentTicker::Init(std::shared_ptr<agent::Agent> agent) {
 void AgentTicker::Tick(
   const InputState& input,
   Vec2 mouse_pixel,
-  float dt_seconds) {
+  float dt_seconds,
+  Vec2 render_preview_extent) {
   algorithm_to_agent_signal_ = {};
   last_timing_log_.clear();
   if (!agent_binding_) {
@@ -278,6 +283,7 @@ void AgentTicker::Tick(
   const agent::AgentTickContext context{
     .input = &input,
     .mouse_pixel = mouse_pixel,
+    .render_preview_extent = render_preview_extent,
     .dt_seconds = dt_seconds,
     .intervention_request = &intervention_request_,
   };
@@ -403,7 +409,11 @@ void AgentManager::PauseTicking() {
   tick_enabled_ = false;
 }
 
-bool AgentManager::Tick(const InputState& input, Vec2 mouse_pixel, float dt_seconds) {
+bool AgentManager::Tick(
+  const InputState& input,
+  Vec2 mouse_pixel,
+  float dt_seconds,
+  Vec2 render_preview_extent) {
   combined_algorithm_to_agent_signal_ = {};
   if (!tick_enabled_) {
     return true;
@@ -428,7 +438,7 @@ bool AgentManager::Tick(const InputState& input, Vec2 mouse_pixel, float dt_seco
       }
     }
 
-    managed_agent->ticker.Tick(input, mouse_pixel, dt_seconds);
+    managed_agent->ticker.Tick(input, mouse_pixel, dt_seconds, render_preview_extent);
     if (!managed_agent->ticker.last_timing_log().empty()) {
       std::cerr << managed_agent->ticker.last_timing_log();
     }

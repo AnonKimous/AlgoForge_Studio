@@ -28,6 +28,15 @@
       "intervention": "v6a6_pbd_ball_collision_demo_package.json"
     },
     {
+      "name": "v3a16_fireworks_pipeline_demo",
+      "display_name": "v3a16_fireworks_pipeline_demo",
+      "folder": "v3a16_fireworks_pipeline_demo",
+      "container_manifest": "v3a16_fireworks_pipeline_demo_package.json",
+      "decomposer": "v3a16_fireworks_pipeline_demo_package.json",
+      "reflector": "v3a16_fireworks_pipeline_demo_package.json",
+      "intervention": "v3a16_fireworks_pipeline_demo_package.json"
+    },
+    {
       "name": "v2a0_precision_grid_mask_demo",
       "display_name": "v2a0_precision_grid_mask_demo",
       "folder": "v2a0_precision_grid_mask_demo",

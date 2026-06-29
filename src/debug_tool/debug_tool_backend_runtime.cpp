@@ -1112,23 +1112,22 @@ bool _IsPipelineAlgorithmByName(
     return false;
   }
 
-  std::shared_ptr<algorithm::AlgorithmRuntimeTransferMap> transfer_map{};
-  bool has_transfer_map = false;
-  std::string transfer_map_error_message;
-  if (!algorithm_management::LoadAlgorithmPackageTransferMapFromLocation(
-        package_location,
-        &transfer_map,
-        &has_transfer_map,
-        &transfer_map_error_message)) {
+  std::string normalized_name = algorithm_name;
+  std::transform(
+    normalized_name.begin(),
+    normalized_name.end(),
+    normalized_name.begin(),
+    [](unsigned char ch) {
+      return static_cast<char>(std::tolower(ch));
+    });
+  const bool name_indicates_pipeline = normalized_name.find("pipeline") != std::string::npos;
+  if (package_location.algorithm_name.empty() && package_location.manifest_name.empty()) {
     if (out_error_message) {
-      *out_error_message = transfer_map_error_message.empty()
-        ? ("Failed to load runtime transfer map for '" + algorithm_name + "'.")
-        : std::move(transfer_map_error_message);
+      *out_error_message = "Resolved algorithm package is missing its algorithm name.";
     }
     return false;
   }
-
-  *out_is_pipeline = has_transfer_map && transfer_map && !transfer_map->empty();
+  *out_is_pipeline = name_indicates_pipeline;
   if (out_error_message) {
     out_error_message->clear();
   }
@@ -1171,7 +1170,11 @@ bool DebugToolBackendRuntime::Tick() {
   frame_dt_ = std::chrono::duration<float>(now - last_frame_time_).count();
   last_frame_time_ = now;
 
-  if (!agent_manager_.Tick(runtime_environment_.input(), runtime_environment_.MousePosition(), frame_dt_)) {
+  if (!agent_manager_.Tick(
+        runtime_environment_.input(),
+        runtime_environment_.MousePosition(),
+        frame_dt_,
+        render_preview_extent_)) {
     return false;
   }
   return runtime_environment_.Tick();
@@ -1432,6 +1435,7 @@ bool DebugToolBackendRuntime::ReplayPipelineStageBridgeDebug(
   const agent::AgentTickContext context{
     .input = &runtime_environment_.input(),
     .mouse_pixel = runtime_environment_.MousePosition(),
+    .render_preview_extent = render_preview_extent_,
     .dt_seconds = frame_dt_,
     .intervention_request = nullptr,
   };
@@ -2030,14 +2034,14 @@ bool DebugToolBackendRuntime::BuildRenderPreviewRequest(
       }
       continue;
     }
+    const bool has_container_bytes = !container->bytes.empty();
     const agent::AlgorithmReflectionValue* reflected_value = nullptr;
-    if (reflection_snapshot) {
+    if (!has_container_bytes && reflection_snapshot) {
       reflected_value = _FindReflectionValue(*reflection_snapshot, binding.container_name);
     }
 
     const bool has_reflected_bytes = reflected_value && !reflected_value->bytes.empty();
-    const bool has_container_bytes = !container->bytes.empty();
-    if (container->element_stride == 0u || (!has_reflected_bytes && !has_container_bytes)) {
+    if (container->element_stride == 0u || (!has_container_bytes && !has_reflected_bytes)) {
       DEBUG_TOOL_ASSERT(false, "Preview container has no drawable data.");
       if (binding.required) {
         if (out_error_message) {
@@ -2052,7 +2056,9 @@ bool DebugToolBackendRuntime::BuildRenderPreviewRequest(
     runtime_systems::RenderPreviewBuffer preview_buffer{};
     preview_buffer.binding_name = binding.container_name;
     preview_buffer.element_stride = container->element_stride;
-    if (has_reflected_bytes && reflected_value->storage_kind == container->storage_kind) {
+    if (has_container_bytes) {
+      preview_buffer.bytes.assign(container->bytes.begin(), container->bytes.end());
+    } else if (has_reflected_bytes && reflected_value->storage_kind == container->storage_kind) {
       preview_buffer.bytes = reflected_value->bytes;
     } else {
       preview_buffer.bytes.assign(container->bytes.begin(), container->bytes.end());

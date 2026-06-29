@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <cstring>
 #include <string>
@@ -125,6 +126,10 @@ class FireworksCpuExecutor final : public agent::IAlgorithmCpuExecutor {
     const float live_spark_value = _ReadScalar(v3);
     const uint32_t tick_seed = static_cast<uint32_t>(tick_value) + 1u;
     const Vec2 preview_extent = context.render_preview_extent;
+    assert(preview_extent.x > 0.0f && preview_extent.y > 0.0f && "Render preview extent must be positive.");
+    if (preview_extent.x <= 0.0f || preview_extent.y <= 0.0f) {
+      return false;
+    }
 
     const auto convert_shell_coordinates = [&](bool to_logical) {
       if (!(shell_state && shell_pos_x && shell_pos_y && shell_vel_x && shell_vel_y && shell_age && shell_life && shell_seed)) {
@@ -233,11 +238,40 @@ class FireworksCpuExecutor final : public agent::IAlgorithmCpuExecutor {
     };
 
     if (algorithm_name_ == "v3a16_fireworks_pipeline_demo_stageBegin") {
+      float begin_launch_budget_value = launch_budget_value;
+      float begin_live_spark_value = live_spark_value;
+      if (tick_value < 1.5f) {
+        const float zero = 0.0f;
+        const auto clear_array = [&](algorithm::AlgorithmContainer* container) {
+          if (container && !container->bytes.empty()) {
+            std::memset(container->bytes.data(), 0, container->bytes.size());
+          }
+        };
+        clear_array(shell_pos_x);
+        clear_array(shell_pos_y);
+        clear_array(shell_vel_x);
+        clear_array(shell_vel_y);
+        clear_array(shell_state);
+        clear_array(shell_age);
+        clear_array(shell_life);
+        clear_array(shell_seed);
+        clear_array(spark_pos_x);
+        clear_array(spark_pos_y);
+        clear_array(spark_vel_x);
+        clear_array(spark_vel_y);
+        clear_array(spark_state);
+        clear_array(spark_age);
+        clear_array(spark_life);
+        clear_array(spark_seed);
+        _WriteScalar(v1, zero);
+        begin_launch_budget_value = 12.0f;
+        begin_live_spark_value = zero;
+      }
       convert_shell_coordinates(true);
       convert_spark_coordinates(true);
       _WriteScalar(v1, tick_value);
-      _WriteScalar(v2, launch_budget_value);
-      _WriteScalar(v3, live_spark_value);
+      _WriteScalar(v2, begin_launch_budget_value);
+      _WriteScalar(v3, begin_live_spark_value);
     } else if (algorithm_name_ == "v3a16_fireworks_pipeline_demo") {
       const uint32_t window_frame = static_cast<uint32_t>(tick_value) % 30u;
       const bool window_reset = window_frame == 0u;
@@ -294,6 +328,8 @@ class FireworksCpuExecutor final : public agent::IAlgorithmCpuExecutor {
           const float age = 0.0f;
           std::memcpy(shell_age->bytes.data() + i * shell_age->element_stride, &age, sizeof(age));
           std::memcpy(shell_life->bytes.data() + i * shell_life->element_stride, &life, sizeof(life));
+          const float seed = static_cast<float>(tick_seed + static_cast<uint32_t>(i) * 131u);
+          std::memcpy(shell_seed->bytes.data() + i * shell_seed->element_stride, &seed, sizeof(seed));
           state = 1.0f;
           std::memcpy(shell_state->bytes.data() + i * shell_state->element_stride, &state, sizeof(state));
         }
@@ -398,8 +434,6 @@ class FireworksCpuExecutor final : public agent::IAlgorithmCpuExecutor {
       _WriteScalar(v2, launch_budget_value);
       _WriteScalar(v3, live_spark_value);
     } else if (algorithm_name_ == "v3a16_fireworks_pipeline_demo_stage5") {
-      convert_shell_coordinates(false);
-      convert_spark_coordinates(false);
       if (shell_state && shell_pos_x && shell_pos_y && shell_vel_x && shell_vel_y && shell_age && shell_life && shell_seed) {
         const size_t shell_count = _ArrayCount(shell_state);
         for (size_t i = 0u; i < shell_count; ++i) {
@@ -476,6 +510,12 @@ class FireworksCpuExecutor final : public agent::IAlgorithmCpuExecutor {
           }
         }
       }
+      _WriteScalar(v1, tick_value);
+      _WriteScalar(v2, launch_budget_value);
+      _WriteScalar(v3, live_spark_value);
+    } else if (algorithm_name_ == "v3a16_fireworks_pipeline_demo_stageEnd") {
+      convert_shell_coordinates(false);
+      convert_spark_coordinates(false);
       _WriteScalar(v1, tick_value);
       _WriteScalar(v2, launch_budget_value);
       _WriteScalar(v3, live_spark_value);

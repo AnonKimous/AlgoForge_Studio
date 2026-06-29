@@ -33,6 +33,7 @@ class ImGuiVulkanRuntime {
   void SetRenderPreviewExtent(ImVec2 extent);
   void ClearGpuRuntimeCaches();
   bool HasRenderPreviewTexture() const;
+  bool ReadbackRenderPreviewTexture(std::vector<std::byte>* out_rgba, ImVec2* out_size);
   std::string RenderPreviewDebugSummary() const;
   ImTextureID RenderPreviewTextureId() const;
   ImVec2 RenderPreviewTextureSize() const;

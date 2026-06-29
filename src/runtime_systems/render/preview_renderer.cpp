@@ -156,6 +156,41 @@ bool PreviewRenderer::HasTexture() const {
   return target_.descriptor_set != VK_NULL_HANDLE;
 }
 
+bool PreviewRenderer::ReadbackTexture(
+  std::vector<std::byte>* out_rgba,
+  VkExtent2D* out_extent) const {
+  if (!out_rgba) {
+    return false;
+  }
+  if (!HasTexture() || readback_.buffer == VK_NULL_HANDLE || readback_.allocation == VK_NULL_HANDLE) {
+    return false;
+  }
+
+  const size_t required_size =
+    static_cast<size_t>(target_.extent.width) *
+    static_cast<size_t>(target_.extent.height) * 4u;
+  if (required_size == 0u || readback_.size_bytes < required_size) {
+    return false;
+  }
+
+  CheckVkResult(vmaInvalidateAllocation(
+    allocator_,
+    readback_.allocation,
+    0u,
+    readback_.size_bytes));
+  const auto* mapped_bytes =
+    static_cast<const std::byte*>(readback_.allocation_info.pMappedData);
+  if (!mapped_bytes) {
+    return false;
+  }
+
+  out_rgba->assign(mapped_bytes, mapped_bytes + required_size);
+  if (out_extent) {
+    *out_extent = target_.extent;
+  }
+  return true;
+}
+
 std::string PreviewRenderer::DebugSummary() const {
   std::ostringstream stream;
   stream
@@ -256,7 +291,10 @@ bool PreviewRenderer::CreateTarget() {
     image_info.arrayLayers = 1;
     image_info.samples = VK_SAMPLE_COUNT_1_BIT;
     image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
-    image_info.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    image_info.usage =
+      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+      VK_IMAGE_USAGE_SAMPLED_BIT |
+      VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     VmaAllocationCreateInfo allocation_info{};
@@ -349,6 +387,7 @@ bool PreviewRenderer::CreateTarget() {
 
 void PreviewRenderer::DestroyTarget() {
   DestroyPipeline();
+  DestroyReadback();
   if (device_ == VK_NULL_HANDLE && allocator_ == VK_NULL_HANDLE) {
     target_ = {};
     return;
@@ -377,6 +416,13 @@ void PreviewRenderer::DestroyTarget() {
   }
 }
 
+void PreviewRenderer::DestroyReadback() {
+  if (readback_.buffer != VK_NULL_HANDLE && allocator_ != VK_NULL_HANDLE) {
+    vmaDestroyBuffer(allocator_, readback_.buffer, readback_.allocation);
+  }
+  readback_ = {};
+}
+
 bool PreviewRenderer::EnsureTarget() {
   if (target_.descriptor_set != VK_NULL_HANDLE) {
     return true;
@@ -385,6 +431,46 @@ bool PreviewRenderer::EnsureTarget() {
     DestroyTarget();
   }
   return CreateTarget();
+}
+
+bool PreviewRenderer::EnsureReadbackBuffer() {
+  if (allocator_ == VK_NULL_HANDLE) {
+    return false;
+  }
+
+  const VkDeviceSize required_size =
+    static_cast<VkDeviceSize>(target_.extent.width) *
+    static_cast<VkDeviceSize>(target_.extent.height) * 4u;
+  if (required_size == 0u) {
+    return false;
+  }
+  if (readback_.buffer != VK_NULL_HANDLE && readback_.size_bytes >= required_size) {
+    return true;
+  }
+
+  DestroyReadback();
+
+  VkBufferCreateInfo buffer_info{};
+  buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+  buffer_info.size = required_size;
+  buffer_info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+  buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+  VmaAllocationCreateInfo allocation_info{};
+  allocation_info.usage = VMA_MEMORY_USAGE_AUTO;
+  allocation_info.flags =
+    VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
+    VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+  CheckVkResult(vmaCreateBuffer(
+    allocator_,
+    &buffer_info,
+    &allocation_info,
+    &readback_.buffer,
+    &readback_.allocation,
+    &readback_.allocation_info));
+  readback_.size_bytes = buffer_info.size;
+  return true;
 }
 
 bool PreviewRenderer::RecreateBuffers() {
@@ -623,6 +709,9 @@ bool PreviewRenderer::Record(VkCommandBuffer command_buffer) {
   if (!UpdateBuffers()) {
     return false;
   }
+  if (!EnsureReadbackBuffer()) {
+    return false;
+  }
 
   uint32_t instance_count = request_.instance_count;
   if (instance_count == 0u && !request_.storage_buffers.empty()) {
@@ -726,6 +815,66 @@ bool PreviewRenderer::Record(VkCommandBuffer command_buffer) {
   vkCmdSetScissor(command_buffer, 0, 1, &scissor);
   vkCmdDraw(command_buffer, 4, instance_count, 0, 0);
   vkCmdEndRenderPass(command_buffer);
+
+  VkImageMemoryBarrier to_transfer_barrier{};
+  to_transfer_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  to_transfer_barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+  to_transfer_barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+  to_transfer_barrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  to_transfer_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+  to_transfer_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  to_transfer_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  to_transfer_barrier.image = target_.image;
+  to_transfer_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  to_transfer_barrier.subresourceRange.levelCount = 1;
+  to_transfer_barrier.subresourceRange.layerCount = 1;
+  vkCmdPipelineBarrier(
+    command_buffer,
+    VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+    VK_PIPELINE_STAGE_TRANSFER_BIT,
+    0,
+    0,
+    nullptr,
+    0,
+    nullptr,
+    1,
+    &to_transfer_barrier);
+
+  VkBufferImageCopy image_copy{};
+  image_copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  image_copy.imageSubresource.layerCount = 1;
+  image_copy.imageExtent = {target_.extent.width, target_.extent.height, 1u};
+  vkCmdCopyImageToBuffer(
+    command_buffer,
+    target_.image,
+    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+    readback_.buffer,
+    1,
+    &image_copy);
+
+  VkImageMemoryBarrier to_shader_read_barrier{};
+  to_shader_read_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  to_shader_read_barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+  to_shader_read_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+  to_shader_read_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+  to_shader_read_barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  to_shader_read_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  to_shader_read_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  to_shader_read_barrier.image = target_.image;
+  to_shader_read_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  to_shader_read_barrier.subresourceRange.levelCount = 1;
+  to_shader_read_barrier.subresourceRange.layerCount = 1;
+  vkCmdPipelineBarrier(
+    command_buffer,
+    VK_PIPELINE_STAGE_TRANSFER_BIT,
+    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+    0,
+    0,
+    nullptr,
+    0,
+    nullptr,
+    1,
+    &to_shader_read_barrier);
   return true;
 }
 
@@ -767,6 +916,7 @@ void PreviewRenderer::DestroyPipeline() {
 void PreviewRenderer::Destroy() {
   DestroyPipeline();
   DestroyTarget();
+  DestroyReadback();
   request_.Clear();
   instance_ = VK_NULL_HANDLE;
   physical_device_ = VK_NULL_HANDLE;

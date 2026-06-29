@@ -14,17 +14,17 @@
 
 ### 2.1 文档层目前默认 `AlgorithmScheduler` 持有整条 pipeline
 
-- [algorithm_scheduler_center.md](/D:/gptsandbox/algorithm_scheduler_center.md:41) 第 41-42 行写明“流水线算法的运行态不能散落在 `Agent` 里，调度中心要保存对应的运行时状态”。
-- [algorithm_scheduler_center.md](/D:/gptsandbox/algorithm_scheduler_center.md:77) 第 77-84 行写明调度中心持有“流水线定义、lane 列表、stage 状态、owner 归属、运行统计”。
-- [algorithm_scheduler_pipeline_model.md](/D:/gptsandbox/algorithm_scheduler_pipeline_model.md:12) 第 12 行写明“流水线的调度、推进、统计、挂载和卸载，都由 `AlgorithmScheduler` 统一管理”。
-- [algorithm_scheduler_pipeline_model.md](/D:/gptsandbox/algorithm_scheduler_pipeline_model.md:124) 第 124-132 行继续把“持有流水线 runtime、维护提交和 tick 关系、维护同步统计”定义成 `AlgorithmScheduler` 职责。
+- [algorithm_scheduler_center.md](/D:/gptsandbox/Devlog/algorithm_scheduler_center.md:41) 第 41-42 行写明“流水线算法的运行态不能散落在 `Agent` 里，调度中心要保存对应的运行时状态”。
+- [algorithm_scheduler_center.md](/D:/gptsandbox/Devlog/algorithm_scheduler_center.md:77) 第 77-84 行写明调度中心持有“流水线定义、lane 列表、stage 状态、owner 归属、运行统计”。
+- [algorithm_scheduler_pipeline_model.md](/D:/gptsandbox/Devlog/algorithm_scheduler_pipeline_model.md:12) 第 12 行写明“流水线的调度、推进、统计、挂载和卸载，都由 `AlgorithmScheduler` 统一管理”。
+- [algorithm_scheduler_pipeline_model.md](/D:/gptsandbox/Devlog/algorithm_scheduler_pipeline_model.md:124) 第 124-132 行继续把“持有流水线 runtime、维护提交和 tick 关系、维护同步统计”定义成 `AlgorithmScheduler` 职责。
 
 ### 2.2 最新 `pipelineDevDoc` 已收口为“算法语义不上 runtime_systems”
 
-- [devtask.md](/D:/gptsandbox/devtask.md) 已明确要求：CPU pipeline 的算法语义、owner 和 runtime 状态留在 `agent` / `algorithm_management`，并补齐 stage 间临时自定义参数规则。
-- [devtask.md](/D:/gptsandbox/devtask.md) 已明确说明 `runtime_systems` 不应理解 algorithm / pipeline / stage / lane / runtime transfer map。
-- [devtask.md](/D:/gptsandbox/devtask.md) 已把分层重新收口为：`agent` 负责入口，`algorithm_management::AlgorithmScheduler` 负责 pipeline 注册与推进，`runtime_systems` 只保留下层执行原语。
-- [devtask.md](/D:/gptsandbox/devtask.md) 已保留并统一了 stage 间临时自定义参数规则，把它们约束在 standard container / interStageBuffer / same-name custom container 这些通道里。
+- [devtask.md](/D:/gptsandbox/Devlog/devtask.md) 已明确要求：CPU pipeline 的算法语义、owner 和 runtime 状态留在 `agent` / `algorithm_management`，并补齐 stage 间临时自定义参数规则。
+- [devtask.md](/D:/gptsandbox/Devlog/devtask.md) 已明确说明 `runtime_systems` 不应理解 algorithm / pipeline / stage / lane / runtime transfer map。
+- [devtask.md](/D:/gptsandbox/Devlog/devtask.md) 已把分层重新收口为：`agent` 负责入口，`algorithm_management::AlgorithmScheduler` 负责 pipeline 注册与推进，`runtime_systems` 只保留下层执行原语。
+- [devtask.md](/D:/gptsandbox/Devlog/devtask.md) 已保留并统一了 stage 间临时自定义参数规则，把它们约束在 standard container / interStageBuffer / same-name custom container 这些通道里。
 
 ### 2.3 主干层级约束不允许随便跨层改 owner
 
@@ -76,7 +76,7 @@
 - 方案 A：`algorithm_management::AlgorithmScheduler` 持有 node registry，`Agent` 保留兼容视图。
 - 方案 B：`Agent` 继续持有更多 pipeline/stage 视图，`AlgorithmScheduler` 只做部分注册/路由。
 
-从现有分层和代码状态看，方案 A 更贴近 [devtask.md](/D:/gptsandbox/devtask.md) 和 [src/README.md](/D:/gptsandbox/src/README.md:22)，也更利于把 pipeline 语义从 `Agent` 继续收口到 `algorithm_management`。
+从现有分层和代码状态看，方案 A 更贴近 [devtask.md](/D:/gptsandbox/Devlog/devtask.md) 和 [src/README.md](/D:/gptsandbox/src/README.md:22)，也更利于把 pipeline 语义从 `Agent` 继续收口到 `algorithm_management`。
 
 ### 4.2 数据模型冲突
 
@@ -219,7 +219,7 @@ lane、pending stage0 submission、circular loopback 这些仍然更像 pipeline
 
 - 短期：先把 `AlgorithmScheduler` 从“整条 pipeline runtime owner”收敛成“pipeline/node 注册与路由中心”。
 - 中期：让 node registry 成为 scheduler 内的第一层索引，lane/runtime 仍暂时保持 pipeline-owned。
-- 长期：继续按 [devtask.md](/D:/gptsandbox/devtask.md) 的方向，把 pipeline 语义收口到 `algorithm_management`，同时让 `runtime_systems` 维持“只提供执行原语”的边界。
+- 长期：继续按 [devtask.md](/D:/gptsandbox/Devlog/devtask.md) 的方向，把 pipeline 语义收口到 `algorithm_management`，同时让 `runtime_systems` 维持“只提供执行原语”的边界。
 
 这样和现有分层、call chain、以及 executor 化方向都更不冲突。
 

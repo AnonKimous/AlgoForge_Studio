@@ -284,6 +284,7 @@ struct AlgorithmGpuExecSpec {
 struct AgentTickContext {
   const InputState* input{nullptr};
   Vec2 mouse_pixel{};
+  Vec2 render_preview_extent{1024.0f, 1024.0f};
   float dt_seconds{0.0f};
   AlgorithmExecutionPhase execution_phase{AlgorithmExecutionPhase::Body};
   AlgorithmJobPriority job_priority{AlgorithmJobPriority::High};

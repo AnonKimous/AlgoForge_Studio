@@ -73,7 +73,11 @@ class DebugToolBackendRuntime : public IDebugToolHost {
     std::string* out_error_message = nullptr) override;
   void StartTicking() override {
     agent_manager_.StartTicking();
-    (void)agent_manager_.Tick(runtime_environment_.input(), runtime_environment_.MousePosition(), frame_dt_);
+    (void)agent_manager_.Tick(
+      runtime_environment_.input(),
+      runtime_environment_.MousePosition(),
+      frame_dt_,
+      render_preview_extent_);
   }
   void PauseTicking() override {
     agent_manager_.PauseTicking();
@@ -82,7 +86,11 @@ class DebugToolBackendRuntime : public IDebugToolHost {
     return agent_manager_.tick_enabled();
   }
   bool TickManagedAgents() override {
-    return agent_manager_.Tick(runtime_environment_.input(), runtime_environment_.MousePosition(), frame_dt_);
+    return agent_manager_.Tick(
+      runtime_environment_.input(),
+      runtime_environment_.MousePosition(),
+      frame_dt_,
+      render_preview_extent_);
   }
   void ClearAgents() override {
     agent_manager_.ClearAgents();
@@ -117,6 +125,7 @@ class DebugToolBackendRuntime : public IDebugToolHost {
   ImTextureID render_preview_texture_id() const override { return runtime_environment_.RenderPreviewTextureId(); }
   ImVec2 render_preview_texture_size() const override { return runtime_environment_.RenderPreviewTextureSize(); }
   void SetRenderPreviewExtent(ImVec2 extent) override {
+    render_preview_extent_ = Vec2{extent.x, extent.y};
     runtime_environment_.SetRenderPreviewExtent(extent);
   }
   void SetRenderPreviewRequest(runtime_systems::RenderPreviewRequest request) override {
@@ -140,6 +149,7 @@ class DebugToolBackendRuntime : public IDebugToolHost {
   std::string ui_status_message_{};
   std::chrono::steady_clock::time_point last_frame_time_{};
   float frame_dt_{0.0f};
+  Vec2 render_preview_extent_{1024.0f, 1024.0f};
 };
 
 }  // namespace debug_tool_backend

@@ -1,6 +1,6 @@
 #define ALGORITHM_LIBRARY_PLUGIN_BUILD 1
 
-#include "../v3a16_fireworks_pipeline_demo/v3a16_fireworks_pipeline_demo_shared.h"
+#include "../v3a16_fireworks_pipeline_demo_shared.h"
 
 extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateBundle(
   const algorithm_library_plugin::AlgorithmPluginRequest* request,

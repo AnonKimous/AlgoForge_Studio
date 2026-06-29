@@ -1127,7 +1127,11 @@ inline bool RuntimeTransferMapsMatch(
     if (expected_edge.source_stage_name != candidate_edge.source_stage_name ||
         expected_edge.target_stage_name != candidate_edge.target_stage_name) {
       if (out_error_message) {
-        *out_error_message = "Pipeline stage runtime transfer map topology does not match.";
+        *out_error_message =
+          "Pipeline stage runtime transfer map topology does not match at edge index " +
+          std::to_string(edge_index) +
+          ". expected=" + expected_edge.source_stage_name + "->" + expected_edge.target_stage_name +
+          ", actual=" + candidate_edge.source_stage_name + "->" + candidate_edge.target_stage_name + ".";
       }
       return false;
     }
@@ -2360,6 +2364,10 @@ inline bool AlgorithmScheduler::MountPipelineAlgorithmObjects(
       " begin=" + (wrapper_spec.stage_begin.algorithm_name.empty() ? "<empty>" : wrapper_spec.stage_begin.algorithm_name) +
       " end=" + (wrapper_spec.stage_end.algorithm_name.empty() ? "<empty>" : wrapper_spec.stage_end.algorithm_name));
   }
+  if (!wrapper_spec.declared) {
+    set_error("Pipeline algorithm must declare both wrapper stages. Legacy pipelines must be upgraded with wrappers.");
+    return false;
+  }
 
   std::vector<pipeline_scheduler_detail::BuiltAlgorithmMount> built_body_stages{};
   built_body_stages.reserve(stage_submissions.size());
@@ -2414,10 +2422,21 @@ inline bool AlgorithmScheduler::MountPipelineAlgorithmObjects(
 
   std::shared_ptr<algorithm::AlgorithmRuntimeTransferMap> shared_pipeline_transfer_map{};
   std::string transfer_map_error_message;
+  if (emit_runner_probe) {
+    pipeline_scheduler_detail::AppendPipelineRunnerProbe(
+      "scheduler_mount_probe.log",
+      "mount.transfer_map.begin");
+  }
   if (!pipeline_scheduler_detail::TryBuildMountedPipelineTransferMap(
         built_body_stages,
         &shared_pipeline_transfer_map,
         &transfer_map_error_message)) {
+    if (emit_runner_probe) {
+      pipeline_scheduler_detail::AppendPipelineRunnerProbe(
+        "scheduler_mount_probe.log",
+        "mount.transfer_map.fail error=" +
+          (transfer_map_error_message.empty() ? std::string("<empty>") : transfer_map_error_message));
+    }
     set_error(transfer_map_error_message.empty()
       ? "Failed to build the mounted pipeline runtime transfer map."
       : std::move(transfer_map_error_message));
@@ -2445,6 +2464,11 @@ inline bool AlgorithmScheduler::MountPipelineAlgorithmObjects(
   const bool has_wrapper_nodes = wrapper_spec.declared;
   built_stages.reserve(stage_submissions.size() + (has_wrapper_nodes ? 2u : 0u));
   if (has_wrapper_nodes) {
+    if (emit_runner_probe) {
+      pipeline_scheduler_detail::AppendPipelineRunnerProbe(
+        "scheduler_mount_probe.log",
+        "mount.wrapper_begin_build.begin");
+    }
     pipeline_scheduler_detail::BuiltAlgorithmMount wrapper_begin_mount =
       pipeline_scheduler_detail::BuildPipelineWrapperMount(
         root_package_location,
@@ -2454,9 +2478,19 @@ inline bool AlgorithmScheduler::MountPipelineAlgorithmObjects(
         execution_preference,
         standard_shared_container_sets);
     if (!wrapper_begin_mount.ok) {
+      if (emit_runner_probe) {
+        pipeline_scheduler_detail::AppendPipelineRunnerProbe(
+          "scheduler_mount_probe.log",
+          "mount.wrapper_begin_build.fail error=" +
+            (wrapper_begin_mount.error_message.empty() ? std::string("<empty>") : wrapper_begin_mount.error_message));
+      }
       set_error(wrapper_begin_mount.error_message.empty()
         ? "Failed to build pipeline wrapper begin mount."
         : std::move(wrapper_begin_mount.error_message));
+      return false;
+    }
+    if (wrapper_begin_mount.object.pipeline_wrapper_empty) {
+      set_error("Pipeline wrapper begin stage must resolve to a concrete algorithm package.");
       return false;
     }
     if (emit_runner_probe) {
@@ -2471,6 +2505,11 @@ inline bool AlgorithmScheduler::MountPipelineAlgorithmObjects(
     built_stages.push_back(std::move(built_body_stage));
   }
   if (has_wrapper_nodes) {
+    if (emit_runner_probe) {
+      pipeline_scheduler_detail::AppendPipelineRunnerProbe(
+        "scheduler_mount_probe.log",
+        "mount.wrapper_end_build.begin");
+    }
     pipeline_scheduler_detail::BuiltAlgorithmMount wrapper_end_mount =
       pipeline_scheduler_detail::BuildPipelineWrapperMount(
         root_package_location,
@@ -2480,9 +2519,19 @@ inline bool AlgorithmScheduler::MountPipelineAlgorithmObjects(
         execution_preference,
         standard_shared_container_sets);
     if (!wrapper_end_mount.ok) {
+      if (emit_runner_probe) {
+        pipeline_scheduler_detail::AppendPipelineRunnerProbe(
+          "scheduler_mount_probe.log",
+          "mount.wrapper_end_build.fail error=" +
+            (wrapper_end_mount.error_message.empty() ? std::string("<empty>") : wrapper_end_mount.error_message));
+      }
       set_error(wrapper_end_mount.error_message.empty()
         ? "Failed to build pipeline wrapper end mount."
         : std::move(wrapper_end_mount.error_message));
+      return false;
+    }
+    if (wrapper_end_mount.object.pipeline_wrapper_empty) {
+      set_error("Pipeline wrapper end stage must resolve to a concrete algorithm package.");
       return false;
     }
     if (emit_runner_probe) {
@@ -2552,8 +2601,8 @@ inline bool AlgorithmScheduler::MountPipelineAlgorithmObjects(
     shared_pipeline_transfer_map->pipeline_shared_stage_buffer_slot_name;
   pipeline_runtime_state.stage_has_data.assign(pipeline_total_stage_count, false);
   if (topology == ::algorithm_management::AlgorithmPipelineTopology::NonCircular &&
-      !pipeline_runtime_state.stage_has_data.empty()) {
-    pipeline_runtime_state.stage_has_data.front() = true;
+      pipeline_body_begin_stage_index < pipeline_runtime_state.stage_has_data.size()) {
+    pipeline_runtime_state.stage_has_data[pipeline_body_begin_stage_index] = true;
   }
 
   pipeline_scheduler_detail::PipelineLaneRuntimeState initial_lane_state{};
@@ -2579,8 +2628,8 @@ inline bool AlgorithmScheduler::MountPipelineAlgorithmObjects(
       "mount.initial_lane.end");
   }
   if (topology == ::algorithm_management::AlgorithmPipelineTopology::NonCircular &&
-      !initial_lane_state.stage_has_data.empty()) {
-    initial_lane_state.stage_has_data.front() = true;
+      pipeline_body_begin_stage_index < initial_lane_state.stage_has_data.size()) {
+    initial_lane_state.stage_has_data[pipeline_body_begin_stage_index] = true;
   }
   pipeline_runtime_state.current_lane_id = initial_lane_state.lane_id;
   pipeline_runtime_state.lanes.push_back(std::move(initial_lane_state));
@@ -2951,12 +3000,51 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
     progress_state.stage_runtime_stats.clear();
   }
 
-  body_stage0_object.SetContainerSet(primary_lane_state->standard_container_set);
+  ALGORITHM_SCHEDULER_ASSERT(
+    has_wrapper_begin && has_wrapper_end,
+    "Mounted pipeline must expose concrete wrapper begin/end stages.");
+  if (!has_wrapper_begin || !has_wrapper_end) {
+    set_error("Mounted pipeline must expose concrete wrapper begin/end stages.");
+    out_pipeline_signal->stop_requested = true;
+    *out_pipeline_processing_failed = true;
+    return false;
+  }
+
+  const size_t body_begin_offset = body_begin_index - begin_index;
+  std::vector<bool> current_body_stage_has_data(body_stage_count, false);
+  auto build_body_stage_has_data = [&](const std::vector<bool>& full_stage_has_data) {
+    std::vector<bool> body_stage_has_data(body_stage_count, false);
+    for (size_t body_offset = 0u; body_offset < body_stage_count; ++body_offset) {
+      const size_t pipeline_stage_offset = body_begin_offset + body_offset;
+      if (pipeline_stage_offset < full_stage_has_data.size()) {
+        body_stage_has_data[body_offset] = full_stage_has_data[pipeline_stage_offset];
+      }
+    }
+    return body_stage_has_data;
+  };
+  auto build_full_stage_has_data = [&](const std::vector<bool>& body_stage_has_data) {
+    std::vector<bool> full_stage_has_data(pipeline_stage_count, false);
+    for (size_t body_offset = 0u; body_offset < body_stage_has_data.size(); ++body_offset) {
+      const size_t pipeline_stage_offset = body_begin_offset + body_offset;
+      if (pipeline_stage_offset < full_stage_has_data.size()) {
+        full_stage_has_data[pipeline_stage_offset] = body_stage_has_data[body_offset];
+      }
+    }
+    return full_stage_has_data;
+  };
+  current_body_stage_has_data = build_body_stage_has_data(primary_lane_state->stage_has_data);
+
+  if (body_stage0_object.shared_container_set == primary_lane_state->standard_container_set) {
+    std::shared_ptr<algorithm::AlgorithmContainerSet> detached_body_stage0_container =
+      std::make_shared<algorithm::AlgorithmContainerSet>();
+    algorithm::CopyAlgorithmContainerSet(
+      *primary_lane_state->standard_container_set,
+      detached_body_stage0_container.get());
+    body_stage0_object.SetContainerSet(std::move(detached_body_stage0_container));
+  }
   body_stage0_object.resource_bindings = primary_lane_state->resource_bindings;
   body_stage0_object.descriptor_values = primary_lane_state->descriptor_values;
 
-  std::vector<bool> current_stage_has_data = primary_lane_state->stage_has_data;
-  std::vector<bool> next_stage_has_data(pipeline_stage_count, false);
   auto resolve_pipeline_active_stage = [&](
     const std::vector<bool>& stage_has_data,
     const std::vector<size_t>& executable_stage_indices,
@@ -2977,21 +3065,15 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
     }
   };
 
-  const bool stage0_allow_tick = begin_index < allow_tick_mask.size() ? allow_tick_mask[begin_index] : true;
-  const bool stage0_is_ready =
-    begin_index < assembly_states.size() &&
-    assembly_states[begin_index] == ::algorithm_management::AlgorithmAssemblyState::Ready;
-  if (!current_stage_has_data.empty() &&
-      !current_stage_has_data.front() &&
-      stage0_allow_tick &&
-      stage0_is_ready &&
-      !pipeline_state.pending_stage0_submissions.empty() &&
-      (pipeline_stage_debug_all || pipeline_stage_debug_index == 0u)) {
+  bool imported_submission_this_tick = false;
+  if (!current_body_stage_has_data.empty() &&
+      pipeline_scheduler_detail::CountLivePipelineStages(current_body_stage_has_data) == 0u &&
+      !pipeline_state.pending_stage0_submissions.empty()) {
     ::algorithm_management::AlgorithmObject& stage0_object = body_stage0_object;
     CpuPendingPipelineStage0Submission submission =
       std::move(pipeline_state.pending_stage0_submissions.front());
     pipeline_state.pending_stage0_submissions.erase(pipeline_state.pending_stage0_submissions.begin());
-    if (pipeline_scheduler_detail::CountLivePipelineStages(current_stage_has_data) == 0u &&
+    if (pipeline_scheduler_detail::CountLivePipelineStages(current_body_stage_has_data) == 0u &&
         pipeline_state.current_lane_id != 0u &&
         pipeline_state.current_lane_id != submission.lane_id) {
       if (pipeline_scheduler_detail::PipelineLaneRuntimeState* previous_lane_state =
@@ -3015,17 +3097,20 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
     }
     stage0_object.resource_bindings = submission.resource_bindings;
     stage0_object.descriptor_values = submission.descriptor_values;
-    stage0_object.SetContainerSet(primary_lane_state->standard_container_set);
     primary_lane_state->owner_agent_name = owner_agent_name;
     primary_lane_state->lane_id = submission.lane_id;
     primary_lane_state->loop_lane_active = submission.loop_lane_active;
-    primary_lane_state->standard_container_set = stage0_object.shared_container_set;
     primary_lane_state->resource_bindings = stage0_object.resource_bindings;
     primary_lane_state->descriptor_values = stage0_object.descriptor_values;
     primary_lane_state->stage_has_data.assign(pipeline_stage_count, false);
-    current_stage_has_data.front() = true;
+    current_body_stage_has_data.assign(body_stage_count, false);
+    current_body_stage_has_data.front() = true;
     pipeline_state.stage0_saturated = false;
+    imported_submission_this_tick = true;
   }
+
+  body_stage0_object.resource_bindings = primary_lane_state->resource_bindings;
+  body_stage0_object.descriptor_values = primary_lane_state->descriptor_values;
 
   std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>> stage_container_sets{};
   std::string stage_set_error_message;
@@ -3050,7 +3135,6 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
   std::vector<bool> stage_allow_tick(pipeline_stage_count, false);
   std::vector<bool> stage_is_ready(pipeline_stage_count, false);
   std::vector<bool> stage_launch_once_completed(pipeline_stage_count, false);
-  std::vector<bool> stage_execute_mask(pipeline_stage_count, false);
 
   for (size_t index = begin_index; index < end_index; ++index) {
     const size_t stage_offset = index - begin_index;
@@ -3080,161 +3164,156 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
       object.tick_lifetime == ::algorithm_management::AlgorithmTickLifetime::LaunchOnceThenHold;
     stage_launch_once_completed[stage_offset] =
       launch_once_then_hold && updated_runtime_states[index].launch_once_completed;
-    const bool has_data = stage_offset < current_stage_has_data.size() && current_stage_has_data[stage_offset];
-    stage_execute_mask[stage_offset] =
-      has_data &&
-      stage_allow_tick[stage_offset] &&
-      stage_is_ready[stage_offset] &&
-      !stage_launch_once_completed[stage_offset] &&
-      (pipeline_stage_debug_all || stage_offset == pipeline_stage_debug_index);
   }
 
-  for (size_t index = begin_index; index < end_index; ++index) {
+  const bool forced_sync =
+    pipeline_state.sync_mode == ::algorithm_management::AlgorithmPipelineSyncMode::Forced;
+  std::vector<bool> next_body_stage_has_data(body_stage_count, false);
+
+  auto tick_stage_without_execution = [&](
+    size_t index,
+    bool has_data,
+    bool is_stage0_body,
+    const std::string& blocked_reason) {
     const size_t stage_offset = index - begin_index;
     ::algorithm_management::AlgorithmObject& object = algorithm_objects[index];
     ::algorithm_management::AgentAlgorithmRuntimeState& runtime_state = updated_runtime_states[index];
-    const bool has_data = stage_offset < current_stage_has_data.size() && current_stage_has_data[stage_offset];
-    const bool execute_now = stage_offset < stage_execute_mask.size() && stage_execute_mask[stage_offset];
+    pipeline_scheduler_detail::SetPipelineStageRuntimeReason(
+      pipeline_stage_runtime_stats,
+      object.algorithm_profile.algorithm_name,
+      !has_data
+        ? pipeline_scheduler_detail::BuildPipelineStageNoInputReason(
+            is_stage0_body,
+            !pipeline_state.pending_stage0_submissions.empty())
+        : blocked_reason);
+    if (!pipeline_scheduler_detail::TickAlgorithmObject(
+          object,
+          context,
+          stage_allow_tick[stage_offset],
+          stage_is_ready[stage_offset],
+          false,
+          &runtime_state)) {
+      runtime_state.algorithm_to_agent_signal.stop_requested = true;
+    }
+    pipeline_scheduler_detail::MergeAlgorithmToAgentSignal(
+      runtime_state.algorithm_to_agent_signal,
+      out_pipeline_signal);
+  };
+
+  auto tick_wrapper_stage = [&](
+    size_t index,
+    bool collect_exit_reflection,
+    const char* executed_reason) {
+    const size_t stage_offset = index - begin_index;
+    ::algorithm_management::AlgorithmObject& object = algorithm_objects[index];
+    ::algorithm_management::AgentAlgorithmRuntimeState& runtime_state = updated_runtime_states[index];
+    object.SetContainerSet(primary_lane_state->standard_container_set);
+    object.resource_bindings = primary_lane_state->resource_bindings;
+    object.descriptor_values = primary_lane_state->descriptor_values;
+    const bool execute_now =
+      stage_allow_tick[stage_offset] &&
+      stage_is_ready[stage_offset] &&
+      !stage_launch_once_completed[stage_offset];
     if (!execute_now) {
-      pipeline_scheduler_detail::SetPipelineStageRuntimeReason(
-        pipeline_stage_runtime_stats,
-        object.algorithm_profile.algorithm_name,
-        !has_data
-          ? pipeline_scheduler_detail::BuildPipelineStageNoInputReason(
-              stage_offset == 0u,
-              !pipeline_state.pending_stage0_submissions.empty())
-          : (stage_allow_tick[stage_offset] &&
-             stage_is_ready[stage_offset] &&
-             !stage_launch_once_completed[stage_offset])
-              ? "Stage is holding data, but the downstream stage cannot accept output this tick."
-              : pipeline_scheduler_detail::BuildPipelineStageIdleReason(
-                  stage_allow_tick[stage_offset],
-                  stage_is_ready[stage_offset],
-                  stage_launch_once_completed[stage_offset]));
-      if (!pipeline_scheduler_detail::TickAlgorithmObject(
-            object,
-            context,
-            stage_allow_tick[stage_offset],
-            stage_is_ready[stage_offset],
-            false,
-            &runtime_state)) {
-        runtime_state.algorithm_to_agent_signal.stop_requested = true;
-      }
-      if (has_data) {
-        next_stage_has_data[stage_offset] = true;
-      }
+      tick_stage_without_execution(
+        index,
+        true,
+        false,
+        pipeline_scheduler_detail::BuildPipelineStageIdleReason(
+          stage_allow_tick[stage_offset],
+          stage_is_ready[stage_offset],
+          stage_launch_once_completed[stage_offset]));
+      return true;
+    }
+    const auto stage_time_begin = std::chrono::steady_clock::now();
+    if (emit_runner_probe) {
+      pipeline_scheduler_detail::AppendPipelineRunnerProbe(
+        "scheduler_tick_probe.log",
+        "tick.wrapper.begin stage=" + object.algorithm_profile.algorithm_name);
+    }
+    pipeline_scheduler_detail::SetPipelineStageRuntimeReason(
+      pipeline_stage_runtime_stats,
+      object.algorithm_profile.algorithm_name,
+      executed_reason);
+    if (!pipeline_scheduler_detail::TickAlgorithmObject(
+          object,
+          context,
+          stage_allow_tick[stage_offset],
+          stage_is_ready[stage_offset],
+          true,
+          &runtime_state)) {
+      runtime_state.algorithm_to_agent_signal.stop_requested = true;
       pipeline_scheduler_detail::MergeAlgorithmToAgentSignal(
         runtime_state.algorithm_to_agent_signal,
         out_pipeline_signal);
-      continue;
+      set_error("Mounted pipeline wrapper stage execution failed.");
+      *out_pipeline_processing_failed = true;
+      return false;
     }
+    if (collect_exit_reflection) {
+      const algorithm::AlgorithmContainerSet* wrapper_container_set = object.container_set();
+      ALGORITHM_SCHEDULER_ASSERT(
+        wrapper_container_set != nullptr,
+        "Pipeline wrapper end container set is unavailable.");
+      if (!wrapper_container_set) {
+        runtime_state.algorithm_to_agent_signal.stop_requested = true;
+        pipeline_scheduler_detail::MergeAlgorithmToAgentSignal(
+          runtime_state.algorithm_to_agent_signal,
+          out_pipeline_signal);
+        set_error("Pipeline wrapper end container set is unavailable.");
+        *out_pipeline_processing_failed = true;
+        return false;
+      }
+      if (pipeline_scheduler_detail::CollectPipelineExitReflectionSnapshot(
+            object.pipeline_name.empty() ? object.algorithm_profile.algorithm_name : object.pipeline_name,
+            *wrapper_container_set,
+            &runtime_state.reflection_snapshot)) {
+        runtime_state.reflection_snapshot_cached = false;
+        pipeline_state.exit_reflection_snapshot = runtime_state.reflection_snapshot;
+        pipeline_state.exit_reflection_snapshot_valid = true;
+      } else {
+        runtime_state.reflection_snapshot.Clear();
+        pipeline_state.exit_reflection_snapshot.Clear();
+        pipeline_state.exit_reflection_snapshot_valid = false;
+      }
+    }
+    pipeline_scheduler_detail::MergeAlgorithmToAgentSignal(
+      runtime_state.algorithm_to_agent_signal,
+      out_pipeline_signal);
+    const auto stage_time_end = std::chrono::steady_clock::now();
+    pipeline_scheduler_detail::AddPipelineStageRuntimeElapsed(
+      pipeline_stage_runtime_stats,
+      object.algorithm_profile.algorithm_name,
+      std::chrono::duration<float>(stage_time_end - stage_time_begin).count());
+    if (emit_runner_probe) {
+      pipeline_scheduler_detail::AppendPipelineRunnerProbe(
+        "scheduler_tick_probe.log",
+        "tick.wrapper.end stage=" + object.algorithm_profile.algorithm_name);
+    }
+    return true;
+  };
+
+  auto execute_body_stage = [&](
+    size_t body_stage_offset,
+    bool allow_immediate_forward,
+    std::vector<bool>* inout_working_body_stage_has_data) {
+    const size_t index = body_begin_index + body_stage_offset;
+    const size_t stage_offset = index - begin_index;
+    ::algorithm_management::AlgorithmObject& object = algorithm_objects[index];
+    ::algorithm_management::AgentAlgorithmRuntimeState& runtime_state = updated_runtime_states[index];
     pipeline_scheduler_detail::SetPipelineStageRuntimeReason(
       pipeline_stage_runtime_stats,
       object.algorithm_profile.algorithm_name,
       "Stage executed.");
     executable_indices.push_back(index);
-  }
 
-  auto commit_progress_state = [&](pipeline_scheduler_detail::PipelineGroupProgressState&& applied_progress_state) {
-    if (begin_index >= updated_runtime_states.size() || begin_index >= end_index) {
-      return;
-    }
-    size_t active_stage_index = 0u;
-    bool active_stage_valid = false;
-    resolve_pipeline_active_stage(
-      pipeline_state.stage_has_data,
-      executable_indices,
-      &active_stage_index,
-      &active_stage_valid);
-    for (size_t index = begin_index; index < end_index; ++index) {
-      ::algorithm_management::AgentAlgorithmRuntimeState& runtime_state = updated_runtime_states[index];
-      runtime_state.pipeline_progress_signature = applied_progress_state.signature;
-      runtime_state.pipeline_progress_signature_valid = applied_progress_state.signature_valid;
-      runtime_state.pipeline_no_progress_seconds = applied_progress_state.no_progress_seconds;
-      runtime_state.pipeline_stall_report_requested = applied_progress_state.stall_report_requested;
-      runtime_state.pipeline_stall_reported = applied_progress_state.stall_reported;
-      runtime_state.pipeline_stall_reason = applied_progress_state.stall_reason;
-      runtime_state.pipeline_active_stage_index = static_cast<uint32_t>(active_stage_index);
-      runtime_state.pipeline_active_stage_index_valid = active_stage_valid;
-      if (collect_pipeline_timing) {
-        runtime_state.pipeline_total_elapsed_seconds = applied_progress_state.total_elapsed_seconds;
-        runtime_state.pipeline_stage_runtime_stats = applied_progress_state.stage_runtime_stats;
-      } else {
-        runtime_state.pipeline_total_elapsed_seconds = 0.0f;
-        runtime_state.pipeline_stage_runtime_stats.clear();
-      }
-    }
-  };
-
-  if (!pipeline_scheduler_detail::PipelineGroupIsExecutable(executable_indices)) {
-    pipeline_scheduler_detail::CommitPipelineStageStateToPrimaryLane(&pipeline_state, next_stage_has_data);
-    const bool pipeline_has_live_token =
-      pipeline_scheduler_detail::CountLivePipelineStages(pipeline_state.stage_has_data) > 0u;
-    const uint64_t current_signature =
-      pipeline_scheduler_detail::HashPipelineGroupState(
-        algorithm_objects,
-        executable_indices,
-        pipeline_state.current_lane_id,
-        pipeline_scheduler_detail::CountValidPipelineLanes(pipeline_state),
-        pipeline_state.stage_has_data,
-        pipeline_state.pending_stage0_submissions.size(),
-        pipeline_state.stage0_saturated,
-        updated_runtime_states,
-        begin_index,
-        end_index);
-    if (!pipeline_has_live_token && pipeline_state.pending_stage0_submissions.empty()) {
-      progress_state.signature = current_signature;
-      progress_state.signature_valid = true;
-      progress_state.no_progress_seconds = 0.0f;
-      progress_state.stall_report_requested = false;
-      progress_state.stall_reported = false;
-      progress_state.stall_reason = "Pipeline is idle and waiting for an external resource batch.";
-    } else {
-      pipeline_scheduler_detail::UpdatePipelineGroupProgressState(
-        previous_progress_state,
-        current_signature,
-        true,
-        context.dt_seconds,
-        &progress_state);
-      progress_state.stall_reason = "No pipeline stage was executable during this tick.";
-    }
-    commit_progress_state(std::move(progress_state));
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      pipeline_runtime_states_[root_object.pipeline_name][owner_agent_name] = std::move(pipeline_state);
-    }
-    if (out_error_message) {
-      out_error_message->clear();
-    }
-    return true;
-  }
-
-  for (size_t index : executable_indices) {
-    ::algorithm_management::AlgorithmObject& object = algorithm_objects[index];
-    ::algorithm_management::AgentAlgorithmRuntimeState& runtime_state = updated_runtime_states[index];
-    const auto stage_begin = std::chrono::steady_clock::now();
+    algorithm_support::PipelineStageBridge bridge(object.runtime_transfer_map);
+    const auto stage_time_begin = std::chrono::steady_clock::now();
     if (emit_runner_probe) {
       pipeline_scheduler_detail::AppendPipelineRunnerProbe(
         "scheduler_tick_probe.log",
         "tick.ingress.begin stage=" + object.algorithm_profile.algorithm_name);
     }
-    if (object.pipeline_wrapper_role != ::algorithm_management::AlgorithmPipelineWrapperRole::None) {
-      object.SetContainerSet(primary_lane_state->standard_container_set);
-      object.resource_bindings = primary_lane_state->resource_bindings;
-      object.descriptor_values = primary_lane_state->descriptor_values;
-      if (emit_runner_probe) {
-        pipeline_scheduler_detail::AppendPipelineRunnerProbe(
-          "scheduler_tick_probe.log",
-          "tick.ingress.wrapper_passthrough stage=" + object.algorithm_profile.algorithm_name);
-      }
-      const auto stage_end = std::chrono::steady_clock::now();
-      pipeline_scheduler_detail::AddPipelineStageRuntimeElapsed(
-        pipeline_stage_runtime_stats,
-        object.algorithm_profile.algorithm_name,
-        std::chrono::duration<float>(stage_end - stage_begin).count());
-      continue;
-    }
-    algorithm_support::PipelineStageBridge bridge(object.runtime_transfer_map);
     std::string ingress_error_message;
     const bool ingress_ok = pipeline_uses_inter_stage_buffer
       ? bridge.IngestFromPreviousStage(
@@ -3294,21 +3373,7 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
       *out_pipeline_processing_failed = true;
       return false;
     }
-    const auto stage_end = std::chrono::steady_clock::now();
-    pipeline_scheduler_detail::AddPipelineStageRuntimeElapsed(
-      pipeline_stage_runtime_stats,
-      object.algorithm_profile.algorithm_name,
-      std::chrono::duration<float>(stage_end - stage_begin).count());
-  }
 
-  for (size_t index : executable_indices) {
-    ::algorithm_management::AlgorithmObject& object = algorithm_objects[index];
-    ::algorithm_management::AgentAlgorithmRuntimeState& runtime_state = updated_runtime_states[index];
-    const bool allow_tick = index < allow_tick_mask.size() ? allow_tick_mask[index] : true;
-    const bool is_ready =
-      index < assembly_states.size() &&
-      assembly_states[index] == ::algorithm_management::AlgorithmAssemblyState::Ready;
-    const auto stage_begin = std::chrono::steady_clock::now();
     if (emit_runner_probe) {
       pipeline_scheduler_detail::AppendPipelineRunnerProbe(
         "scheduler_tick_probe.log",
@@ -3317,8 +3382,8 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
     if (!pipeline_scheduler_detail::TickAlgorithmObject(
           object,
           context,
-          allow_tick,
-          is_ready,
+          stage_allow_tick[stage_offset],
+          stage_is_ready[stage_offset],
           true,
           &runtime_state)) {
       runtime_state.algorithm_to_agent_signal.stop_requested = true;
@@ -3338,35 +3403,27 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
         "scheduler_tick_probe.log",
         "tick.execute.end stage=" + object.algorithm_profile.algorithm_name);
     }
-    const auto stage_end = std::chrono::steady_clock::now();
-    pipeline_scheduler_detail::AddPipelineStageRuntimeElapsed(
-      pipeline_stage_runtime_stats,
-      object.algorithm_profile.algorithm_name,
-      std::chrono::duration<float>(stage_end - stage_begin).count());
     pipeline_scheduler_detail::MergeAlgorithmToAgentSignal(
       runtime_state.algorithm_to_agent_signal,
       out_pipeline_signal);
-  }
 
-  for (size_t index : executable_indices) {
-    ::algorithm_management::AlgorithmObject& object = algorithm_objects[index];
     const algorithm::AlgorithmContainerSet* source_container_set = object.container_set();
     if (emit_runner_probe) {
       pipeline_scheduler_detail::AppendPipelineRunnerProbe(
         "scheduler_tick_probe.log",
         "tick.egress.begin stage=" + object.algorithm_profile.algorithm_name);
     }
+    ALGORITHM_SCHEDULER_ASSERT(
+      source_container_set != nullptr,
+      "Pipeline stage source container set is unavailable.");
     if (!source_container_set) {
-      ALGORITHM_SCHEDULER_ASSERT(
-        false,
-        "Pipeline stage source container set is unavailable.");
-      updated_runtime_states[index].algorithm_to_agent_signal.stop_requested = true;
+      runtime_state.algorithm_to_agent_signal.stop_requested = true;
       pipeline_scheduler_detail::SetPipelineStageRuntimeReason(
         pipeline_stage_runtime_stats,
         object.algorithm_profile.algorithm_name,
         "Egress failed: source container set is unavailable.");
       pipeline_scheduler_detail::MergeAlgorithmToAgentSignal(
-        updated_runtime_states[index].algorithm_to_agent_signal,
+        runtime_state.algorithm_to_agent_signal,
         out_pipeline_signal);
       set_error("Pipeline stage source container set is unavailable.");
       *out_pipeline_processing_failed = true;
@@ -3374,33 +3431,8 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
     }
 
     std::string egress_error_message;
-    algorithm_support::PipelineStageBridge bridge(object.runtime_transfer_map);
-    const auto stage_begin = std::chrono::steady_clock::now();
-    const size_t stage_offset = index - begin_index;
-    const bool is_wrapper_begin =
-      object.pipeline_wrapper_role == ::algorithm_management::AlgorithmPipelineWrapperRole::Begin;
-    const bool is_wrapper_end =
-      object.pipeline_wrapper_role == ::algorithm_management::AlgorithmPipelineWrapperRole::End;
-    const bool is_body_last_stage = index + 1u == body_end_index;
-    const bool is_effective_tail_stage = index == effective_tail_index;
-    if (is_wrapper_begin) {
-      if (stage_offset + 1u < next_stage_has_data.size()) {
-        next_stage_has_data[stage_offset + 1u] = true;
-      }
-    } else if (is_wrapper_end) {
-      if (pipeline_scheduler_detail::CollectPipelineExitReflectionSnapshot(
-            object.pipeline_name.empty() ? object.algorithm_profile.algorithm_name : object.pipeline_name,
-            *source_container_set,
-            &updated_runtime_states[index].reflection_snapshot)) {
-        updated_runtime_states[index].reflection_snapshot_cached = false;
-        pipeline_state.exit_reflection_snapshot = updated_runtime_states[index].reflection_snapshot;
-        pipeline_state.exit_reflection_snapshot_valid = true;
-      } else {
-        updated_runtime_states[index].reflection_snapshot.Clear();
-        pipeline_state.exit_reflection_snapshot.Clear();
-        pipeline_state.exit_reflection_snapshot_valid = false;
-      }
-    } else if (is_body_last_stage && has_wrapper_end) {
+    const bool is_body_last_stage = body_stage_offset + 1u == body_stage_count;
+    if (is_body_last_stage) {
       if (!pipeline_scheduler_detail::CopyWholeStandardContainerLayout(
             *source_container_set,
             primary_lane_state->standard_container_set.get(),
@@ -3409,21 +3441,18 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
           ? std::string("Failed to copy pipeline body tail output into wrapper tail input.")
           : std::move(egress_error_message);
         ALGORITHM_SCHEDULER_ASSERT(false, failure_message.c_str());
-        updated_runtime_states[index].algorithm_to_agent_signal.stop_requested = true;
+        runtime_state.algorithm_to_agent_signal.stop_requested = true;
         pipeline_scheduler_detail::SetPipelineStageRuntimeReason(
           pipeline_stage_runtime_stats,
           object.algorithm_profile.algorithm_name,
           "Egress failed: " + failure_message);
         pipeline_scheduler_detail::MergeAlgorithmToAgentSignal(
-          updated_runtime_states[index].algorithm_to_agent_signal,
+          runtime_state.algorithm_to_agent_signal,
           out_pipeline_signal);
         set_error(failure_message);
         *out_pipeline_processing_failed = true;
         return false;
       }
-      if (stage_offset + 1u < next_stage_has_data.size()) {
-        next_stage_has_data[stage_offset + 1u] = true;
-      }
       if (pipeline_state.topology == ::algorithm_management::AlgorithmPipelineTopology::Circular) {
         const bool emit_loopback_ok = pipeline_uses_inter_stage_buffer
           ? bridge.EmitToNextStage(
@@ -3442,13 +3471,13 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
             ? std::string("Failed to emit circular pipeline stage output.")
             : std::move(egress_error_message);
           ALGORITHM_SCHEDULER_ASSERT(false, failure_message.c_str());
-          updated_runtime_states[index].algorithm_to_agent_signal.stop_requested = true;
+          runtime_state.algorithm_to_agent_signal.stop_requested = true;
           pipeline_scheduler_detail::SetPipelineStageRuntimeReason(
             pipeline_stage_runtime_stats,
             object.algorithm_profile.algorithm_name,
             "Egress failed: " + failure_message);
           pipeline_scheduler_detail::MergeAlgorithmToAgentSignal(
-            updated_runtime_states[index].algorithm_to_agent_signal,
+            runtime_state.algorithm_to_agent_signal,
             out_pipeline_signal);
           set_error(failure_message);
           *out_pipeline_processing_failed = true;
@@ -3465,87 +3494,19 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
             ? std::string("Failed to emit circular pipeline loopback output.")
             : std::move(loopback_error_message);
           ALGORITHM_SCHEDULER_ASSERT(false, failure_message.c_str());
-          updated_runtime_states[index].algorithm_to_agent_signal.stop_requested = true;
+          runtime_state.algorithm_to_agent_signal.stop_requested = true;
           pipeline_scheduler_detail::SetPipelineStageRuntimeReason(
             pipeline_stage_runtime_stats,
             object.algorithm_profile.algorithm_name,
             "Egress failed: " + failure_message);
           pipeline_scheduler_detail::MergeAlgorithmToAgentSignal(
-            updated_runtime_states[index].algorithm_to_agent_signal,
+            runtime_state.algorithm_to_agent_signal,
             out_pipeline_signal);
           set_error(failure_message);
           *out_pipeline_processing_failed = true;
           return false;
         }
-        next_stage_has_data[has_wrapper_begin ? 1u : 0u] = true;
-      }
-    } else if (is_effective_tail_stage) {
-      if (pipeline_scheduler_detail::CollectPipelineExitReflectionSnapshot(
-            object.pipeline_name.empty() ? object.algorithm_profile.algorithm_name : object.pipeline_name,
-            *source_container_set,
-            &updated_runtime_states[index].reflection_snapshot)) {
-        updated_runtime_states[index].reflection_snapshot_cached = false;
-        pipeline_state.exit_reflection_snapshot = updated_runtime_states[index].reflection_snapshot;
-        pipeline_state.exit_reflection_snapshot_valid = true;
-      } else {
-        updated_runtime_states[index].reflection_snapshot.Clear();
-        pipeline_state.exit_reflection_snapshot.Clear();
-        pipeline_state.exit_reflection_snapshot_valid = false;
-      }
-      if (pipeline_state.topology == ::algorithm_management::AlgorithmPipelineTopology::Circular) {
-        const bool emit_loopback_ok = pipeline_uses_inter_stage_buffer
-          ? bridge.EmitToNextStage(
-              object.algorithm_profile.algorithm_name,
-              *source_container_set,
-              &primary_lane_state->inter_stage_buffer,
-              &stage_container_sets,
-              &egress_error_message)
-          : bridge.EmitToNextStage(
-              object.algorithm_profile.algorithm_name,
-              *source_container_set,
-              &stage_container_sets,
-              &egress_error_message);
-        if (!emit_loopback_ok) {
-          const std::string failure_message = egress_error_message.empty()
-            ? std::string("Failed to emit circular pipeline stage output.")
-            : std::move(egress_error_message);
-          ALGORITHM_SCHEDULER_ASSERT(false, failure_message.c_str());
-          updated_runtime_states[index].algorithm_to_agent_signal.stop_requested = true;
-          pipeline_scheduler_detail::SetPipelineStageRuntimeReason(
-            pipeline_stage_runtime_stats,
-            object.algorithm_profile.algorithm_name,
-            "Egress failed: " + failure_message);
-          pipeline_scheduler_detail::MergeAlgorithmToAgentSignal(
-            updated_runtime_states[index].algorithm_to_agent_signal,
-            out_pipeline_signal);
-          set_error(failure_message);
-          *out_pipeline_processing_failed = true;
-          return false;
-        }
-        std::string loopback_error_message;
-        if (!pipeline_scheduler_detail::CopyPipelineCircularLoopback(
-              *source_container_set,
-              object.runtime_transfer_map->pipeline_shared_variable_count,
-              object.runtime_transfer_map->pipeline_shared_array_count,
-              &algorithm_objects[body_begin_index],
-              &loopback_error_message)) {
-          const std::string failure_message = loopback_error_message.empty()
-            ? std::string("Failed to emit circular pipeline loopback output.")
-            : std::move(loopback_error_message);
-          ALGORITHM_SCHEDULER_ASSERT(false, failure_message.c_str());
-          updated_runtime_states[index].algorithm_to_agent_signal.stop_requested = true;
-          pipeline_scheduler_detail::SetPipelineStageRuntimeReason(
-            pipeline_stage_runtime_stats,
-            object.algorithm_profile.algorithm_name,
-            "Egress failed: " + failure_message);
-          pipeline_scheduler_detail::MergeAlgorithmToAgentSignal(
-            updated_runtime_states[index].algorithm_to_agent_signal,
-            out_pipeline_signal);
-          set_error(failure_message);
-          *out_pipeline_processing_failed = true;
-          return false;
-        }
-        next_stage_has_data.front() = true;
+        next_body_stage_has_data.front() = true;
       }
     } else {
       const bool emit_ok = pipeline_uses_inter_stage_buffer
@@ -3565,33 +3526,23 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
           ? std::string("Failed to emit pipeline stage output.")
           : std::move(egress_error_message);
         ALGORITHM_SCHEDULER_ASSERT(false, failure_message.c_str());
-        updated_runtime_states[index].algorithm_to_agent_signal.stop_requested = true;
+        runtime_state.algorithm_to_agent_signal.stop_requested = true;
         pipeline_scheduler_detail::SetPipelineStageRuntimeReason(
           pipeline_stage_runtime_stats,
           object.algorithm_profile.algorithm_name,
           "Egress failed: " + failure_message);
         pipeline_scheduler_detail::MergeAlgorithmToAgentSignal(
-          updated_runtime_states[index].algorithm_to_agent_signal,
+          runtime_state.algorithm_to_agent_signal,
           out_pipeline_signal);
         set_error(failure_message);
         *out_pipeline_processing_failed = true;
         return false;
       }
-      next_stage_has_data[stage_offset + 1u] = true;
-    }
-
-    if (object.pipeline_wrapper_role != ::algorithm_management::AlgorithmPipelineWrapperRole::None) {
-      if (emit_runner_probe) {
-        pipeline_scheduler_detail::AppendPipelineRunnerProbe(
-          "scheduler_tick_probe.log",
-          "tick.egress.wrapper_end stage=" + object.algorithm_profile.algorithm_name);
+      if (allow_immediate_forward && inout_working_body_stage_has_data) {
+        (*inout_working_body_stage_has_data)[body_stage_offset + 1u] = true;
+      } else {
+        next_body_stage_has_data[body_stage_offset + 1u] = true;
       }
-      const auto stage_end = std::chrono::steady_clock::now();
-      pipeline_scheduler_detail::AddPipelineStageRuntimeElapsed(
-        pipeline_stage_runtime_stats,
-        object.algorithm_profile.algorithm_name,
-        std::chrono::duration<float>(stage_end - stage_begin).count());
-      continue;
     }
 
     std::string egress_debug_error_message;
@@ -3600,19 +3551,19 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
           object.algorithm_profile.algorithm_name,
           *source_container_set,
           stage_container_sets,
-          &updated_runtime_states[index].bridge_debug_set,
+          &runtime_state.bridge_debug_set,
           &egress_debug_error_message)) {
       const std::string failure_message = egress_debug_error_message.empty()
         ? std::string("Failed to capture pipeline egress debug state.")
         : std::move(egress_debug_error_message);
       ALGORITHM_SCHEDULER_ASSERT(false, failure_message.c_str());
-      updated_runtime_states[index].algorithm_to_agent_signal.stop_requested = true;
+      runtime_state.algorithm_to_agent_signal.stop_requested = true;
       pipeline_scheduler_detail::SetPipelineStageRuntimeReason(
         pipeline_stage_runtime_stats,
         object.algorithm_profile.algorithm_name,
         "Egress debug capture failed: " + failure_message);
       pipeline_scheduler_detail::MergeAlgorithmToAgentSignal(
-        updated_runtime_states[index].algorithm_to_agent_signal,
+        runtime_state.algorithm_to_agent_signal,
         out_pipeline_signal);
       set_error(failure_message);
       *out_pipeline_processing_failed = true;
@@ -3628,32 +3579,160 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
         ? std::string("Failed to clear pipeline external-write reset containers.")
         : std::move(reset_error_message);
       ALGORITHM_SCHEDULER_ASSERT(false, failure_message.c_str());
-      updated_runtime_states[index].algorithm_to_agent_signal.stop_requested = true;
+      runtime_state.algorithm_to_agent_signal.stop_requested = true;
       pipeline_scheduler_detail::SetPipelineStageRuntimeReason(
         pipeline_stage_runtime_stats,
         object.algorithm_profile.algorithm_name,
         "External-write reset failed: " + failure_message);
       pipeline_scheduler_detail::MergeAlgorithmToAgentSignal(
-        updated_runtime_states[index].algorithm_to_agent_signal,
+        runtime_state.algorithm_to_agent_signal,
         out_pipeline_signal);
       set_error(failure_message);
       *out_pipeline_processing_failed = true;
       return false;
     }
 
-    const auto stage_end = std::chrono::steady_clock::now();
+    if (allow_immediate_forward && inout_working_body_stage_has_data) {
+      (*inout_working_body_stage_has_data)[body_stage_offset] = false;
+    }
+    const auto stage_time_end = std::chrono::steady_clock::now();
     pipeline_scheduler_detail::AddPipelineStageRuntimeElapsed(
       pipeline_stage_runtime_stats,
       object.algorithm_profile.algorithm_name,
-      std::chrono::duration<float>(stage_end - stage_begin).count());
+      std::chrono::duration<float>(stage_time_end - stage_time_begin).count());
     if (emit_runner_probe) {
       pipeline_scheduler_detail::AppendPipelineRunnerProbe(
         "scheduler_tick_probe.log",
         "tick.egress.end stage=" + object.algorithm_profile.algorithm_name);
     }
+    return true;
+  };
+
+  auto commit_progress_state = [&](pipeline_scheduler_detail::PipelineGroupProgressState&& applied_progress_state) {
+    if (begin_index >= updated_runtime_states.size() || begin_index >= end_index) {
+      return;
+    }
+    size_t active_stage_index = 0u;
+    bool active_stage_valid = false;
+    resolve_pipeline_active_stage(
+      pipeline_state.stage_has_data,
+      executable_indices,
+      &active_stage_index,
+      &active_stage_valid);
+    for (size_t index = begin_index; index < end_index; ++index) {
+      ::algorithm_management::AgentAlgorithmRuntimeState& runtime_state = updated_runtime_states[index];
+      runtime_state.pipeline_progress_signature = applied_progress_state.signature;
+      runtime_state.pipeline_progress_signature_valid = applied_progress_state.signature_valid;
+      runtime_state.pipeline_no_progress_seconds = applied_progress_state.no_progress_seconds;
+      runtime_state.pipeline_stall_report_requested = applied_progress_state.stall_report_requested;
+      runtime_state.pipeline_stall_reported = applied_progress_state.stall_reported;
+      runtime_state.pipeline_stall_reason = applied_progress_state.stall_reason;
+      runtime_state.pipeline_active_stage_index = static_cast<uint32_t>(active_stage_index);
+      runtime_state.pipeline_active_stage_index_valid = active_stage_valid;
+      if (collect_pipeline_timing) {
+        runtime_state.pipeline_total_elapsed_seconds = applied_progress_state.total_elapsed_seconds;
+        runtime_state.pipeline_stage_runtime_stats = applied_progress_state.stage_runtime_stats;
+      } else {
+        runtime_state.pipeline_total_elapsed_seconds = 0.0f;
+        runtime_state.pipeline_stage_runtime_stats.clear();
+      }
+    }
+  };
+  if (!tick_wrapper_stage(begin_index, false, "Wrapper begin executed.")) {
+    return false;
+  }
+  if (!current_body_stage_has_data.empty() &&
+      current_body_stage_has_data.front() &&
+      (pipeline_state.topology != ::algorithm_management::AlgorithmPipelineTopology::Circular ||
+       imported_submission_this_tick)) {
+    std::string begin_copy_error_message;
+    if (!pipeline_scheduler_detail::CopyWholeStandardContainerLayout(
+          *primary_lane_state->standard_container_set,
+          body_stage0_object.mutable_container_set(),
+          &begin_copy_error_message)) {
+      const std::string failure_message = begin_copy_error_message.empty()
+        ? std::string("Failed to copy wrapper begin output into pipeline body stage0 input.")
+        : std::move(begin_copy_error_message);
+      ALGORITHM_SCHEDULER_ASSERT(false, failure_message.c_str());
+      set_error(failure_message);
+      out_pipeline_signal->stop_requested = true;
+      *out_pipeline_processing_failed = true;
+      return false;
+    }
   }
 
-  pipeline_scheduler_detail::CommitPipelineStageStateToPrimaryLane(&pipeline_state, next_stage_has_data);
+  if (forced_sync) {
+    std::vector<bool> working_body_stage_has_data = current_body_stage_has_data;
+    for (size_t body_stage_offset = 0u; body_stage_offset < body_stage_count; ++body_stage_offset) {
+      const size_t index = body_begin_index + body_stage_offset;
+      const size_t stage_offset = index - begin_index;
+      const bool has_data = working_body_stage_has_data[body_stage_offset];
+      const bool execute_now =
+        has_data &&
+        stage_allow_tick[stage_offset] &&
+        stage_is_ready[stage_offset] &&
+        !stage_launch_once_completed[stage_offset] &&
+        (pipeline_stage_debug_all || stage_offset == pipeline_stage_debug_index);
+      if (!execute_now) {
+        if (has_data) {
+          next_body_stage_has_data[body_stage_offset] = true;
+        }
+        tick_stage_without_execution(
+          index,
+          has_data,
+          body_stage_offset == 0u,
+          has_data
+            ? "Stage is holding data, but the downstream stage cannot accept output this tick."
+            : pipeline_scheduler_detail::BuildPipelineStageIdleReason(
+                stage_allow_tick[stage_offset],
+                stage_is_ready[stage_offset],
+                stage_launch_once_completed[stage_offset]));
+        continue;
+      }
+      if (!execute_body_stage(body_stage_offset, true, &working_body_stage_has_data)) {
+        return false;
+      }
+    }
+  } else {
+    for (size_t body_stage_offset = 0u; body_stage_offset < body_stage_count; ++body_stage_offset) {
+      const size_t index = body_begin_index + body_stage_offset;
+      const size_t stage_offset = index - begin_index;
+      const bool has_data = current_body_stage_has_data[body_stage_offset];
+      const bool execute_now =
+        has_data &&
+        stage_allow_tick[stage_offset] &&
+        stage_is_ready[stage_offset] &&
+        !stage_launch_once_completed[stage_offset] &&
+        (pipeline_stage_debug_all || stage_offset == pipeline_stage_debug_index);
+      if (!execute_now) {
+        if (has_data) {
+          next_body_stage_has_data[body_stage_offset] = true;
+        }
+        tick_stage_without_execution(
+          index,
+          has_data,
+          body_stage_offset == 0u,
+          has_data
+            ? "Stage is holding data, but the downstream stage cannot accept output this tick."
+            : pipeline_scheduler_detail::BuildPipelineStageIdleReason(
+                stage_allow_tick[stage_offset],
+                stage_is_ready[stage_offset],
+                stage_launch_once_completed[stage_offset]));
+        continue;
+      }
+      if (!execute_body_stage(body_stage_offset, false, nullptr)) {
+        return false;
+      }
+    }
+  }
+
+  if (!tick_wrapper_stage(effective_tail_index, true, "Wrapper end executed.")) {
+    return false;
+  }
+
+  pipeline_scheduler_detail::CommitPipelineStageStateToPrimaryLane(
+    &pipeline_state,
+    build_full_stage_has_data(next_body_stage_has_data));
   const uint64_t current_signature =
     pipeline_scheduler_detail::HashPipelineGroupState(
       algorithm_objects,
