@@ -7,13 +7,14 @@ This layer owns the runtime shell around SDL, ImGui, and Vulkan.
 - `runtime_systems/runtime_systems.h` is the only public facade for this layer
 - `RuntimeEnvironment`
 - runtime job entry points are exposed through the facade for upper layers that need them
+- GPU job execution lives in the `gpu_job_system.cpp` implementation and is exposed through the job facade.
 
 ## Internal Details
 
 - `SdlWindow` owns the SDL window object and input snapshot.
 - `ImGuiVulkanRuntime` owns the ImGui, SDL backend, and Vulkan rendering lifecycle.
 - `MemoryManager` owns the tracked default `std::pmr::memory_resource` used by buffer-building code.
-- `job_system.h`, `runtime_environment.h`, and the rendering/window implementation headers are internal implementation headers.
+- `job_system.h`, `gpu_job_system.h`, `runtime_environment.h`, and the rendering/window implementation headers are internal implementation headers.
 - Upper layers should only depend on the public runtime-systems interfaces listed above.
 
 ## Coordinate Convention

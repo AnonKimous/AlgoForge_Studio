@@ -29,7 +29,6 @@ resolve_vma_dependency("${CMAKE_CURRENT_SOURCE_DIR}")
 resolve_spirv_reflect_dependency("${CMAKE_CURRENT_SOURCE_DIR}")
 resolve_cjson_dependency("${CMAKE_CURRENT_SOURCE_DIR}")
 resolve_mimalloc_dependency("${CMAKE_CURRENT_SOURCE_DIR}")
-resolve_eastl_dependency("${CMAKE_CURRENT_SOURCE_DIR}")
 
 if(0)
 
@@ -261,13 +260,7 @@ else()
   FetchContent_Populate(eastl_source)
   set(EASTL_SOURCE_DIR "${eastl_source_SOURCE_DIR}" CACHE PATH "EASTL source directory" FORCE)
 endif()
-add_subdirectory(
-  "${EASTL_SOURCE_DIR}"
-  "${CMAKE_CURRENT_BINARY_DIR}/eastl-build"
-  EXCLUDE_FROM_ALL
-)
 endif()
-
 set(CMAKE_HELPER_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated_cmake")
 file(MAKE_DIRECTORY "${CMAKE_HELPER_DIR}")
 file(WRITE "${CMAKE_HELPER_DIR}/require_generated_file.cmake"
@@ -312,6 +305,17 @@ add_library(common_data STATIC
 target_include_directories(common_data PUBLIC ${PROJECT_INCLUDE_DIRS})
 target_compile_definitions(common_data PRIVATE PROJECT_ROOT_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
+add_library(debug_tool_hooks INTERFACE)
+target_sources(debug_tool_hooks INTERFACE
+  src/debug_tool/debug_tool_hooker.h
+  src/debug_tool/algorithm_manager_hooker.h
+  src/debug_tool/agent_hooker.h
+  src/debug_tool/agent_management_hooker.h
+  src/debug_tool/runtime_systems_hooker.h
+)
+target_include_directories(debug_tool_hooks INTERFACE ${PROJECT_INCLUDE_DIRS})
+target_link_libraries(debug_tool_hooks INTERFACE common_data agent_management runtime_systems algorithm_management)
+
 add_library(algorithm_management STATIC
   src/algorithm_support/algorithm_package_location.cpp
   src/algorithm_support/algorithm_runtime_bridge.cpp
@@ -328,7 +332,7 @@ target_link_libraries(algorithm_management PUBLIC common_data runtime_systems)
 add_library(runtime_systems STATIC
   src/runtime_systems/window/sdl_window.cpp
   src/runtime_systems/algorithm_gpu_context.cpp
-  src/runtime_systems/algorithm_gpu_executor.cpp
+  src/runtime_systems/gpu_job_system.cpp
   src/runtime_systems/job_system.cpp
   src/runtime_systems/render/preview_renderer.cpp
   src/runtime_systems/render/imgui_vulkan_runtime.cpp
@@ -364,7 +368,7 @@ add_library(debug_tool_backend STATIC
   src/debug_tool/debug_tool_backend_runtime.cpp
 )
 target_include_directories(debug_tool_backend PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(debug_tool_backend PUBLIC common_data agent_management runtime_systems algorithm_management)
+target_link_libraries(debug_tool_backend PUBLIC debug_tool_hooks)
 
 add_library(debug_tool_frontend STATIC
   src/debug_tool/debug_tool_frontend_panel.cpp
@@ -380,7 +384,7 @@ add_library(sdk STATIC
   src/sdk/sdk_decomposer.cpp
 )
 target_include_directories(sdk PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(sdk PUBLIC EASTL agent_management)
+target_link_libraries(sdk PUBLIC agent_management)
 
 set(SDK_PACKAGE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/sdk")
 set(SDK_PACKAGE_INCLUDE_DIR "${SDK_PACKAGE_ROOT}/include")

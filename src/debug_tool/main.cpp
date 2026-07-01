@@ -1010,6 +1010,14 @@ bool _RunAlgorithmRunner(const AlgorithmRunnerOptions& options) {
         << " exec=" << _ExecutionPreferenceName(summary.execution_preference)
         << " cpu_symbol=" << (summary.cpu_symbol ? "true" : "false")
         << " gpu_symbol=" << (summary.gpu_symbol ? "true" : "false")
+        << " active_bundle_valid=" << (summary.pipeline_active_bundle_valid ? "true" : "false");
+      if (summary.pipeline_active_bundle_valid) {
+        std::cout
+          << " active_bundle_begin=" << summary.pipeline_active_bundle_begin_stage_index
+          << " active_bundle_count=" << summary.pipeline_active_bundle_stage_count
+          << " active_bundle_exec=" << _ExecutionPreferenceName(summary.pipeline_active_bundle_preference);
+      }
+      std::cout
         << '\n';
     }
   }

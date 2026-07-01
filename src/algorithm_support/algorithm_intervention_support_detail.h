@@ -82,6 +82,39 @@ inline bool ParseInterventionStageKind(
   return true;
 }
 
+inline bool ParseExecutionPreference(
+  const std::string& preference_text,
+  agent::AlgorithmExecutionPreference* out_preference) {
+  if (!out_preference) {
+    return false;
+  }
+  if (preference_text == "cpu" || preference_text == "Cpu" || preference_text == "CPU") {
+    *out_preference = agent::AlgorithmExecutionPreference::Cpu;
+    return true;
+  }
+  if (preference_text == "gpu" || preference_text == "Gpu" || preference_text == "GPU") {
+    *out_preference = agent::AlgorithmExecutionPreference::Gpu;
+    return true;
+  }
+  return false;
+}
+
+inline agent::AlgorithmExecutionPreference DefaultExecutionPreferenceForStageKind(
+  agent::AlgorithmInterventionStageKind stage_kind) {
+  switch (stage_kind) {
+    case agent::AlgorithmInterventionStageKind::ResultRender:
+      return agent::AlgorithmExecutionPreference::Gpu;
+    case agent::AlgorithmInterventionStageKind::Reflect:
+      return agent::AlgorithmExecutionPreference::Cpu;
+    case agent::AlgorithmInterventionStageKind::Pretick:
+    case agent::AlgorithmInterventionStageKind::Exec:
+    case agent::AlgorithmInterventionStageKind::AfterTick:
+    case agent::AlgorithmInterventionStageKind::Custom:
+      return agent::AlgorithmExecutionPreference::Cpu;
+  }
+  return agent::AlgorithmExecutionPreference::Cpu;
+}
+
 inline InterventionSchema LoadInterventionSchema(const algorithm::AlgorithmPackageLocation& package_location) {
   InterventionSchema schema{};
   const std::string algorithm_name = AlgorithmNameFromLocation(package_location);
@@ -171,6 +204,31 @@ inline InterventionSchema LoadInterventionSchema(const algorithm::AlgorithmPacka
     const std::string stage_kind_text = json_utils::GetStringField(stage_item, "stage_kind");
     if (!ParseInterventionStageKind(stage_spec.stage_name, stage_kind_text, &stage_spec.stage_kind)) {
       schema.error_message = "Invalid stage kind in package JSON file: " + path.string();
+      cJSON_Delete(root);
+      return schema;
+    }
+
+    stage_spec.execution_preference = DefaultExecutionPreferenceForStageKind(stage_spec.stage_kind);
+    const std::string execution_preference_text = json_utils::GetStringField(stage_item, "execution_preference");
+    const std::string execution_preference_alias = json_utils::GetStringField(stage_item, "executionPreference");
+    const std::string stage_execution_preference_text =
+      !execution_preference_text.empty() ? execution_preference_text : execution_preference_alias;
+    if (!stage_execution_preference_text.empty()) {
+      if (!ParseExecutionPreference(stage_execution_preference_text, &stage_spec.execution_preference)) {
+        schema.error_message = "Invalid stage execution preference in package JSON file: " + path.string();
+        cJSON_Delete(root);
+        return schema;
+      }
+    }
+    if (stage_spec.stage_kind == agent::AlgorithmInterventionStageKind::ResultRender &&
+        stage_spec.execution_preference != agent::AlgorithmExecutionPreference::Gpu) {
+      schema.error_message = "Result-render stage must use GPU execution preference: " + path.string();
+      cJSON_Delete(root);
+      return schema;
+    }
+    if (stage_spec.stage_kind == agent::AlgorithmInterventionStageKind::Reflect &&
+        stage_spec.execution_preference != agent::AlgorithmExecutionPreference::Cpu) {
+      schema.error_message = "Reflect stage must use CPU execution preference: " + path.string();
       cJSON_Delete(root);
       return schema;
     }

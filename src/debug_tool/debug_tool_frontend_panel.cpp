@@ -116,6 +116,15 @@ const char* _AlgorithmInterventionStageKindDisplayName(
   return "custom";
 }
 
+const char* _AlgorithmExecutionPreferenceDisplayName(
+  algorithm_management::AlgorithmExecutionPreference execution_preference) {
+  switch (execution_preference) {
+    case algorithm_management::AlgorithmExecutionPreference::Cpu: return "cpu";
+    case algorithm_management::AlgorithmExecutionPreference::Gpu: return "gpu";
+  }
+  return "cpu";
+}
+
 void _DrawReflectionSnapshot(
   const char* title,
   const debug_tool::AlgorithmReflectionSnapshot& snapshot) {
@@ -1227,6 +1236,20 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
     ImGui::Text("Assembly State: %s", assembly_state_text);
     ImGui::Text("CPU Symbol: %s", selected_algorithm_summary->cpu_symbol ? "true" : "false");
     ImGui::Text("GPU Symbol: %s", selected_algorithm_summary->gpu_symbol ? "true" : "false");
+    const char* active_bundle_preference_text = "gpu";
+    switch (selected_algorithm_summary->pipeline_active_bundle_preference) {
+      case debug_tool::AlgorithmExecutionPreference::Cpu: active_bundle_preference_text = "cpu"; break;
+      case debug_tool::AlgorithmExecutionPreference::Gpu: active_bundle_preference_text = "gpu"; break;
+    }
+    if (selected_algorithm_summary->pipeline_active_bundle_valid) {
+      ImGui::Text(
+        "Active Bundle: begin=%u count=%u pref=%s",
+        selected_algorithm_summary->pipeline_active_bundle_begin_stage_index,
+        selected_algorithm_summary->pipeline_active_bundle_stage_count,
+        active_bundle_preference_text);
+    } else {
+      ImGui::TextUnformatted("Active Bundle: invalid");
+    }
     ImGui::BeginChild("AlgorithmDetailStats", ImVec2(0.0f, 220.0f), true);
 
     if (!selected_algorithm_summary->pipeline_stage &&
@@ -1292,9 +1315,10 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
       for (const debug_tool::AlgorithmInterventionStageSummary& stage_summary :
            selected_algorithm_summary->intervention_stage_summaries) {
         ImGui::BulletText(
-          "%s [%s]",
+          "%s [%s, %s]",
           stage_summary.stage_name.empty() ? "<stage>" : stage_summary.stage_name.c_str(),
-          _AlgorithmInterventionStageKindDisplayName(stage_summary.stage_kind));
+          _AlgorithmInterventionStageKindDisplayName(stage_summary.stage_kind),
+          _AlgorithmExecutionPreferenceDisplayName(stage_summary.execution_preference));
         if (!stage_summary.functions.empty()) {
           ImGui::Indent();
           ImGui::TextUnformatted("Functions:");

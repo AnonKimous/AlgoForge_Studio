@@ -47,16 +47,12 @@ struct AlgorithmDescriptorValue {
   double scalar_value{0.0};
 };
 
-struct AlgorithmPipelineStageSubmission {
-  std::string stage_name;
-  std::vector<AlgorithmResourceBinding> resource_bindings;
-  std::vector<AlgorithmDescriptorValue> descriptor_values;
-};
-
 struct AlgorithmInterventionStageSummary {
   std::string stage_name;
   algorithm_management::AlgorithmInterventionStageKind stage_kind{
     algorithm_management::AlgorithmInterventionStageKind::Custom};
+  algorithm_management::AlgorithmExecutionPreference execution_preference{
+    algorithm_management::AlgorithmExecutionPreference::Cpu};
   std::vector<std::string> functions;
   std::vector<algorithm_management::AlgorithmInterventionContainerBinding> used_algorithm_containers;
   std::string vertex_shader_path;
@@ -73,6 +69,13 @@ enum class AlgorithmMountMode {
 enum class AlgorithmExecutionPreference {
   Cpu = 0,
   Gpu = 1,
+};
+
+struct AlgorithmPipelineStageSubmission {
+  std::string stage_name;
+  std::vector<AlgorithmResourceBinding> resource_bindings;
+  std::vector<AlgorithmDescriptorValue> descriptor_values;
+  AlgorithmExecutionPreference execution_preference{AlgorithmExecutionPreference::Gpu};
 };
 
 enum class AlgorithmPipelineTopology {
@@ -218,6 +221,10 @@ struct AlgorithmRuntimeSummary {
   AlgorithmPipelineSyncMode pipeline_sync_mode{AlgorithmPipelineSyncMode::Forced};
   uint32_t pipeline_active_stage_index{0u};
   bool pipeline_active_stage_index_valid{false};
+  uint32_t pipeline_active_bundle_begin_stage_index{0u};
+  uint32_t pipeline_active_bundle_stage_count{0u};
+  AlgorithmExecutionPreference pipeline_active_bundle_preference{AlgorithmExecutionPreference::Gpu};
+  bool pipeline_active_bundle_valid{false};
   std::vector<AlgorithmResourceBinding> resource_bindings;
   std::vector<AlgorithmDescriptorValue> descriptor_values;
   bool cpu_symbol{true};

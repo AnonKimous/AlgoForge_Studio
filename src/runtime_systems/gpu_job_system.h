@@ -28,6 +28,14 @@ struct RuntimeGpuBufferBindingView {
   bool required{true};
 };
 
+struct RuntimeGpuStageSubJob {
+  std::string debug_name;
+  std::string stage_name;
+  std::string vertex_shader_path;
+  std::string fragment_shader_path;
+  std::vector<RuntimeGpuBufferBindingView> buffer_bindings;
+};
+
 struct RuntimeGpuStageJob {
   std::string debug_name;
   std::string shader_namespace;
@@ -38,6 +46,7 @@ struct RuntimeGpuStageJob {
   float viewport_height{1.0f};
   const void* execution_key{nullptr};
   std::vector<RuntimeGpuBufferBindingView> buffer_bindings;
+  std::vector<RuntimeGpuStageSubJob> stage_jobs;
 };
 
 void ClearRuntimeGpuJobCaches();

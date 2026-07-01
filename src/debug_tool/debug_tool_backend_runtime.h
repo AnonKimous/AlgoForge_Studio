@@ -1,8 +1,7 @@
 #pragma once
 
 #include "debug_tool/debug_tool_host.h"
-#include "agent_management/agent_management.h"
-#include "runtime_systems/runtime_systems.h"
+#include "debug_tool/debug_tool_hooker.h"
 
 #include <chrono>
 #include <cassert>
@@ -14,6 +13,11 @@
 namespace debug_tool_backend {
 
 using debug_tool::IDebugToolHost;
+using AgentManager = hooker::AgentManagementHooker;
+using RuntimeSystemsHooker = hooker::RuntimeSystemsHooker;
+using RuntimeEnvironment = hooker::RuntimeEnvironment;
+using RenderPreviewRequest = hooker::RenderPreviewRequest;
+using RenderPreviewBuffer = hooker::RenderPreviewBuffer;
 
 class DebugToolBackendRuntime : public IDebugToolHost {
  public:
@@ -115,7 +119,7 @@ class DebugToolBackendRuntime : public IDebugToolHost {
   bool BuildRenderPreviewRequest(
     size_t agent_index,
     size_t algorithm_index,
-    runtime_systems::RenderPreviewRequest* out_request,
+    RenderPreviewRequest* out_request,
     std::string* out_error_message = nullptr) const override;
   const InputState& input() const override { return runtime_environment_.input(); }
   Vec2 mouse_position() const override { return runtime_environment_.MousePosition(); }
@@ -128,27 +132,25 @@ class DebugToolBackendRuntime : public IDebugToolHost {
     render_preview_extent_ = Vec2{extent.x, extent.y};
     runtime_environment_.SetRenderPreviewExtent(extent);
   }
-  void SetRenderPreviewRequest(runtime_systems::RenderPreviewRequest request) override {
+  void SetRenderPreviewRequest(RenderPreviewRequest request) override {
     if (request.valid) {
       assert(!request.stage_name.empty() && "Render preview request is missing a stage name.");
       assert(!request.storage_buffers.empty() && "Render preview request is missing storage buffers.");
     }
-    render_preview_request_ = std::move(request);
-    runtime_environment_.SetRenderPreviewRequest(render_preview_request_);
+    runtime_environment_.SetRenderPreviewRequest(std::move(request));
   }
   std::string& ui_status_message() override { return ui_status_message_; }
   const std::string& ui_status_message() const override { return ui_status_message_; }
-  runtime_systems::RuntimeEnvironment& runtime_environment() { return runtime_environment_; }
-  const runtime_systems::RuntimeEnvironment& runtime_environment() const { return runtime_environment_; }
+  RuntimeEnvironment& runtime_environment() { return runtime_environment_.runtime_environment(); }
+  const RuntimeEnvironment& runtime_environment() const { return runtime_environment_.runtime_environment(); }
 
  private:
   bool CreateAgent(const char* agent_name, uint32_t limit_fps_flag, size_t* out_agent_index = nullptr);
-  runtime_systems::RuntimeEnvironment runtime_environment_{}; 
-  AgentManager agent_manager_{};
-  runtime_systems::RenderPreviewRequest render_preview_request_{};
-  std::string ui_status_message_{};
-  std::chrono::steady_clock::time_point last_frame_time_{};
-  float frame_dt_{0.0f};
+  RuntimeSystemsHooker runtime_environment_{}; 
+  AgentManager agent_manager_{}; 
+  std::string ui_status_message_{}; 
+  std::chrono::steady_clock::time_point last_frame_time_{}; 
+  float frame_dt_{0.0f}; 
   Vec2 render_preview_extent_{1024.0f, 1024.0f};
 };
 

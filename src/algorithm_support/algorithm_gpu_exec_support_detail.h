@@ -130,6 +130,7 @@ inline GpuExecSchema LoadGpuExecSchema(
 
   const cJSON* exec = cJSON_GetObjectItemCaseSensitive(root, "exec");
   if (!exec) {
+    schema.error_message = "Exec section is missing: " + path.string();
     cJSON_Delete(root);
     return schema;
   }

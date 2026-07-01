@@ -114,6 +114,39 @@ bool _ParseInterventionStageKind(
   return true;
 }
 
+bool _ParseExecutionPreference(
+  const std::string& preference_text,
+  agent::AlgorithmExecutionPreference* out_preference) {
+  if (!out_preference) {
+    return false;
+  }
+  if (preference_text == "cpu" || preference_text == "Cpu" || preference_text == "CPU") {
+    *out_preference = agent::AlgorithmExecutionPreference::Cpu;
+    return true;
+  }
+  if (preference_text == "gpu" || preference_text == "Gpu" || preference_text == "GPU") {
+    *out_preference = agent::AlgorithmExecutionPreference::Gpu;
+    return true;
+  }
+  return false;
+}
+
+agent::AlgorithmExecutionPreference _DefaultExecutionPreferenceForStageKind(
+  agent::AlgorithmInterventionStageKind stage_kind) {
+  switch (stage_kind) {
+    case agent::AlgorithmInterventionStageKind::ResultRender:
+      return agent::AlgorithmExecutionPreference::Gpu;
+    case agent::AlgorithmInterventionStageKind::Reflect:
+      return agent::AlgorithmExecutionPreference::Cpu;
+    case agent::AlgorithmInterventionStageKind::Pretick:
+    case agent::AlgorithmInterventionStageKind::Exec:
+    case agent::AlgorithmInterventionStageKind::AfterTick:
+    case agent::AlgorithmInterventionStageKind::Custom:
+      return agent::AlgorithmExecutionPreference::Cpu;
+  }
+  return agent::AlgorithmExecutionPreference::Cpu;
+}
+
 _InterventionSchema _LoadInterventionSchema(const algorithm::AlgorithmPackageLocation& package_location) {
   _InterventionSchema schema{};
   const std::string algorithm_name = _AlgorithmNameFromLocation(package_location);
@@ -179,6 +212,31 @@ _InterventionSchema _LoadInterventionSchema(const algorithm::AlgorithmPackageLoc
     const std::string stage_kind_text = json_utils::GetStringField(stage_item, "stage_kind");
     if (!_ParseInterventionStageKind(stage_spec.stage_name, stage_kind_text, &stage_spec.stage_kind)) {
       schema.error_message = "Invalid stage kind in package JSON file: " + path.string();
+      cJSON_Delete(root);
+      return schema;
+    }
+
+    stage_spec.execution_preference = _DefaultExecutionPreferenceForStageKind(stage_spec.stage_kind);
+    const std::string execution_preference_text = json_utils::GetStringField(stage_item, "execution_preference");
+    const std::string execution_preference_alias = json_utils::GetStringField(stage_item, "executionPreference");
+    const std::string stage_execution_preference_text =
+      !execution_preference_text.empty() ? execution_preference_text : execution_preference_alias;
+    if (!stage_execution_preference_text.empty()) {
+      if (!_ParseExecutionPreference(stage_execution_preference_text, &stage_spec.execution_preference)) {
+        schema.error_message = "Invalid stage execution preference in package JSON file: " + path.string();
+        cJSON_Delete(root);
+        return schema;
+      }
+    }
+    if (stage_spec.stage_kind == agent::AlgorithmInterventionStageKind::ResultRender &&
+        stage_spec.execution_preference != agent::AlgorithmExecutionPreference::Gpu) {
+      schema.error_message = "Result-render stage must use GPU execution preference: " + path.string();
+      cJSON_Delete(root);
+      return schema;
+    }
+    if (stage_spec.stage_kind == agent::AlgorithmInterventionStageKind::Reflect &&
+        stage_spec.execution_preference != agent::AlgorithmExecutionPreference::Cpu) {
+      schema.error_message = "Reflect stage must use CPU execution preference: " + path.string();
       cJSON_Delete(root);
       return schema;
     }
@@ -523,7 +581,7 @@ void _ClearAlgorithmSchedulerForRuntimeShutdown() {
 }
 
 bool _IsGpuExecutionStage(const agent::AlgorithmInterventionStageSpec& stage) {
-  return stage.stage_kind == agent::AlgorithmInterventionStageKind::ResultRender;
+  return stage.execution_preference == agent::AlgorithmExecutionPreference::Gpu;
 }
 
 bool _ResolveRuntimeGpuShaderPath(
@@ -622,9 +680,12 @@ bool _TryBuildRuntimeGpuStageJob(
   }
 
   const agent::AlgorithmInterventionStageSpec* gpu_stage = nullptr;
-  for (const agent::AlgorithmInterventionStageSpec& stage_spec : stage_specs) {
+  size_t gpu_stage_index = 0u;
+  for (size_t stage_index = 0u; stage_index < stage_specs.size(); ++stage_index) {
+    const agent::AlgorithmInterventionStageSpec& stage_spec = stage_specs[stage_index];
     if (_IsGpuExecutionStage(stage_spec)) {
       gpu_stage = &stage_spec;
+      gpu_stage_index = stage_index;
       break;
     }
   }
@@ -636,68 +697,93 @@ bool _TryBuildRuntimeGpuStageJob(
   }
 
   *out_has_gpu_stage = true;
-  if (gpu_stage->shader.vertex_shader_path.empty() || gpu_stage->shader.fragment_shader_path.empty()) {
-    if (out_error_message) {
-      *out_error_message = "GPU tick stage is missing shader paths.";
-    }
-    return false;
-  }
-  if (gpu_stage->used_algorithm_containers.empty()) {
-    if (out_error_message) {
-      *out_error_message = "GPU tick stage does not bind any containers.";
-    }
-    return false;
-  }
-
-  out_job->debug_name = object.algorithm_profile.algorithm_name + "::" + gpu_stage->stage_name;
-  out_job->shader_namespace = object.algorithm_profile.algorithm_name;
-  out_job->stage_name = gpu_stage->stage_name;
   out_job->execution_key = container_set;
-  if (!_ResolveRuntimeGpuShaderPath(
-        object.algorithm_profile.algorithm_name,
-        gpu_stage->shader.vertex_shader_path,
-        &out_job->vertex_shader_path,
-        out_error_message)) {
-    return false;
-  }
-  if (!_ResolveRuntimeGpuShaderPath(
-        object.algorithm_profile.algorithm_name,
-        gpu_stage->shader.fragment_shader_path,
-        &out_job->fragment_shader_path,
-        out_error_message)) {
-    return false;
-  }
-
-  out_job->buffer_bindings.reserve(gpu_stage->used_algorithm_containers.size());
-  for (const agent::AlgorithmInterventionContainerBinding& binding : gpu_stage->used_algorithm_containers) {
-    algorithm::AlgorithmContainer* container = FindAlgorithmContainer(container_set, binding.container_name);
-    if (!container) {
+  out_job->stage_jobs.clear();
+  out_job->stage_jobs.reserve(stage_specs.size() - gpu_stage_index);
+  for (size_t stage_index = gpu_stage_index; stage_index < stage_specs.size(); ++stage_index) {
+    const agent::AlgorithmInterventionStageSpec& stage_spec = stage_specs[stage_index];
+    if (!_IsGpuExecutionStage(stage_spec)) {
+      break;
+    }
+    if (stage_spec.shader.vertex_shader_path.empty() || stage_spec.shader.fragment_shader_path.empty()) {
       if (out_error_message) {
-        *out_error_message = binding.required
-          ? ("GPU tick stage is missing container '" + binding.container_name + "'.")
-          : ("GPU tick optional container '" + binding.container_name +
-              "' is not supported because runtime GPU bindings must stay positional.");
+        *out_error_message = "GPU tick stage is missing shader paths.";
       }
       return false;
     }
-    if (container->element_stride == 0u || container->bytes.empty()) {
+    if (stage_spec.used_algorithm_containers.empty()) {
       if (out_error_message) {
-        *out_error_message = binding.required
-          ? ("GPU tick stage container '" + binding.container_name + "' has no data.")
-          : ("GPU tick optional container '" + binding.container_name +
-              "' has no data, and sparse GPU bindings are not supported.");
+        *out_error_message = "GPU tick stage does not bind any containers.";
       }
       return false;
     }
 
-    runtime_systems::RuntimeGpuBufferBindingView binding_view{};
-    binding_view.binding_name = binding.container_name;
-    binding_view.bytes = container->bytes.data();
-    binding_view.size_bytes = container->bytes.size();
-    binding_view.element_stride = container->element_stride;
-    binding_view.required = binding.required;
-    out_job->buffer_bindings.push_back(std::move(binding_view));
+    runtime_systems::RuntimeGpuStageSubJob stage_job{};
+    stage_job.debug_name = object.algorithm_profile.algorithm_name + "::" + stage_spec.stage_name;
+    stage_job.stage_name = stage_spec.stage_name;
+    if (!_ResolveRuntimeGpuShaderPath(
+          object.algorithm_profile.algorithm_name,
+          stage_spec.shader.vertex_shader_path,
+          &stage_job.vertex_shader_path,
+          out_error_message)) {
+      return false;
+    }
+    if (!_ResolveRuntimeGpuShaderPath(
+          object.algorithm_profile.algorithm_name,
+          stage_spec.shader.fragment_shader_path,
+          &stage_job.fragment_shader_path,
+          out_error_message)) {
+      return false;
+    }
+
+    stage_job.buffer_bindings.reserve(stage_spec.used_algorithm_containers.size());
+    for (const agent::AlgorithmInterventionContainerBinding& binding : stage_spec.used_algorithm_containers) {
+      algorithm::AlgorithmContainer* container = FindAlgorithmContainer(container_set, binding.container_name);
+      if (!container) {
+        if (out_error_message) {
+          *out_error_message = binding.required
+            ? ("GPU tick stage is missing container '" + binding.container_name + "'.")
+            : ("GPU tick optional container '" + binding.container_name +
+                "' is not supported because runtime GPU bindings must stay positional.");
+        }
+        return false;
+      }
+      if (container->element_stride == 0u || container->bytes.empty()) {
+        if (out_error_message) {
+          *out_error_message = binding.required
+            ? ("GPU tick stage container '" + binding.container_name + "' has no data.")
+            : ("GPU tick optional container '" + binding.container_name +
+                "' has no data, and sparse GPU bindings are not supported.");
+        }
+        return false;
+      }
+
+      runtime_systems::RuntimeGpuBufferBindingView binding_view{};
+      binding_view.binding_name = binding.container_name;
+      binding_view.bytes = container->bytes.data();
+      binding_view.size_bytes = container->bytes.size();
+      binding_view.element_stride = container->element_stride;
+      binding_view.array_like = binding.container_kind == "array";
+      binding_view.required = binding.required;
+      stage_job.buffer_bindings.push_back(std::move(binding_view));
+    }
+    out_job->stage_jobs.push_back(std::move(stage_job));
   }
+
+  if (out_job->stage_jobs.empty()) {
+    if (out_error_message) {
+      out_error_message->clear();
+    }
+    return true;
+  }
+
+  const runtime_systems::RuntimeGpuStageSubJob& first_stage_job = out_job->stage_jobs.front();
+  out_job->debug_name = first_stage_job.debug_name;
+  out_job->shader_namespace = object.algorithm_profile.algorithm_name;
+  out_job->stage_name = first_stage_job.stage_name;
+  out_job->vertex_shader_path = first_stage_job.vertex_shader_path;
+  out_job->fragment_shader_path = first_stage_job.fragment_shader_path;
+  out_job->buffer_bindings = first_stage_job.buffer_bindings;
 
   if (out_error_message) {
     out_error_message->clear();

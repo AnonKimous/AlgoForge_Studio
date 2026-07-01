@@ -404,6 +404,29 @@ class GpuJobRuntimeSystem {
   bool ExecuteRuntimeGpuJob(
     const RuntimeGpuStageJob& job,
     std::string* out_error_message) {
+    if (!job.stage_jobs.empty()) {
+      for (size_t stage_index = 0u; stage_index < job.stage_jobs.size(); ++stage_index) {
+        const RuntimeGpuStageSubJob& stage_job_spec = job.stage_jobs[stage_index];
+        RuntimeGpuStageJob stage_job = job;
+        stage_job.debug_name = stage_job_spec.debug_name.empty()
+          ? (job.debug_name + "::" + stage_job_spec.stage_name)
+          : stage_job_spec.debug_name;
+        stage_job.stage_name = stage_job_spec.stage_name;
+        stage_job.vertex_shader_path = stage_job_spec.vertex_shader_path;
+        stage_job.fragment_shader_path = stage_job_spec.fragment_shader_path;
+        stage_job.buffer_bindings = stage_job_spec.buffer_bindings;
+        stage_job.stage_jobs.clear();
+        if (!ExecuteRuntimeGpuJob(stage_job, out_error_message)) {
+          return false;
+        }
+        if (stage_index + 1u < job.stage_jobs.size()) {
+          if (!SynchronizeRuntimeGpuJob(stage_job, out_error_message)) {
+            return false;
+          }
+        }
+      }
+      return true;
+    }
     if (job.execution_key == nullptr) {
       _ThrowGpuTickError("Runtime GPU job execution key is null.", out_error_message);
     }
@@ -633,6 +656,23 @@ class GpuJobRuntimeSystem {
   bool SynchronizeRuntimeGpuJob(
     const RuntimeGpuStageJob& job,
     std::string* out_error_message) {
+    if (!job.stage_jobs.empty()) {
+      for (const RuntimeGpuStageSubJob& stage_job_spec : job.stage_jobs) {
+        RuntimeGpuStageJob stage_job = job;
+        stage_job.debug_name = stage_job_spec.debug_name.empty()
+          ? (job.debug_name + "::" + stage_job_spec.stage_name)
+          : stage_job_spec.debug_name;
+        stage_job.stage_name = stage_job_spec.stage_name;
+        stage_job.vertex_shader_path = stage_job_spec.vertex_shader_path;
+        stage_job.fragment_shader_path = stage_job_spec.fragment_shader_path;
+        stage_job.buffer_bindings = stage_job_spec.buffer_bindings;
+        stage_job.stage_jobs.clear();
+        if (!SynchronizeRuntimeGpuJob(stage_job, out_error_message)) {
+          return false;
+        }
+      }
+      return true;
+    }
     if (job.execution_key == nullptr) {
       _ThrowGpuTickError("Runtime GPU job synchronization key is null.", out_error_message);
     }

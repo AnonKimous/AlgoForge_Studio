@@ -756,163 +756,6 @@ inline bool SignalBlocksTick(
   return !object.intervention || object.intervention->SupportsIntervention();
 }
 
-inline bool HasPipelineStageBufferSlot(
-  const algorithm::AlgorithmContainerSet& container_set,
-  const std::string& stage_buffer_slot_name) {
-  if (stage_buffer_slot_name.empty()) {
-    return false;
-  }
-  const algorithm::AlgorithmContainer* stage_buffer_container =
-    algorithm::FindAlgorithmContainer(container_set, stage_buffer_slot_name);
-  return stage_buffer_container != nullptr &&
-    algorithm::IsStandardContainerSlotName(container_set, stage_buffer_slot_name);
-}
-
-inline bool CopyPipelineCircularLoopback(
-  const algorithm::AlgorithmContainerSet& source_container_set,
-  uint32_t shared_variable_count,
-  uint32_t shared_array_count,
-  ::agent::AlgorithmObject* target_stage,
-  std::string* out_error_message) {
-  if (!target_stage || !target_stage->mutable_container_set()) {
-    if (out_error_message) {
-      *out_error_message = "Circular pipeline loopback target container set is unavailable.";
-    }
-    return false;
-  }
-  algorithm::AlgorithmContainerSet* target_container_set = target_stage->mutable_container_set();
-  if (!source_container_set.standard_layout.enabled() ||
-      !target_container_set->standard_layout.enabled()) {
-    if (out_error_message) {
-      *out_error_message = "Circular pipeline loopback requires standard container layouts.";
-    }
-    return false;
-  }
-  if (source_container_set.standard_layout.variable_count < shared_variable_count ||
-      target_container_set->standard_layout.variable_count < shared_variable_count ||
-      source_container_set.standard_layout.array_count < shared_array_count ||
-      target_container_set->standard_layout.array_count < shared_array_count) {
-    if (out_error_message) {
-      *out_error_message = "Circular pipeline loopback shared prefix is out of range.";
-    }
-    return false;
-  }
-  for (uint32_t i = 0; i < shared_variable_count; ++i) {
-    const std::string slot_name = source_container_set.standard_layout.MakeVariableName(i);
-    const algorithm::AlgorithmContainer* source_container =
-      algorithm::FindAlgorithmContainer(source_container_set, slot_name);
-    algorithm::AlgorithmContainer* target_container =
-      algorithm::FindAlgorithmContainer(target_container_set, slot_name);
-    if (!source_container || !target_container) {
-      if (out_error_message) {
-        *out_error_message = "Circular pipeline loopback is missing standard variable slot '" + slot_name + "'.";
-      }
-      return false;
-    }
-    if (!algorithm::HasSameContainerStructure(*source_container, *target_container)) {
-      if (out_error_message) {
-        *out_error_message = "Circular pipeline loopback variable slot structure mismatch at '" + slot_name + "'.";
-      }
-      return false;
-    }
-    std::memcpy(target_container->bytes.data(), source_container->bytes.data(), source_container->bytes.size());
-  }
-  for (uint32_t i = 0; i < shared_array_count; ++i) {
-    const std::string slot_name = source_container_set.standard_layout.MakeArrayName(i);
-    const algorithm::AlgorithmContainer* source_container =
-      algorithm::FindAlgorithmContainer(source_container_set, slot_name);
-    algorithm::AlgorithmContainer* target_container =
-      algorithm::FindAlgorithmContainer(target_container_set, slot_name);
-    if (!source_container || !target_container) {
-      if (out_error_message) {
-        *out_error_message = "Circular pipeline loopback is missing standard array slot '" + slot_name + "'.";
-      }
-      return false;
-    }
-    if (!algorithm::HasSameContainerStructure(*source_container, *target_container)) {
-      if (out_error_message) {
-        *out_error_message = "Circular pipeline loopback array slot structure mismatch at '" + slot_name + "'.";
-      }
-      return false;
-    }
-    std::memcpy(target_container->bytes.data(), source_container->bytes.data(), source_container->bytes.size());
-  }
-  if (out_error_message) {
-    out_error_message->clear();
-  }
-  return true;
-}
-
-inline bool CopyWholeStandardContainerLayout(
-  const algorithm::AlgorithmContainerSet& source_container_set,
-  algorithm::AlgorithmContainerSet* target_container_set,
-  std::string* out_error_message) {
-  if (!target_container_set) {
-    if (out_error_message) {
-      *out_error_message = "Pipeline wrapper standard container target is unavailable.";
-    }
-    return false;
-  }
-  if (!source_container_set.standard_layout.enabled() ||
-      !target_container_set->standard_layout.enabled()) {
-    if (out_error_message) {
-      *out_error_message = "Pipeline wrapper standard container copy requires standard layouts.";
-    }
-    return false;
-  }
-  if (source_container_set.standard_layout.variable_count != target_container_set->standard_layout.variable_count ||
-      source_container_set.standard_layout.array_count != target_container_set->standard_layout.array_count) {
-    if (out_error_message) {
-      *out_error_message = "Pipeline wrapper standard container layout count mismatch.";
-    }
-    return false;
-  }
-  for (uint32_t i = 0u; i < source_container_set.standard_layout.variable_count; ++i) {
-    const std::string slot_name = source_container_set.standard_layout.MakeVariableName(i);
-    const algorithm::AlgorithmContainer* source_container =
-      algorithm::FindAlgorithmContainer(source_container_set, slot_name);
-    algorithm::AlgorithmContainer* target_container =
-      algorithm::FindAlgorithmContainer(target_container_set, slot_name);
-    if (!source_container || !target_container) {
-      if (out_error_message) {
-        *out_error_message = "Pipeline wrapper copy is missing standard variable slot '" + slot_name + "'.";
-      }
-      return false;
-    }
-    if (!algorithm::HasSameContainerStructure(*source_container, *target_container)) {
-      if (out_error_message) {
-        *out_error_message = "Pipeline wrapper variable slot structure mismatch at '" + slot_name + "'.";
-      }
-      return false;
-    }
-    std::memcpy(target_container->bytes.data(), source_container->bytes.data(), source_container->bytes.size());
-  }
-  for (uint32_t i = 0u; i < source_container_set.standard_layout.array_count; ++i) {
-    const std::string slot_name = source_container_set.standard_layout.MakeArrayName(i);
-    const algorithm::AlgorithmContainer* source_container =
-      algorithm::FindAlgorithmContainer(source_container_set, slot_name);
-    algorithm::AlgorithmContainer* target_container =
-      algorithm::FindAlgorithmContainer(target_container_set, slot_name);
-    if (!source_container || !target_container) {
-      if (out_error_message) {
-        *out_error_message = "Pipeline wrapper copy is missing standard array slot '" + slot_name + "'.";
-      }
-      return false;
-    }
-    if (!algorithm::HasSameContainerStructure(*source_container, *target_container)) {
-      if (out_error_message) {
-        *out_error_message = "Pipeline wrapper array slot structure mismatch at '" + slot_name + "'.";
-      }
-      return false;
-    }
-    std::memcpy(target_container->bytes.data(), source_container->bytes.data(), source_container->bytes.size());
-  }
-  if (out_error_message) {
-    out_error_message->clear();
-  }
-  return true;
-}
-
 inline void UpdatePipelineGroupProgressState(
   const PipelineGroupProgressState& previous_state,
   uint64_t current_signature,
@@ -963,6 +806,12 @@ inline void ResetRuntimeStateBase(
 inline bool PipelineGroupIsExecutable(const std::vector<size_t>& executable_indices) {
   return !executable_indices.empty();
 }
+
+struct PipelineStageExecutionBundle {
+  size_t begin_stage_offset{0u};
+  size_t end_stage_offset{0u};
+  AlgorithmExecutionPreference execution_preference{AlgorithmExecutionPreference::Gpu};
+};
 
 inline size_t CountLivePipelineStages(const std::vector<bool>& stage_has_data) {
   size_t live_stage_count = 0u;
@@ -1528,31 +1377,7 @@ inline bool InitializePipelineInterStageBufferRuntimeState(
   const ::agent::AlgorithmObject& stage0_object,
   const std::string& stage_buffer_slot_name,
   PipelineInterStageBufferRuntimeState* out_inter_stage_buffer,
-  std::string* out_error_message) {
-  if (!out_inter_stage_buffer) {
-    if (out_error_message) {
-      *out_error_message = "Pipeline inter-stage buffer runtime state output pointer is null.";
-    }
-    return false;
-  }
-  if (!stage0_object.runtime_transfer_map || !stage0_object.runtime_transfer_map->valid) {
-    if (out_error_message) {
-      *out_error_message = "Pipeline runtime transfer map is unavailable while building the inter-stage buffer.";
-    }
-    return false;
-  }
-  out_inter_stage_buffer->standard_container_slot_name = stage_buffer_slot_name;
-  out_inter_stage_buffer->scalar_slot_count =
-    stage0_object.runtime_transfer_map->pipeline_total_extra_variable_count;
-  out_inter_stage_buffer->scalar_slots.assign(
-    static_cast<size_t>(out_inter_stage_buffer->scalar_slot_count),
-    0.0f);
-  out_inter_stage_buffer->valid = true;
-  if (out_error_message) {
-    out_error_message->clear();
-  }
-  return true;
-}
+  std::string* out_error_message);
 
 inline bool TryBuildInitialPipelineLaneRuntimeState(
   const ::agent::AlgorithmObject& stage0_object,
@@ -1732,6 +1557,36 @@ inline bool ClearPipelineExternalWriteResetContainers(
   return true;
 }
 
+inline bool InitializePipelineInterStageBufferRuntimeState(
+  const ::agent::AlgorithmObject& stage0_object,
+  const std::string& stage_buffer_slot_name,
+  PipelineInterStageBufferRuntimeState* out_inter_stage_buffer,
+  std::string* out_error_message) {
+  if (!out_inter_stage_buffer) {
+    if (out_error_message) {
+      *out_error_message = "Pipeline inter-stage buffer runtime state output pointer is null.";
+    }
+    return false;
+  }
+  if (!stage0_object.runtime_transfer_map || !stage0_object.runtime_transfer_map->valid) {
+    if (out_error_message) {
+      *out_error_message = "Pipeline runtime transfer map is unavailable while building the inter-stage buffer.";
+    }
+    return false;
+  }
+  out_inter_stage_buffer->standard_container_slot_name = stage_buffer_slot_name;
+  out_inter_stage_buffer->scalar_slot_count =
+    stage0_object.runtime_transfer_map->pipeline_total_extra_variable_count;
+  out_inter_stage_buffer->scalar_slots.assign(
+    static_cast<size_t>(out_inter_stage_buffer->scalar_slot_count),
+    0.0f);
+  out_inter_stage_buffer->valid = true;
+  if (out_error_message) {
+    out_error_message->clear();
+  }
+  return true;
+}
+
 inline bool TickAlgorithmObject(
   ::agent::AlgorithmObject& object,
   const ::agent::AgentTickContext& context,
@@ -1853,50 +1708,6 @@ inline bool TickAlgorithmObject(
     if (!has_runtime_reflector) {
       runtime_state->reflection_snapshot_cached = true;
     }
-  }
-  return true;
-}
-
-inline bool BuildPipelineStageContainerSets(
-  const std::vector<::algorithm_management::AlgorithmObject>& algorithm_objects,
-  size_t begin_index,
-  size_t end_index,
-  std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>* out_stage_container_sets,
-  std::string* out_error_message) {
-  if (!out_stage_container_sets) {
-    if (out_error_message) {
-      *out_error_message = "Pipeline stage container set output pointer is null.";
-    }
-    return false;
-  }
-  out_stage_container_sets->clear();
-  out_stage_container_sets->reserve(end_index > begin_index ? end_index - begin_index : 0u);
-  for (size_t index = begin_index; index < end_index; ++index) {
-    const ::algorithm_management::AlgorithmObject& object = algorithm_objects[index];
-    if (object.algorithm_profile.algorithm_name.empty()) {
-      if (out_error_message) {
-        *out_error_message = "Pipeline stage name is empty.";
-      }
-      return false;
-    }
-    if (!object.container_set()) {
-      if (out_error_message) {
-        *out_error_message = "Pipeline stage container set is unavailable for '" + object.algorithm_profile.algorithm_name + "'.";
-      }
-      return false;
-    }
-    const auto [_, inserted] = out_stage_container_sets->emplace(
-      object.algorithm_profile.algorithm_name,
-      object.shared_container_set);
-    if (!inserted) {
-      if (out_error_message) {
-        *out_error_message = "Pipeline stage name is duplicated: '" + object.algorithm_profile.algorithm_name + "'.";
-      }
-      return false;
-    }
-  }
-  if (out_error_message) {
-    out_error_message->clear();
   }
   return true;
 }
@@ -2098,67 +1909,18 @@ inline bool AlgorithmScheduler::SubmitAlgorithmObject(
   }
   const bool emit_runner_probe =
     pipeline_scheduler_detail::ShouldEmitPipelineRunnerProbe(object.pipeline_name);
-
-  if (object.execution_preference == AlgorithmExecutionPreference::Gpu &&
-      object.gpu_symbol &&
-      HasExecutableGpuAlgorithmStage(object)) {
-    if (emit_runner_probe) {
-      pipeline_scheduler_detail::AppendPipelineRunnerProbe(
-        "scheduler_submit_probe.log",
-        "submit.branch=gpu_exec stage=" + object.algorithm_profile.algorithm_name);
-    }
-    if (!ExecuteGpuAlgorithmObject(
-          object,
-          container_set,
-          context,
-          out_error_message)) {
-      return false;
-    }
-
-    if (!_SynchronizeAlgorithmObjectForReflection(
-          object,
-          container_set,
-          out_error_message)) {
-      return false;
-    }
-    if (out_error_message) {
-      out_error_message->clear();
-    }
-    return true;
+  if (emit_runner_probe) {
+    pipeline_scheduler_detail::AppendPipelineRunnerProbe(
+      "scheduler_submit_probe.log",
+      "submit.begin stage=" + object.algorithm_profile.algorithm_name +
+      " exec=" + (object.execution_preference == AlgorithmExecutionPreference::Gpu ? "gpu" : "cpu"));
   }
 
-  if (object.execution_preference == AlgorithmExecutionPreference::Gpu &&
-      object.gpu_symbol &&
-      !HasExecutableGpuAlgorithmStage(object) &&
-      !object.cpu_executor) {
-    if (emit_runner_probe) {
-      pipeline_scheduler_detail::AppendPipelineRunnerProbe(
-        "scheduler_submit_probe.log",
-        "submit.branch=missing_gpu_exec stage=" + object.algorithm_profile.algorithm_name);
-    }
-    if (out_error_message) {
-      *out_error_message = "Ready GPU algorithm does not expose an executable GPU stage.";
-    }
-    return false;
-  }
-
-  if (!object.cpu_symbol || !object.cpu_executor) {
-    if (emit_runner_probe) {
-      pipeline_scheduler_detail::AppendPipelineRunnerProbe(
-        "scheduler_submit_probe.log",
-        "submit.branch=missing_cpu_exec stage=" + object.algorithm_profile.algorithm_name);
-    }
-    if (out_error_message) {
-      *out_error_message = "Ready CPU algorithm is missing its CPU executor.";
-    }
-    return false;
-  }
-
-  const bool ok = ExecuteCpuAlgorithmObject(
+  const bool ok = ExecuteAlgorithmObjectStagePlan(
     object,
-    context,
     agent_to_algorithm_signal,
     container_set,
+    context,
     out_algorithm_to_agent_signal,
     out_debug_state,
     out_error_message);
@@ -2487,7 +2249,7 @@ inline bool AlgorithmScheduler::MountPipelineAlgorithmObjects(
         stage_submission.resource_bindings,
         stage_submission.descriptor_values,
         ::algorithm_management::AlgorithmMountMode::Pipeline,
-        execution_preference,
+        stage_submission.execution_preference,
         standard_shared_container_sets);
     if (!built_mount.ok) {
       set_error(built_mount.error_message);
@@ -2561,6 +2323,8 @@ inline bool AlgorithmScheduler::MountPipelineAlgorithmObjects(
   const bool has_wrapper_nodes = wrapper_spec.declared;
   built_stages.reserve(stage_submissions.size() + (has_wrapper_nodes ? 2u : 0u));
   if (has_wrapper_nodes) {
+    const ::algorithm_management::AlgorithmExecutionPreference wrapper_begin_preference =
+      built_body_stages.front().object.execution_preference;
     if (emit_runner_probe) {
       pipeline_scheduler_detail::AppendPipelineRunnerProbe(
         "scheduler_mount_probe.log",
@@ -2572,7 +2336,7 @@ inline bool AlgorithmScheduler::MountPipelineAlgorithmObjects(
         built_body_stages.front().object,
         wrapper_spec.stage_begin,
         ::algorithm_management::AlgorithmPipelineWrapperRole::Begin,
-        execution_preference,
+        wrapper_begin_preference,
         standard_shared_container_sets);
     if (!wrapper_begin_mount.ok) {
       if (emit_runner_probe) {
@@ -2602,6 +2366,8 @@ inline bool AlgorithmScheduler::MountPipelineAlgorithmObjects(
     built_stages.push_back(std::move(built_body_stage));
   }
   if (has_wrapper_nodes) {
+    const ::algorithm_management::AlgorithmExecutionPreference wrapper_end_preference =
+      built_body_stages.back().object.execution_preference;
     if (emit_runner_probe) {
       pipeline_scheduler_detail::AppendPipelineRunnerProbe(
         "scheduler_mount_probe.log",
@@ -2613,7 +2379,7 @@ inline bool AlgorithmScheduler::MountPipelineAlgorithmObjects(
         built_stages[has_wrapper_nodes ? 1u : 0u].object,
         wrapper_spec.stage_end,
         ::algorithm_management::AlgorithmPipelineWrapperRole::End,
-        execution_preference,
+        wrapper_end_preference,
         standard_shared_container_sets);
     if (!wrapper_end_mount.ok) {
       if (emit_runner_probe) {
@@ -3162,6 +2928,80 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
     }
   };
 
+  auto resolve_pipeline_active_bundle = [&](
+    const std::vector<bool>& stage_has_data,
+    const std::vector<size_t>& executable_stage_indices,
+    size_t* out_bundle_begin_stage_index,
+    size_t* out_bundle_stage_count,
+    ::algorithm_management::AlgorithmExecutionPreference* out_bundle_preference,
+    bool* out_bundle_valid) {
+    *out_bundle_begin_stage_index = 0u;
+    *out_bundle_stage_count = 0u;
+    *out_bundle_preference = ::algorithm_management::AlgorithmExecutionPreference::Gpu;
+    *out_bundle_valid = false;
+
+    size_t active_stage_index = 0u;
+    bool active_stage_valid = false;
+    resolve_pipeline_active_stage(
+      stage_has_data,
+      executable_stage_indices,
+      &active_stage_index,
+      &active_stage_valid);
+    if (!active_stage_valid) {
+      return;
+    }
+
+    const size_t body_bundle_begin_stage_offset = body_begin_index - begin_index;
+    const size_t body_bundle_end_stage_offset = body_bundle_begin_stage_offset + body_stage_count;
+    if (active_stage_index < body_bundle_begin_stage_offset ||
+        active_stage_index >= body_bundle_end_stage_offset) {
+      const size_t active_object_index = begin_index + active_stage_index;
+      if (active_object_index < algorithm_objects.size() &&
+          algorithm_objects[active_object_index].pipeline_wrapper_role !=
+            ::algorithm_management::AlgorithmPipelineWrapperRole::None) {
+        *out_bundle_begin_stage_index = active_stage_index;
+        *out_bundle_stage_count = 1u;
+        *out_bundle_preference = algorithm_objects[active_object_index].execution_preference;
+        *out_bundle_valid = true;
+      }
+      return;
+    }
+
+    const ::algorithm_management::AlgorithmExecutionPreference bundle_preference =
+      algorithm_objects[begin_index + active_stage_index].execution_preference;
+    size_t bundle_begin_stage_index = active_stage_index;
+    while (bundle_begin_stage_index > 0u) {
+      size_t previous_stage_offset = bundle_begin_stage_index - 1u;
+      while (previous_stage_offset > 0u && !stage_has_data[previous_stage_offset]) {
+        --previous_stage_offset;
+      }
+      const size_t previous_stage_index = begin_index + previous_stage_offset;
+      if (!stage_has_data[previous_stage_offset] ||
+          algorithm_objects[previous_stage_index].execution_preference != bundle_preference) {
+        break;
+      }
+      bundle_begin_stage_index = previous_stage_offset;
+    }
+
+    size_t bundle_end_stage_index = active_stage_index + 1u;
+    while (bundle_end_stage_index < stage_has_data.size()) {
+      if (!stage_has_data[bundle_end_stage_index]) {
+        ++bundle_end_stage_index;
+        continue;
+      }
+      const size_t next_stage_index = begin_index + bundle_end_stage_index;
+      if (algorithm_objects[next_stage_index].execution_preference != bundle_preference) {
+        break;
+      }
+      ++bundle_end_stage_index;
+    }
+
+    *out_bundle_begin_stage_index = bundle_begin_stage_index;
+    *out_bundle_stage_count = bundle_end_stage_index - bundle_begin_stage_index;
+    *out_bundle_preference = bundle_preference;
+    *out_bundle_valid = true;
+  };
+
   bool imported_submission_this_tick = false;
   if (!current_body_stage_has_data.empty() &&
       pipeline_scheduler_detail::CountLivePipelineStages(current_body_stage_has_data) == 0u &&
@@ -3322,6 +3162,7 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
           stage_launch_once_completed[stage_offset]));
       return true;
     }
+    executable_indices.push_back(index);
     const auto stage_time_begin = std::chrono::steady_clock::now();
     if (emit_runner_probe) {
       pipeline_scheduler_detail::AppendPipelineRunnerProbe(
@@ -3739,11 +3580,23 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
     }
     size_t active_stage_index = 0u;
     bool active_stage_valid = false;
+    size_t active_bundle_begin_stage_index = 0u;
+    size_t active_bundle_stage_count = 0u;
+    ::algorithm_management::AlgorithmExecutionPreference active_bundle_preference =
+      ::algorithm_management::AlgorithmExecutionPreference::Gpu;
+    bool active_bundle_valid = false;
     resolve_pipeline_active_stage(
       pipeline_state.stage_has_data,
       executable_indices,
       &active_stage_index,
       &active_stage_valid);
+    resolve_pipeline_active_bundle(
+      pipeline_state.stage_has_data,
+      executable_indices,
+      &active_bundle_begin_stage_index,
+      &active_bundle_stage_count,
+      &active_bundle_preference,
+      &active_bundle_valid);
     for (size_t index = begin_index; index < end_index; ++index) {
       ::algorithm_management::AgentAlgorithmRuntimeState& runtime_state = updated_runtime_states[index];
       runtime_state.pipeline_progress_signature = applied_progress_state.signature;
@@ -3754,6 +3607,10 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
       runtime_state.pipeline_stall_reason = applied_progress_state.stall_reason;
       runtime_state.pipeline_active_stage_index = static_cast<uint32_t>(active_stage_index);
       runtime_state.pipeline_active_stage_index_valid = active_stage_valid;
+      runtime_state.pipeline_active_bundle_begin_stage_index = static_cast<uint32_t>(active_bundle_begin_stage_index);
+      runtime_state.pipeline_active_bundle_stage_count = static_cast<uint32_t>(active_bundle_stage_count);
+      runtime_state.pipeline_active_bundle_preference = active_bundle_preference;
+      runtime_state.pipeline_active_bundle_valid = active_bundle_valid;
       if (collect_pipeline_timing) {
         runtime_state.pipeline_total_elapsed_seconds = applied_progress_state.total_elapsed_seconds;
         runtime_state.pipeline_stage_runtime_stats = applied_progress_state.stage_runtime_stats;
@@ -3786,9 +3643,36 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
     }
   }
 
+  auto build_body_execution_bundle = [&](
+    size_t start_body_stage_offset,
+    const std::vector<bool>& stage_has_data_state) {
+    pipeline_scheduler_detail::PipelineStageExecutionBundle bundle{};
+    bundle.begin_stage_offset = start_body_stage_offset;
+    bundle.end_stage_offset = start_body_stage_offset + 1u;
+    bundle.execution_preference =
+      algorithm_objects[body_begin_index + start_body_stage_offset].execution_preference;
+    for (; bundle.end_stage_offset < body_stage_count; ++bundle.end_stage_offset) {
+      if (!stage_has_data_state[bundle.end_stage_offset]) {
+        continue;
+      }
+      const size_t index = body_begin_index + bundle.end_stage_offset;
+      const size_t stage_offset = index - begin_index;
+      const bool execute_now =
+        algorithm_objects[index].execution_preference == bundle.execution_preference &&
+        stage_allow_tick[stage_offset] &&
+        stage_is_ready[stage_offset] &&
+        !stage_launch_once_completed[stage_offset] &&
+        (pipeline_stage_debug_all || stage_offset == pipeline_stage_debug_index);
+      if (!execute_now) {
+        break;
+      }
+    }
+    return bundle;
+  };
+
   if (forced_sync) {
     std::vector<bool> working_body_stage_has_data = current_body_stage_has_data;
-    for (size_t body_stage_offset = 0u; body_stage_offset < body_stage_count; ++body_stage_offset) {
+    for (size_t body_stage_offset = 0u; body_stage_offset < body_stage_count; ) {
       const size_t index = body_begin_index + body_stage_offset;
       const size_t stage_offset = index - begin_index;
       const bool has_data = working_body_stage_has_data[body_stage_offset];
@@ -3812,14 +3696,25 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
                 stage_allow_tick[stage_offset],
                 stage_is_ready[stage_offset],
                 stage_launch_once_completed[stage_offset]));
+        ++body_stage_offset;
         continue;
       }
-      if (!execute_body_stage(body_stage_offset, true, &working_body_stage_has_data)) {
-        return false;
+      pipeline_scheduler_detail::PipelineStageExecutionBundle bundle = build_body_execution_bundle(
+        body_stage_offset,
+        working_body_stage_has_data);
+      for (size_t bundle_stage_offset = bundle.begin_stage_offset; bundle_stage_offset < bundle.end_stage_offset; ++bundle_stage_offset) {
+        if (!working_body_stage_has_data[bundle_stage_offset]) {
+          continue;
+        }
+        if (!execute_body_stage(bundle_stage_offset, true, &working_body_stage_has_data)) {
+          return false;
+        }
       }
+      body_stage_offset = bundle.end_stage_offset;
     }
   } else {
-    for (size_t body_stage_offset = 0u; body_stage_offset < body_stage_count; ++body_stage_offset) {
+    next_body_stage_has_data = current_body_stage_has_data;
+    for (size_t body_stage_offset = 0u; body_stage_offset < body_stage_count; ) {
       const size_t index = body_begin_index + body_stage_offset;
       const size_t stage_offset = index - begin_index;
       const bool has_data = current_body_stage_has_data[body_stage_offset];
@@ -3843,11 +3738,17 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
                 stage_allow_tick[stage_offset],
                 stage_is_ready[stage_offset],
                 stage_launch_once_completed[stage_offset]));
+        ++body_stage_offset;
         continue;
       }
-      if (!execute_body_stage(body_stage_offset, false, nullptr)) {
+      pipeline_scheduler_detail::PipelineStageExecutionBundle bundle = build_body_execution_bundle(
+        body_stage_offset,
+        current_body_stage_has_data);
+      if (!execute_body_stage(bundle.begin_stage_offset, false, &next_body_stage_has_data)) {
         return false;
       }
+      next_body_stage_has_data[bundle.begin_stage_offset] = false;
+      break;
     }
   }
 
