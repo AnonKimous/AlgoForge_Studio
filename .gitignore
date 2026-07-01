@@ -6,6 +6,7 @@ out/
 bin/
 lib/
 .tmp/
+/artifacts
 /algorithmLib/.build_*/
 /algorithmLib/.rebuild_stash_*/
 /algorithmLib/algorithmruntimeLib*/
