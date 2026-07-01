@@ -44,6 +44,7 @@ class PreviewRenderer {
     VkImage image{VK_NULL_HANDLE};
     VmaAllocation allocation{VK_NULL_HANDLE};
     VkImageView view{VK_NULL_HANDLE};
+    VkSampler sampler{VK_NULL_HANDLE};
     VkRenderPass render_pass{VK_NULL_HANDLE};
     VkFramebuffer framebuffer{VK_NULL_HANDLE};
     VkDescriptorSet descriptor_set{VK_NULL_HANDLE};

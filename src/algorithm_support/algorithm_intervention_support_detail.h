@@ -1,6 +1,7 @@
 #pragma once
 
 #include "algorithm_support/algorithm_intervention_support.h"
+#include "algorithm_support/algorithm_library_paths.h"
 #include "algorithm_support/algorithm_json_utils.h"
 #include "algorithm_support/algorithm_package_location.h"
 #include "algorithm_support/algorithm_package_paths.h"
@@ -24,7 +25,8 @@ inline bool ShouldEmitPipelineRunnerProbe(const std::string& algorithm_name) {
 }
 
 inline void AppendPipelineRunnerProbe(const std::string& file_name, const std::string& line) {
-  const fs::path path = fs::path("D:/gptsandbox/artifacts/pipeline_runner") / file_name;
+  const fs::path path = algorithm::library_paths::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot() /
+    file_name;
   std::error_code ec;
   fs::create_directories(path.parent_path(), ec);
   std::ofstream file(path, std::ios::binary | std::ios::app);
@@ -55,16 +57,24 @@ inline bool ParseInterventionStageKind(
   }
 
   const std::string kind = !stage_kind_text.empty() ? stage_kind_text : stage_name;
-  if (kind == "resultRender") {
-    *out_stage_kind = agent::AlgorithmInterventionStageKind::ResultRender;
+  if (kind == "pretick" || kind == "preTick") {
+    *out_stage_kind = agent::AlgorithmInterventionStageKind::Pretick;
     return true;
   }
-  if (kind == "preTick") {
-    *out_stage_kind = agent::AlgorithmInterventionStageKind::PreExecution;
+  if (kind == "exec") {
+    *out_stage_kind = agent::AlgorithmInterventionStageKind::Exec;
     return true;
   }
-  if (kind == "afterTick") {
-    *out_stage_kind = agent::AlgorithmInterventionStageKind::PostExecution;
+  if (kind == "aftertick" || kind == "afterTick" || kind == "postExecution") {
+    *out_stage_kind = agent::AlgorithmInterventionStageKind::AfterTick;
+    return true;
+  }
+  if (kind == "renderresult" || kind == "renderResult" || kind == "resultRender") {
+    *out_stage_kind = agent::AlgorithmInterventionStageKind::RenderResult;
+    return true;
+  }
+  if (kind == "reflect") {
+    *out_stage_kind = agent::AlgorithmInterventionStageKind::Reflect;
     return true;
   }
 

@@ -59,6 +59,21 @@ std::string _ToLower(std::string value) {
   return value;
 }
 
+bool _ShouldEmitPackageLocationProbe(const std::string& algorithm_name) {
+  return algorithm_name.find("v3a16_fireworks_pipeline_demo") != std::string::npos;
+}
+
+void _AppendPackageLocationProbe(const std::string& line) {
+  const fs::path path = library_paths::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot() /
+    "package_location_probe.log";
+  std::error_code ec;
+  fs::create_directories(path.parent_path(), ec);
+  std::ofstream file(path, std::ios::binary | std::ios::app);
+  if (file) {
+    file << line << '\n';
+  }
+}
+
 std::string _NormalizeManifestLookupKey(const std::string& value) {
   std::string normalized;
   normalized.reserve(value.size());
@@ -70,21 +85,13 @@ std::string _NormalizeManifestLookupKey(const std::string& value) {
   return normalized;
 }
 
-std::string _SanitizePathKey(const fs::path& value) {
-  std::string normalized;
-  const std::string text = value.generic_string();
-  normalized.reserve(text.size());
-  for (unsigned char ch : text) {
-    if (std::isalnum(ch) != 0) {
-      normalized.push_back(static_cast<char>(std::tolower(ch)));
-    } else {
-      normalized.push_back('_');
-    }
+std::string _GetNestedAlgorithmRootPrefix(const std::string& algorithm_name) {
+  const std::string token = "_stage";
+  const size_t stage_pos = algorithm_name.find(token);
+  if (stage_pos == std::string::npos || stage_pos == 0u) {
+    return {};
   }
-  if (normalized.empty()) {
-    normalized = "algo";
-  }
-  return normalized;
+  return algorithm_name.substr(0u, stage_pos);
 }
 
 uint64_t _HashStringFNV1a64(const std::string& value) {
@@ -297,9 +304,8 @@ bool _MountAlgoPackageFile(
 
   const std::string relative_key_text = relative_package_path.generic_string();
   const uint64_t relative_key_hash = _HashStringFNV1a64(relative_key_text);
-  const std::string relative_key_prefix = _SanitizePathKey(relative_package_path);
   const std::string cache_dir_name =
-    relative_key_prefix + "_" +
+    std::string("algo_") +
     std::to_string(relative_key_hash) + "_" +
     std::to_string(static_cast<unsigned long long>(package_file_size)) + "_" +
     std::to_string(static_cast<long long>(package_file_write_time.time_since_epoch().count()));
@@ -353,21 +359,6 @@ bool _MountAlgoPackageFile(
         "Failed to finalize extracted .algo cache directory: " + mounted_root.generic_string();
     }
     return false;
-  }
-
-  for (fs::directory_iterator iter(cache_root, ec), end; !ec && iter != end; iter.increment(ec)) {
-    if (ec || !iter->is_directory()) {
-      continue;
-    }
-    const std::string sibling_name = iter->path().filename().string();
-    const std::string expected_prefix = relative_key_prefix + "_" + std::to_string(relative_key_hash) + "_";
-    if (iter->path() == mounted_root || iter->path() == mounted_root_tmp) {
-      continue;
-    }
-    if (sibling_name.rfind(expected_prefix, 0u) == 0u) {
-      fs::remove_all(iter->path(), ec);
-      ec.clear();
-    }
   }
 
   *out_mounted_root = mounted_root;
@@ -437,10 +428,16 @@ ManifestLookupResult _ResolveManifestPathByName(
     return ManifestLookupResult::Error;
   }
 
-  const fs::path search_root = library_paths::ResolveAlgorithmLibrarySourceRoot();
+  const fs::path search_roots[] = {
+    library_paths::ResolveAlgorithmLibrarySourceNormRoot(),
+    library_paths::ResolveAlgorithmLibrarySourcePipelineRoot(),
+  };
   static std::mutex manifest_lookup_cache_mutex;
   static std::unordered_map<std::string, ManifestLookupCacheEntry> manifest_lookup_cache;
-  const std::string cache_key = search_root.generic_string() + "|" + trimmed_name;
+  const std::string cache_key =
+    search_roots[0].generic_string() + "|" +
+    search_roots[1].generic_string() + "|" +
+    trimmed_name;
   {
     std::lock_guard<std::mutex> lock(manifest_lookup_cache_mutex);
     const auto found = manifest_lookup_cache.find(cache_key);
@@ -455,78 +452,47 @@ ManifestLookupResult _ResolveManifestPathByName(
     }
   }
 
-  std::error_code ec;
-  if (!fs::exists(search_root, ec) || !fs::is_directory(search_root, ec)) {
-    if (out_error_message) {
-      *out_error_message = "Manifest search root does not exist: " + search_root.generic_string();
+  for (const fs::path& search_root : search_roots) {
+    if (search_root.empty()) {
+      continue;
     }
-    return ManifestLookupResult::Error;
-  }
 
-  const fs::path requested_path = fs::path(trimmed_name);
-  if (_TryUseManifestPathCandidate(requested_path, out_manifest_path)) {
-    return ManifestLookupResult::Found;
-  }
-  const fs::path requested_package_path = fs::path(trimmed_name + "_package.json");
-  if (_TryUsePackagePathCandidate(requested_package_path, out_manifest_path)) {
-    return ManifestLookupResult::Found;
-  }
-  const fs::path folder_candidate = search_root / trimmed_name / (trimmed_name + ".json");
-  if (_TryUseManifestPathCandidate(folder_candidate, out_manifest_path)) {
-    return ManifestLookupResult::Found;
-  }
-  const fs::path package_folder_candidate = search_root / trimmed_name / (trimmed_name + "_package.json");
-  if (_TryUsePackagePathCandidate(package_folder_candidate, out_manifest_path)) {
-    return ManifestLookupResult::Found;
-  }
-  if (_TryUseManifestPathCandidate(search_root / requested_path, out_manifest_path)) {
-    return ManifestLookupResult::Found;
-  }
-  if (_TryUsePackagePathCandidate(search_root / (trimmed_name + "_package.json"), out_manifest_path)) {
-    return ManifestLookupResult::Found;
-  }
-
-  std::vector<fs::path> matches;
-  for (fs::recursive_directory_iterator iter(search_root, ec), end; !ec && iter != end; iter.increment(ec)) {
-    if (ec) break;
-    if (!iter->is_regular_file()) continue;
-    const fs::path candidate = iter->path();
-    if (_ToLower(candidate.extension().string()) != ".json") continue;
-    if (_ManifestNameMatches(candidate, trimmed_name)) {
-      matches.push_back(candidate);
+    const fs::path requested_path = fs::path(trimmed_name);
+    if (_TryUseManifestPathCandidate(search_root / requested_path, out_manifest_path)) {
+      return ManifestLookupResult::Found;
     }
-  }
-
-  if (matches.size() == 1u) {
-    *out_manifest_path = matches.front();
-    std::lock_guard<std::mutex> lock(manifest_lookup_cache_mutex);
-    manifest_lookup_cache[cache_key] = ManifestLookupCacheEntry{
-      .result = ManifestLookupResult::Found,
-      .manifest_path = matches.front(),
-      .error_message = {}
-    };
-    return ManifestLookupResult::Found;
+    const fs::path requested_package_path = fs::path(trimmed_name + "_package.json");
+    if (_TryUsePackagePathCandidate(search_root / requested_package_path, out_manifest_path)) {
+      return ManifestLookupResult::Found;
+    }
+    const fs::path folder_candidate = search_root / trimmed_name / (trimmed_name + ".json");
+    if (_TryUseManifestPathCandidate(folder_candidate, out_manifest_path)) {
+      return ManifestLookupResult::Found;
+    }
+    const fs::path package_folder_candidate = search_root / trimmed_name / (trimmed_name + "_package.json");
+    if (_TryUsePackagePathCandidate(package_folder_candidate, out_manifest_path)) {
+      return ManifestLookupResult::Found;
+    }
+    const std::string nested_root_prefix = _GetNestedAlgorithmRootPrefix(trimmed_name);
+    if (!nested_root_prefix.empty()) {
+      const fs::path nested_root_candidate = search_root / nested_root_prefix / trimmed_name;
+      if (_TryUseManifestPathCandidate(nested_root_candidate / (trimmed_name + ".json"), out_manifest_path)) {
+        return ManifestLookupResult::Found;
+      }
+      if (_TryUsePackagePathCandidate(
+            nested_root_candidate / (trimmed_name + "_package.json"),
+            out_manifest_path)) {
+        return ManifestLookupResult::Found;
+      }
+    }
   }
 
   if (out_error_message) {
-    if (matches.empty()) {
-      *out_error_message =
-        "No manifest named '" + trimmed_name + "' was found under " + search_root.generic_string() + ".";
-    } else {
-      std::ostringstream message;
-      message << "Manifest name '" << trimmed_name << "' is ambiguous under "
-              << search_root.generic_string() << ": ";
-      for (size_t i = 0; i < matches.size(); ++i) {
-        if (i > 0u) {
-          message << ", ";
-        }
-        message << matches[i].generic_string();
-      }
-      *out_error_message = message.str();
-    }
+    *out_error_message =
+      "No manifest named '" + trimmed_name + "' was found under " +
+      library_paths::ResolveAlgorithmLibrarySourceRoot().generic_string() + ".";
   }
-  const ManifestLookupResult result =
-    matches.empty() ? ManifestLookupResult::NotFound : ManifestLookupResult::Error;
+  const ManifestLookupResult result = ManifestLookupResult::NotFound;
   std::lock_guard<std::mutex> lock(manifest_lookup_cache_mutex);
   manifest_lookup_cache[cache_key] = ManifestLookupCacheEntry{
     .result = result,
@@ -583,10 +549,17 @@ ManifestLookupResult _ResolveAlgoFilePathByName(
     return ManifestLookupResult::Error;
   }
 
-  const fs::path runtime_root = library_paths::ResolveAlgorithmLibraryRuntimeRoot();
+  const fs::path search_roots[] = {
+    library_paths::ResolveAlgorithmLibraryRuntimeNormRoot(),
+    library_paths::ResolveAlgorithmLibraryRuntimePipelineRoot(),
+    library_paths::ResolveAlgorithmLibraryRuntimeRoot(),
+  };
   static std::mutex algo_file_lookup_cache_mutex;
   static std::unordered_map<std::string, AlgoFileLookupCacheEntry> algo_file_lookup_cache;
-  const std::string cache_key = runtime_root.generic_string() + "|" + trimmed_name;
+  const std::string cache_key =
+    search_roots[0].generic_string() + "|" +
+    search_roots[1].generic_string() + "|" +
+    trimmed_name;
   {
     std::lock_guard<std::mutex> lock(algo_file_lookup_cache_mutex);
     const auto found = algo_file_lookup_cache.find(cache_key);
@@ -601,81 +574,44 @@ ManifestLookupResult _ResolveAlgoFilePathByName(
     }
   }
 
-  std::error_code ec;
-  if (!fs::exists(runtime_root, ec) || !fs::is_directory(runtime_root, ec)) {
-    if (out_error_message) {
-      *out_error_message = "Algorithm runtime root does not exist: " + runtime_root.generic_string();
-    }
-    return ManifestLookupResult::Error;
-  }
-
-  const fs::path direct_candidate = runtime_root / trimmed_name / (trimmed_name + ".algo");
-  if (_TryUseAlgoFilePathCandidate(direct_candidate, out_package_file_path)) {
-    std::lock_guard<std::mutex> lock(algo_file_lookup_cache_mutex);
-    algo_file_lookup_cache[cache_key] = AlgoFileLookupCacheEntry{
-      .result = ManifestLookupResult::Found,
-      .package_file_path = *out_package_file_path,
-      .error_message = {}
-    };
-    return ManifestLookupResult::Found;
-  }
-
-  const fs::path flat_candidate = runtime_root / (trimmed_name + ".algo");
-  if (_TryUseAlgoFilePathCandidate(flat_candidate, out_package_file_path)) {
-    std::lock_guard<std::mutex> lock(algo_file_lookup_cache_mutex);
-    algo_file_lookup_cache[cache_key] = AlgoFileLookupCacheEntry{
-      .result = ManifestLookupResult::Found,
-      .package_file_path = *out_package_file_path,
-      .error_message = {}
-    };
-    return ManifestLookupResult::Found;
-  }
-
-  std::vector<fs::path> matches;
-  for (fs::recursive_directory_iterator iter(runtime_root, ec), end; !ec && iter != end; iter.increment(ec)) {
-    if (ec) {
-      break;
-    }
-    if (!iter->is_regular_file()) {
+  for (const fs::path& runtime_root : search_roots) {
+    if (runtime_root.empty()) {
       continue;
     }
-    const fs::path candidate = iter->path();
-    if (_AlgoFileNameMatches(candidate, trimmed_name)) {
-      matches.push_back(candidate);
-    }
-  }
 
-  if (matches.size() == 1u) {
-    *out_package_file_path = matches.front();
-    std::lock_guard<std::mutex> lock(algo_file_lookup_cache_mutex);
-    algo_file_lookup_cache[cache_key] = AlgoFileLookupCacheEntry{
-      .result = ManifestLookupResult::Found,
-      .package_file_path = matches.front(),
-      .error_message = {}
-    };
-    return ManifestLookupResult::Found;
+    const fs::path direct_candidate = runtime_root / trimmed_name / (trimmed_name + ".algo");
+    if (_TryUseAlgoFilePathCandidate(direct_candidate, out_package_file_path)) {
+      std::lock_guard<std::mutex> lock(algo_file_lookup_cache_mutex);
+      algo_file_lookup_cache[cache_key] = AlgoFileLookupCacheEntry{
+        .result = ManifestLookupResult::Found,
+        .package_file_path = *out_package_file_path,
+        .error_message = {}
+      };
+      return ManifestLookupResult::Found;
+    }
+    const std::string nested_root_prefix = _GetNestedAlgorithmRootPrefix(trimmed_name);
+    if (!nested_root_prefix.empty()) {
+      const fs::path nested_root_candidate = runtime_root / nested_root_prefix / trimmed_name;
+      const fs::path nested_algo_candidate = nested_root_candidate / (trimmed_name + ".algo");
+      if (_TryUseAlgoFilePathCandidate(nested_algo_candidate, out_package_file_path)) {
+        std::lock_guard<std::mutex> lock(algo_file_lookup_cache_mutex);
+        algo_file_lookup_cache[cache_key] = AlgoFileLookupCacheEntry{
+          .result = ManifestLookupResult::Found,
+          .package_file_path = *out_package_file_path,
+          .error_message = {}
+        };
+        return ManifestLookupResult::Found;
+      }
+    }
   }
 
   if (out_error_message) {
-    if (matches.empty()) {
-      *out_error_message =
-        "No .algo package named '" + trimmed_name + "' was found under " + runtime_root.generic_string() + ".";
-    } else {
-      std::ostringstream message;
-      message << ".algo package name '" << trimmed_name << "' is ambiguous under "
-              << runtime_root.generic_string() << ": ";
-      for (size_t i = 0; i < matches.size(); ++i) {
-        if (i > 0u) {
-          message << ", ";
-        }
-        message << matches[i].generic_string();
-      }
-      *out_error_message = message.str();
-    }
+    *out_error_message =
+      "No .algo package named '" + trimmed_name + "' was found under " +
+      library_paths::ResolveAlgorithmLibraryRuntimeRoot().generic_string() + ".";
   }
 
-  const ManifestLookupResult result =
-    matches.empty() ? ManifestLookupResult::NotFound : ManifestLookupResult::Error;
+  const ManifestLookupResult result = ManifestLookupResult::NotFound;
   std::lock_guard<std::mutex> lock(algo_file_lookup_cache_mutex);
   algo_file_lookup_cache[cache_key] = AlgoFileLookupCacheEntry{
     .result = result,
@@ -699,6 +635,9 @@ bool _TryResolveAlgorithmPackageLocationFromAlgoFile(
   }
 
   out_location->Clear();
+  if (_ShouldEmitPackageLocationProbe(algorithm_name)) {
+    _AppendPackageLocationProbe("resolve.begin name=" + algorithm_name);
+  }
 
   fs::path package_file_path;
   const ManifestLookupResult lookup_result =
@@ -711,6 +650,9 @@ bool _TryResolveAlgorithmPackageLocationFromAlgoFile(
   }
   if (lookup_result != ManifestLookupResult::Found) {
     return false;
+  }
+  if (_ShouldEmitPackageLocationProbe(algorithm_name)) {
+    _AppendPackageLocationProbe("resolve.package_path.end path=" + package_file_path.generic_string());
   }
 
   const std::string trimmed_name = _Trim(algorithm_name);
@@ -732,6 +674,9 @@ bool _TryResolveAlgorithmPackageLocationFromAlgoFile(
 
   fs::path mounted_package_root;
   std::string mount_error_message;
+  if (_ShouldEmitPackageLocationProbe(algorithm_name)) {
+    _AppendPackageLocationProbe("resolve.mount.begin path=" + package_file_path.generic_string());
+  }
   if (!_MountAlgoPackageFile(
         package_file_path,
         runtime_root,
@@ -742,6 +687,9 @@ bool _TryResolveAlgorithmPackageLocationFromAlgoFile(
       *out_error_message = std::move(mount_error_message);
     }
     return false;
+  }
+  if (_ShouldEmitPackageLocationProbe(algorithm_name)) {
+    _AppendPackageLocationProbe("resolve.mount.end root=" + mounted_package_root.generic_string());
   }
 
   out_location->package_file_path = package_file_path;
@@ -851,14 +799,142 @@ bool _TryResolveAlgorithmPackageLocationForPluginCompileLayout(
   return true;
 }
 
+bool _TryResolveAlgorithmPackageLocationFromMountedCacheLayout(
+  const std::string& algorithm_name,
+  AlgorithmPackageLocation* out_location,
+  std::string* out_error_message) {
+  if (!out_location) {
+    if (out_error_message) {
+      *out_error_message = "AlgorithmPackageLocation output pointer is null.";
+    }
+    return false;
+  }
+
+  out_location->Clear();
+
+  const std::string trimmed_name = _Trim(algorithm_name);
+  if (trimmed_name.empty()) {
+    if (out_error_message) {
+      *out_error_message = "Algorithm name must not be empty.";
+    }
+    return false;
+  }
+
+  const fs::path runtime_root = library_paths::ResolveAlgorithmLibraryRuntimeRoot();
+  const fs::path cache_root = runtime_root / ".algo_cache";
+  std::error_code ec;
+  if (!fs::exists(cache_root, ec) || !fs::is_directory(cache_root, ec)) {
+    return false;
+  }
+
+  if (_ShouldEmitPackageLocationProbe(trimmed_name)) {
+    _AppendPackageLocationProbe("resolve.cache.begin name=" + trimmed_name);
+  }
+
+  fs::path best_manifest_path;
+  fs::path best_package_root;
+  fs::file_time_type best_write_time{};
+  bool found = false;
+  const std::string package_file_name = trimmed_name + "_package.json";
+  for (const fs::directory_entry& cache_entry : fs::directory_iterator(cache_root, ec)) {
+    if (ec) {
+      break;
+    }
+    if (!cache_entry.is_directory(ec)) {
+      continue;
+    }
+    const fs::path candidate = cache_entry.path() / package_file_name;
+    if (!fs::exists(candidate, ec) || !fs::is_regular_file(candidate, ec)) {
+      continue;
+    }
+
+    const fs::file_time_type candidate_write_time = fs::last_write_time(candidate, ec);
+    if (!found || candidate_write_time > best_write_time) {
+      found = true;
+      best_write_time = candidate_write_time;
+      best_manifest_path = candidate;
+      best_package_root = cache_entry.path();
+    }
+  }
+
+  if (!found) {
+    return false;
+  }
+
+  out_location->algorithm_name = trimmed_name;
+  out_location->manifest_name = trimmed_name;
+  out_location->manifest_path = best_manifest_path;
+  out_location->package_root = best_package_root;
+  out_location->runtime_package_root = best_package_root;
+
+  fs::path source_manifest{};
+  if (_ResolveManifestPathByName(trimmed_name, &source_manifest, nullptr) == ManifestLookupResult::Found) {
+    out_location->source_manifest_path = source_manifest;
+    out_location->source_package_root = source_manifest.parent_path();
+  }
+
+  const fs::path plugin_candidates[] = {
+    out_location->runtime_package_root / "Debug" / (trimmed_name + ".dll"),
+    out_location->runtime_package_root / (trimmed_name + ".dll"),
+  };
+
+  for (const fs::path& candidate : plugin_candidates) {
+    if (fs::exists(candidate, ec) && fs::is_regular_file(candidate, ec)) {
+      out_location->plugin_module_path = candidate;
+      out_location->has_plugin_module = true;
+      break;
+    }
+  }
+
+  out_location->valid = true;
+  if (_ShouldEmitPackageLocationProbe(trimmed_name)) {
+    _AppendPackageLocationProbe("resolve.cache.end root=" + best_package_root.generic_string());
+  }
+  if (out_error_message) {
+    out_error_message->clear();
+  }
+  return true;
+}
+
 bool TryResolveAlgorithmPackageLocation(
   const std::string& algorithm_name,
   AlgorithmPackageLocation* out_location,
   std::string* out_error_message) {
-  return _TryResolveAlgorithmPackageLocationFromAlgoFile(
-    algorithm_name,
-    out_location,
-    out_error_message);
+  if (_TryResolveAlgorithmPackageLocationFromAlgoFile(
+        algorithm_name,
+        out_location,
+        out_error_message)) {
+    return true;
+  }
+
+  std::string mounted_cache_error_message;
+  if (_TryResolveAlgorithmPackageLocationFromMountedCacheLayout(
+        algorithm_name,
+        out_location,
+        &mounted_cache_error_message)) {
+    if (out_error_message) {
+      out_error_message->clear();
+    }
+    return true;
+  }
+
+  std::string plugin_compile_error_message;
+  if (_TryResolveAlgorithmPackageLocationForPluginCompileLayout(
+        algorithm_name,
+        out_location,
+        &plugin_compile_error_message)) {
+    if (out_error_message) {
+      out_error_message->clear();
+    }
+    return true;
+  }
+
+  if (out_error_message) {
+    *out_error_message = !mounted_cache_error_message.empty()
+      ? std::move(mounted_cache_error_message)
+      : std::move(plugin_compile_error_message);
+  }
+  return false;
 }
 
 bool TryResolveAlgorithmPackageLocationForPluginCompile(

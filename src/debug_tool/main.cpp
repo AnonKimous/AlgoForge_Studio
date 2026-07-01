@@ -1,5 +1,6 @@
 #include "debug_tool/debug_tool_backend_runtime.h"
 #include "debug_tool/debug_tool_frontend_panel.h"
+#include "algorithm_support/algorithm_library_paths.h"
 
 #include <SDL3/SDL_main.h>
 
@@ -27,8 +28,21 @@ struct PipelineRunnerOptions {
   uint32_t ticks{24u};
   uint32_t preview_width{640u};
   uint32_t preview_height{480u};
-  std::string preview_output_path{
-    "D:/gptsandbox/artifacts/pipeline_runner/render_preview.ppm"};
+  std::string render_preview_output_path{
+    algorithm::library_paths::ResolvePipelineRunnerArtifactRoot().string() + "/render_preview.ppm"};
+  debug_tool::AlgorithmExecutionPreference execution_preference{
+    debug_tool::AlgorithmExecutionPreference::Gpu};
+};
+
+struct AlgorithmRunnerOptions {
+  bool enabled{false};
+  std::string algorithm_name{"v6a6_pbd_ball_collision_demo"};
+  uint32_t ticks{24u};
+  uint32_t preview_width{640u};
+  uint32_t preview_height{480u};
+  std::string render_preview_output_path{
+    algorithm::library_paths::ResolveAlgorithmLibraryRuntimeNormDebugInfoRoot().string() +
+      "/render_preview.ppm"};
   debug_tool::AlgorithmExecutionPreference execution_preference{
     debug_tool::AlgorithmExecutionPreference::Gpu};
 };
@@ -172,6 +186,24 @@ bool _ParseExecutionPreference(
   return false;
 }
 
+bool _IsPipelineRunnerInvocation(int argc, char** argv) {
+  for (int i = 1; i < argc; ++i) {
+    if (argv[i] && std::string(argv[i]) == "--pipeline-runner") {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool _IsAlgorithmRunnerInvocation(int argc, char** argv) {
+  for (int i = 1; i < argc; ++i) {
+    if (argv[i] && std::string(argv[i]) == "--algorithm-runner") {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool _WritePpmImage(
   const std::filesystem::path& output_path,
   const std::vector<std::byte>& rgba_bytes,
@@ -295,7 +327,7 @@ bool _ParsePipelineRunnerOptions(
         }
         return false;
       }
-      options.preview_output_path = argv[++i];
+      options.render_preview_output_path = argv[++i];
       continue;
     }
     if (argument == "--execution") {
@@ -311,8 +343,109 @@ bool _ParsePipelineRunnerOptions(
     if (argument == "--help" || argument == "-h") {
       std::cout
         << "Usage:\n"
+        << "  debugTool.exe --algorithm-runner "
+        << "[--algorithm <name>] [--ticks <count>] "
+        << "[--preview-width <px>] [--preview-height <px>] [--preview-output <path>] "
+        << "[--execution cpu|gpu]\n"
         << "  debugTool.exe --pipeline-runner "
         << "[--algorithm <name>] [--pipeline-name <name>] [--ticks <count>] "
+        << "[--preview-width <px>] [--preview-height <px>] [--preview-output <path>] "
+        << "[--execution cpu|gpu]\n";
+      return false;
+    }
+  }
+
+  *out_options = std::move(options);
+  if (out_error_message) {
+    out_error_message->clear();
+  }
+  return true;
+}
+
+bool _ParseAlgorithmRunnerOptions(
+  int argc,
+  char** argv,
+  AlgorithmRunnerOptions* out_options,
+  std::string* out_error_message) {
+  if (!out_options) {
+    if (out_error_message) {
+      *out_error_message = "Algorithm runner option output pointer is null.";
+    }
+    return false;
+  }
+
+  AlgorithmRunnerOptions options{};
+  for (int i = 1; i < argc; ++i) {
+    const std::string argument = argv[i] ? argv[i] : "";
+    if (argument == "--algorithm-runner") {
+      options.enabled = true;
+      continue;
+    }
+    if (argument == "--algorithm") {
+      if (i + 1 >= argc || !argv[i + 1] || !*argv[i + 1]) {
+        if (out_error_message) {
+          *out_error_message = "--algorithm requires a non-empty value.";
+        }
+        return false;
+      }
+      options.algorithm_name = argv[++i];
+      continue;
+    }
+    if (argument == "--ticks") {
+      if (i + 1 >= argc || !_ParseUInt32(argv[i + 1], &options.ticks) || options.ticks == 0u) {
+        if (out_error_message) {
+          *out_error_message = "--ticks requires a positive integer value.";
+        }
+        return false;
+      }
+      ++i;
+      continue;
+    }
+    if (argument == "--preview-width") {
+      if (i + 1 >= argc || !_ParseUInt32(argv[i + 1], &options.preview_width) || options.preview_width == 0u) {
+        if (out_error_message) {
+          *out_error_message = "--preview-width requires a positive integer value.";
+        }
+        return false;
+      }
+      ++i;
+      continue;
+    }
+    if (argument == "--preview-height") {
+      if (i + 1 >= argc || !_ParseUInt32(argv[i + 1], &options.preview_height) || options.preview_height == 0u) {
+        if (out_error_message) {
+          *out_error_message = "--preview-height requires a positive integer value.";
+        }
+        return false;
+      }
+      ++i;
+      continue;
+    }
+    if (argument == "--preview-output") {
+      if (i + 1 >= argc || !argv[i + 1] || !*argv[i + 1]) {
+        if (out_error_message) {
+          *out_error_message = "--preview-output requires a non-empty value.";
+        }
+        return false;
+      }
+      options.render_preview_output_path = argv[++i];
+      continue;
+    }
+    if (argument == "--execution") {
+      if (i + 1 >= argc || !_ParseExecutionPreference(argv[i + 1], &options.execution_preference)) {
+        if (out_error_message) {
+          *out_error_message = "--execution requires 'cpu' or 'gpu'.";
+        }
+        return false;
+      }
+      ++i;
+      continue;
+    }
+    if (argument == "--help" || argument == "-h") {
+      std::cout
+        << "Usage:\n"
+        << "  debugTool.exe --algorithm-runner "
+        << "[--algorithm <name>] [--ticks <count>] "
         << "[--preview-width <px>] [--preview-height <px>] [--preview-output <path>] "
         << "[--execution cpu|gpu]\n";
       return false;
@@ -362,6 +495,17 @@ void _PrintReflectionSnapshot(const debug_tool::AlgorithmReflectionSnapshot& sna
   }
 }
 
+void _PrintReflectionSnapshotPresence(
+  const char* label,
+  const debug_tool::AlgorithmReflectionSnapshot& snapshot) {
+  std::cout
+    << "    " << label
+    << ".valid=" << (snapshot.valid ? "true" : "false")
+    << " vars=" << snapshot.variables.size()
+    << " arrays=" << snapshot.variable_arrays.size()
+    << '\n';
+}
+
 void _PrintBridgeDebugSummary(const debug_tool::PipelineStageBridgeDebugSummary& bridge_summary) {
   if (!bridge_summary.valid) {
     std::cout << "    bridge.valid=false\n";
@@ -383,6 +527,11 @@ void _PrintBridgeDebugSummary(const debug_tool::PipelineStageBridgeDebugSummary&
       << "        " << binding.source_stage_name << ':' << binding.source_container_name
       << " -> " << binding.target_stage_name << ':' << binding.target_container_name << '\n';
   }
+  _PrintReflectionSnapshotPresence("bridge.stage_input", bridge_summary.stage_input_reflection_snapshot);
+  _PrintReflectionSnapshotPresence("bridge.stage_output", bridge_summary.stage_output_reflection_snapshot);
+  _PrintReflectionSnapshotPresence("bridge.next_stage_input", bridge_summary.next_stage_input_reflection_snapshot);
+  _PrintReflectionSnapshotPresence("bridge.replay_output", bridge_summary.replay_output_reflection_snapshot);
+  _PrintReflectionSnapshotPresence("bridge.replay_runtime", bridge_summary.replay_reflection_snapshot);
   if (bridge_summary.has_stage_output_reflection_snapshot) {
     for (size_t index = 0u; index < 8u; ++index) {
       const std::optional<float> spark_state =
@@ -406,7 +555,7 @@ void _PrintBridgeDebugSummary(const debug_tool::PipelineStageBridgeDebugSummary&
 
 bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
   const std::filesystem::path log_directory =
-    std::filesystem::path("D:/gptsandbox/artifacts/pipeline_runner");
+    algorithm::library_paths::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot();
   std::error_code ec;
   std::filesystem::create_directories(log_directory, ec);
   if (ec) {
@@ -417,8 +566,9 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
   const std::filesystem::path backend_attach_probe_path = log_directory / "backend_attach_probe.log";
   const std::filesystem::path agent_mount_probe_path = log_directory / "agent_mount_probe.log";
   const std::filesystem::path progress_path = log_directory / "progress_probe.log";
+  const std::filesystem::path reflection_probe_path = log_directory / "pipeline_reflection_probe.log";
   const std::filesystem::path log_path = log_directory / "last_run.log";
-  const std::filesystem::path preview_output_path(options.preview_output_path);
+  const std::filesystem::path render_preview_output_path(options.render_preview_output_path);
   std::filesystem::remove(package_loader_probe_path, ec);
   ec.clear();
   std::filesystem::remove(backend_attach_probe_path, ec);
@@ -427,14 +577,22 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
   ec.clear();
   std::filesystem::remove(progress_path, ec);
   ec.clear();
+  std::filesystem::remove(reflection_probe_path, ec);
+  ec.clear();
   std::filesystem::remove(log_path, ec);
   ec.clear();
-  std::filesystem::remove(preview_output_path, ec);
+  std::filesystem::remove(render_preview_output_path, ec);
   ec.clear();
   const auto append_progress = [&](const std::string& line) {
     std::ofstream progress_file(progress_path, std::ios::binary | std::ios::app);
     if (progress_file) {
       progress_file << line << '\n';
+    }
+  };
+  const auto append_reflection_probe = [&](const std::string& line) {
+    std::ofstream probe_file(reflection_probe_path, std::ios::binary | std::ios::app);
+    if (probe_file) {
+      probe_file << line << '\n';
     }
   };
   append_progress("runner.begin");
@@ -446,9 +604,11 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
 
   DebugToolBackendRuntime runtime;
   append_progress("runtime.created");
+  append_progress("runtime_init_begin");
   if (!runtime.Init("debugToolRunner", 1280, 720)) {
     throw std::runtime_error("DebugToolBackendRuntime init failed in pipeline runner mode.");
   }
+  append_progress("runtime_init_end");
   append_progress("runtime.initialized");
 
   runtime.runtime_environment().SetDrawCallback([]() {});
@@ -573,6 +733,21 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
 
     std::cout << "[tick " << (tick_index + 1u) << "] stage_count=" << pipeline_stages.size() << '\n';
     for (const debug_tool::AlgorithmRuntimeSummary& summary : pipeline_stages) {
+      append_reflection_probe(
+        "tick=" + std::to_string(tick_index + 1u) +
+        " stage_index=" + std::to_string(summary.pipeline_stage_index) +
+        " stage=" + summary.algorithm_name +
+        " reflection_valid=" + std::string(summary.reflection_snapshot.valid ? "true" : "false") +
+        " vars=" + std::to_string(summary.reflection_snapshot.variables.size()) +
+        " arrays=" + std::to_string(summary.reflection_snapshot.variable_arrays.size()) +
+        " bridge_input_valid=" +
+          std::string(summary.bridge_debug_set.has_stage_input_reflection_snapshot ? "true" : "false") +
+        " bridge_output_valid=" +
+          std::string(summary.bridge_debug_set.has_stage_output_reflection_snapshot ? "true" : "false") +
+        " bridge_next_valid=" +
+          std::string(summary.bridge_debug_set.has_next_stage_input_reflection_snapshot ? "true" : "false") +
+        " bridge_replay_valid=" +
+          std::string(summary.bridge_debug_set.replay_valid ? "true" : "false"));
       std::cout
         << "  stage[" << summary.pipeline_stage_index << "] "
         << summary.algorithm_name
@@ -585,8 +760,9 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
       }
       std::cout << '\n';
 
+      _PrintReflectionSnapshotPresence("reflection", summary.reflection_snapshot);
+      _PrintReflectionSnapshot(summary.reflection_snapshot);
       if (summary.pipeline_stage_index == 0u) {
-        _PrintReflectionSnapshot(summary.reflection_snapshot);
         const PositionSample sample = _ExtractPositionSample(summary.reflection_snapshot);
         if (sample.valid) {
           std::cout << "    position=(" << sample.x << ", " << sample.y << ")\n";
@@ -662,9 +838,9 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
     throw std::runtime_error(
       "Render preview frame is empty. summary=" + runtime.render_preview_debug_summary());
   }
-  if (!_WritePpmImage(preview_output_path, preview_rgba, preview_width, preview_height)) {
+  if (!_WritePpmImage(render_preview_output_path, preview_rgba, preview_width, preview_height)) {
     throw std::runtime_error(
-      "Failed to write render preview image: " + preview_output_path.string());
+      "Failed to write render preview image: " + render_preview_output_path.string());
   }
   append_progress("preview_image_written");
 
@@ -681,7 +857,7 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
   }
   std::cout
     << " preview_pixels=" << non_empty_pixel_count
-    << " preview_path=" << preview_output_path.string()
+    << " render_preview_path=" << render_preview_output_path.string()
     << " preview_summary=" << runtime.render_preview_debug_summary();
   std::cout << '\n';
   std::cout.flush();
@@ -693,14 +869,247 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
   return true;
 }
 
+bool _RunAlgorithmRunner(const AlgorithmRunnerOptions& options) {
+  const std::filesystem::path log_directory =
+    algorithm::library_paths::ResolveAlgorithmLibraryRuntimeNormDebugInfoRoot();
+  std::error_code ec;
+  std::filesystem::create_directories(log_directory, ec);
+  if (ec) {
+    throw std::runtime_error(
+      "Failed to create algorithm runner log directory: " + log_directory.string());
+  }
+  const std::filesystem::path package_loader_probe_path = log_directory / "package_loader_probe.log";
+  const std::filesystem::path attach_probe_path = log_directory / "attach_probe.log";
+  const std::filesystem::path progress_path = log_directory / "progress_probe.log";
+  const std::filesystem::path reflection_probe_path = log_directory / "algorithm_reflection_probe.log";
+  const std::filesystem::path log_path = log_directory / "last_run.log";
+  const std::filesystem::path render_preview_output_path(options.render_preview_output_path);
+  std::filesystem::remove(package_loader_probe_path, ec);
+  ec.clear();
+  std::filesystem::remove(attach_probe_path, ec);
+  ec.clear();
+  std::filesystem::remove(progress_path, ec);
+  ec.clear();
+  std::filesystem::remove(reflection_probe_path, ec);
+  ec.clear();
+  std::filesystem::remove(log_path, ec);
+  ec.clear();
+  std::filesystem::remove(render_preview_output_path, ec);
+  ec.clear();
+  const auto append_progress = [&](const std::string& line) {
+    std::ofstream progress_file(progress_path, std::ios::binary | std::ios::app);
+    if (progress_file) {
+      progress_file << line << '\n';
+    }
+  };
+  const auto append_reflection_probe = [&](const std::string& line) {
+    std::ofstream probe_file(reflection_probe_path, std::ios::binary | std::ios::app);
+    if (probe_file) {
+      probe_file << line << '\n';
+    }
+  };
+  append_progress("runner.begin");
+  std::ofstream log_file(log_path, std::ios::binary | std::ios::trunc);
+  if (!log_file) {
+    throw std::runtime_error("Failed to open algorithm runner log file: " + log_path.string());
+  }
+  std::streambuf* const original_cout_buffer = std::cout.rdbuf(log_file.rdbuf());
+
+  DebugToolBackendRuntime runtime;
+  append_progress("runtime.created");
+  append_progress("runtime_init_begin");
+  if (!runtime.Init("debugToolRunner", 1280, 720)) {
+    throw std::runtime_error("DebugToolBackendRuntime init failed in algorithm runner mode.");
+  }
+  append_progress("runtime_init_end");
+  append_progress("runtime.initialized");
+
+  runtime.runtime_environment().SetDrawCallback([]() {});
+  append_progress("draw_callback_set");
+
+  bool is_pipeline = false;
+  std::string error_message;
+  if (!runtime.IsPipelineAlgorithm(options.algorithm_name, &is_pipeline, &error_message)) {
+    throw std::runtime_error(
+      error_message.empty()
+        ? ("Failed to query algorithm type for '" + options.algorithm_name + "'.")
+        : error_message);
+  }
+  append_progress("algorithm_type_checked");
+  if (is_pipeline) {
+    throw std::runtime_error(
+      "Algorithm runner requires a normal algorithm, but '" + options.algorithm_name + "' is pipeline.");
+  }
+
+  std::vector<debug_tool::AlgorithmResourceBinding> resource_bindings;
+  std::vector<debug_tool::AlgorithmDescriptorValue> descriptor_values;
+  bool has_default_file = false;
+  if (!runtime.LoadAlgorithmPackageDefaultBindings(
+        options.algorithm_name,
+        &resource_bindings,
+        &descriptor_values,
+        &has_default_file,
+        &error_message)) {
+    throw std::runtime_error(
+      error_message.empty()
+        ? ("Failed to load default bindings for '" + options.algorithm_name + "'.")
+        : error_message);
+  }
+  append_progress("default_bindings_loaded");
+
+  size_t mounted_algorithm_index = 0u;
+  if (!runtime.AttachAlgorithmToAgent(
+        0u,
+        options.algorithm_name,
+        resource_bindings,
+        descriptor_values,
+        &mounted_algorithm_index,
+        &error_message,
+        debug_tool::AlgorithmMountMode::Direct,
+        options.execution_preference)) {
+    throw std::runtime_error(
+      error_message.empty()
+        ? ("Failed to mount algorithm '" + options.algorithm_name + "'.")
+        : error_message);
+  }
+  append_progress("algorithm_mounted");
+
+  runtime.StartTicking();
+  append_progress("ticking_started");
+  runtime.SetRenderPreviewExtent(
+    ImVec2(static_cast<float>(options.preview_width), static_cast<float>(options.preview_height)));
+  append_progress("preview_extent_set");
+
+  std::cout
+    << "algorithm_runner.begin algorithm=" << options.algorithm_name
+    << " execution=" << _ExecutionPreferenceName(options.execution_preference)
+    << " ticks=" << options.ticks
+    << " preview=" << options.preview_width << 'x' << options.preview_height
+    << " defaults=" << (has_default_file ? "true" : "false") << '\n';
+
+  for (uint32_t tick_index = 0u; tick_index < options.ticks; ++tick_index) {
+    append_progress("tick_loop_begin_" + std::to_string(tick_index + 1u));
+    std::this_thread::sleep_for(std::chrono::milliseconds(12));
+    if (!runtime.Tick()) {
+      throw std::runtime_error(
+        runtime.ui_status_message().empty()
+          ? "Algorithm runner tick failed."
+          : runtime.ui_status_message());
+    }
+    append_progress("tick_complete_" + std::to_string(tick_index + 1u));
+
+    debug_tool::AgentRuntimeSummary agent_summary{};
+    if (!runtime.GetAgentSummary(0u, &agent_summary)) {
+      throw std::runtime_error("Failed to collect agent summary after algorithm tick.");
+    }
+    std::cout << "[tick " << (tick_index + 1u) << "] algorithm_count=" << agent_summary.algorithms.size() << '\n';
+    for (const debug_tool::AlgorithmRuntimeSummary& summary : agent_summary.algorithms) {
+      std::cout
+        << "  algorithm " << summary.algorithm_name
+        << " state=" << _AssemblyStateName(summary.assembly_state)
+        << " exec=" << _ExecutionPreferenceName(summary.execution_preference)
+        << " cpu_symbol=" << (summary.cpu_symbol ? "true" : "false")
+        << " gpu_symbol=" << (summary.gpu_symbol ? "true" : "false")
+        << '\n';
+    }
+  }
+
+  runtime.PauseTicking();
+  append_progress("ticking_paused");
+
+  runtime_systems::RenderPreviewRequest preview_request{};
+  if (!runtime.BuildRenderPreviewRequest(0u, mounted_algorithm_index, &preview_request, &error_message)) {
+    throw std::runtime_error(
+      error_message.empty()
+        ? "Failed to build render preview request for mounted algorithm."
+        : error_message);
+  }
+  if (!preview_request.valid) {
+    throw std::runtime_error("Render preview request is invalid after algorithm execution.");
+  }
+  runtime.SetRenderPreviewRequest(std::move(preview_request));
+  append_progress("preview_request_set");
+
+  if (!runtime.runtime_environment().Tick()) {
+    throw std::runtime_error("Runtime environment failed while rendering the preview frame.");
+  }
+  append_progress("preview_frame_rendered");
+
+  if (!runtime.has_render_preview_texture()) {
+    throw std::runtime_error(
+      "Render preview texture was not created. summary=" + runtime.render_preview_debug_summary());
+  }
+
+  std::vector<std::byte> preview_rgba{};
+  ImVec2 preview_size{};
+  if (!runtime.runtime_environment().ReadbackRenderPreviewTexture(&preview_rgba, &preview_size)) {
+    throw std::runtime_error(
+      "Failed to read back render preview texture. summary=" + runtime.render_preview_debug_summary());
+  }
+  append_progress("preview_readback_complete");
+
+  const uint32_t preview_width = static_cast<uint32_t>(preview_size.x);
+  const uint32_t preview_height = static_cast<uint32_t>(preview_size.y);
+  if (preview_width == 0u || preview_height == 0u) {
+    throw std::runtime_error("Render preview readback returned an empty extent.");
+  }
+  const size_t preview_pixel_count =
+    static_cast<size_t>(preview_width) * static_cast<size_t>(preview_height);
+  if (preview_rgba.size() < preview_pixel_count * 4u) {
+    throw std::runtime_error("Render preview readback returned fewer bytes than expected.");
+  }
+
+  size_t non_empty_pixel_count = 0u;
+  for (size_t pixel_index = 0u; pixel_index < preview_pixel_count; ++pixel_index) {
+    const size_t byte_index = pixel_index * 4u;
+    if (preview_rgba[byte_index + 0u] != std::byte{0} ||
+        preview_rgba[byte_index + 1u] != std::byte{0} ||
+        preview_rgba[byte_index + 2u] != std::byte{0} ||
+        preview_rgba[byte_index + 3u] != std::byte{0}) {
+      ++non_empty_pixel_count;
+    }
+  }
+  if (non_empty_pixel_count == 0u) {
+    throw std::runtime_error(
+      "Render preview frame is empty. summary=" + runtime.render_preview_debug_summary());
+  }
+  if (!_WritePpmImage(render_preview_output_path, preview_rgba, preview_width, preview_height)) {
+    throw std::runtime_error(
+      "Failed to write render preview image: " + render_preview_output_path.string());
+  }
+  append_progress("preview_image_written");
+
+  std::cout
+    << "algorithm_runner.end"
+    << " preview_pixels=" << non_empty_pixel_count
+    << " render_preview_path=" << render_preview_output_path.string()
+    << " preview_summary=" << runtime.render_preview_debug_summary();
+  std::cout << '\n';
+  std::cout.flush();
+  std::cout.rdbuf(original_cout_buffer);
+  append_progress("runner.completed");
+  std::cerr << "algorithm_runner.log=" << log_path.string() << '\n';
+  runtime.Destroy();
+  append_progress("runtime.destroyed");
+  return true;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
   try {
     {
-      std::filesystem::create_directories("D:/gptsandbox/artifacts/pipeline_runner");
+      std::filesystem::create_directories(
+        algorithm::library_paths::ResolveAlgorithmLibraryRuntimeNormDebugInfoRoot());
+      std::filesystem::create_directories(
+        algorithm::library_paths::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot());
+      const std::filesystem::path argv_probe_root =
+        _IsPipelineRunnerInvocation(argc, argv)
+          ? algorithm::library_paths::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot()
+          : algorithm::library_paths::ResolveAlgorithmLibraryRuntimeNormDebugInfoRoot();
+      std::filesystem::create_directories(argv_probe_root);
       std::ofstream probe_file(
-        "D:/gptsandbox/artifacts/pipeline_runner/argv_probe.log",
+        (argv_probe_root / "argv_probe.log"),
         std::ios::binary | std::ios::app);
       if (probe_file) {
         probe_file << "argc=" << argc << '\n';
@@ -720,6 +1129,18 @@ int main(int argc, char** argv) {
     }
     if (runner_options.enabled) {
       return _RunPipelineRunner(runner_options) ? 0 : 1;
+    }
+
+    AlgorithmRunnerOptions algorithm_options{};
+    std::string algorithm_parse_error;
+    if (!_ParseAlgorithmRunnerOptions(argc, argv, &algorithm_options, &algorithm_parse_error)) {
+      if (!algorithm_parse_error.empty()) {
+        throw std::runtime_error(algorithm_parse_error);
+      }
+      return 0;
+    }
+    if (algorithm_options.enabled) {
+      return _RunAlgorithmRunner(algorithm_options) ? 0 : 1;
     }
 
     DebugToolBackendRuntime runtime;

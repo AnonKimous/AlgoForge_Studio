@@ -318,6 +318,19 @@ bool PreviewRenderer::CreateTarget() {
     view_info.subresourceRange.layerCount = 1;
     CheckVkResult(vkCreateImageView(device_, &view_info, nullptr, &target_.view));
 
+    VkSamplerCreateInfo sampler_info{};
+    sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    sampler_info.magFilter = VK_FILTER_LINEAR;
+    sampler_info.minFilter = VK_FILTER_LINEAR;
+    sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sampler_info.minLod = -1000.0f;
+    sampler_info.maxLod = 1000.0f;
+    sampler_info.maxAnisotropy = 1.0f;
+    CheckVkResult(vkCreateSampler(device_, &sampler_info, nullptr, &target_.sampler));
+
     VkAttachmentDescription attachment{};
     attachment.format = target_.format;
     attachment.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -374,7 +387,10 @@ bool PreviewRenderer::CreateTarget() {
     framebuffer_info.layers = 1;
     CheckVkResult(vkCreateFramebuffer(device_, &framebuffer_info, nullptr, &target_.framebuffer));
 
-    target_.descriptor_set = ImGui_ImplVulkan_AddTexture(target_.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    target_.descriptor_set = ImGui_ImplVulkan_AddTexture(
+      target_.sampler,
+      target_.view,
+      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     if (target_.descriptor_set == VK_NULL_HANDLE) {
       throw std::runtime_error("ImGui_ImplVulkan_AddTexture returned null descriptor set");
     }
@@ -396,6 +412,10 @@ void PreviewRenderer::DestroyTarget() {
   if (target_.descriptor_set != VK_NULL_HANDLE) {
     ImGui_ImplVulkan_RemoveTexture(target_.descriptor_set);
     target_.descriptor_set = VK_NULL_HANDLE;
+  }
+  if (target_.sampler != VK_NULL_HANDLE) {
+    vkDestroySampler(device_, target_.sampler, nullptr);
+    target_.sampler = VK_NULL_HANDLE;
   }
   if (target_.framebuffer != VK_NULL_HANDLE) {
     vkDestroyFramebuffer(device_, target_.framebuffer, nullptr);
@@ -606,11 +626,16 @@ bool PreviewRenderer::CreatePipeline() {
 
     VkPipelineColorBlendAttachmentState color_blend_attachment{};
     color_blend_attachment.blendEnable = VK_TRUE;
-    color_blend_attachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-    color_blend_attachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    const bool additive_blend = request_.stage_name.find("fireworks") != std::string::npos;
+    color_blend_attachment.srcColorBlendFactor =
+      additive_blend ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_SRC_ALPHA;
+    color_blend_attachment.dstColorBlendFactor =
+      additive_blend ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
     color_blend_attachment.colorBlendOp = VK_BLEND_OP_ADD;
-    color_blend_attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-    color_blend_attachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    color_blend_attachment.srcAlphaBlendFactor =
+      additive_blend ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_ONE;
+    color_blend_attachment.dstAlphaBlendFactor =
+      additive_blend ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
     color_blend_attachment.alphaBlendOp = VK_BLEND_OP_ADD;
     color_blend_attachment.colorWriteMask =
       VK_COLOR_COMPONENT_R_BIT |

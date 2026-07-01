@@ -45,49 +45,61 @@ inline void LoadGpuExecBindings(
     return;
   }
 
+  const auto append_binding_group = [&](const cJSON* items, const char* default_kind, uint32_t default_tuple_width) {
+    if (!items || !cJSON_IsArray(items)) {
+      return true;
+    }
+
+    const int container_count = cJSON_GetArraySize(items);
+    out_bindings->reserve(
+      out_bindings->size() + (container_count > 0 ? static_cast<size_t>(container_count) : 0u));
+    for (int i = 0; i < container_count; ++i) {
+      const cJSON* item = cJSON_GetArrayItem(items, i);
+      if (!item) {
+        continue;
+      }
+
+      agent::AlgorithmGpuExecContainerBinding binding{};
+      if (cJSON_IsString(item) && item->valuestring) {
+        binding.container_name = item->valuestring;
+        binding.container_kind = default_kind ? default_kind : "";
+        binding.tuple_width = default_tuple_width;
+        binding.required = true;
+      } else if (cJSON_IsObject(item)) {
+        binding.container_name = json_utils::GetStringField(item, "name");
+        if (binding.container_name.empty()) {
+          binding.container_name = json_utils::GetStringField(item, "container");
+        }
+        binding.container_kind = json_utils::GetStringField(item, "kind");
+        if (binding.container_kind.empty()) {
+          binding.container_kind = default_kind ? default_kind : "";
+        }
+        binding.tuple_width = json_utils::GetUintField(item, "tuple_width", default_tuple_width);
+        if (binding.tuple_width == 0u) {
+          binding.tuple_width = default_tuple_width;
+        }
+        binding.required = json_utils::GetBoolField(item, "required", true);
+      }
+
+      if (binding.container_name.empty()) {
+        if (out_error_message) {
+          *out_error_message = "Invalid GPU exec container binding in package JSON file: " + package_path;
+        }
+        return false;
+      }
+      out_bindings->push_back(std::move(binding));
+    }
+    return true;
+  };
+
   const cJSON* arrays = cJSON_GetObjectItemCaseSensitive(used_containers, "arrays");
-  if (!arrays || !cJSON_IsArray(arrays)) {
+  if (!append_binding_group(arrays, "array", 1u)) {
     return;
   }
 
-  const int container_count = cJSON_GetArraySize(arrays);
-  out_bindings->reserve(
-    out_bindings->size() + (container_count > 0 ? static_cast<size_t>(container_count) : 0u));
-  for (int i = 0; i < container_count; ++i) {
-    const cJSON* item = cJSON_GetArrayItem(arrays, i);
-    if (!item) {
-      continue;
-    }
-
-    agent::AlgorithmGpuExecContainerBinding binding{};
-    if (cJSON_IsString(item) && item->valuestring) {
-      binding.container_name = item->valuestring;
-      binding.container_kind = "array";
-      binding.tuple_width = 3u;
-      binding.required = true;
-    } else if (cJSON_IsObject(item)) {
-      binding.container_name = json_utils::GetStringField(item, "name");
-      if (binding.container_name.empty()) {
-        binding.container_name = json_utils::GetStringField(item, "container");
-      }
-      binding.container_kind = json_utils::GetStringField(item, "kind");
-      if (binding.container_kind.empty()) {
-        binding.container_kind = "array";
-      }
-      binding.tuple_width = json_utils::GetUintField(item, "tuple_width", 3u);
-      if (binding.tuple_width == 0u) {
-        binding.tuple_width = 3u;
-      }
-      binding.required = json_utils::GetBoolField(item, "required", true);
-    }
-
-    if (binding.container_name.empty()) {
-      if (out_error_message) {
-        *out_error_message = "Invalid GPU exec container binding in package JSON file: " + package_path;
-      }
-      return;
-    }
-    out_bindings->push_back(std::move(binding));
+  const cJSON* variables = cJSON_GetObjectItemCaseSensitive(used_containers, "variables");
+  if (!append_binding_group(variables, "variable", 1u)) {
+    return;
   }
 }
 

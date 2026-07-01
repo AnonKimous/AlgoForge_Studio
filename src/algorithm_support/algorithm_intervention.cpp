@@ -89,20 +89,24 @@ bool _ParseInterventionStageKind(
   }
 
   const std::string kind = !stage_kind_text.empty() ? stage_kind_text : stage_name;
-  if (kind == "resultRender") {
-    *out_stage_kind = agent::AlgorithmInterventionStageKind::ResultRender;
+  if (kind == "pretick" || kind == "preTick") {
+    *out_stage_kind = agent::AlgorithmInterventionStageKind::Pretick;
     return true;
   }
-  if (kind == "preTick") {
-    *out_stage_kind = agent::AlgorithmInterventionStageKind::PreExecution;
+  if (kind == "exec") {
+    *out_stage_kind = agent::AlgorithmInterventionStageKind::Exec;
     return true;
   }
-  if (kind == "postExecution") {
-    *out_stage_kind = agent::AlgorithmInterventionStageKind::PostExecution;
+  if (kind == "aftertick" || kind == "afterTick" || kind == "postExecution") {
+    *out_stage_kind = agent::AlgorithmInterventionStageKind::AfterTick;
     return true;
   }
-  if (kind == "inExecution") {
-    *out_stage_kind = agent::AlgorithmInterventionStageKind::InExecution;
+  if (kind == "renderresult" || kind == "renderResult" || kind == "resultRender") {
+    *out_stage_kind = agent::AlgorithmInterventionStageKind::RenderResult;
+    return true;
+  }
+  if (kind == "reflect") {
+    *out_stage_kind = agent::AlgorithmInterventionStageKind::Reflect;
     return true;
   }
 
@@ -761,47 +765,21 @@ bool ExecuteGpuAlgorithmObject(
   ::algorithm::AlgorithmContainerSet* container_set,
   const ::agent::AgentTickContext& context,
   std::string* out_error_message) {
-  (void)context;
-  runtime_systems::RuntimeGpuStageJob job{};
-  bool has_gpu_stage = false;
-  if (!_TryBuildRuntimeGpuStageJob(
-        object,
-        container_set,
-        &job,
-        &has_gpu_stage,
-        out_error_message)) {
-    return false;
-  }
-  if (!has_gpu_stage) {
-    if (out_error_message) {
-      out_error_message->clear();
-    }
-    return true;
-  }
-  return runtime_systems::ExecuteRuntimeGpuJob(job, out_error_message);
+  return runtime_systems::ExecuteRuntimeGpuAlgorithmObject(
+    object,
+    container_set,
+    context,
+    out_error_message);
 }
 
 bool SynchronizeGpuAlgorithmObject(
   const ::agent::AlgorithmObject& object,
   ::algorithm::AlgorithmContainerSet* container_set,
   std::string* out_error_message) {
-  runtime_systems::RuntimeGpuStageJob job{};
-  bool has_gpu_stage = false;
-  if (!_TryBuildRuntimeGpuStageJob(
-        object,
-        container_set,
-        &job,
-        &has_gpu_stage,
-        out_error_message)) {
-    return false;
-  }
-  if (!has_gpu_stage) {
-    if (out_error_message) {
-      out_error_message->clear();
-    }
-    return true;
-  }
-  return runtime_systems::SynchronizeRuntimeGpuJob(job, out_error_message);
+  return runtime_systems::SynchronizeRuntimeGpuAlgorithmObject(
+    object,
+    container_set,
+    out_error_message);
 }
 
 }  // namespace algorithm_management

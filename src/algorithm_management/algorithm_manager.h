@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "algorithm_support/algorithm_support.h"
+#include "algorithm_support/algorithm_library_paths.h"
 #include "algorithm_management/algorithm_scheduler_runtime_bridge.h"
 #include "common_data/kernel_cfg.h"
 
@@ -371,13 +372,86 @@ inline bool ShouldEmitPipelineRunnerProbe(const std::string& pipeline_name) {
 
 inline void AppendPipelineRunnerProbe(const std::string& file_name, const std::string& line) {
   const std::filesystem::path path =
-    std::filesystem::path("D:/gptsandbox/artifacts/pipeline_runner") / file_name;
+    algorithm::library_paths::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot() / file_name;
   std::error_code ec;
   std::filesystem::create_directories(path.parent_path(), ec);
   std::ofstream file(path, std::ios::binary | std::ios::app);
   if (file) {
     file << line << '\n';
   }
+}
+
+inline void AppendReflectionSnapshotProbe(
+  const std::string& phase,
+  const std::string& stage_name,
+  const AlgorithmReflectionSnapshot& snapshot) {
+  AppendPipelineRunnerProbe(
+    "scheduler_tick_probe.log",
+    phase +
+      " stage=" + stage_name +
+      " reflection_valid=" + std::string(snapshot.valid ? "true" : "false") +
+      " vars=" + std::to_string(snapshot.variables.size()) +
+      " arrays=" + std::to_string(snapshot.variable_arrays.size()));
+}
+
+inline void AppendBridgeDebugProbe(
+  const std::string& phase,
+  const std::string& stage_name,
+  const PipelineStageBridgeDebugSet& bridge_debug_set) {
+  const size_t input_container_count =
+    bridge_debug_set.stage_input_container_set.arrays.size() +
+    bridge_debug_set.stage_input_container_set.temporary_registers.size() +
+    bridge_debug_set.stage_input_container_set.temporary_caches.size() +
+    bridge_debug_set.stage_input_container_set.hidden_containers.size();
+  const size_t output_container_count =
+    bridge_debug_set.stage_output_container_set.arrays.size() +
+    bridge_debug_set.stage_output_container_set.temporary_registers.size() +
+    bridge_debug_set.stage_output_container_set.temporary_caches.size() +
+    bridge_debug_set.stage_output_container_set.hidden_containers.size();
+  const size_t next_container_count =
+    bridge_debug_set.next_stage_input_container_set.arrays.size() +
+    bridge_debug_set.next_stage_input_container_set.temporary_registers.size() +
+    bridge_debug_set.next_stage_input_container_set.temporary_caches.size() +
+    bridge_debug_set.next_stage_input_container_set.hidden_containers.size();
+  AppendPipelineRunnerProbe(
+    "scheduler_tick_probe.log",
+    phase +
+      " stage=" + stage_name +
+      " bridge.valid=" + std::string(bridge_debug_set.valid ? "true" : "false") +
+      " input_valid=" + std::string(bridge_debug_set.has_stage_input_container_set ? "true" : "false") +
+      " input_containers=" + std::to_string(input_container_count) +
+      " output_valid=" + std::string(bridge_debug_set.has_stage_output_container_set ? "true" : "false") +
+      " output_containers=" + std::to_string(output_container_count) +
+      " next_valid=" + std::string(bridge_debug_set.has_next_stage_input_container_set ? "true" : "false") +
+      " next_containers=" + std::to_string(next_container_count));
+}
+
+inline void AppendBridgeScalarProbe(
+  const std::string& phase,
+  const std::string& stage_name,
+  const PipelineStageBridgeDebugSet& bridge_debug_set) {
+  const algorithm::AlgorithmContainer* v1 = algorithm::FindAlgorithmContainer(bridge_debug_set.stage_output_container_set, "v1");
+  const algorithm::AlgorithmContainer* v2 = algorithm::FindAlgorithmContainer(bridge_debug_set.stage_output_container_set, "v2");
+  const algorithm::AlgorithmContainer* v3 = algorithm::FindAlgorithmContainer(bridge_debug_set.stage_output_container_set, "v3");
+  float v1_value = 0.0f;
+  float v2_value = 0.0f;
+  float v3_value = 0.0f;
+  if (v1 && v1->bytes.size() >= sizeof(float)) {
+    std::memcpy(&v1_value, v1->bytes.data(), sizeof(float));
+  }
+  if (v2 && v2->bytes.size() >= sizeof(float)) {
+    std::memcpy(&v2_value, v2->bytes.data(), sizeof(float));
+  }
+  if (v3 && v3->bytes.size() >= sizeof(float)) {
+    std::memcpy(&v3_value, v3->bytes.data(), sizeof(float));
+  }
+  AppendPipelineRunnerProbe(
+    "scheduler_tick_probe.log",
+    phase +
+      " stage=" + stage_name +
+      " v1=" + std::to_string(v1_value) +
+      " v2=" + std::to_string(v2_value) +
+      " v3=" + std::to_string(v3_value));
 }
 
 inline uint64_t HashBytes(uint64_t hash, const void* data, size_t size) {
@@ -1745,9 +1819,21 @@ inline bool TickAlgorithmObject(
             object,
             *object.container_set(),
             &runtime_state->reflection_snapshot)) {
+        if (pipeline_scheduler_detail::ShouldEmitPipelineRunnerProbe(object.pipeline_name)) {
+          pipeline_scheduler_detail::AppendReflectionSnapshotProbe(
+            "tick.reflection.body",
+            object.algorithm_profile.algorithm_name,
+            runtime_state->reflection_snapshot);
+        }
         ALGORITHM_SCHEDULER_ASSERT(false, "Runtime reflection snapshot could not be collected.");
         runtime_state->algorithm_to_agent_signal.stop_requested = true;
         return false;
+      }
+      if (pipeline_scheduler_detail::ShouldEmitPipelineRunnerProbe(object.pipeline_name)) {
+        pipeline_scheduler_detail::AppendReflectionSnapshotProbe(
+          "tick.reflection.body",
+          object.algorithm_profile.algorithm_name,
+          runtime_state->reflection_snapshot);
       }
       runtime_state->algorithm_to_agent_signal.reflection_collection_requested = true;
       if (capture_reflection_once) {
@@ -1983,6 +2069,19 @@ inline void AlgorithmScheduler::Clear() {
   ClearAlgorithmExecutionCaches();
 }
 
+inline bool _SynchronizeAlgorithmObjectForReflection(
+  const ::agent::AlgorithmObject& object,
+  ::algorithm::AlgorithmContainerSet* container_set,
+  std::string* out_error_message) {
+  if (object.execution_preference == AlgorithmExecutionPreference::Gpu &&
+      object.gpu_symbol &&
+      HasExecutableGpuAlgorithmStage(object)) {
+    return SynchronizeGpuAlgorithmObject(object, container_set, out_error_message);
+  }
+
+  return true;
+}
+
 inline bool AlgorithmScheduler::SubmitAlgorithmObject(
   const ::agent::AlgorithmObject& object,
   const ::agent::AgentTickContext& context,
@@ -2016,13 +2115,11 @@ inline bool AlgorithmScheduler::SubmitAlgorithmObject(
       return false;
     }
 
-    if (object.algorithm_reflector && !object.algorithm_reflector->empty()) {
-      if (!SynchronizeGpuAlgorithmObject(
-            object,
-            container_set,
-            out_error_message)) {
-        return false;
-      }
+    if (!_SynchronizeAlgorithmObjectForReflection(
+          object,
+          container_set,
+          out_error_message)) {
+      return false;
     }
     if (out_error_message) {
       out_error_message->clear();
@@ -3268,10 +3365,22 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
             object.pipeline_name.empty() ? object.algorithm_profile.algorithm_name : object.pipeline_name,
             *wrapper_container_set,
             &runtime_state.reflection_snapshot)) {
+        if (pipeline_scheduler_detail::ShouldEmitPipelineRunnerProbe(object.pipeline_name)) {
+          pipeline_scheduler_detail::AppendReflectionSnapshotProbe(
+            "tick.reflection.wrapper_exit",
+            object.algorithm_profile.algorithm_name,
+            runtime_state.reflection_snapshot);
+        }
         runtime_state.reflection_snapshot_cached = false;
         pipeline_state.exit_reflection_snapshot = runtime_state.reflection_snapshot;
         pipeline_state.exit_reflection_snapshot_valid = true;
       } else {
+        if (pipeline_scheduler_detail::ShouldEmitPipelineRunnerProbe(object.pipeline_name)) {
+          pipeline_scheduler_detail::AppendReflectionSnapshotProbe(
+            "tick.reflection.wrapper_exit",
+            object.algorithm_profile.algorithm_name,
+            runtime_state.reflection_snapshot);
+        }
         runtime_state.reflection_snapshot.Clear();
         pipeline_state.exit_reflection_snapshot.Clear();
         pipeline_state.exit_reflection_snapshot_valid = false;
@@ -3372,6 +3481,12 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
       set_error(failure_message);
       *out_pipeline_processing_failed = true;
       return false;
+    }
+    if (emit_runner_probe) {
+      pipeline_scheduler_detail::AppendBridgeDebugProbe(
+        "tick.bridge.ingress",
+        object.algorithm_profile.algorithm_name,
+        runtime_state.bridge_debug_set);
     }
 
     if (emit_runner_probe) {
@@ -3590,6 +3705,16 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
       set_error(failure_message);
       *out_pipeline_processing_failed = true;
       return false;
+    }
+    if (emit_runner_probe) {
+      pipeline_scheduler_detail::AppendBridgeDebugProbe(
+        "tick.bridge.egress",
+        object.algorithm_profile.algorithm_name,
+        runtime_state.bridge_debug_set);
+      pipeline_scheduler_detail::AppendBridgeScalarProbe(
+        "tick.bridge.egress",
+        object.algorithm_profile.algorithm_name,
+        runtime_state.bridge_debug_set);
     }
 
     if (allow_immediate_forward && inout_working_body_stage_has_data) {

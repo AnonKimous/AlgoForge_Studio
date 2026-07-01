@@ -106,10 +106,11 @@ std::string _FormatAlgorithmRuntimeLabel(
 const char* _AlgorithmInterventionStageKindDisplayName(
   algorithm_management::AlgorithmInterventionStageKind stage_kind) {
   switch (stage_kind) {
-    case algorithm_management::AlgorithmInterventionStageKind::ResultRender: return "resultRender";
-    case algorithm_management::AlgorithmInterventionStageKind::PreExecution: return "preTick";
-    case algorithm_management::AlgorithmInterventionStageKind::InExecution: return "inExecution";
-    case algorithm_management::AlgorithmInterventionStageKind::PostExecution: return "postExecution";
+    case algorithm_management::AlgorithmInterventionStageKind::Pretick: return "pretick";
+    case algorithm_management::AlgorithmInterventionStageKind::Exec: return "exec";
+    case algorithm_management::AlgorithmInterventionStageKind::AfterTick: return "aftertick";
+    case algorithm_management::AlgorithmInterventionStageKind::RenderResult: return "renderresult";
+    case algorithm_management::AlgorithmInterventionStageKind::Reflect: return "reflect";
     case algorithm_management::AlgorithmInterventionStageKind::Custom: return "custom";
   }
   return "custom";

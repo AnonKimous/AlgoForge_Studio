@@ -3,7 +3,7 @@
     {
       "name": "v2a0_pipeline_square_vertex_demo",
       "display_name": "v2a0_pipeline_square_vertex_demo",
-      "folder": "v2a0_pipeline_square_vertex_demo",
+      "folder": "pipeline/v2a0_pipeline_square_vertex_demo",
       "container_manifest": "v2a0_pipeline_square_vertex_demo_package.json",
       "decomposer": "v2a0_pipeline_square_vertex_demo_package.json",
       "reflector": "v2a0_pipeline_square_vertex_demo_package.json",
@@ -12,7 +12,7 @@
     {
       "name": "temporary_test_line_motion",
       "display_name": "temporary_test_line_motion",
-      "folder": "temporary_test_line_motion",
+      "folder": "norm/temporary_test_line_motion",
       "container_manifest": "temporary_test_line_motion_package.json",
       "decomposer": "temporary_test_line_motion_package.json",
       "reflector": "temporary_test_line_motion_package.json",
@@ -21,7 +21,7 @@
     {
       "name": "v6a6_pbd_ball_collision_demo",
       "display_name": "v6a6_pbd_ball_collision_demo",
-      "folder": "v6a6_pbd_ball_collision_demo",
+      "folder": "norm/v6a6_pbd_ball_collision_demo",
       "container_manifest": "v6a6_pbd_ball_collision_demo_package.json",
       "decomposer": "v6a6_pbd_ball_collision_demo_package.json",
       "reflector": "v6a6_pbd_ball_collision_demo_package.json",
@@ -30,7 +30,7 @@
     {
       "name": "v3a16_fireworks_pipeline_demo",
       "display_name": "v3a16_fireworks_pipeline_demo",
-      "folder": "v3a16_fireworks_pipeline_demo",
+      "folder": "pipeline/v3a16_fireworks_pipeline_demo",
       "container_manifest": "v3a16_fireworks_pipeline_demo_package.json",
       "decomposer": "v3a16_fireworks_pipeline_demo_package.json",
       "reflector": "v3a16_fireworks_pipeline_demo_package.json",
@@ -39,7 +39,7 @@
     {
       "name": "v2a0_precision_grid_mask_demo",
       "display_name": "v2a0_precision_grid_mask_demo",
-      "folder": "v2a0_precision_grid_mask_demo",
+      "folder": "norm/v2a0_precision_grid_mask_demo",
       "container_manifest": "v2a0_precision_grid_mask_demo_package.json",
       "decomposer": "v2a0_precision_grid_mask_demo_package.json",
       "reflector": "v2a0_precision_grid_mask_demo_package.json",

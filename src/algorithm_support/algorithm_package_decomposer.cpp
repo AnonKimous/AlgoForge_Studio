@@ -2346,14 +2346,16 @@ bool _PipelineStageBridgeIngressImpl(
       return false;
     }
   }
-  if (!_ApplyImplicitStageBufferIngress(
-        transfer_map,
-        target_stage_name,
-        inter_stage_buffer,
-        out_target_container_set,
-        &written_target_names,
-        out_error_message)) {
-    return false;
+  if (inter_stage_buffer) {
+    if (!_ApplyImplicitStageBufferIngress(
+          transfer_map,
+          target_stage_name,
+          inter_stage_buffer,
+          out_target_container_set,
+          &written_target_names,
+          out_error_message)) {
+      return false;
+    }
   }
 
   if (out_error_message) {
@@ -2408,13 +2410,15 @@ bool _PipelineStageBridgeEgressImpl(
     _SetErrorMessage(out_error_message, "Runtime transfer stage container set map is null.");
     return false;
   }
-  if (!_ApplyImplicitStageBufferEgress(
-        transfer_map,
-        source_stage_name,
-        source_container_set,
-        inter_stage_buffer,
-        out_error_message)) {
-    return false;
+  if (inter_stage_buffer) {
+    if (!_ApplyImplicitStageBufferEgress(
+          transfer_map,
+          source_stage_name,
+          source_container_set,
+          inter_stage_buffer,
+          out_error_message)) {
+      return false;
+    }
   }
 
   const std::vector<const algorithm::AlgorithmRuntimeTransferEdge*> outgoing_edges =

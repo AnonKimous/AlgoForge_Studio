@@ -115,10 +115,15 @@ enum class AlgorithmTickLifetime {
 };
 
 enum class AlgorithmExecutionPhase {
-  Body = 0,
-  PreExecution = 1,
-  PostExecution = 2,
-  ResultRender = 3,
+  Pretick = 0,
+  Exec = 1,
+  AfterTick = 2,
+  RenderResult = 3,
+  Reflect = 4,
+  Body = Exec,
+  PreExecution = Pretick,
+  PostExecution = AfterTick,
+  ResultRender = RenderResult,
 };
 
 struct AlgorithmReflectionValue {
@@ -286,7 +291,7 @@ struct AgentTickContext {
   Vec2 mouse_pixel{};
   Vec2 render_preview_extent{1024.0f, 1024.0f};
   float dt_seconds{0.0f};
-  AlgorithmExecutionPhase execution_phase{AlgorithmExecutionPhase::Body};
+  AlgorithmExecutionPhase execution_phase{AlgorithmExecutionPhase::Exec};
   AlgorithmJobPriority job_priority{AlgorithmJobPriority::High};
   const InteractionInterventionRequest* intervention_request{nullptr};
 };
@@ -459,11 +464,16 @@ class IAlgorithmGpuExecutor {
 };
 
 enum class AlgorithmInterventionStageKind {
-  ResultRender = 0,
-  PreExecution = 1,
-  InExecution = 2,
-  PostExecution = 3,
-  Custom = 4,
+  Pretick = 0,
+  Exec = 1,
+  AfterTick = 2,
+  RenderResult = 3,
+  Reflect = 4,
+  Custom = 5,
+  PreExecution = Pretick,
+  InExecution = Exec,
+  PostExecution = AfterTick,
+  ResultRender = RenderResult,
 };
 
 struct AlgorithmInterventionContainerBinding {

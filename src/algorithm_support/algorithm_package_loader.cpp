@@ -80,7 +80,8 @@ bool _ShouldEmitPipelineRunnerProbe(const std::string& algorithm_name) {
 }
 
 void _AppendPipelineRunnerProbe(const std::string& file_name, const std::string& line) {
-  const fs::path path = fs::path("D:/gptsandbox/artifacts/pipeline_runner") / file_name;
+  const fs::path path = algorithm::library_paths::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot() /
+    file_name;
   std::error_code ec;
   fs::create_directories(path.parent_path(), ec);
   std::ofstream file(path, std::ios::binary | std::ios::app);

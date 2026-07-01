@@ -94,13 +94,26 @@ bool _ShouldEmitPipelineRunnerProbe(const std::string& pipeline_name) {
 
 void _AppendPipelineRunnerProbe(const std::string& file_name, const std::string& line) {
   const std::filesystem::path path =
-    std::filesystem::path("D:/gptsandbox/artifacts/pipeline_runner") / file_name;
+    algorithm::library_paths::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot() / file_name;
   std::error_code ec;
   std::filesystem::create_directories(path.parent_path(), ec);
   std::ofstream file(path, std::ios::binary | std::ios::app);
   if (file) {
     file << line << '\n';
   }
+}
+
+void _AppendReflectionSnapshotProbe(
+  const std::string& phase,
+  const std::string& stage_name,
+  const AlgorithmReflectionSnapshot& snapshot) {
+  _AppendPipelineRunnerProbe(
+    "scheduler_tick_probe.log",
+    phase +
+      " stage=" + stage_name +
+      " reflection_valid=" + std::string(snapshot.valid ? "true" : "false") +
+      " vars=" + std::to_string(snapshot.variables.size()) +
+      " arrays=" + std::to_string(snapshot.variable_arrays.size()));
 }
 
 uint64_t _HashContainerSet(uint64_t hash, const algorithm::AlgorithmContainerSet& container_set) {
@@ -890,9 +903,21 @@ bool _TickAlgorithmObject(
             object,
             *object.container_set(),
             &runtime_state->reflection_snapshot)) {
+        if (_ShouldEmitPipelineRunnerProbe(object.pipeline_name)) {
+          _AppendReflectionSnapshotProbe(
+            "tick.reflection.body",
+            object.algorithm_profile.algorithm_name,
+            runtime_state->reflection_snapshot);
+        }
         DEBUG_TOOL_ASSERT(false, "Runtime reflection snapshot could not be collected.");
         runtime_state->algorithm_to_agent_signal.stop_requested = true;
         return false;
+      }
+      if (_ShouldEmitPipelineRunnerProbe(object.pipeline_name)) {
+        _AppendReflectionSnapshotProbe(
+          "tick.reflection.body",
+          object.algorithm_profile.algorithm_name,
+          runtime_state->reflection_snapshot);
       }
       runtime_state->algorithm_to_agent_signal.reflection_collection_requested = true;
       if (capture_reflection_once) {

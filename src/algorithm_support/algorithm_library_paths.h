@@ -55,11 +55,65 @@ inline fs::path ResolveAlgorithmLibraryRuntimeRoot() {
   }, PathType::Directory);
 }
 
+inline fs::path ResolveAlgorithmLibraryChildRoot(
+  const fs::path& parent_root,
+  const char* child_name) {
+  if (parent_root.empty() || !child_name || !*child_name) {
+    return {};
+  }
+  return parent_root / child_name;
+}
+
+inline fs::path ResolveAlgorithmLibrarySourceNormRoot() {
+  return ResolveAlgorithmLibraryChildRoot(ResolveAlgorithmLibrarySourceRoot(), "norm");
+}
+
+inline fs::path ResolveAlgorithmLibrarySourcePipelineRoot() {
+  return ResolveAlgorithmLibraryChildRoot(ResolveAlgorithmLibrarySourceRoot(), "pipeline");
+}
+
+inline fs::path ResolveAlgorithmLibraryRuntimeNormRoot() {
+  return ResolveAlgorithmLibraryChildRoot(ResolveAlgorithmLibraryRuntimeRoot(), "norm");
+}
+
+inline fs::path ResolveAlgorithmLibraryRuntimePipelineRoot() {
+  return ResolveAlgorithmLibraryChildRoot(ResolveAlgorithmLibraryRuntimeRoot(), "pipeline");
+}
+
+inline fs::path ResolveAlgorithmLibrarySourceDebugInfoRoot(const fs::path& category_root) {
+  return ResolveAlgorithmLibraryChildRoot(category_root, "debugInfo");
+}
+
+inline fs::path ResolveAlgorithmLibraryRuntimeDebugInfoRoot(const fs::path& category_root) {
+  return ResolveAlgorithmLibraryChildRoot(category_root, "debugInfo");
+}
+
+inline fs::path ResolveAlgorithmLibrarySourceNormDebugInfoRoot() {
+  return ResolveAlgorithmLibrarySourceDebugInfoRoot(ResolveAlgorithmLibrarySourceNormRoot());
+}
+
+inline fs::path ResolveAlgorithmLibrarySourcePipelineDebugInfoRoot() {
+  return ResolveAlgorithmLibrarySourceDebugInfoRoot(ResolveAlgorithmLibrarySourcePipelineRoot());
+}
+
+inline fs::path ResolveAlgorithmLibraryRuntimeNormDebugInfoRoot() {
+  return ResolveAlgorithmLibraryRuntimeDebugInfoRoot(ResolveAlgorithmLibraryRuntimeNormRoot());
+}
+
+inline fs::path ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot() {
+  return ResolveAlgorithmLibraryRuntimeDebugInfoRoot(ResolveAlgorithmLibraryRuntimePipelineRoot());
+}
+
 inline fs::path ResolveProjectRootFromAlgorithmLibraryRoot(const fs::path& algorithm_library_root) {
   if (algorithm_library_root.empty()) {
     return {};
   }
   return algorithm_library_root.parent_path().parent_path();
+}
+
+inline fs::path ResolvePipelineRunnerArtifactRoot() {
+  return ResolveProjectRootFromAlgorithmLibraryRoot(ResolveAlgorithmLibrarySourceRoot()) /
+    "artifacts" / "pipeline_runner";
 }
 
 inline fs::path ResolvePackageRelativePath(

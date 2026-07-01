@@ -1,4 +1,5 @@
 #define RUNTIME_SYSTEMS_LAYER_INTERNAL_BUILD 1
+#include "algorithm_support/algorithm_support.h"
 #include "runtime_systems/gpu_job_system.h"
 #undef RUNTIME_SYSTEMS_LAYER_INTERNAL_BUILD
 #include "runtime_systems/runtime_gpu_context.h"
@@ -155,6 +156,208 @@ std::string _ExecutionStateKey(
   throw std::runtime_error(std::move(message));
 }
 
+bool _ResolveRuntimeGpuShaderPath(
+  const ::agent::AlgorithmObject& object,
+  const std::string& shader_path,
+  std::string* out_resolved_path,
+  std::string* out_error_message) {
+  if (!out_resolved_path) {
+    if (out_error_message) {
+      *out_error_message = "Resolved GPU shader path output pointer is null.";
+    }
+    return false;
+  }
+  if (shader_path.empty()) {
+    if (out_error_message) {
+      *out_error_message = "GPU shader path must not be empty.";
+    }
+    return false;
+  }
+
+  const std::filesystem::path path(shader_path);
+  if (path.is_absolute()) {
+    *out_resolved_path = path.string();
+    if (out_error_message) {
+      out_error_message->clear();
+    }
+    return true;
+  }
+
+  std::filesystem::path runtime_package_root(object.runtime_package_root_path);
+  if (runtime_package_root.empty()) {
+    ::algorithm::AlgorithmPackageLocation package_location{};
+    std::string resolve_error_message;
+    if (!TryResolveAlgorithmPackageLocation(
+          object.algorithm_profile.algorithm_name,
+          &package_location,
+          &resolve_error_message)) {
+      if (out_error_message) {
+        *out_error_message = resolve_error_message.empty()
+          ? ("Failed to resolve algorithm package location for '" + object.algorithm_profile.algorithm_name + "'.")
+          : std::move(resolve_error_message);
+      }
+      return false;
+    }
+    runtime_package_root = package_location.runtime_package_root;
+  }
+  if (runtime_package_root.empty()) {
+    if (out_error_message) {
+      *out_error_message =
+        "Algorithm runtime package root is empty for '" + object.algorithm_profile.algorithm_name + "'.";
+    }
+    return false;
+  }
+
+  *out_resolved_path = (runtime_package_root / path).lexically_normal().string();
+  if (out_resolved_path->empty()) {
+    if (out_error_message) {
+      *out_error_message =
+        "Failed to resolve GPU shader path for '" + object.algorithm_profile.algorithm_name + "'.";
+    }
+    return false;
+  }
+  if (out_error_message) {
+    out_error_message->clear();
+  }
+  return true;
+}
+
+bool _TryLoadRuntimeGpuExecSpec(
+  const ::agent::AlgorithmObject& object,
+  agent::AlgorithmGpuExecSpec* out_spec,
+  bool* out_has_gpu_exec,
+  std::string* out_error_message) {
+  if (!out_spec || !out_has_gpu_exec) {
+    if (out_error_message) {
+      *out_error_message = "Runtime GPU exec spec output pointer is null.";
+    }
+    return false;
+  }
+
+  *out_spec = {};
+  *out_has_gpu_exec = false;
+  if (!object.gpu_executor) {
+    if (out_error_message) {
+      out_error_message->clear();
+    }
+    return true;
+  }
+  if (!object.gpu_executor->GetGpuExecSpec(out_spec)) {
+    if (out_error_message) {
+      *out_error_message = "GPU executor failed to provide its exec specification.";
+    }
+    return false;
+  }
+  if (out_spec->shader.vertex_shader_path.empty() ||
+      out_spec->shader.fragment_shader_path.empty()) {
+    if (out_error_message) {
+      *out_error_message = "GPU exec stage is missing shader paths.";
+    }
+    return false;
+  }
+  if (out_spec->used_algorithm_containers.empty()) {
+    if (out_error_message) {
+      *out_error_message = "GPU exec stage does not bind any containers.";
+    }
+    return false;
+  }
+  if (out_spec->stage_name.empty()) {
+    out_spec->stage_name = "exec";
+  }
+  *out_has_gpu_exec = true;
+  if (out_error_message) {
+    out_error_message->clear();
+  }
+  return true;
+}
+
+bool _TryBuildRuntimeGpuStageJob(
+  const ::agent::AlgorithmObject& object,
+  ::algorithm::AlgorithmContainerSet* container_set,
+  runtime_systems::RuntimeGpuStageJob* out_job,
+  bool* out_has_gpu_stage,
+  std::string* out_error_message) {
+  if (!container_set || !out_job || !out_has_gpu_stage) {
+    if (out_error_message) {
+      *out_error_message = "Runtime GPU stage job output pointer is null.";
+    }
+    return false;
+  }
+
+  *out_job = {};
+  *out_has_gpu_stage = false;
+  agent::AlgorithmGpuExecSpec gpu_exec_spec{};
+  if (!_TryLoadRuntimeGpuExecSpec(
+        object,
+        &gpu_exec_spec,
+        out_has_gpu_stage,
+        out_error_message)) {
+    return false;
+  }
+  if (!*out_has_gpu_stage) {
+    if (out_error_message) {
+      out_error_message->clear();
+    }
+    return true;
+  }
+
+  out_job->debug_name = object.algorithm_profile.algorithm_name + "::" + gpu_exec_spec.stage_name;
+  out_job->shader_namespace = object.algorithm_profile.algorithm_name;
+  out_job->stage_name = gpu_exec_spec.stage_name;
+  out_job->execution_key = container_set;
+  if (!_ResolveRuntimeGpuShaderPath(
+        object,
+        gpu_exec_spec.shader.vertex_shader_path,
+        &out_job->vertex_shader_path,
+        out_error_message)) {
+    return false;
+  }
+  if (!_ResolveRuntimeGpuShaderPath(
+        object,
+        gpu_exec_spec.shader.fragment_shader_path,
+        &out_job->fragment_shader_path,
+        out_error_message)) {
+    return false;
+  }
+
+  out_job->buffer_bindings.reserve(gpu_exec_spec.used_algorithm_containers.size());
+  for (const agent::AlgorithmGpuExecContainerBinding& binding : gpu_exec_spec.used_algorithm_containers) {
+    algorithm::AlgorithmContainer* container = algorithm::FindAlgorithmContainer(container_set, binding.container_name);
+    if (!container) {
+      if (out_error_message) {
+        *out_error_message = binding.required
+          ? ("GPU exec stage is missing container '" + binding.container_name + "'.")
+          : ("GPU exec optional container '" + binding.container_name +
+              "' is not supported because runtime GPU bindings must stay positional.");
+      }
+      return false;
+    }
+    if (container->element_stride == 0u || container->bytes.empty()) {
+      if (out_error_message) {
+        *out_error_message = binding.required
+          ? ("GPU exec stage container '" + binding.container_name + "' has no data.")
+          : ("GPU exec optional container '" + binding.container_name +
+              "' has no data, and sparse GPU bindings are not supported.");
+      }
+      return false;
+    }
+
+    runtime_systems::RuntimeGpuBufferBindingView binding_view{};
+    binding_view.binding_name = binding.container_name;
+    binding_view.bytes = container->bytes.data();
+    binding_view.size_bytes = container->bytes.size();
+    binding_view.element_stride = container->element_stride;
+    binding_view.array_like = container->storage_kind == algorithm::AlgorithmContainerStorageKind::Array;
+    binding_view.required = binding.required;
+    out_job->buffer_bindings.push_back(std::move(binding_view));
+  }
+
+  if (out_error_message) {
+    out_error_message->clear();
+  }
+  return true;
+}
+
 }  // namespace
 
 class GpuJobRuntimeSystem {
@@ -162,6 +365,26 @@ class GpuJobRuntimeSystem {
   static GpuJobRuntimeSystem& Instance() {
     static GpuJobRuntimeSystem instance{};
     return instance;
+  }
+
+  bool HasExecutableRuntimeGpuAlgorithmStage(const ::agent::AlgorithmObject& object) {
+    agent::AlgorithmGpuExecSpec gpu_exec_spec{};
+    bool has_gpu_exec = false;
+    return _TryLoadRuntimeGpuExecSpec(object, &gpu_exec_spec, &has_gpu_exec, nullptr) && has_gpu_exec;
+  }
+
+  bool BuildRuntimeGpuStageJob(
+    const ::agent::AlgorithmObject& object,
+    ::algorithm::AlgorithmContainerSet* container_set,
+    RuntimeGpuStageJob* out_job,
+    bool* out_has_gpu_stage,
+    std::string* out_error_message) {
+    return _TryBuildRuntimeGpuStageJob(
+      object,
+      container_set,
+      out_job,
+      out_has_gpu_stage,
+      out_error_message);
   }
 
   void Clear() {
@@ -199,6 +422,9 @@ class GpuJobRuntimeSystem {
 
     try {
       _EnsureContext(execution_context);
+      _UpdateOffscreenExtent(
+        static_cast<uint32_t>(std::max(job.viewport_width, 1.0f)),
+        static_cast<uint32_t>(std::max(job.viewport_height, 1.0f)));
       if (!_EnsureOffscreenTarget()) {
         _ThrowGpuTickError("Failed to create offscreen GPU target.", out_error_message);
       }
@@ -227,8 +453,10 @@ class GpuJobRuntimeSystem {
         }
       } cleanup{execution_context, VK_NULL_HANDLE};
 
-      uint32_t instance_count = 0u;
-      bool have_instance_count = false;
+      uint32_t array_instance_count = 0u;
+      bool have_array_instance_count = false;
+      uint32_t fallback_instance_count = 0u;
+      bool have_fallback_instance_count = false;
       size_t buffer_index = 0u;
       for (const RuntimeGpuBufferBindingView& binding : job.buffer_bindings) {
         if (binding.bytes == nullptr) {
@@ -285,13 +513,32 @@ class GpuJobRuntimeSystem {
             buffer_pair.output.size_bytes));
         }
 
+        // Bridge ingress updates host container bytes each stage tick.
+        // Always upload the latest host view into this stage input buffer.
+        std::memcpy(buffer_pair.input.allocation_info.pMappedData, binding.bytes, binding.size_bytes);
+        _CheckVkResult(vmaFlushAllocation(
+          execution_context.allocator,
+          buffer_pair.input.allocation,
+          0u,
+          buffer_pair.input.size_bytes));
+
         const uint32_t buffer_instance_count =
           static_cast<uint32_t>(binding.size_bytes / binding.element_stride);
-        if (!have_instance_count) {
-          instance_count = buffer_instance_count;
-          have_instance_count = true;
+
+        if (binding.array_like) {
+          if (!have_array_instance_count) {
+            array_instance_count = buffer_instance_count;
+            have_array_instance_count = true;
+          } else {
+            array_instance_count = std::min(array_instance_count, buffer_instance_count);
+          }
         } else {
-          instance_count = std::min(instance_count, buffer_instance_count);
+          if (!have_fallback_instance_count) {
+            fallback_instance_count = buffer_instance_count;
+            have_fallback_instance_count = true;
+          } else {
+            fallback_instance_count = std::min(fallback_instance_count, buffer_instance_count);
+          }
         }
         ++buffer_index;
       }
@@ -299,6 +546,10 @@ class GpuJobRuntimeSystem {
       if (buffer_index == 0u) {
         _ThrowGpuTickError("GPU tick stage could not build any usable buffers.", out_error_message);
       }
+
+      const uint32_t instance_count = have_array_instance_count
+        ? array_instance_count
+        : fallback_instance_count;
       if (instance_count == 0u) {
         _ThrowGpuTickError("GPU tick stage has no drawable instances.", out_error_message);
       }
@@ -556,6 +807,16 @@ class GpuJobRuntimeSystem {
     alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     alloc_info.commandBufferCount = 1;
     _CheckVkResult(vkAllocateCommandBuffers(context_.device, &alloc_info, &command_resources_.command_buffer));
+  }
+
+  void _UpdateOffscreenExtent(uint32_t width, uint32_t height) {
+    width = std::max<uint32_t>(width, 1u);
+    height = std::max<uint32_t>(height, 1u);
+    if (offscreen_target_.extent.width == width && offscreen_target_.extent.height == height) {
+      return;
+    }
+    _DestroyOffscreenTarget();
+    offscreen_target_.extent = VkExtent2D{width, height};
   }
 
   bool _EnsureOffscreenTarget() {
@@ -961,6 +1222,59 @@ bool SynchronizeRuntimeGpuJob(
   return GpuJobRuntimeSystem::Instance().SynchronizeRuntimeGpuJob(
     job,
     out_error_message);
+}
+
+bool HasExecutableRuntimeGpuAlgorithmStage(const ::agent::AlgorithmObject& object) {
+  return GpuJobRuntimeSystem::Instance().HasExecutableRuntimeGpuAlgorithmStage(object);
+}
+
+bool ExecuteRuntimeGpuAlgorithmObject(
+  const ::agent::AlgorithmObject& object,
+  ::algorithm::AlgorithmContainerSet* container_set,
+  const ::agent::AgentTickContext& context,
+  std::string* out_error_message) {
+  RuntimeGpuStageJob job{};
+  bool has_gpu_stage = false;
+  if (!GpuJobRuntimeSystem::Instance().BuildRuntimeGpuStageJob(
+        object,
+        container_set,
+        &job,
+        &has_gpu_stage,
+        out_error_message)) {
+    return false;
+  }
+  if (!has_gpu_stage) {
+    if (out_error_message) {
+      out_error_message->clear();
+    }
+    return true;
+  }
+  job.viewport_width = std::max(context.render_preview_extent.x, 1.0f);
+  job.viewport_height = std::max(context.render_preview_extent.y, 1.0f);
+  return GpuJobRuntimeSystem::Instance().ExecuteRuntimeGpuJob(job, out_error_message);
+}
+
+bool SynchronizeRuntimeGpuAlgorithmObject(
+  const ::agent::AlgorithmObject& object,
+  ::algorithm::AlgorithmContainerSet* container_set,
+  std::string* out_error_message) {
+  RuntimeGpuStageJob job{};
+  bool has_gpu_stage = false;
+  if (!GpuJobRuntimeSystem::Instance().BuildRuntimeGpuStageJob(
+        object,
+        container_set,
+        &job,
+        &has_gpu_stage,
+        out_error_message)) {
+    return false;
+  }
+  if (!has_gpu_stage) {
+    if (out_error_message) {
+      out_error_message->clear();
+    }
+    return true;
+  }
+  return GpuJobRuntimeSystem::Instance().SynchronizeRuntimeGpuJob(job, out_error_message);
 }
 
 }  // namespace runtime_systems

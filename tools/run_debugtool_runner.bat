@@ -14,7 +14,7 @@ set "Path=%ORIG_PATH%"
 if exist "%TEMP_SRC_ROOT%" rmdir /s /q "%TEMP_SRC_ROOT%"
 mkdir "%TEMP_SRC_ROOT%"
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Copy-Item -LiteralPath '%ALGO_SRC_ROOT%\v3a16_fireworks_pipeline_demo' -Destination '%TEMP_SRC_ROOT%' -Recurse -Force; Copy-Item -LiteralPath '%ALGO_SRC_ROOT%\algorithm_catalog.json' -Destination '%TEMP_SRC_ROOT%' -Force; Copy-Item -LiteralPath '%ALGO_SRC_ROOT%\algorithm_plugin_api.h' -Destination '%TEMP_SRC_ROOT%' -Force"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Copy-Item -LiteralPath '%ALGO_SRC_ROOT%\pipeline' -Destination '%TEMP_SRC_ROOT%' -Recurse -Force; Copy-Item -LiteralPath '%ALGO_SRC_ROOT%\algorithm_catalog.json' -Destination '%TEMP_SRC_ROOT%' -Force; Copy-Item -LiteralPath '%ALGO_SRC_ROOT%\algorithm_plugin_api.h' -Destination '%TEMP_SRC_ROOT%' -Force"
 powershell -NoProfile -ExecutionPolicy Bypass -File "%ALGO_ROOT%\package_algorithm_runtime.ps1" -AlgorithmSourceRoot "%TEMP_SRC_ROOT%" -AlgorithmRuntimeRoot "%ALGO_RUNTIME_ROOT%"
 set "PACKAGE_EXIT=%ERRORLEVEL%"
 

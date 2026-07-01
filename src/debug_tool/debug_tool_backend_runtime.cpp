@@ -84,7 +84,7 @@ bool _ShouldEmitPipelineRunnerProbe(const std::string& pipeline_name) {
 
 void _AppendPipelineRunnerProbe(const std::string& file_name, const std::string& line) {
   const std::filesystem::path path =
-    std::filesystem::path("D:/gptsandbox/artifacts/pipeline_runner") / file_name;
+    algorithm::library_paths::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot() / file_name;
   std::error_code ec;
   std::filesystem::create_directories(path.parent_path(), ec);
   std::ofstream file(path, std::ios::binary | std::ios::app);
@@ -899,6 +899,9 @@ bool _BuildPipelineStageSubmissionsFromPackage(
 
   ::algorithm::AlgorithmPackageLocation package_location{};
   std::string location_error_message;
+  if (pipeline_algorithm_name == "v3a16_fireworks_pipeline_demo") {
+    _AppendPipelineRunnerProbe("backend_attach_probe.log", "attach.root.resolve.begin");
+  }
   if (!algorithm_management::TryResolveAlgorithmPackageLocation(
         pipeline_algorithm_name,
         &package_location,
@@ -910,10 +913,16 @@ bool _BuildPipelineStageSubmissionsFromPackage(
     }
     return false;
   }
+  if (pipeline_algorithm_name == "v3a16_fireworks_pipeline_demo") {
+    _AppendPipelineRunnerProbe("backend_attach_probe.log", "attach.root.resolve.end");
+  }
 
   std::shared_ptr<algorithm::AlgorithmRuntimeTransferMap> transfer_map{};
   bool has_transfer_map = false;
   std::string transfer_map_error_message;
+  if (pipeline_algorithm_name == "v3a16_fireworks_pipeline_demo") {
+    _AppendPipelineRunnerProbe("backend_attach_probe.log", "attach.transfer_map.begin");
+  }
   if (!algorithm_management::LoadAlgorithmPackageTransferMapFromLocation(
         package_location,
         &transfer_map,
@@ -925,6 +934,11 @@ bool _BuildPipelineStageSubmissionsFromPackage(
         : std::move(transfer_map_error_message);
     }
     return false;
+  }
+  if (pipeline_algorithm_name == "v3a16_fireworks_pipeline_demo") {
+    _AppendPipelineRunnerProbe(
+      "backend_attach_probe.log",
+      "attach.transfer_map.end has_transfer_map=" + std::string(has_transfer_map ? "true" : "false"));
   }
 
   if (!has_transfer_map || !transfer_map || transfer_map->empty()) {
@@ -974,6 +988,11 @@ bool _BuildPipelineStageSubmissionsFromPackage(
       }
       return false;
     }
+    if (pipeline_algorithm_name == "v3a16_fireworks_pipeline_demo") {
+      _AppendPipelineRunnerProbe(
+        "backend_attach_probe.log",
+        "attach.stage.resolve.begin stage=" + next_stage_name);
+    }
 
     ::algorithm::AlgorithmPackageLocation next_package_location{};
     std::string next_location_error_message;
@@ -988,11 +1007,21 @@ bool _BuildPipelineStageSubmissionsFromPackage(
       }
       return false;
     }
+    if (pipeline_algorithm_name == "v3a16_fireworks_pipeline_demo") {
+      _AppendPipelineRunnerProbe(
+        "backend_attach_probe.log",
+        "attach.stage.resolve.end stage=" + next_stage_name);
+    }
 
     std::vector<agent::AlgorithmResourceBinding> default_resource_bindings{};
     std::vector<agent::AlgorithmDescriptorValue> default_descriptor_values{};
     bool has_default_file = false;
     std::string default_error_message;
+    if (pipeline_algorithm_name == "v3a16_fireworks_pipeline_demo") {
+      _AppendPipelineRunnerProbe(
+        "backend_attach_probe.log",
+        "attach.stage.defaults.begin stage=" + next_stage_name);
+    }
     if (!algorithm_management::LoadAlgorithmPackageDefaultBindingsFromLocation(
           next_package_location,
           &default_resource_bindings,
@@ -1005,6 +1034,12 @@ bool _BuildPipelineStageSubmissionsFromPackage(
           : std::move(default_error_message);
       }
       return false;
+    }
+    if (pipeline_algorithm_name == "v3a16_fireworks_pipeline_demo") {
+      _AppendPipelineRunnerProbe(
+        "backend_attach_probe.log",
+        "attach.stage.defaults.end stage=" + next_stage_name +
+          " has_default_file=" + (has_default_file ? std::string("true") : std::string("false")));
     }
 
     out_stage_submissions->push_back(debug_tool::AlgorithmPipelineStageSubmission{
@@ -1112,22 +1147,49 @@ bool _IsPipelineAlgorithmByName(
     return false;
   }
 
-  std::string normalized_name = algorithm_name;
-  std::transform(
-    normalized_name.begin(),
-    normalized_name.end(),
-    normalized_name.begin(),
-    [](unsigned char ch) {
-      return static_cast<char>(std::tolower(ch));
-    });
-  const bool name_indicates_pipeline = normalized_name.find("pipeline") != std::string::npos;
-  if (package_location.algorithm_name.empty() && package_location.manifest_name.empty()) {
+  const std::filesystem::path library_root = package_location.from_algo_file
+    ? algorithm::library_paths::ResolveAlgorithmLibraryRuntimeRoot()
+    : algorithm::library_paths::ResolveAlgorithmLibrarySourceRoot();
+  const std::filesystem::path package_root = package_location.from_algo_file
+    ? package_location.package_file_path.parent_path()
+    : package_location.manifest_path.parent_path();
+  if (library_root.empty() || package_root.empty()) {
     if (out_error_message) {
-      *out_error_message = "Resolved algorithm package is missing its algorithm name.";
+      *out_error_message = "Failed to resolve algorithm package root.";
     }
     return false;
   }
-  *out_is_pipeline = name_indicates_pipeline;
+
+  const std::filesystem::path relative_root = package_root.lexically_relative(library_root);
+  if (relative_root.empty() || relative_root == "." || relative_root.generic_string().rfind("..", 0u) == 0u) {
+    if (out_error_message) {
+      *out_error_message = "Algorithm package is not under the norm or pipeline folder: " +
+        package_root.generic_string();
+    }
+    return false;
+  }
+
+  const auto category_it = relative_root.begin();
+  if (category_it == relative_root.end()) {
+    if (out_error_message) {
+      *out_error_message = "Algorithm package is not under the norm or pipeline folder: " +
+        package_root.generic_string();
+    }
+    return false;
+  }
+
+  const std::string category_name = category_it->string();
+  if (category_name == "pipeline") {
+    *out_is_pipeline = true;
+  } else if (category_name == "norm") {
+    *out_is_pipeline = false;
+  } else {
+    if (out_error_message) {
+      *out_error_message = "Unknown algorithm category folder: " + package_root.generic_string();
+    }
+    return false;
+  }
+
   if (out_error_message) {
     out_error_message->clear();
   }
