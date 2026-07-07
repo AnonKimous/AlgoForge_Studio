@@ -36,7 +36,7 @@ Current package resolution is hard-wired to:
 - `TryResolveAlgorithmPackageLocation(...)`
   - this currently resolves only from `.algo`
   - file:
-    [src/algorithm_support/algorithm_package_location.cpp](D:/gptsandbox/src/algorithm_support/algorithm_package_location.cpp:854)
+    [src/algorithm_catalog/algorithm_package_location.cpp](D:/gptsandbox/src/algorithm_catalog/algorithm_package_location.cpp:854)
 
 When resolution comes from `.algo`, it sets:
 
@@ -53,7 +53,7 @@ But the actual build output I verified is split like this:
   - does **not** contain the root DLL
 - locally built plugin DLLs:
   - `algorithmruntimeLib_verify/.../Debug/*.dll`
-  - `algorithmruntimeLib_gpuverify/.../Debug/*.dll`
+  - `algorithmruntimeLib_vkverify/.../Debug/*.dll`
 
 So with the new fail-fast rule:
 
@@ -74,7 +74,7 @@ now requires.
 So:
 
 - if I keep cloud-only resolution, existing mounted algorithms cannot run
-- if I add local DLL fallback from verify/gpuverify outputs, I break the
+- if I add local DLL fallback from verify/vkverify outputs, I break the
   "completely rely on cloud" direction
 
 This affects both:
@@ -88,14 +88,14 @@ because the same package-location rule is shared.
 
 Cloud-extracted cache contains no DLL:
 
-- `D:/gptsandbox/algorithmLib/algorithmruntimeLib/.algo_cache/.../v2a0_pipeline_square_vertex_demo_package.json`
+- `D:/gptsandbox/algorithmLib/algorithmruntimeLib/.algo_cache/.../v2a0_pipeline_square_vertex_demo_package.algoPrj`
 - shader payload exists under `stage0/`
 - no `v2a0_pipeline_square_vertex_demo.dll`
 
 Local verify builds do contain DLLs:
 
 - `D:/gptsandbox/algorithmLib/algorithmruntimeLib_verify/v2a0_pipeline_square_vertex_demo/Debug/v2a0_pipeline_square_vertex_demo.dll`
-- `D:/gptsandbox/algorithmLib/algorithmruntimeLib_gpuverify/v2a0_pipeline_square_vertex_demo/Debug/v2a0_pipeline_square_vertex_demo.dll`
+- `D:/gptsandbox/algorithmLib/algorithmruntimeLib_vkverify/v2a0_pipeline_square_vertex_demo/Debug/v2a0_pipeline_square_vertex_demo.dll`
 
 ## Decision needed
 
@@ -107,7 +107,7 @@ Please choose one of these directions:
 
 2. Allow hybrid resolution.
    Use `.algo` for package JSON/runtime payload, but resolve plugin DLL from the
-   local verify/gpuverify compile layout when the cloud package does not include
+   local verify/vkverify compile layout when the cloud package does not include
    it.
 
 3. Relax the hard-failure rule temporarily.

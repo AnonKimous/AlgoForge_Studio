@@ -1,6 +1,6 @@
 #include "imgui_vulkan_runtime.h"
 
-#include "runtime_systems/runtime_gpu_context.h"
+#include "runtime_systems/runtime_vk_context.h"
 #include "runtime_systems/job_system.h"
 #include "runtime_systems/runtime_environment.h"
 
@@ -8,6 +8,7 @@
 #include <cassert>
 #include <cstring>
 #include <cstdint>
+#include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -21,7 +22,12 @@ namespace runtime_systems {
 namespace {
 
 #ifndef NDEBUG
-#define DEBUG_TOOL_ASSERT(condition, message) assert((condition) && (message))
+#define DEBUG_TOOL_ASSERT(condition, message) do { \
+  if (!(condition)) { \
+    std::cerr << (message) << '\n'; \
+    assert((condition) && (message)); \
+  } \
+} while (false)
 #else
 #define DEBUG_TOOL_ASSERT(condition, message) ((void)0)
 #endif
@@ -120,7 +126,7 @@ void ImGuiVulkanRuntime::SetupVulkan(const char* app_name, SDL_Window* window) {
   vkGetPhysicalDeviceFeatures(physical_device_, &available_features);
   if (!available_features.vertexPipelineStoresAndAtomics) {
     throw std::runtime_error(
-      "Selected Vulkan device does not support vertexPipelineStoresAndAtomics, so GPU tick cannot write back from vertex shader.");
+      "Selected Vulkan device does not support vertexPipelineStoresAndAtomics, so VK tick cannot write back from vertex shader.");
   }
 
   VkPhysicalDeviceFeatures enabled_features{};
@@ -161,7 +167,7 @@ void ImGuiVulkanRuntime::SetupVulkan(const char* app_name, SDL_Window* window) {
   pool_info.pPoolSizes = pool_sizes;
   CheckVkResult(vkCreateDescriptorPool(device_, &pool_info, allocator_, &descriptor_pool_));
 
-  RuntimeGpuContextRegistry::Instance().Set(RuntimeGpuExecutionContext{
+  RuntimeVkContextRegistry::Instance().Set(RuntimeVkExecutionContext{
     .instance = instance_,
     .physical_device = physical_device_,
     .device = device_,
@@ -223,7 +229,7 @@ void ImGuiVulkanRuntime::CleanupVulkanWindow() {
 }
 
 void ImGuiVulkanRuntime::CleanupVulkan() {
-  RuntimeGpuContextRegistry::Instance().Clear();
+  RuntimeVkContextRegistry::Instance().Clear();
   if (vma_allocator_ != VK_NULL_HANDLE) {
     vmaDestroyAllocator(vma_allocator_);
     vma_allocator_ = VK_NULL_HANDLE;
@@ -323,9 +329,6 @@ void ImGuiVulkanRuntime::DrawDefaultOverlay(SDL_Window* window) {
 }
 
 bool ImGuiVulkanRuntime::Init(SDL_Window* window, const char* app_name) {
-  if (!window) {
-    return false;
-  }
   if (initialized_) {
     return true;
   }
@@ -471,11 +474,11 @@ void ImGuiVulkanRuntime::SetRenderPreviewExtent(ImVec2 extent) {
   }
 }
 
-void ImGuiVulkanRuntime::ClearGpuRuntimeCaches() {
+void ImGuiVulkanRuntime::ClearVkRuntimeCaches() {
   if (device_ != VK_NULL_HANDLE) {
     CheckVkResult(vkDeviceWaitIdle(device_));
   }
-  InvokeRuntimeGpuCacheClearCallback();
+  InvokeRuntimeVkCacheClearCallback();
 }
 
 bool ImGuiVulkanRuntime::Tick(SDL_Window* window) {
@@ -560,7 +563,7 @@ void ImGuiVulkanRuntime::Destroy() {
   }
 
   try {
-    ClearGpuRuntimeCaches();
+    ClearVkRuntimeCaches();
   } catch (...) {
     // Shutdown should keep going even if the device was already lost.
   }

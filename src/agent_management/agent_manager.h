@@ -4,7 +4,7 @@
 #error "Do not include agent_management/agent_manager.h directly. Use agent_management/agent_management.h."
 #endif
 
-#include "agent/agent.h"
+#include "agent_management/agent.h"
 #include "common_data/common_data.h"
 #include "common_data/kernel_cfg.h"
 
@@ -13,7 +13,29 @@
 #include <utility>
 #include <vector>
 
-namespace agent_management {
+namespace agentmanager {
+using algorithmManager::AlgorithmAssemblyState;
+using algorithmManager::AlgorithmContainerStorageKind;
+using algorithmManager::AlgorithmDescriptorValue;
+using algorithmManager::AlgorithmExecutionPreference;
+using algorithmManager::AlgorithmInterventionContainerBinding;
+using algorithmManager::AlgorithmInterventionStageKind;
+using algorithmManager::AlgorithmInterventionStageSpec;
+using algorithmManager::AlgorithmMountMode;
+using algorithmManager::AlgorithmPipelineStageRuntimeStat;
+using algorithmManager::AlgorithmPipelineStageSubmission;
+using algorithmManager::AlgorithmPipelineSyncMode;
+using algorithmManager::AlgorithmPipelineTopology;
+using algorithmManager::AlgorithmRequestedDescriptorBindings;
+using algorithmManager::AlgorithmRequestedResources;
+using algorithmManager::AlgorithmResourceBinding;
+using algorithmManager::AlgorithmTickLifetime;
+using algorithmManager::JobsPipelineRegistration;
+using algorithmManager::JobsPipelineRuntimeState;
+using algorithmManager::AgentAlgorithmRuntimeState;
+using algorithmManager::AgentInitConfig;
+using algorithmManager::AgentTickContext;
+using algorithmManager::AgentTickResult;
 
 struct AgentCreateSpec {
   std::string agent_name;
@@ -21,9 +43,9 @@ struct AgentCreateSpec {
   uint32_t limit_fps_flag{common_data::DefaultAgentLimitFpsFlag()};
   struct AlgorithmMountSpec {
     std::string algorithm_name;
-    std::vector<agent::AlgorithmResourceBinding> resource_bindings;
-    std::vector<agent::AlgorithmDescriptorValue> descriptor_values;
-    agent::AlgorithmMountMode mount_mode{agent::AlgorithmMountMode::Direct};
+    std::vector<agentmanager::agent::AlgorithmResourceBinding> resource_bindings;
+    std::vector<agentmanager::agent::AlgorithmDescriptorValue> descriptor_values;
+    agentmanager::agent::AlgorithmMountMode mount_mode{agentmanager::agent::AlgorithmMountMode::Direct};
   };
   std::vector<AlgorithmMountSpec> algorithm_mount_specs;
 };
@@ -60,7 +82,7 @@ struct AlgorithmPipelineStallReport {
   std::string algorithm_name;
   float stalled_seconds{0.0f};
   std::string reason;
-  std::vector<algorithm_management::AlgorithmPipelineStageRuntimeStat> stage_runtime_stats;
+  std::vector<algorithmManager::AlgorithmPipelineStageRuntimeStat> stage_runtime_stats;
 };
 
 bool ReportAlgorithmPipelineStall(
@@ -82,27 +104,30 @@ class AgentManager {
   bool AttachAlgorithmToAgent(
     size_t agent_index,
     const std::string& algorithm_name,
-    const std::vector<agent::AlgorithmResourceBinding>& resource_bindings,
-    const std::vector<agent::AlgorithmDescriptorValue>& descriptor_values,
+    const std::vector<agentmanager::agent::AlgorithmResourceBinding>& resource_bindings,
+    const std::vector<agentmanager::agent::AlgorithmDescriptorValue>& descriptor_values,
     size_t* out_algorithm_index = nullptr,
     std::string* out_error_message = nullptr,
-    agent::AlgorithmMountMode mount_mode = agent::AlgorithmMountMode::Direct,
-    agent::AlgorithmExecutionPreference execution_preference = agent::AlgorithmExecutionPreference::Gpu);
+    agentmanager::agent::AlgorithmMountMode mount_mode = agentmanager::agent::AlgorithmMountMode::Direct,
+     agentmanager::agent::AlgorithmExecutionPreference execution_preference = agentmanager::agent::AlgorithmExecutionPreference::Vk,
+    bool load_reflector = true);
   bool AttachPipelineAlgorithmToAgent(
     size_t agent_index,
     const std::string& pipeline_name,
-    const std::vector<agent::AlgorithmPipelineStageSubmission>& stage_submissions,
+    const std::vector<agentmanager::agent::AlgorithmPipelineStageSubmission>& stage_submissions,
     size_t* out_algorithm_index = nullptr,
     std::string* out_error_message = nullptr,
-    agent::AlgorithmExecutionPreference execution_preference = agent::AlgorithmExecutionPreference::Gpu,
-    agent::AlgorithmPipelineTopology topology = agent::AlgorithmPipelineTopology::NonCircular,
-    agent::AlgorithmPipelineSyncMode sync_mode = agent::AlgorithmPipelineSyncMode::Forced);
+     agentmanager::agent::AlgorithmExecutionPreference execution_preference = agentmanager::agent::AlgorithmExecutionPreference::Vk,
+    agentmanager::agent::AlgorithmPipelineTopology topology = agentmanager::agent::AlgorithmPipelineTopology::NonCircular,
+    agentmanager::agent::AlgorithmPipelineSyncMode sync_mode = agentmanager::agent::AlgorithmPipelineSyncMode::Forced,
+    bool load_reflector = true);
   bool EnqueuePipelineStage0Submission(
     size_t agent_index,
     const std::string& pipeline_name,
-    const std::vector<agent::AlgorithmResourceBinding>& resource_bindings,
-    const std::vector<agent::AlgorithmDescriptorValue>& descriptor_values,
-    std::string* out_error_message = nullptr);
+    const std::vector<agentmanager::agent::AlgorithmResourceBinding>& resource_bindings,
+    const std::vector<agentmanager::agent::AlgorithmDescriptorValue>& descriptor_values,
+    std::string* out_error_message = nullptr,
+    bool load_reflector = true);
   bool RequestAgentTimingLog(
     size_t agent_index,
     std::string* out_error_message = nullptr);
@@ -113,7 +138,7 @@ class AgentManager {
   bool ReplayPipelineStageBridgeDebug(
     size_t agent_index,
     size_t algorithm_index,
-    const agent::AgentTickContext& context,
+    const agentmanager::agent::AgentTickContext& context,
     std::string* out_error_message = nullptr);
   bool DestroyAgent(size_t agent_index);
   void ClearAgents();
@@ -133,7 +158,7 @@ class AgentManager {
 
   size_t agent_count() const;
   bool has_agents() const;
-  std::shared_ptr<agent::Agent> agent(size_t index) const;
+  std::shared_ptr<agentmanager::agent::Agent> agent(size_t index) const;
   const AlgorithmToAgentSignal& combined_algorithm_to_agent_signal() const {
     return combined_algorithm_to_agent_signal_;
   }
@@ -146,7 +171,8 @@ class AgentManager {
   bool tick_enabled_{false};
 };
 
-}  // namespace agent_management
+}  // namespace agentmanager
 
-using agent_management::AgentCreateSpec;
-using agent_management::AgentManager;
+using agentmanager::AgentCreateSpec;
+using agentmanager::AgentManager;
+

@@ -4,6 +4,11 @@
 
 #include <cstring>
 
+#if defined(ALGORITHM_LIBRARY_PLUGIN_HAS_CUDA)
+agent::IAlgorithmCudaExecutor* CreateTemporaryTestLineMotionCudaExecutor();
+void DestroyTemporaryTestLineMotionCudaExecutor(agent::IAlgorithmCudaExecutor* executor);
+#endif
+
 namespace {
 
 constexpr float kLeftStep = -0.10f;
@@ -29,9 +34,9 @@ bool AdvanceScalar(algorithm::AlgorithmContainer* container, float delta) {
   return true;
 }
 
-class LineMotionCpuExecutor final : public agent::IAlgorithmCpuExecutor {
+class LineMotionJobsExecutor final : public agent::IAlgorithmJobsExecutor {
  public:
-  bool ExecuteCpuAlgorithm(
+  bool ExecuteJobsAlgorithm(
     const agent::AgentTickContext& context,
     const algorithm::AlgorithmProfile& algorithm_profile,
     const AgentToAlgorithmSignal& agent_to_algorithm_signal,
@@ -70,7 +75,7 @@ class LineMotionCpuExecutor final : public agent::IAlgorithmCpuExecutor {
   }
 };
 
-void DestroyCpuExecutor(agent::IAlgorithmCpuExecutor* executor) {
+void DestroyJobsExecutor(agent::IAlgorithmJobsExecutor* executor) {
   delete executor;
 }
 
@@ -84,12 +89,18 @@ extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateBundle(
   }
 
   out_bundle->Clear();
-  out_bundle->cpu_symbol = true;
-  out_bundle->gpu_symbol = false;
+  out_bundle->jobs_symbol = true;
+  out_bundle->vk_symbol = false;
+  out_bundle->cuda_symbol = false;
   out_bundle->reflector = true;
   out_bundle->intervention = true;
-  out_bundle->cpu_executor = new LineMotionCpuExecutor();
-  out_bundle->destroy_cpu_executor = &DestroyCpuExecutor;
+  out_bundle->jobs_executor = new LineMotionJobsExecutor();
+  out_bundle->destroy_jobs_executor = &DestroyJobsExecutor;
+#if defined(ALGORITHM_LIBRARY_PLUGIN_HAS_CUDA)
+  out_bundle->cuda_symbol = true;
+  out_bundle->cuda_executor = CreateTemporaryTestLineMotionCudaExecutor();
+  out_bundle->destroy_cuda_executor = &DestroyTemporaryTestLineMotionCudaExecutor;
+#endif
   return true;
 }
 

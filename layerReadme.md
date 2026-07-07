@@ -1,4 +1,4 @@
-﻿# Layer Readme
+# Layer Readme
 
 ## Purpose
 
@@ -20,12 +20,19 @@ When code and docs disagree, follow the code and update the docs.
 - `common_data` is shared in-memory data only.
 - `common_data` is the one exception to the single-facade header rule.
 - `runtime_systems` owns the SDL, ImGui, and Vulkan runtime shell and exposes one facade header.
-- `algorithm_support` contains package support and reflection helpers, but its public entrypoints are surfaced through `algorithm_management`.
-- `algorithm_support` only consumes resolved algorithm package locations and performs assembly/loading; it does not search for packages.
-- `agent` and `debug_tool_backend` should reach algorithm loading through `algorithm_management`, not by including `algorithm_support` directly.
-- `algorithm_management` is a strict main-trunk layer.
-- `algorithm_management` owns container-manifest loading, manifest-name resolution, and runtime container creation helpers only.
-- `algorithm_management` also resolves algorithm package locations before higher layers assemble plugin-backed tools.
+- `algorithm_catalog` is the catalog subtree for package support, manifest assembly, and reflection helpers.
+- `algorithm_catalog` only consumes resolved algorithm package locations and performs assembly/loading; it does not search for packages.
+- `agent_management` and `debug_tool_backend` should reach algorithm loading through `algorithmManager`, not by treating `algorithm_catalog` as a public root.
+- `algorithmManager` is the strict main-trunk root interface for the algorithm layer.
+- `algorithmManager` exposes only the root orchestration surface to upper layers.
+- Upper layers must not use `using namespace algorithmManager` and must not
+  import child namespaces directly; they may only consume symbols that the
+  root `algorithmManager` node re-exports.
+- The public `algorithmManager` facade must not use `using` declarations to
+  re-export symbols; it should use explicit declarations, typedefs, or inline
+  forwarding wrappers instead.
+- `scheduler` and `catalog` are internal implementation subtrees behind that root interface.
+- `algorithmManager` owns the top-level orchestration entrypoints only.
 - `debug_tool_backend` owns the non-UI debug host backend and agent/runtime wiring.
 - `debug_tool_frontend` is the editor-facing debug surface.
 - `sdk` is the external agent/algorithm submission surface and depends on `agent_management`.
@@ -43,20 +50,17 @@ Compile dependency graph:
 graph LR
   mesh_io --> common_data
   runtime_systems --> common_data
-  algorithm_support --> common_data
+  algorithm_catalog --> common_data
   algorithm_management --> common_data
   algorithm_management --> runtime_systems
-  algorithm_management --> algorithm_support
-  agent --> common_data
-  agent --> algorithm_management
-  agent --> algorithm_support
+  algorithm_management --> algorithm_catalog
   agent_management --> common_data
-  agent_management --> agent
+  agent_management --> algorithm_management
   debug_tool_backend --> common_data
   debug_tool_backend --> agent_management
   debug_tool_backend --> runtime_systems
   debug_tool_backend --> algorithm_management
-  debug_tool_backend --> algorithm_support
+  debug_tool_backend --> algorithm_catalog
   debug_tool_frontend --> runtime_systems
   sdk --> agent_management
   debugTool --> common_data
@@ -80,55 +84,86 @@ Capability modules grouped under `src/capabilities`:
 Current project-library dependency graph from `CMakeLists.txt`:
 
 - `mesh_io -> common_data`
-- `algorithm_support -> common_data`
-- `algorithm_management -> common_data + runtime_systems + algorithm_support`
+- `algorithm_catalog -> common_data`
+- `algorithm_management -> common_data + runtime_systems + algorithm_catalog`
 - `runtime_systems -> common_data`
-- `agent -> common_data + algorithm_management + algorithm_support`
-- `agent_management -> common_data + agent`
-- `debug_tool_backend -> common_data + agent_management + runtime_systems + algorithm_management + algorithm_support`
+- `agent_management -> common_data + algorithm_management`
+- `debug_tool_backend -> common_data + agent_management + runtime_systems + algorithm_management + algorithm_catalog`
 - `debug_tool_frontend -> runtime_systems`
 - `sdk -> agent_management`
 - `debugTool -> debug_tool_backend + debug_tool_frontend + common_data`
 
 Important note:
 
-`algorithm_support` still exists as a helper bundle, but the public loading path is
-carried through `algorithm_management`, which owns the unified package loader facade.
+`algorithm_catalog` still exists as a helper bundle, but it is meant to remain a
+peer subtree of `algorithmManager`, not a child of `scheduler`.
 
 `capabilities/agent` is intentionally different: it is consumed by trunk code,
 but it is a capability carrier rather than one strict hop in the layering path.
+
+## Ideal `algorithmManager` Tree
+
+The intended public shape of `algorithmManager` is:
+
+```mermaid
+graph TD
+  ROOT["algorithmManager"]
+  ROOT --> API["public build / submit / schedule / execute APIs"]
+  ROOT --> OWNED["returned owned algorithm object"]
+
+  ROOT -.internal implementation.-> SCH["scheduler"]
+  ROOT -.internal implementation.-> CAT["catalog"]
+
+  SCH --> SCH1["stage analysis"]
+  SCH --> SCH2["pack / sync / submit policy"]
+  SCH --> SCH3["pipeline runtime state"]
+  SCH --> SCH4["tick orchestration"]
+
+  CAT --> CAT1["package location resolution"]
+  CAT --> CAT2["manifest / abi / protocol / types"]
+  CAT --> CAT3["package load / decompose / plugin load"]
+  CAT --> CAT4["default bindings / transfer map"]
+  CAT --> CAT5["build algorithm obj"]
+```
+
+Rules for this tree:
+
+- Upper layers only depend on the root `algorithmManager`.
+- `scheduler` and `catalog` are internal implementation subtrees.
+- `scheduler` and `catalog` must not depend on each other directly.
+- After execution, `algorithmManager` returns the algorithm object structure it owns.
 
 ## Current Tree
 
 ```text
 src/
-鈹溾攢 algorithm_management/
-鈹? 鈹溾攢 algorithm_manager.h
-鈹? 鈹溾攢 algorithm_container_manifest.h/.cpp
-鈹? 鈹溾攢 algorithm_package_location.h
-鈹? 鈹溾攢 algorithm_types.h
-鈹? 鈹斺攢 README.md
-鈹溾攢 capabilities/
-鈹? 鈹溾攢 README.md
-鈹? 鈹溾攢 agent/
-鈹? 鈹? 鈹溾攢 agent.h/.cpp
-鈹? 鈹? 鈹斺攢 README.md
-鈹? 鈹斺攢 sidecar/
-鈹?    鈹溾攢 mesh_io.h/.cpp
-鈹?    鈹斺攢 README.md
-鈹溾攢 common_data/
-鈹溾攢 algorithm_support/
-鈹? 鈹溾攢 algorithm_interaction_protocol.h
-鈹? 鈹斺攢 algorithm_protocol.h
-鈹溾攢 runtime_systems/
-鈹溾攢 sdk/
-鈹斺攢 debug_tool/
+├─ algorithm_management/
+│  ├─ algorithm_manager.h
+│  ├─ algorithm_container_manifest.h/.cpp
+│  ├─ algorithm_package_location.h
+│  ├─ algorithm_types.h
+│  └─ README.md
+├─ capabilities/
+│  ├─ README.md
+│  ├─ agent/
+│  │  ├─ agent.h/.cpp
+│  │  └─ README.md
+│  └─ sidecar/
+│     ├─ mesh_io.h/.cpp
+│     └─ README.md
+├─ common_data/
+├─ algorithm_catalog/
+│  ├─ algorithm_interaction_protocol.h
+│  └─ algorithm_protocol.h
+├─ runtime_systems/
+├─ sdk/
+└─ debug_tool/
 ```
 
 ## Public Interfaces
 
 - `common_data`: specific headers or `common_data/common_data.h`
-- `algorithm_support`: internal helper bundle; public entrypoints are surfaced through `algorithm_management`
+- `algorithm_catalog`: internal helper bundle under the `algorithmManager` root interface
 - `algorithm_management`: `algorithm_management/algorithm_manager.h`
 - `algorithm_management` package-location helper: `algorithm_management/algorithm_package_location.h`
 - `runtime_systems`: `runtime_systems/runtime_systems.h`
@@ -141,21 +176,23 @@ src/
 
 ### `algorithm_management`
 
-Strict trunk layer for manifest-driven runtime container creation.
+Strict trunk layer for algorithm orchestration.
 
 It should:
 
-- load official JSON manifests
-- resolve manifest names from `algorithmLib/algorithmSrc`
-- resolve algorithm package locations before algorithm support assembly
-- create real runtime containers from a manifest
-- cache per-manifest container templates for fast clone-and-clear reuse
+- expose the algorithm orchestration API from the root `algorithmManager`
+- keep top-level orchestration entrypoints thin
+- keep downstream execution and package assembly in the right subtree
+- provide the build interfaces at the root level, not as child modules
+- leave `AlgorithmObject` ownership and routing below the root API
 
 It should not:
 
+- make `scheduler` and `catalog` depend on each other directly
 - own runtime execution state
 - become a sidecar format layer
 - turn back into a full algorithm runtime
+- become a storage owner for algorithm objects at the root layer
 
 Code outside `src/algorithm_management` should include only
 `algorithm_management/algorithm_manager.h`.

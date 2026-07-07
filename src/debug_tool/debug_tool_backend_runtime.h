@@ -35,6 +35,7 @@ class DebugToolBackendRuntime : public IDebugToolHost {
     const std::string& algorithm_name,
     bool* out_is_pipeline,
     std::string* out_error_message = nullptr) const override;
+  void SetAlgorithmRuntimeBuildFlavor(debug_tool::AlgorithmRuntimeBuildFlavor build_flavor) override;
   bool AttachAlgorithmToAgent(
     size_t agent_index,
     const std::string& algorithm_name,
@@ -43,14 +44,14 @@ class DebugToolBackendRuntime : public IDebugToolHost {
     size_t* out_algorithm_index = nullptr,
     std::string* out_error_message = nullptr,
     debug_tool::AlgorithmMountMode mount_mode = debug_tool::AlgorithmMountMode::Direct,
-    debug_tool::AlgorithmExecutionPreference execution_preference = debug_tool::AlgorithmExecutionPreference::Gpu) override;
+     debug_tool::AlgorithmExecutionPreference execution_preference = debug_tool::AlgorithmExecutionPreference::Vk) override;
   bool AttachPipelineAlgorithmToAgent(
     size_t agent_index,
     const std::string& pipeline_name,
     const std::vector<debug_tool::AlgorithmPipelineStageSubmission>& stage_submissions,
     size_t* out_algorithm_index = nullptr,
     std::string* out_error_message = nullptr,
-    debug_tool::AlgorithmExecutionPreference execution_preference = debug_tool::AlgorithmExecutionPreference::Gpu) override;
+     debug_tool::AlgorithmExecutionPreference execution_preference = debug_tool::AlgorithmExecutionPreference::Vk) override;
   bool AttachPipelinePackageToAgent(
     size_t agent_index,
     const std::string& pipeline_name,
@@ -59,7 +60,7 @@ class DebugToolBackendRuntime : public IDebugToolHost {
     const std::vector<debug_tool::AlgorithmDescriptorValue>& descriptor_values,
     size_t* out_algorithm_index = nullptr,
     std::string* out_error_message = nullptr,
-    debug_tool::AlgorithmExecutionPreference execution_preference = debug_tool::AlgorithmExecutionPreference::Gpu) override;
+     debug_tool::AlgorithmExecutionPreference execution_preference = debug_tool::AlgorithmExecutionPreference::Vk) override;
   bool DetachAlgorithmFromAgent(
     size_t agent_index,
     size_t algorithm_index,
@@ -99,8 +100,8 @@ class DebugToolBackendRuntime : public IDebugToolHost {
   void ClearAgents() override {
     agent_manager_.ClearAgents();
   }
-  void ClearGpuRuntimeCaches() override {
-    runtime_environment_.ClearGpuRuntimeCaches();
+  void ClearVkRuntimeCaches() override {
+    runtime_environment_.ClearVkRuntimeCaches();
   }
   bool LoadAlgorithmCatalog(
     std::vector<debug_tool::AlgorithmCatalogEntry>* out_entries,
@@ -134,7 +135,7 @@ class DebugToolBackendRuntime : public IDebugToolHost {
   }
   void SetRenderPreviewRequest(RenderPreviewRequest request) override {
     if (request.valid) {
-      assert(!request.stage_name.empty() && "Render preview request is missing a stage name.");
+      assert(!request.stage_name.empty() && "Render preview request is missing a phase name.");
       assert(!request.storage_buffers.empty() && "Render preview request is missing storage buffers.");
     }
     runtime_environment_.SetRenderPreviewRequest(std::move(request));

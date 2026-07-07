@@ -73,12 +73,12 @@ inline Vec2 _LogicalVelocityToPixel(Vec2 logical_velocity, Vec2 extent) {
   };
 }
 
-class FireworksCpuExecutor final : public agent::IAlgorithmCpuExecutor {
+class FireworksJobsExecutor final : public agent::IAlgorithmJobsExecutor {
  public:
-  explicit FireworksCpuExecutor(std::string algorithm_name)
+  explicit FireworksJobsExecutor(std::string algorithm_name)
     : algorithm_name_(std::move(algorithm_name)) {}
 
-  bool ExecuteCpuAlgorithm(
+  bool ExecuteJobsAlgorithm(
     const agent::AgentTickContext& context,
     const algorithm::AlgorithmProfile& algorithm_profile,
     const AgentToAlgorithmSignal& agent_to_algorithm_signal,
@@ -93,8 +93,8 @@ class FireworksCpuExecutor final : public agent::IAlgorithmCpuExecutor {
     }
     if (debug_state) {
       debug_state->signals.push_back(algorithm_management::AdvancedAlgorithmDebugSignal{
-        .name = algorithm_profile.algorithm_name + ".cpu",
-        .payload = "v3a16 cpu executor tick",
+        .name = algorithm_profile.algorithm_name + ".jobs",
+        .payload = "v3a16 jobs executor tick",
       });
     }
     if (!algorithm_container_set) {
@@ -595,7 +595,7 @@ class FireworksCpuExecutor final : public agent::IAlgorithmCpuExecutor {
   std::string algorithm_name_;
 };
 
-void DestroyCpuExecutor(agent::IAlgorithmCpuExecutor* executor) {
+void DestroyJobsExecutor(agent::IAlgorithmJobsExecutor* executor) {
   delete executor;
 }
 
@@ -605,12 +605,12 @@ inline bool CreateBundle(
   const algorithmManager::support::AlgorithmPluginRequest* request,
   algorithmManager::support::AlgorithmPluginBundle* out_bundle) {
   out_bundle->Clear();
-  out_bundle->cpu_symbol = true;
-  out_bundle->gpu_symbol = true;
+  out_bundle->jobs_symbol = true;
+  out_bundle->vk_symbol = true;
   out_bundle->reflector = true;
   out_bundle->intervention = true;
-  out_bundle->cpu_executor = new FireworksCpuExecutor(request && request->algorithm_name ? request->algorithm_name : "");
-  out_bundle->destroy_cpu_executor = &DestroyCpuExecutor;
+  out_bundle->jobs_executor = new FireworksJobsExecutor(request && request->algorithm_name ? request->algorithm_name : "");
+  out_bundle->destroy_jobs_executor = &DestroyJobsExecutor;
   return true;
 }
 

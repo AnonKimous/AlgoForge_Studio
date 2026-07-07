@@ -2,8 +2,6 @@
 #include "agent_manager.h"
 #undef AGENT_MANAGEMENT_LAYER_INTERNAL_BUILD
 
-#include "algorithm_support/algorithm_library_paths.h"
-
 #include <cassert>
 #include <algorithm>
 #include <filesystem>
@@ -14,7 +12,7 @@
 #include <chrono>
 #include <utility>
 
-namespace agent_management {
+namespace agentmanager {
 
 namespace {
 
@@ -39,9 +37,9 @@ std::string _SanitizePipelineTimingExportName(const std::string& name) {
 
 std::filesystem::path _ResolvePipelineTimingExportDirectory() {
   const std::filesystem::path algorithm_library_root =
-    algorithm::library_paths::ResolveAlgorithmLibrarySourceRoot();
+    algorithmManager::ResolveAlgorithmLibrarySourceRoot();
   const std::filesystem::path project_root =
-    algorithm::library_paths::ResolveProjectRootFromAlgorithmLibraryRoot(algorithm_library_root);
+    algorithmManager::ResolveProjectRootFromAlgorithmLibraryRoot(algorithm_library_root);
   if (!project_root.empty()) {
     return project_root / "artifacts" / "pipeline_timing";
   }
@@ -223,7 +221,7 @@ bool ReportAlgorithmPipelineStall(
 namespace {
 
 bool _SignalBlocksTick(
-  const agent::AlgorithmObject& object,
+  const agentmanager::agent::AlgorithmObject& object,
   const AgentToAlgorithmSignal& signal) {
   if ((signal.control_bits & kInterventionControlStopAndEditBit) != 0u) {
     return true;
@@ -240,7 +238,7 @@ bool _SignalBlocksTick(
 
 class AgentTicker {
  public:
-  void Init(std::shared_ptr<agent::Agent> agent);
+  void Init(std::shared_ptr<agentmanager::agent::Agent> agent);
   void Tick(
     const InputState& input,
     Vec2 mouse_pixel,
@@ -255,13 +253,13 @@ class AgentTicker {
   const std::string& last_timing_log() const { return last_timing_log_; }
 
  private:
-  std::shared_ptr<agent::Agent> agent_binding_{};
+  std::shared_ptr<agentmanager::agent::Agent> agent_binding_{};
   AlgorithmToAgentSignal algorithm_to_agent_signal_{};
   InteractionInterventionRequest intervention_request_{};
   std::string last_timing_log_{};
 };
 
-void AgentTicker::Init(std::shared_ptr<agent::Agent> agent) {
+void AgentTicker::Init(std::shared_ptr<agentmanager::agent::Agent> agent) {
   agent_binding_ = std::move(agent);
   algorithm_to_agent_signal_ = {};
   intervention_request_ = {};
@@ -279,20 +277,23 @@ void AgentTicker::Tick(
   if (!agent_binding_) {
     return;
   }
+  std::cerr << "agent_ticker.tick.begin\n";
 
-  const agent::AgentTickContext context{
+  const agentmanager::agent::AgentTickContext context{
     .input = &input,
     .mouse_pixel = mouse_pixel,
     .render_preview_extent = render_preview_extent,
     .dt_seconds = dt_seconds,
     .intervention_request = &intervention_request_,
   };
+  std::cerr << "agent_ticker.refresh_intervention.begin\n";
   agent_binding_->RefreshInterventionSignals(context);
+  std::cerr << "agent_ticker.refresh_intervention.end\n";
 
   std::vector<bool> allow_tick_mask(agent_binding_->algorithm_count(), true);
   for (size_t i = 0; i < agent_binding_->algorithm_count(); ++i) {
-    const agent::AlgorithmObject* object = agent_binding_->algorithm_object(i);
-    const agent::AgentAlgorithmRuntimeState* runtime_state = agent_binding_->algorithm_runtime_state(i);
+    const agentmanager::agent::AlgorithmObject* object = agent_binding_->algorithm_object(i);
+    const agentmanager::agent::AgentAlgorithmRuntimeState* runtime_state = agent_binding_->algorithm_runtime_state(i);
     if (!object || !runtime_state) {
       allow_tick_mask[i] = false;
       continue;
@@ -302,7 +303,8 @@ void AgentTicker::Tick(
     }
   }
 
-  agent::AgentTickResult result{};
+  agentmanager::agent::AgentTickResult result{};
+  std::cerr << "agent_ticker.agent_tick.begin\n";
   if (agent_binding_->Tick(context, allow_tick_mask, &result)) {
     algorithm_to_agent_signal_ = result.algorithm_to_agent_signal;
     last_timing_log_ = std::move(result.timing_log);
@@ -310,6 +312,7 @@ void AgentTicker::Tick(
     algorithm_to_agent_signal_ = {};
     last_timing_log_.clear();
   }
+  std::cerr << "agent_ticker.agent_tick.end\n";
 }
 
 void AgentTicker::Destroy() {
@@ -320,7 +323,7 @@ void AgentTicker::Destroy() {
 }
 
 struct AgentManager::ManagedAgentEntry {
-  std::shared_ptr<agent::Agent> agent{};
+  std::shared_ptr<agentmanager::agent::Agent> agent{};
   AgentTicker ticker{};
   uint32_t limit_fps_flag{common_data::DefaultAgentLimitFpsFlag()};
   bool one_shot_tick_consumed{false};
@@ -341,12 +344,15 @@ AgentManager::~AgentManager() {
 }
 
 bool AgentManager::CreateAgent(AgentCreateSpec spec, size_t* out_agent_index) {
-  auto agent_instance = std::make_shared<agent::Agent>();
-  agent::AgentInitConfig agent_config{};
+  auto agent_instance = std::make_shared<agentmanager::agent::Agent>();
+  agentmanager::agent::AgentInitConfig agent_config{};
   agent_config.agent_name = std::move(spec.agent_name);
   if (!agent_instance->Init(std::move(agent_config))) {
     return false;
   }
+  const bool load_reflector =
+    algorithmManager::GetAlgorithmLibraryRuntimeBuildFlavor() !=
+    algorithm::library_paths::AlgorithmLibraryRuntimeBuildFlavor::ReleaseWithDebugInfo;
   for (const AgentCreateSpec::AlgorithmMountSpec& mount_spec : spec.algorithm_mount_specs) {
     if (!agent_instance->MountAlgorithm(
           mount_spec.algorithm_name,
@@ -355,7 +361,8 @@ bool AgentManager::CreateAgent(AgentCreateSpec spec, size_t* out_agent_index) {
           nullptr,
           nullptr,
           mount_spec.mount_mode,
-          agent::AlgorithmExecutionPreference::Gpu)) {
+          agentmanager::agent::AlgorithmExecutionPreference::Vk,
+          load_reflector)) {
       agent_instance->Destroy();
       return false;
     }
@@ -418,8 +425,10 @@ bool AgentManager::Tick(
   if (!tick_enabled_) {
     return true;
   }
+  std::cerr << "agent_manager.tick.begin agents=" << managed_agents_.size() << '\n';
   const auto now = std::chrono::steady_clock::now();
-  for (std::shared_ptr<ManagedAgentEntry>& managed_agent : managed_agents_) {
+  for (size_t agent_index = 0u; agent_index < managed_agents_.size(); ++agent_index) {
+    std::shared_ptr<ManagedAgentEntry>& managed_agent = managed_agents_[agent_index];
     if (!managed_agent) {
       continue;
     }
@@ -438,7 +447,9 @@ bool AgentManager::Tick(
       }
     }
 
+    std::cerr << "agent_manager.agent_tick.begin index=" << agent_index << '\n';
     managed_agent->ticker.Tick(input, mouse_pixel, dt_seconds, render_preview_extent);
+    std::cerr << "agent_manager.agent_tick.end index=" << agent_index << '\n';
     if (!managed_agent->ticker.last_timing_log().empty()) {
       std::cerr << managed_agent->ticker.last_timing_log();
     }
@@ -447,8 +458,8 @@ bool AgentManager::Tick(
       const auto& runtime_states = managed_agent->agent->algorithm_runtime_states();
       const size_t paired_count = std::min(algorithm_objects.size(), runtime_states.size());
       for (size_t i = 0; i < paired_count; ++i) {
-        const agent::AlgorithmObject& object = algorithm_objects[i];
-        const agent::AgentAlgorithmRuntimeState& runtime_state = runtime_states[i];
+        const agentmanager::agent::AlgorithmObject& object = algorithm_objects[i];
+        const agentmanager::agent::AgentAlgorithmRuntimeState& runtime_state = runtime_states[i];
         if (!object.pipeline_stage || object.pipeline_stage_index != 0u) {
           continue;
         }
@@ -499,18 +510,20 @@ bool AgentManager::Tick(
       signal.reflection_collection_requested;
     combined_algorithm_to_agent_signal_.control_bits |= signal.control_bits;
   }
+  std::cerr << "agent_manager.tick.end\n";
   return true;
 }
 
 bool AgentManager::AttachAlgorithmToAgent(
   size_t agent_index,
   const std::string& algorithm_name,
-  const std::vector<agent::AlgorithmResourceBinding>& resource_bindings,
-  const std::vector<agent::AlgorithmDescriptorValue>& descriptor_values,
+  const std::vector<agentmanager::agent::AlgorithmResourceBinding>& resource_bindings,
+  const std::vector<agentmanager::agent::AlgorithmDescriptorValue>& descriptor_values,
   size_t* out_algorithm_index,
   std::string* out_error_message,
-  agent::AlgorithmMountMode mount_mode,
-  agent::AlgorithmExecutionPreference execution_preference) {
+  agentmanager::agent::AlgorithmMountMode mount_mode,
+  agentmanager::agent::AlgorithmExecutionPreference execution_preference,
+  bool load_reflector) {
   auto set_error = [&](const std::string& message) {
     if (out_error_message) {
       *out_error_message = message;
@@ -530,7 +543,8 @@ bool AgentManager::AttachAlgorithmToAgent(
     &algorithm_index,
     out_error_message,
     mount_mode,
-    execution_preference)) {
+    execution_preference,
+    load_reflector)) {
     if (out_error_message && out_error_message->empty()) {
       set_error("Failed to mount algorithm.");
     }
@@ -547,12 +561,13 @@ bool AgentManager::AttachAlgorithmToAgent(
 bool AgentManager::AttachPipelineAlgorithmToAgent(
   size_t agent_index,
   const std::string& pipeline_name,
-  const std::vector<agent::AlgorithmPipelineStageSubmission>& stage_submissions,
+  const std::vector<agentmanager::agent::AlgorithmPipelineStageSubmission>& stage_submissions,
   size_t* out_algorithm_index,
   std::string* out_error_message,
-  agent::AlgorithmExecutionPreference execution_preference,
-  agent::AlgorithmPipelineTopology topology,
-  agent::AlgorithmPipelineSyncMode sync_mode) {
+  agentmanager::agent::AlgorithmExecutionPreference execution_preference,
+  agentmanager::agent::AlgorithmPipelineTopology topology,
+  agentmanager::agent::AlgorithmPipelineSyncMode sync_mode,
+  bool load_reflector) {
   auto set_error = [&](const std::string& message) {
     if (out_error_message) {
       *out_error_message = message;
@@ -572,8 +587,8 @@ bool AgentManager::AttachPipelineAlgorithmToAgent(
         out_error_message,
         execution_preference,
         topology,
-        sync_mode)) {
-    assert(false && "Failed to mount pipeline algorithm.");
+        sync_mode,
+        load_reflector)) {
     if (out_error_message && out_error_message->empty()) {
       set_error("Failed to mount pipeline algorithm.");
     }
@@ -590,9 +605,10 @@ bool AgentManager::AttachPipelineAlgorithmToAgent(
 bool AgentManager::EnqueuePipelineStage0Submission(
   size_t agent_index,
   const std::string& pipeline_name,
-  const std::vector<agent::AlgorithmResourceBinding>& resource_bindings,
-  const std::vector<agent::AlgorithmDescriptorValue>& descriptor_values,
-  std::string* out_error_message) {
+  const std::vector<agentmanager::agent::AlgorithmResourceBinding>& resource_bindings,
+  const std::vector<agentmanager::agent::AlgorithmDescriptorValue>& descriptor_values,
+  std::string* out_error_message,
+  bool load_reflector) {
   auto set_error = [&](const std::string& message) {
     if (out_error_message) {
       *out_error_message = message;
@@ -608,7 +624,8 @@ bool AgentManager::EnqueuePipelineStage0Submission(
         pipeline_name,
         resource_bindings,
         descriptor_values,
-        out_error_message)) {
+        out_error_message,
+        load_reflector)) {
     assert(false && "Failed to enqueue pipeline stage0 submission.");
     if (out_error_message && out_error_message->empty()) {
       set_error("Failed to enqueue pipeline stage0 submission.");
@@ -660,7 +677,7 @@ bool AgentManager::DetachAlgorithmFromAgent(
     return false;
   }
 
-  const std::shared_ptr<agent::Agent> managed_agent = managed_agents_[agent_index]->agent;
+  const std::shared_ptr<agentmanager::agent::Agent> managed_agent = managed_agents_[agent_index]->agent;
   if (!managed_agent->RemoveAlgorithm(algorithm_index)) {
     set_error("Selected algorithm is unavailable.");
     return false;
@@ -672,7 +689,7 @@ bool AgentManager::DetachAlgorithmFromAgent(
 bool AgentManager::ReplayPipelineStageBridgeDebug(
   size_t agent_index,
   size_t algorithm_index,
-  const agent::AgentTickContext& context,
+  const agentmanager::agent::AgentTickContext& context,
   std::string* out_error_message) {
   auto set_error = [&](const std::string& message) {
     if (out_error_message) {
@@ -707,22 +724,22 @@ bool AgentManager::CollectAlgorithmReflection(
     return false;
   }
 
-  const std::shared_ptr<agent::Agent> managed_agent = agent(agent_index);
+  const std::shared_ptr<agentmanager::agent::Agent> managed_agent = agent(agent_index);
   if (!managed_agent) {
     return false;
   }
 
-  const agent::AlgorithmObject* object = managed_agent->algorithm_object(algorithm_index);
+  const agentmanager::agent::AlgorithmObject* object = managed_agent->algorithm_object(algorithm_index);
   if (!object) {
     return false;
   }
 
-  const agent::AlgorithmReflectionSnapshot* runtime_snapshot =
+  const agentmanager::agent::AlgorithmReflectionSnapshot* runtime_snapshot =
     managed_agent->algorithm_runtime_state(algorithm_index)
       ? &managed_agent->algorithm_runtime_state(algorithm_index)->reflection_snapshot
       : nullptr;
   if (!runtime_snapshot || !runtime_snapshot->valid) {
-    agent::AlgorithmReflectionSnapshot collected_snapshot{};
+    agentmanager::agent::AlgorithmReflectionSnapshot collected_snapshot{};
     if (!managed_agent->CollectAlgorithmReflection(algorithm_index, &collected_snapshot) ||
         !collected_snapshot.valid) {
       return false;
@@ -734,7 +751,7 @@ bool AgentManager::CollectAlgorithmReflection(
     out_snapshot->agent_name = managed_agent->agent_name();
     out_snapshot->algorithm_name = object->algorithm_profile.algorithm_name;
     out_snapshot->valid = true;
-    for (const agent::AlgorithmReflectionValue& value : collected_snapshot.variables) {
+    for (const agentmanager::agent::AlgorithmReflectionValue& value : collected_snapshot.variables) {
       out_snapshot->variables.push_back(AlgorithmReflectionRecord{
         .reflection_object_name = value.reflection_object_name,
         .container_name = value.container_name,
@@ -743,7 +760,7 @@ bool AgentManager::CollectAlgorithmReflection(
         .bytes = value.bytes,
       });
     }
-    for (const agent::AlgorithmReflectionValue& value : collected_snapshot.variable_arrays) {
+    for (const agentmanager::agent::AlgorithmReflectionValue& value : collected_snapshot.variable_arrays) {
       out_snapshot->variable_arrays.push_back(AlgorithmReflectionRecord{
         .reflection_object_name = value.reflection_object_name,
         .container_name = value.container_name,
@@ -761,7 +778,7 @@ bool AgentManager::CollectAlgorithmReflection(
   out_snapshot->agent_name = managed_agent->agent_name();
   out_snapshot->algorithm_name = object->algorithm_profile.algorithm_name;
   out_snapshot->valid = runtime_snapshot->valid;
-  for (const agent::AlgorithmReflectionValue& value : runtime_snapshot->variables) {
+  for (const agentmanager::agent::AlgorithmReflectionValue& value : runtime_snapshot->variables) {
     out_snapshot->variables.push_back(AlgorithmReflectionRecord{
       .reflection_object_name = value.reflection_object_name,
       .container_name = value.container_name,
@@ -770,7 +787,7 @@ bool AgentManager::CollectAlgorithmReflection(
       .bytes = value.bytes,
     });
   }
-  for (const agent::AlgorithmReflectionValue& value : runtime_snapshot->variable_arrays) {
+  for (const agentmanager::agent::AlgorithmReflectionValue& value : runtime_snapshot->variable_arrays) {
     out_snapshot->variable_arrays.push_back(AlgorithmReflectionRecord{
       .reflection_object_name = value.reflection_object_name,
       .container_name = value.container_name,
@@ -794,11 +811,12 @@ bool AgentManager::has_agents() const {
   return !managed_agents_.empty();
 }
 
-std::shared_ptr<agent::Agent> AgentManager::agent(size_t index) const {
+std::shared_ptr<agentmanager::agent::Agent> AgentManager::agent(size_t index) const {
   if (index >= managed_agents_.size() || !managed_agents_[index]) {
     return {};
   }
   return managed_agents_[index]->agent;
 }
 
-}  // namespace agent_management
+}  // namespace agentmanager
+

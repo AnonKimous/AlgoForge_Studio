@@ -1,15 +1,6 @@
 {
   "algorithms": [
     {
-      "name": "v2a0_pipeline_square_vertex_demo",
-      "display_name": "v2a0_pipeline_square_vertex_demo",
-      "folder": "pipeline/v2a0_pipeline_square_vertex_demo",
-      "container_manifest": "v2a0_pipeline_square_vertex_demo_package.json",
-      "decomposer": "v2a0_pipeline_square_vertex_demo_package.json",
-      "reflector": "v2a0_pipeline_square_vertex_demo_package.json",
-      "intervention": "v2a0_pipeline_square_vertex_demo_package.json"
-    },
-    {
       "name": "temporary_test_line_motion",
       "display_name": "temporary_test_line_motion",
       "folder": "norm/temporary_test_line_motion",
@@ -44,6 +35,15 @@
       "decomposer": "v2a0_precision_grid_mask_demo_package.json",
       "reflector": "v2a0_precision_grid_mask_demo_package.json",
       "intervention": "v2a0_precision_grid_mask_demo_package.json"
+    },
+    {
+      "name": "v2a0_teapot_pbr_demo",
+      "display_name": "v2a0_teapot_pbr_demo",
+      "folder": "norm/v2a0_teapot_pbr_demo",
+      "container_manifest": "v2a0_teapot_pbr_demo_package.json",
+      "decomposer": "v2a0_teapot_pbr_demo_package.json",
+      "reflector": "v2a0_teapot_pbr_demo_package.json",
+      "intervention": "v2a0_teapot_pbr_demo_package.json"
     }
   ]
 }

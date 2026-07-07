@@ -4,8 +4,8 @@
 #include <cassert>
 #include <cctype>
 #include <cstring>
-#include <fstream>
 #include <filesystem>
+#include <iostream>
 #include <imgui.h>
 #include <SDL3/SDL.h>
 #include <sstream>
@@ -103,26 +103,46 @@ std::string _FormatAlgorithmRuntimeLabel(
     " stage " + std::to_string(algorithm_summary.pipeline_stage_index) + "]";
 }
 
-const char* _AlgorithmInterventionStageKindDisplayName(
-  algorithm_management::AlgorithmInterventionStageKind stage_kind) {
-  switch (stage_kind) {
-    case algorithm_management::AlgorithmInterventionStageKind::Pretick: return "pretick";
-    case algorithm_management::AlgorithmInterventionStageKind::Exec: return "exec";
-    case algorithm_management::AlgorithmInterventionStageKind::AfterTick: return "aftertick";
-    case algorithm_management::AlgorithmInterventionStageKind::RenderResult: return "renderresult";
-    case algorithm_management::AlgorithmInterventionStageKind::Reflect: return "reflect";
-    case algorithm_management::AlgorithmInterventionStageKind::Custom: return "custom";
+const char* _AlgorithmPhaseKindDisplayName(
+  algorithmManager::AlgorithmPhaseKind phase_kind) {
+  switch (phase_kind) {
+    case algorithmManager::AlgorithmPhaseKind::Pretick: return "pretick";
+    case algorithmManager::AlgorithmPhaseKind::Exec: return "exec";
+    case algorithmManager::AlgorithmPhaseKind::AfterTick: return "aftertick";
+    case algorithmManager::AlgorithmPhaseKind::RenderResult: return "renderresult";
+    case algorithmManager::AlgorithmPhaseKind::Reflect: return "reflect";
+    case algorithmManager::AlgorithmPhaseKind::Custom: return "custom";
   }
   return "custom";
 }
 
 const char* _AlgorithmExecutionPreferenceDisplayName(
-  algorithm_management::AlgorithmExecutionPreference execution_preference) {
+  debug_tool::AlgorithmExecutionPreference execution_preference) {
   switch (execution_preference) {
-    case algorithm_management::AlgorithmExecutionPreference::Cpu: return "cpu";
-    case algorithm_management::AlgorithmExecutionPreference::Gpu: return "gpu";
+    case debug_tool::AlgorithmExecutionPreference::Jobs: return "jobs";
+    case debug_tool::AlgorithmExecutionPreference::Vk: return "vk";
+    case debug_tool::AlgorithmExecutionPreference::Cuda: return "cuda";
   }
-  return "cpu";
+  return "jobs";
+}
+
+const char* _AlgorithmExecutionPreferenceDisplayName(
+  algorithmManager::AlgorithmExecutionPreference execution_preference) {
+  switch (execution_preference) {
+    case algorithmManager::AlgorithmExecutionPreference::Jobs: return "jobs";
+    case algorithmManager::AlgorithmExecutionPreference::Vk: return "vk";
+    case algorithmManager::AlgorithmExecutionPreference::Cuda: return "cuda";
+  }
+  return "jobs";
+}
+
+const char* _AlgorithmRuntimeBuildFlavorDisplayName(
+  debug_tool::AlgorithmRuntimeBuildFlavor build_flavor) {
+  switch (build_flavor) {
+    case debug_tool::AlgorithmRuntimeBuildFlavor::Debug: return "debug";
+    case debug_tool::AlgorithmRuntimeBuildFlavor::ReleaseWithDebugInfo: return "releaseWithDebugInfo";
+  }
+  return "debug";
 }
 
 void _DrawReflectionSnapshot(
@@ -318,7 +338,12 @@ void _ResizePreservingValues(std::vector<T>* values, size_t new_size) {
 }
 
 #ifndef NDEBUG
-#define DEBUG_TOOL_ASSERT(condition, message) assert((condition) && (message))
+#define DEBUG_TOOL_ASSERT(condition, message) do { \
+  if (!(condition)) { \
+    std::cerr << (message) << '\n'; \
+    assert((condition) && (message)); \
+  } \
+} while (false)
 #else
 #define DEBUG_TOOL_ASSERT(condition, message) ((void)0)
 #endif
@@ -390,7 +415,8 @@ void DebugToolFrontendPanel::InitializeAgentComposerDefaults() {
   agent_composer_ui_state_.selected_algorithm_catalog_index = -1;
   agent_composer_ui_state_.selected_agent_index = -1;
   agent_composer_ui_state_.selected_algorithm_index = -1;
-  agent_composer_ui_state_.execution_preference = debug_tool::AlgorithmExecutionPreference::Gpu;
+  agent_composer_ui_state_.execution_preference = debug_tool::AlgorithmExecutionPreference::Vk;
+  agent_composer_ui_state_.runtime_build_flavor = debug_tool::AlgorithmRuntimeBuildFlavor::Debug;
   agent_composer_ui_state_.algorithm_catalog_loaded = false;
   agent_composer_ui_state_.algorithm_catalog_error.clear();
   agent_composer_ui_state_.reflected_algorithm_name.clear();
@@ -742,23 +768,59 @@ void DebugToolFrontendPanel::DrawAgentComposerUi(IDebugToolHost& host) {
   }
 
   ImGui::SeparatorText("Execution Mode");
-  const char* execution_mode_text = "GPU";
+  const char* execution_mode_text = "VK";
   switch (agent_composer_ui_state_.execution_preference) {
-    case debug_tool::AlgorithmExecutionPreference::Cpu: execution_mode_text = "CPU"; break;
-    case debug_tool::AlgorithmExecutionPreference::Gpu: execution_mode_text = "GPU"; break;
+    case debug_tool::AlgorithmExecutionPreference::Jobs: execution_mode_text = "Jobs"; break;
+    case debug_tool::AlgorithmExecutionPreference::Vk: execution_mode_text = "VK"; break;
+    case debug_tool::AlgorithmExecutionPreference::Cuda: execution_mode_text = "CUDA"; break;
   }
   if (ImGui::BeginCombo("Backend", execution_mode_text)) {
     const struct Option {
       const char* label;
       debug_tool::AlgorithmExecutionPreference value;
     } options[] = {
-      {"CPU", debug_tool::AlgorithmExecutionPreference::Cpu},
-      {"GPU", debug_tool::AlgorithmExecutionPreference::Gpu},
+      {"Jobs", debug_tool::AlgorithmExecutionPreference::Jobs},
+      {"VK", debug_tool::AlgorithmExecutionPreference::Vk},
+      {"CUDA", debug_tool::AlgorithmExecutionPreference::Cuda},
     };
     for (const Option& option : options) {
       const bool is_selected = agent_composer_ui_state_.execution_preference == option.value;
       if (ImGui::Selectable(option.label, is_selected)) {
         agent_composer_ui_state_.execution_preference = option.value;
+      }
+      if (is_selected) {
+        ImGui::SetItemDefaultFocus();
+      }
+    }
+    ImGui::EndCombo();
+  }
+
+  ImGui::SeparatorText("Runtime Build");
+  const char* runtime_build_text = "Debug";
+  switch (agent_composer_ui_state_.runtime_build_flavor) {
+    case debug_tool::AlgorithmRuntimeBuildFlavor::Debug: runtime_build_text = "Debug"; break;
+    case debug_tool::AlgorithmRuntimeBuildFlavor::ReleaseWithDebugInfo:
+      runtime_build_text = "releaseWithDebugInfo";
+      break;
+  }
+  if (ImGui::BeginCombo("Runtime Flavor", runtime_build_text)) {
+    const struct Option {
+      const char* label;
+      debug_tool::AlgorithmRuntimeBuildFlavor value;
+    } options[] = {
+      {"Debug", debug_tool::AlgorithmRuntimeBuildFlavor::Debug},
+      {"releaseWithDebugInfo", debug_tool::AlgorithmRuntimeBuildFlavor::ReleaseWithDebugInfo},
+    };
+    for (const Option& option : options) {
+      const bool is_selected = agent_composer_ui_state_.runtime_build_flavor == option.value;
+      if (ImGui::Selectable(option.label, is_selected)) {
+        agent_composer_ui_state_.runtime_build_flavor = option.value;
+        host.SetAlgorithmRuntimeBuildFlavor(option.value);
+        agent_composer_ui_state_.preview_request_dirty = true;
+        const std::string current_algorithm_name = _TrimCopy(agent_composer_ui_state_.algorithm_name.data());
+        if (!current_algorithm_name.empty()) {
+          RefreshAlgorithmComposerBindings(host, current_algorithm_name);
+        }
       }
       if (is_selected) {
         ImGui::SetItemDefaultFocus();
@@ -1168,23 +1230,44 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
     return;
   }
 
+  const auto refresh_selected_algorithm_summary = [&]() -> const debug_tool::AlgorithmRuntimeSummary* {
+    if (!host.GetAgentSummary(0u, &selected_agent_summary)) {
+      agent_composer_ui_state_.selected_algorithm_index = -1;
+      return nullptr;
+    }
+
+    int refreshed_algorithm_index = agent_composer_ui_state_.selected_algorithm_index;
+    if (refreshed_algorithm_index < 0 ||
+        refreshed_algorithm_index >= static_cast<int>(selected_agent_summary.algorithms.size())) {
+      refreshed_algorithm_index = selected_agent_summary.algorithms.empty() ? -1 : 0;
+      agent_composer_ui_state_.selected_algorithm_index = refreshed_algorithm_index;
+      agent_composer_ui_state_.preview_request_dirty = true;
+    }
+
+    return refreshed_algorithm_index >= 0
+      ? &selected_agent_summary.algorithms[static_cast<size_t>(refreshed_algorithm_index)]
+      : nullptr;
+  };
+
   const std::string selected_agent_header = selected_agent_summary.agent_name.empty()
     ? "Debug Agent"
     : ("Debug Agent  " + selected_agent_summary.agent_name);
   ImGui::Text("Target Agent: %s", selected_agent_header.c_str());
 
   int selected_algorithm_index = agent_composer_ui_state_.selected_algorithm_index;
-  if (selected_algorithm_index < 0 ||
-      selected_algorithm_index >= static_cast<int>(selected_agent_summary.algorithms.size())) {
-    selected_algorithm_index = selected_agent_summary.algorithms.empty() ? -1 : 0;
-    agent_composer_ui_state_.selected_algorithm_index = selected_algorithm_index;
-    agent_composer_ui_state_.preview_request_dirty = true;
+  const debug_tool::AlgorithmRuntimeSummary* selected_algorithm_summary = refresh_selected_algorithm_summary();
+  if (selected_algorithm_summary &&
+      !selected_algorithm_summary->pipeline_stage) {
+    if (!selected_algorithm_summary->vk_symbol &&
+        selected_algorithm_summary->jobs_symbol &&
+        agent_composer_ui_state_.execution_preference != debug_tool::AlgorithmExecutionPreference::Jobs) {
+      agent_composer_ui_state_.execution_preference = debug_tool::AlgorithmExecutionPreference::Jobs;
+    } else if (!selected_algorithm_summary->jobs_symbol &&
+               selected_algorithm_summary->vk_symbol &&
+               agent_composer_ui_state_.execution_preference != debug_tool::AlgorithmExecutionPreference::Vk) {
+      agent_composer_ui_state_.execution_preference = debug_tool::AlgorithmExecutionPreference::Vk;
+    }
   }
-
-  const debug_tool::AlgorithmRuntimeSummary* selected_algorithm_summary =
-    selected_algorithm_index >= 0
-      ? &selected_agent_summary.algorithms[static_cast<size_t>(selected_algorithm_index)]
-      : nullptr;
   if (selected_algorithm_summary &&
       selected_algorithm_summary->pipeline_stage &&
       !selected_algorithm_summary->pipeline_name.empty()) {
@@ -1209,12 +1292,14 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
         host.ui_status_message() = attach_error_message.empty()
           ? "Failed to mount the selected pipeline stage as a normal algorithm."
           : attach_error_message;
-      } else {
-        agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(attached_algorithm_index);
-        agent_composer_ui_state_.preview_request_dirty = true;
-        host.ClearGpuRuntimeCaches();
-        host.ui_status_message() =
-          "Mounted the selected stage as a normal algorithm. Use this mount for single-stage debug.";
+          } else {
+            agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(attached_algorithm_index);
+            selected_algorithm_index = static_cast<int>(attached_algorithm_index);
+            selected_algorithm_summary = refresh_selected_algorithm_summary();
+            agent_composer_ui_state_.preview_request_dirty = true;
+            host.ClearVkRuntimeCaches();
+            host.ui_status_message() =
+              "Mounted the selected stage as a normal algorithm. Use this mount for single-stage debug.";
       }
     }
   }
@@ -1234,12 +1319,13 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
       case debug_tool::AlgorithmAssemblyState::Failed: assembly_state_text = "failed"; break;
     }
     ImGui::Text("Assembly State: %s", assembly_state_text);
-    ImGui::Text("CPU Symbol: %s", selected_algorithm_summary->cpu_symbol ? "true" : "false");
-    ImGui::Text("GPU Symbol: %s", selected_algorithm_summary->gpu_symbol ? "true" : "false");
-    const char* active_bundle_preference_text = "gpu";
+    ImGui::Text("Jobs Symbol: %s", selected_algorithm_summary->jobs_symbol ? "true" : "false");
+    ImGui::Text("VK Symbol: %s", selected_algorithm_summary->vk_symbol ? "true" : "false");
+    const char* active_bundle_preference_text = "vk";
     switch (selected_algorithm_summary->pipeline_active_bundle_preference) {
-      case debug_tool::AlgorithmExecutionPreference::Cpu: active_bundle_preference_text = "cpu"; break;
-      case debug_tool::AlgorithmExecutionPreference::Gpu: active_bundle_preference_text = "gpu"; break;
+      case debug_tool::AlgorithmExecutionPreference::Jobs: active_bundle_preference_text = "jobs"; break;
+      case debug_tool::AlgorithmExecutionPreference::Vk: active_bundle_preference_text = "vk"; break;
+      case debug_tool::AlgorithmExecutionPreference::Cuda: active_bundle_preference_text = "cuda"; break;
     }
     if (selected_algorithm_summary->pipeline_active_bundle_valid) {
       ImGui::Text(
@@ -1255,21 +1341,21 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
     if (!selected_algorithm_summary->pipeline_stage &&
         (selected_algorithm_summary->pipeline_total_elapsed_seconds > 0.0f ||
          !selected_algorithm_summary->pipeline_stage_runtime_stats.empty())) {
-      ImGui::SeparatorText("流水线耗时");
+      ImGui::SeparatorText("娴佹按绾胯€楁椂");
       ImGui::Text(
-        "拓扑: %s",
+        "鎷撴墤: %s",
         debug_tool::AlgorithmPipelineTopologyDisplayName(
           selected_algorithm_summary->pipeline_topology));
       ImGui::Text(
-        "同步模式: %s",
+        "鍚屾妯″紡: %s",
         debug_tool::AlgorithmPipelineSyncModeDisplayName(
           selected_algorithm_summary->pipeline_sync_mode));
       ImGui::Text(
-        "总耗时: %.3f s",
+        "鎬昏€楁椂: %.3f s",
         selected_algorithm_summary->pipeline_total_elapsed_seconds);
       if (!selected_algorithm_summary->pipeline_stage_runtime_stats.empty()) {
-        for (const algorithm_management::AlgorithmPipelineStageRuntimeStat& stage_stat :
-             selected_algorithm_summary->pipeline_stage_runtime_stats) {
+        for (const algorithmManager::AlgorithmPipelineStageRuntimeStat& stage_stat :
+              selected_algorithm_summary->pipeline_stage_runtime_stats) {
           if (!stage_stat.reason.empty()) {
             ImGui::BulletText(
               "%s: %.3f s (%s)",
@@ -1309,29 +1395,29 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
 
     ImGui::SeparatorText("Intervention");
     ImGui::Text("Intervention: %s", selected_algorithm_summary->has_intervention ? "present" : "absent");
-    if (selected_algorithm_summary->intervention_stage_summaries.empty()) {
-      ImGui::TextUnformatted("No intervention stages available.");
+    if (selected_algorithm_summary->intervention_phase_summaries.empty()) {
+      ImGui::TextUnformatted("No intervention phases available.");
     } else {
-      for (const debug_tool::AlgorithmInterventionStageSummary& stage_summary :
-           selected_algorithm_summary->intervention_stage_summaries) {
+      for (const debug_tool::AlgorithmPhaseSummary& phase_summary :
+           selected_algorithm_summary->intervention_phase_summaries) {
         ImGui::BulletText(
           "%s [%s, %s]",
-          stage_summary.stage_name.empty() ? "<stage>" : stage_summary.stage_name.c_str(),
-          _AlgorithmInterventionStageKindDisplayName(stage_summary.stage_kind),
-          _AlgorithmExecutionPreferenceDisplayName(stage_summary.execution_preference));
-        if (!stage_summary.functions.empty()) {
+          phase_summary.phase_name.empty() ? "<phase>" : phase_summary.phase_name.c_str(),
+          _AlgorithmPhaseKindDisplayName(phase_summary.phase_kind),
+          _AlgorithmExecutionPreferenceDisplayName(phase_summary.execution_preference));
+        if (!phase_summary.functions.empty()) {
           ImGui::Indent();
           ImGui::TextUnformatted("Functions:");
-          for (const std::string& function_name : stage_summary.functions) {
+          for (const std::string& function_name : phase_summary.functions) {
             ImGui::BulletText("%s", function_name.c_str());
           }
           ImGui::Unindent();
         }
-        if (!stage_summary.used_algorithm_containers.empty()) {
+        if (!phase_summary.used_algorithm_containers.empty()) {
           ImGui::Indent();
           ImGui::TextUnformatted("Containers:");
-          for (const algorithm_management::AlgorithmInterventionContainerBinding& binding :
-               stage_summary.used_algorithm_containers) {
+          for (const algorithmManager::AlgorithmPhaseContainerBinding& binding :
+                phase_summary.used_algorithm_containers) {
             ImGui::BulletText(
               "%s [%s]%s",
               binding.container_name.c_str(),
@@ -1340,14 +1426,14 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
           }
           ImGui::Unindent();
         }
-        if (!stage_summary.vertex_shader_path.empty() || !stage_summary.fragment_shader_path.empty()) {
+        if (!phase_summary.vertex_shader_path.empty() || !phase_summary.fragment_shader_path.empty()) {
           ImGui::Indent();
           ImGui::Text(
             "Shaders: %s | %s",
-            stage_summary.vertex_shader_path.empty() ? "<none>" : stage_summary.vertex_shader_path.c_str(),
-            stage_summary.fragment_shader_path.empty() ? "<none>" : stage_summary.fragment_shader_path.c_str());
-          if (!stage_summary.pipeline_kind.empty()) {
-            ImGui::Text("Pipeline: %s", stage_summary.pipeline_kind.c_str());
+            phase_summary.vertex_shader_path.empty() ? "<none>" : phase_summary.vertex_shader_path.c_str(),
+            phase_summary.fragment_shader_path.empty() ? "<none>" : phase_summary.fragment_shader_path.c_str());
+          if (!phase_summary.pipeline_kind.empty()) {
+            ImGui::Text("Pipeline: %s", phase_summary.pipeline_kind.c_str());
           }
           ImGui::Unindent();
         }
@@ -1517,6 +1603,35 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
     return descriptor_values;
   };
 
+  const auto build_effective_mount_bindings = [&]() {
+    std::vector<debug_tool::AlgorithmResourceBinding> resource_bindings = build_current_resource_bindings();
+    std::vector<debug_tool::AlgorithmDescriptorValue> descriptor_values = build_current_descriptor_values();
+    if ((resource_bindings.empty() || descriptor_values.empty()) && !algorithm_name.empty()) {
+      std::vector<debug_tool::AlgorithmResourceBinding> default_resource_bindings;
+      std::vector<debug_tool::AlgorithmDescriptorValue> default_descriptor_values;
+      bool has_default_file = false;
+      std::string default_error_message;
+      if (host.LoadAlgorithmPackageDefaultBindings(
+            algorithm_name,
+            &default_resource_bindings,
+            &default_descriptor_values,
+            &has_default_file,
+            &default_error_message) &&
+          has_default_file) {
+        if (resource_bindings.empty()) {
+          resource_bindings = std::move(default_resource_bindings);
+        }
+        if (descriptor_values.empty()) {
+          descriptor_values = std::move(default_descriptor_values);
+        }
+      }
+    }
+    return std::pair{
+      std::move(resource_bindings),
+      std::move(descriptor_values),
+    };
+  };
+
   const auto clear_built_in_agent_mounts = [&](std::string* out_error_message) {
     std::string clear_error_message;
     debug_tool::AgentRuntimeSummary clear_summary{};
@@ -1533,7 +1648,8 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
     agent_composer_ui_state_.selected_algorithm_index = -1;
     agent_composer_ui_state_.preview_request_dirty = true;
     host.SetRenderPreviewRequest({});
-    host.ClearGpuRuntimeCaches();
+    host.ClearVkRuntimeCaches();
+    selected_algorithm_summary = refresh_selected_algorithm_summary();
     if (out_error_message) {
       out_error_message->clear();
     }
@@ -1632,8 +1748,7 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
       if (algorithm_name.empty()) {
         host.ui_status_message() = "Algorithm name must not be empty.";
       } else {
-        const std::vector<debug_tool::AlgorithmResourceBinding> resource_bindings = build_current_resource_bindings();
-        const std::vector<debug_tool::AlgorithmDescriptorValue> descriptor_values = build_current_descriptor_values();
+        const auto [resource_bindings, descriptor_values] = build_effective_mount_bindings();
         std::string attach_error_message;
         host.PauseTicking();
         if (!clear_built_in_agent_mounts(&attach_error_message)) {
@@ -1657,6 +1772,8 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
               : ("Failed to mount pipeline package: " + attach_error_message);
           } else {
             agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(attached_algorithm_index);
+            selected_algorithm_index = static_cast<int>(attached_algorithm_index);
+            selected_algorithm_summary = refresh_selected_algorithm_summary();
             host.SetRenderPreviewRequest({});
             host.ui_status_message() =
               "Pipeline mounted as a render pipeline. Submit a resource batch to run it.";
@@ -1670,8 +1787,7 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
       if (algorithm_name.empty()) {
         host.ui_status_message() = "Algorithm name must not be empty.";
       } else {
-        const std::vector<debug_tool::AlgorithmResourceBinding> resource_bindings = build_current_resource_bindings();
-        const std::vector<debug_tool::AlgorithmDescriptorValue> descriptor_values = build_current_descriptor_values();
+        const auto [resource_bindings, descriptor_values] = build_effective_mount_bindings();
         const std::string pipeline_instance_name = build_testsubmit_pipeline_name(algorithm_name);
         size_t attached_algorithm_index = 0u;
         std::string attach_error_message;
@@ -1690,6 +1806,8 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
             : ("Failed to append the pipeline resource submission: " + attach_error_message);
         } else {
           agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(attached_algorithm_index);
+          selected_algorithm_index = static_cast<int>(attached_algorithm_index);
+          selected_algorithm_summary = refresh_selected_algorithm_summary();
           std::string preview_error_message;
           if (!build_and_apply_preview_for_algorithm(attached_algorithm_index, &preview_error_message)) {
             host.ui_status_message() = preview_error_message.empty()
@@ -1709,8 +1827,7 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
       if (algorithm_name.empty()) {
         host.ui_status_message() = "Algorithm name must not be empty.";
       } else {
-        const std::vector<debug_tool::AlgorithmResourceBinding> resource_bindings = build_current_resource_bindings();
-        const std::vector<debug_tool::AlgorithmDescriptorValue> descriptor_values = build_current_descriptor_values();
+        const auto [resource_bindings, descriptor_values] = build_effective_mount_bindings();
         std::string attach_error_message;
         host.PauseTicking();
         if (!clear_built_in_agent_mounts(&attach_error_message)) {
@@ -1729,11 +1846,13 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
             host.ui_status_message() = attach_error_message.empty()
               ? "Failed to mount algorithm on built-in agent."
               : ("Failed to mount algorithm on built-in agent: " + attach_error_message);
-          } else {
-            agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(attached_algorithm_index);
-            std::string preview_error_message;
-            const bool preview_ready =
-              build_and_apply_preview_for_algorithm(attached_algorithm_index, &preview_error_message);
+        } else {
+          agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(attached_algorithm_index);
+          selected_algorithm_index = static_cast<int>(attached_algorithm_index);
+          selected_algorithm_summary = refresh_selected_algorithm_summary();
+          std::string preview_error_message;
+          const bool preview_ready =
+            build_and_apply_preview_for_algorithm(attached_algorithm_index, &preview_error_message);
             if (!preview_ready) {
               host.SetRenderPreviewRequest({});
               agent_composer_ui_state_.preview_request_dirty = true;
@@ -1749,7 +1868,7 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
     }
 
     ImGui::SameLine();
-    ImGui::BeginDisabled(!selected_algorithm_summary);
+    ImGui::BeginDisabled(selected_algorithm_index < 0);
     if (ImGui::Button("Start Tick", ImVec2(180.0f, 0.0f))) {
       if (!selected_algorithm_summary) {
         host.ui_status_message() = "Mount an algorithm first.";

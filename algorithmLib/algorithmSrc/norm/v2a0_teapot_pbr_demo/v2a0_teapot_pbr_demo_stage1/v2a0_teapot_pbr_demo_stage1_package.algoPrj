@@ -1,0 +1,250 @@
+{
+  "algorithm_name": "v2a0_teapot_pbr_demo_stage1",
+  "globalCfg": {
+    "solvePrecision": "32",
+    "defaultPrecision": "32"
+  },
+  "container": {
+    "variable": {
+      "frame_tick": {
+        "count": 1
+      },
+      "mesh_triangle_count": {
+        "count": 1
+      },
+      "mesh_bvh_node_count": {
+        "count": 1
+      },
+      "texture_seed": {
+        "count": 1
+      }
+    },
+    "variableArray": {
+      "scene_info": {
+        "count": 1,
+        "shape": [0, 0, 0, 0]
+      },
+      "material_buffer": {
+        "count": 1,
+        "shape": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+      },
+      "triangle_buffer": {
+        "count": 10000,
+        "shape": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+      },
+      "bvh_buffer": {
+        "count": 20000,
+        "shape": [0, 0, 0, 0, 0, 0, 0, 0]
+      },
+      "teapot_obj_bytes": {
+        "count": 540580,
+        "precision": "8"
+      },
+      "teapot_mtl_bytes": {
+        "count": 229,
+        "precision": "8"
+      },
+      "teapot_gold_tile_bytes": {
+        "count": 144198,
+        "precision": "8"
+      }
+    }
+  },
+  "decomposer": {
+    "res": {
+      "obj": {
+        "teapot_obj": "teapot_obj_bytes"
+      },
+      "mtl": {
+        "teapot_mtl": "teapot_mtl_bytes"
+      },
+      "png": {
+        "teapot_gold_tile": "teapot_gold_tile_bytes"
+      }
+    },
+    "description": []
+  },
+  "reflector": {
+    "name": "teapot_state",
+    "functionName": "direct",
+    "items": [
+      {
+        "name": "frame_tick",
+        "from": ["frame_tick"],
+        "to": ["frame_tick"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "mesh_triangle_count",
+        "from": ["mesh_triangle_count"],
+        "to": ["mesh_triangle_count"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "mesh_bvh_node_count",
+        "from": ["mesh_bvh_node_count"],
+        "to": ["mesh_bvh_node_count"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "texture_seed",
+        "from": ["texture_seed"],
+        "to": ["texture_seed"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "scene_info",
+        "from": ["scene_info"],
+        "to": ["scene_info"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "material_buffer",
+        "from": ["material_buffer"],
+        "to": ["material_buffer"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "triangle_buffer",
+        "from": ["triangle_buffer"],
+        "to": ["triangle_buffer"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "bvh_buffer",
+        "from": ["bvh_buffer"],
+        "to": ["bvh_buffer"],
+        "reflectFun": "direct"
+      }
+    ]
+  },
+  "exec": {
+    "stage_name": "exec",
+    "used_algorithm_containers": {
+      "arrays": [
+        {
+          "name": "scene_info",
+          "kind": "array",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "material_buffer",
+          "kind": "array",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "triangle_buffer",
+          "kind": "array",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "bvh_buffer",
+          "kind": "array",
+          "tuple_width": 1,
+          "required": true
+        }
+      ],
+      "variables": [
+        {
+          "name": "frame_tick",
+          "kind": "variable",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "mesh_triangle_count",
+          "kind": "variable",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "mesh_bvh_node_count",
+          "kind": "variable",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "texture_seed",
+          "kind": "variable",
+          "tuple_width": 1,
+          "required": true
+        }
+      ]
+    },
+    "shader": {
+      "pipeline": "graphics",
+      "vertex": "v2a0_teapot_pbr_demo_stage1_gpu_tick.vert",
+      "fragment": "v2a0_teapot_pbr_demo_stage1_gpu_tick.frag"
+    }
+  },
+  "intervention": {
+    "stage": {
+      "resultRender": {
+        "stage_name": "resultRender",
+        "stage_kind": "resultRender",
+        "used_algorithm_containers": {
+          "arrays": [
+            {
+              "name": "scene_info",
+              "kind": "array",
+              "tuple_width": 1,
+              "required": true
+            },
+            {
+              "name": "material_buffer",
+              "kind": "array",
+              "tuple_width": 1,
+              "required": true
+            },
+            {
+              "name": "triangle_buffer",
+              "kind": "array",
+              "tuple_width": 1,
+              "required": true
+            },
+            {
+              "name": "bvh_buffer",
+              "kind": "array",
+              "tuple_width": 1,
+              "required": true
+            }
+          ],
+          "variables": [
+            {
+              "name": "frame_tick",
+              "kind": "variable",
+              "tuple_width": 1,
+              "required": true
+            },
+            {
+              "name": "mesh_triangle_count",
+              "kind": "variable",
+              "tuple_width": 1,
+              "required": true
+            },
+            {
+              "name": "mesh_bvh_node_count",
+              "kind": "variable",
+              "tuple_width": 1,
+              "required": true
+            },
+            {
+              "name": "texture_seed",
+              "kind": "variable",
+              "tuple_width": 1,
+              "required": true
+            }
+          ]
+        },
+        "shader": {
+          "pipeline": "graphics",
+          "vertex": "v2a0_teapot_pbr_demo_stage1_result_render.vert",
+          "fragment": "v2a0_teapot_pbr_demo_stage1_result_render.frag"
+        }
+      }
+    }
+  }
+}

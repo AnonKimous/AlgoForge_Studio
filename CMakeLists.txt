@@ -314,13 +314,12 @@ target_sources(debug_tool_hooks INTERFACE
   src/debug_tool/runtime_systems_hooker.h
 )
 target_include_directories(debug_tool_hooks INTERFACE ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(debug_tool_hooks INTERFACE common_data agent_management runtime_systems algorithm_management)
+target_link_libraries(debug_tool_hooks INTERFACE common_data agentmanager runtime_systems)
 
 add_library(algorithm_management STATIC
-  src/algorithm_support/algorithm_package_location.cpp
-  src/algorithm_support/algorithm_runtime_bridge.cpp
-  src/algorithm_support/algorithm_package_decomposer.cpp
-  src/algorithm_support/algorithm_package_loader.cpp
+  src/algorithm_catalog/algorithm_package_location.cpp
+  src/algorithm_catalog/algorithm_package_decomposer.cpp
+  src/algorithm_catalog/algorithm_package_loader.cpp
   ${CJSON_SOURCE_DIR}/cJSON.c
 )
 target_include_directories(algorithm_management PUBLIC ${PROJECT_INCLUDE_DIRS})
@@ -351,18 +350,15 @@ target_compile_definitions(runtime_systems PRIVATE RUNTIME_SYSTEMS_LAYER_INTERNA
 target_link_libraries(runtime_systems PUBLIC common_data Vulkan::Vulkan ${SDL3_LINK_LIBS} ${MIMALLOC_TARGET})
 target_link_libraries(algorithm_management PUBLIC runtime_systems)
 
-add_library(agent STATIC
-  src/agent/agent.cpp
-)
-target_include_directories(agent PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(agent PUBLIC common_data algorithm_management)
-
-add_library(agent_management STATIC
+add_library(agentmanager STATIC
+  src/agent_management/agent.cpp
   src/agent_management/agent_manager.cpp
 )
-target_include_directories(agent_management PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_compile_definitions(agent_management PRIVATE AGENT_MANAGEMENT_LAYER_INTERNAL_BUILD=1)
-target_link_libraries(agent_management PUBLIC common_data agent)
+target_include_directories(agentmanager PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_compile_definitions(agentmanager PRIVATE AGENT_MANAGEMENT_LAYER_INTERNAL_BUILD=1)
+target_link_libraries(agentmanager PUBLIC common_data algorithm_management)
+
+add_library(agent_management ALIAS agentmanager)
 
 add_library(debug_tool_backend STATIC
   src/debug_tool/debug_tool_backend_runtime.cpp
@@ -384,7 +380,7 @@ add_library(sdk STATIC
   src/sdk/sdk_decomposer.cpp
 )
 target_include_directories(sdk PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(sdk PUBLIC agent_management)
+target_link_libraries(sdk PUBLIC agentmanager)
 
 set(SDK_PACKAGE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/sdk")
 set(SDK_PACKAGE_INCLUDE_DIR "${SDK_PACKAGE_ROOT}/include")

@@ -4,14 +4,16 @@ project(algorithm_packages LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
 if(WIN32)
   if(MSVC)
     message(STATUS "Windows: MSVC is the recommended toolchain for this project.")
-    add_compile_options("/utf-8")
+    add_compile_options(
+      "$<$<COMPILE_LANGUAGE:C>:/utf-8>"
+      "$<$<COMPILE_LANGUAGE:CXX>:/utf-8>"
+    )
   else()
     message(WARNING "Windows: MSVC is the recommended toolchain for this project, but continuing with the current compiler.")
   endif()
@@ -109,6 +111,7 @@ set(PROJECT_INCLUDE_DIRS
 )
 
 option(BUILD_ALGORITHM_SAMPLE_PLUGIN "Build the temporary sample algorithm plugin." OFF)
+option(BUILD_ALGORITHM_CUDA_SAMPLE_PLUGIN_PACKAGES "Build algorithm plugin packages that require CUDA sources." OFF)
 set(CORE_BUILD_DIR "${REPO_ROOT}/build" CACHE PATH "Core build directory containing the base libraries for algorithm plugins")
 
 function(import_core_static_library target_name library_name)
@@ -142,17 +145,12 @@ set(CORE_DEBUG_DIR "${CORE_BUILD_DIR}/Debug")
 if(BUILD_ALGORITHM_SAMPLE_PLUGIN)
   set(ALGORITHM_PLUGIN_MIRROR_SRC_ROOT "${CMAKE_CURRENT_BINARY_DIR}/plugin_support_mirror/src")
   file(MAKE_DIRECTORY "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}")
-  file(COPY "${REPO_ROOT}/src/algorithm_support" DESTINATION "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}")
+  file(COPY "${REPO_ROOT}/src/algorithm_catalog" DESTINATION "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}")
   file(COPY "${REPO_ROOT}/src/common_data" DESTINATION "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}")
-  file(MAKE_DIRECTORY "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}/agent")
-  configure_file(
-    "${REPO_ROOT}/src/agent/agent_abi.h"
-    "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}/agent/agent_abi.h"
-    COPYONLY)
 
   add_library(algorithm_plugin_support_mirror STATIC
-    "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}/algorithm_support/algorithm_package_location.cpp"
-    "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}/algorithm_support/algorithm_plugin_support_minimal.cpp"
+    "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}/algorithm_catalog/algorithm_package_location.cpp"
+    "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}/algorithm_catalog/algorithm_plugin_support_minimal.cpp"
     "${CJSON_SOURCE_DIR}/cJSON.c"
   )
   target_include_directories(algorithm_plugin_support_mirror PUBLIC
@@ -174,9 +172,6 @@ function(register_algorithm_package package_manifest)
   string(REPLACE "\\" "/" algorithm_relative_dir "${algorithm_relative_dir}")
   string(MAKE_C_IDENTIFIER "${algorithm_relative_dir}" algorithm_target_name)
   set(algorithm_output_dir "${ALGORITHM_LIBRARY_RUNTIME_OUTPUT_ROOT}/${algorithm_relative_dir}")
-
-  file(MAKE_DIRECTORY "${algorithm_output_dir}")
-
   set(algorithm_source_dir "${algorithm_dir}")
   file(GLOB algorithm_shader_sources
     "${algorithm_source_dir}/*.vert"
@@ -184,6 +179,7 @@ function(register_algorithm_package package_manifest)
   )
   file(GLOB plugin_sources
     "${algorithm_source_dir}/*_plugin.cpp"
+    "${algorithm_source_dir}/*.cu"
   )
   if(NOT algorithm_shader_sources AND NOT plugin_sources)
     set(stage0_source_dir "${algorithm_dir}/${algorithm_name}_stage0")
@@ -195,9 +191,25 @@ function(register_algorithm_package package_manifest)
       )
       file(GLOB plugin_sources
         "${algorithm_source_dir}/*_plugin.cpp"
+        "${algorithm_source_dir}/*.cu"
       )
     endif()
   endif()
+
+  set(plugin_sources_for_build ${plugin_sources})
+  set(plugin_has_cuda_source OFF)
+  foreach(plugin_source IN LISTS plugin_sources)
+    if(plugin_source MATCHES "\\.cu$")
+      set(plugin_has_cuda_source ON)
+    endif()
+  endforeach()
+  if(plugin_has_cuda_source AND NOT BUILD_ALGORITHM_CUDA_SAMPLE_PLUGIN_PACKAGES)
+    list(FILTER plugin_sources_for_build EXCLUDE REGEX "\\.cu$")
+  endif()
+  list(SORT plugin_sources_for_build)
+  list(LENGTH plugin_sources_for_build plugin_source_count)
+
+  file(MAKE_DIRECTORY "${algorithm_output_dir}")
 
   list(SORT algorithm_shader_sources)
   if(NOT algorithm_shader_sources)
@@ -223,37 +235,36 @@ function(register_algorithm_package package_manifest)
   set(shader_target "${algorithm_target_name}_shaders")
   add_custom_target("${shader_target}" DEPENDS ${algorithm_shader_outputs})
 
-  list(SORT plugin_sources)
-  list(LENGTH plugin_sources plugin_source_count)
-  if(plugin_source_count GREATER 1)
-    message(FATAL_ERROR "Multiple plugin sources found in ${algorithm_source_dir}. Keep one plugin source per algorithm folder.")
-  endif()
-
-  if(plugin_source_count EQUAL 1)
-    list(GET plugin_sources 0 plugin_source)
-    if(BUILD_ALGORITHM_SAMPLE_PLUGIN)
-      add_library("${algorithm_target_name}_plugin" MODULE "${plugin_source}")
-      target_include_directories("${algorithm_target_name}_plugin" PUBLIC
-        "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}"
-        ${PROJECT_INCLUDE_DIRS}
-      )
+  if(plugin_source_count GREATER 0 AND BUILD_ALGORITHM_SAMPLE_PLUGIN)
+    add_library("${algorithm_target_name}_plugin" MODULE ${plugin_sources_for_build})
+    target_include_directories("${algorithm_target_name}_plugin" PUBLIC
+      "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}"
+      ${PROJECT_INCLUDE_DIRS}
+    )
+    target_compile_definitions("${algorithm_target_name}_plugin" PRIVATE
+      ALGORITHM_LIBRARY_PLUGIN_BUILD=1
+      ALGORITHM_LIBRARY_RESOURCE_ROOT="${ALGORITHM_LIBRARY_SOURCE_ROOT}"
+    )
+    if(plugin_has_cuda_source AND BUILD_ALGORITHM_CUDA_SAMPLE_PLUGIN_PACKAGES)
       target_compile_definitions("${algorithm_target_name}_plugin" PRIVATE
-        ALGORITHM_LIBRARY_PLUGIN_BUILD=1
-        ALGORITHM_LIBRARY_RESOURCE_ROOT="${ALGORITHM_LIBRARY_SOURCE_ROOT}"
+        ALGORITHM_LIBRARY_PLUGIN_HAS_CUDA=1
       )
-      target_link_libraries("${algorithm_target_name}_plugin" PRIVATE
-        algorithm_plugin_support_mirror
-      )
-      set_target_properties("${algorithm_target_name}_plugin" PROPERTIES
-        PREFIX ""
-        OUTPUT_NAME "${algorithm_name}"
-        RUNTIME_OUTPUT_DIRECTORY "${algorithm_output_dir}"
-        LIBRARY_OUTPUT_DIRECTORY "${algorithm_output_dir}"
-        ARCHIVE_OUTPUT_DIRECTORY "${algorithm_output_dir}"
-        PDB_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
-      )
-      add_dependencies("${algorithm_target_name}_plugin" "${shader_target}")
     endif()
+    target_link_libraries("${algorithm_target_name}_plugin" PRIVATE
+      algorithm_plugin_support_mirror
+    )
+    if(plugin_has_cuda_source AND BUILD_ALGORITHM_CUDA_SAMPLE_PLUGIN_PACKAGES)
+      target_link_libraries("${algorithm_target_name}_plugin" PRIVATE CUDA::cudart)
+    endif()
+    set_target_properties("${algorithm_target_name}_plugin" PROPERTIES
+      PREFIX ""
+      OUTPUT_NAME "${algorithm_name}"
+      RUNTIME_OUTPUT_DIRECTORY "${algorithm_output_dir}"
+      LIBRARY_OUTPUT_DIRECTORY "${algorithm_output_dir}"
+      ARCHIVE_OUTPUT_DIRECTORY "${algorithm_output_dir}"
+      PDB_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+    )
+    add_dependencies("${algorithm_target_name}_plugin" "${shader_target}")
   endif()
 
   set(package_target "${algorithm_target_name}_package")

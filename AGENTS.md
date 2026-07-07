@@ -10,6 +10,7 @@
 
 - Do not modify `CMakeLists.txt` unless the user has explicitly and personally approved that change in this turn.
 - Keep the call chain aligned with `sdk -> agent_management -> agent -> algorithm_management -> runtime_systems`.
+- Redirect all test outputs and transient test artifacts into `testData/`; do not write test files at the repository root.
 
 ## Coordinate Convention
 

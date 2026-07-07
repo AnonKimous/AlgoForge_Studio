@@ -1,154 +1,154 @@
-# DevTask: Agent / Algorithm / RuntimeSystem 边界收口
+# DevTask: Agent / Algorithm / RuntimeSystem 杈圭晫鏀跺彛
 
-## 文档状态
+## 鏂囨。鐘舵€?
 
-- 本文档用于替代旧 `pipelineDevDoc.txt` 与旧 `devtask.md`。
-- 如果历史描述与本文档冲突，以本文档为准。
-- 本轮先确认文档口径，确认后再按本文档推进代码修改。
+- 鏈枃妗ｇ敤浜庢浛浠ｆ棫 `pipelineDevDoc.txt` 涓庢棫 `devtask.md`銆?
+- 濡傛灉鍘嗗彶鎻忚堪涓庢湰鏂囨。鍐茬獊锛屼互鏈枃妗ｄ负鍑嗐€?
+- 鏈疆鍏堢‘璁ゆ枃妗ｅ彛寰勶紝纭鍚庡啀鎸夋湰鏂囨。鎺ㄨ繘浠ｇ爜淇敼銆?
 
-## 背景
+## 鑳屾櫙
 
-当前主干任务聚焦于 pipeline / scheduler / agent / runtime_systems 的分层收口。
+褰撳墠涓诲共浠诲姟鑱氱劍浜?pipeline / scheduler / agent / runtime_systems 鐨勫垎灞傛敹鍙ｃ€?
 
-与 Python 工具侧相关的算法产物生成、打包、装载规则，不并入这份主干 `devtask`。
+涓?Python 宸ュ叿渚х浉鍏崇殑绠楁硶浜х墿鐢熸垚銆佹墦鍖呫€佽杞借鍒欙紝涓嶅苟鍏ヨ繖浠戒富骞?`devtask`銆?
 
-## 总目标
+## 鎬荤洰鏍?
 
-### 目标：收紧运行时边界
+### 鐩爣锛氭敹绱ц繍琛屾椂杈圭晫
 
-1. `runtime_systems` 不再承接任何 algorithm 专属概念、类型、owner 语义和调度语义。
-2. `Agent` 对算法的了解收口到最小边界：
-   - 它知道自己持有 `AlgorithmObject`
-   - 它知道这是普通算法还是 pipeline 算法
-   - 如果是 pipeline，它只知道拓扑是 `linear` 或 `circular`
-   - 除此之外，`Agent` 不主动拆解算法内部 stage / lane / bridge / intervention / reflector 细节
-3. `AlgorithmObject` 持有 pipeline 相关信息是允许的；问题不在 `obj` 持有，而在 `Agent` 不应自己动手拆 `obj` 内部结构并驱动细粒度执行。
-4. pipeline 的内部推进、顺序、lane、stage runtime 仍属于 `algorithm_management` / `AlgorithmScheduler` 语义，不下沉到 `runtime_systems`。
+1. `runtime_systems` 涓嶅啀鎵挎帴浠讳綍 algorithm 涓撳睘姒傚康銆佺被鍨嬨€乷wner 璇箟鍜岃皟搴﹁涔夈€?
+2. `Agent` 瀵圭畻娉曠殑浜嗚В鏀跺彛鍒版渶灏忚竟鐣岋細
+   - 瀹冪煡閬撹嚜宸辨寔鏈?`AlgorithmObject`
+   - 瀹冪煡閬撹繖鏄櫘閫氱畻娉曡繕鏄?pipeline 绠楁硶
+   - 濡傛灉鏄?pipeline锛屽畠鍙煡閬撴嫇鎵戞槸 `linear` 鎴?`circular`
+   - 闄ゆ涔嬪锛宍Agent` 涓嶄富鍔ㄦ媶瑙ｇ畻娉曞唴閮?stage / lane / bridge / intervention / reflector 缁嗚妭
+3. `AlgorithmObject` 鎸佹湁 pipeline 鐩稿叧淇℃伅鏄厑璁哥殑锛涢棶棰樹笉鍦?`obj` 鎸佹湁锛岃€屽湪 `Agent` 涓嶅簲鑷繁鍔ㄦ墜鎷?`obj` 鍐呴儴缁撴瀯骞堕┍鍔ㄧ粏绮掑害鎵ц銆?
+4. pipeline 鐨勫唴閮ㄦ帹杩涖€侀『搴忋€乴ane銆乻tage runtime 浠嶅睘浜?`algorithm_management` / `AlgorithmScheduler` 璇箟锛屼笉涓嬫矇鍒?`runtime_systems`銆?
 
-## 本轮实施范围
+## 鏈疆瀹炴柦鑼冨洿
 
-### P0：先做边界收口
+### P0锛氬厛鍋氳竟鐣屾敹鍙?
 
-1. 继续把 `runtime_systems` 内与 algorithm 直接耦合的内容拔掉。
-2. 检查并削减 `Agent` 对 pipeline 内部执行细节的直接介入。
-3. 保持调用链仍为：
+1. 缁х画鎶?`runtime_systems` 鍐呬笌 algorithm 鐩存帴鑰﹀悎鐨勫唴瀹规嫈鎺夈€?
+2. 妫€鏌ュ苟鍓婂噺 `Agent` 瀵?pipeline 鍐呴儴鎵ц缁嗚妭鐨勭洿鎺ヤ粙鍏ャ€?
+3. 淇濇寔璋冪敤閾句粛涓猴細
    `sdk -> agent_management -> agent -> algorithm_management -> runtime_systems`
-4. 不允许静默失败；状态不一致直接报错或断言。
+4. 涓嶅厑璁搁潤榛樺け璐ワ紱鐘舵€佷笉涓€鑷寸洿鎺ユ姤閿欐垨鏂█銆?
 
-### P1：整理调试能力与正式运行能力的边界
+### P1锛氭暣鐞嗚皟璇曡兘鍔涗笌姝ｅ紡杩愯鑳藉姏鐨勮竟鐣?
 
-1. `intervention`、`reflector`、`result render` 属于开发/调试语义，不是正常运行态语义。
-2. 在真实运行算法中，默认不要求存在 `intervention` / `reflector`。
-3. `Agent` 不应该把底层介入器当成自己的信号控制器；算法信号应由算法自身负责。
-4. `result render` 只能留在 `debugTool` 语境下，不能进入 release 运行时。
-5. `build release` 时：
-   - 必须砍掉渲染器
-   - `intervention` / `reflector` 要么被开发者提前收编进算法本体，要么直接被剔除
-   - 这轮实现只负责“砍”，不负责自动收编
-6. `build debug` 时：
-   - 不丢任何调试构件
-   - 需要明确说明：带完整调试构件的算法只允许在调试器路径下运行
+1. `intervention`銆乣reflector`銆乣result render` 灞炰簬寮€鍙?璋冭瘯璇箟锛屼笉鏄甯歌繍琛屾€佽涔夈€?
+2. 鍦ㄧ湡瀹炶繍琛岀畻娉曚腑锛岄粯璁や笉瑕佹眰瀛樺湪 `intervention` / `reflector`銆?
+3. `Agent` 涓嶅簲璇ユ妸搴曞眰浠嬪叆鍣ㄥ綋鎴愯嚜宸辩殑淇″彿鎺у埗鍣紱绠楁硶淇″彿搴旂敱绠楁硶鑷韩璐熻矗銆?
+4. `result render` 鍙兘鐣欏湪 `debugTool` 璇涓嬶紝涓嶈兘杩涘叆 release 杩愯鏃躲€?
+5. `build release` 鏃讹細
+   - 蹇呴』鐮嶆帀娓叉煋鍣?
+   - `intervention` / `reflector` 瑕佷箞琚紑鍙戣€呮彁鍓嶆敹缂栬繘绠楁硶鏈綋锛岃涔堢洿鎺ヨ鍓旈櫎
+   - 杩欒疆瀹炵幇鍙礋璐ｂ€滅爫鈥濓紝涓嶈礋璐ｈ嚜鍔ㄦ敹缂?
+6. `build debug` 鏃讹細
+   - 涓嶄涪浠讳綍璋冭瘯鏋勪欢
+   - 闇€瑕佹槑纭鏄庯細甯﹀畬鏁磋皟璇曟瀯浠剁殑绠楁硶鍙厑璁稿湪璋冭瘯鍣ㄨ矾寰勪笅杩愯
 
-### P2：统计能力改成显式启用
+### P2锛氱粺璁¤兘鍔涙敼鎴愭樉寮忓惎鐢?
 
-1. `Agent` 对算法耗时数据只保留一个上层接口。
-2. 该接口的职责是“要求输出一份日志”。
-3. 只有启用该接口时，底层才开启统计逻辑。
-4. 不再把逐 stage / 普通算法耗时统计默认塞进核心热路径。
+1. `Agent` 瀵圭畻娉曡€楁椂鏁版嵁鍙繚鐣欎竴涓笂灞傛帴鍙ｃ€?
+2. 璇ユ帴鍙ｇ殑鑱岃矗鏄€滆姹傝緭鍑轰竴浠芥棩蹇椻€濄€?
+3. 鍙湁鍚敤璇ユ帴鍙ｆ椂锛屽簳灞傛墠寮€鍚粺璁￠€昏緫銆?
+4. 涓嶅啀鎶婇€?stage / 鏅€氱畻娉曡€楁椂缁熻榛樿濉炶繘鏍稿績鐑矾寰勩€?
 
-## 本轮明确不做的事
+## 鏈疆鏄庣‘涓嶅仛鐨勪簨
 
-1. 不在这一轮把所有 stage 全量抽象成 node。
-2. 不在这一轮把 `AlgorithmScheduler` 改成按 node 哈希表完全持有。
-3. 不在这一轮改掉现有 pipeline 的“两段提交”语义。
-4. 不在这一轮改算法底层 `vn/an` 容器规则。
-5. 不在这一轮修改 `CMakeLists.txt`。
-6. 不在这一轮把 Python 工具侧的产物生成、打包、装载需求并入主干整改范围。
+1. 涓嶅湪杩欎竴杞妸鎵€鏈?stage 鍏ㄩ噺鎶借薄鎴?node銆?
+2. 涓嶅湪杩欎竴杞妸 `AlgorithmScheduler` 鏀规垚鎸?node 鍝堝笇琛ㄥ畬鍏ㄦ寔鏈夈€?
+3. 涓嶅湪杩欎竴杞敼鎺夌幇鏈?pipeline 鐨勨€滀袱娈垫彁浜も€濊涔夈€?
+4. 涓嶅湪杩欎竴杞敼绠楁硶搴曞眰 `vn/an` 瀹瑰櫒瑙勫垯銆?
+5. 涓嶅湪杩欎竴杞慨鏀?`CMakeLists.txt`銆?
+6. 涓嶅湪杩欎竴杞妸 Python 宸ュ叿渚х殑浜х墿鐢熸垚銆佹墦鍖呫€佽杞介渶姹傚苟鍏ヤ富骞叉暣鏀硅寖鍥淬€?
 
-## 当前已确认的架构判断
+## 褰撳墠宸茬‘璁ょ殑鏋舵瀯鍒ゆ柇
 
-1. `runtime_systems` 不应该理解：
+1. `runtime_systems` 涓嶅簲璇ョ悊瑙ｏ細
    - `AlgorithmObject`
    - pipeline
    - stage
    - lane
    - runtime transfer map
-   - algorithm owner / 调度语义
-2. `AlgorithmScheduler` 当前继续作为 pipeline 语义的主要承接层，是可接受的过渡状态。
-3. `lane` 语义本身是合理的，但调度顺序不应该由 `Agent` 自己处理。
-4. `Agent` 应把“内部那一大坨”整体视为算法，不应把它拆成“介入器 + 反射器 + 算法本体 + 介入渲染”的多个运行时控制对象。
-5. `AlgorithmObject` 持有把管线推送给调度中心所需的信息是正常的，暂时不作为本轮问题源头。
+   - algorithm owner / 璋冨害璇箟
+2. `AlgorithmScheduler` 褰撳墠缁х画浣滀负 pipeline 璇箟鐨勪富瑕佹壙鎺ュ眰锛屾槸鍙帴鍙楃殑杩囨浮鐘舵€併€?
+3. `lane` 璇箟鏈韩鏄悎鐞嗙殑锛屼絾璋冨害椤哄簭涓嶅簲璇ョ敱 `Agent` 鑷繁澶勭悊銆?
+4. `Agent` 搴旀妸鈥滃唴閮ㄩ偅涓€澶у潹鈥濇暣浣撹涓虹畻娉曪紝涓嶅簲鎶婂畠鎷嗘垚鈥滀粙鍏ュ櫒 + 鍙嶅皠鍣?+ 绠楁硶鏈綋 + 浠嬪叆娓叉煋鈥濈殑澶氫釜杩愯鏃舵帶鍒跺璞°€?
+5. `AlgorithmObject` 鎸佹湁鎶婄绾挎帹閫佺粰璋冨害涓績鎵€闇€鐨勪俊鎭槸姝ｅ父鐨勶紝鏆傛椂涓嶄綔涓烘湰杞棶棰樻簮澶淬€?
 
-## 临时自定义参数规则
+## 涓存椂鑷畾涔夊弬鏁拌鍒?
 
-### 1. 三类数据分层
+### 1. 涓夌被鏁版嵁鍒嗗眰
 
-1. stage 内部 scratch
-   - 只在当前 stage 执行过程中临时存在
-   - 不跨 stage
-2. stage 间临时参数
-   - 当前 stage 产出，下一 stage 立即消费
-   - 只用于少量碎数据传递
-   - 不视为 lane 长期主状态
-3. lane 长期状态
-   - 必须进入 `standard container`
-   - 不允许伪装成临时参数通道
+1. stage 鍐呴儴 scratch
+   - 鍙湪褰撳墠 stage 鎵ц杩囩▼涓复鏃跺瓨鍦?
+   - 涓嶈法 stage
+2. stage 闂翠复鏃跺弬鏁?
+   - 褰撳墠 stage 浜у嚭锛屼笅涓€ stage 绔嬪嵆娑堣垂
+   - 鍙敤浜庡皯閲忕鏁版嵁浼犻€?
+   - 涓嶈涓?lane 闀挎湡涓荤姸鎬?
+3. lane 闀挎湡鐘舵€?
+   - 蹇呴』杩涘叆 `standard container`
+   - 涓嶅厑璁镐吉瑁呮垚涓存椂鍙傛暟閫氶亾
 
-### 2. 允许的跨 stage 传递方式
+### 2. 鍏佽鐨勮法 stage 浼犻€掓柟寮?
 
-1. 额外 `v` 槽位
-   - 通过 `extra_variable_count` / `extra_variable_offset` 一类映射信息描述
-   - CPU 路径走共享 `interStageBuffer`
-   - GPU 路径走共享 `stageBuffer`
-2. 同名同结构的 custom container
-   - 仅允许 `custom -> custom`
-   - 名称必须相同
-   - 结构必须完全一致
+1. 棰濆 `v` 妲戒綅
+   - 閫氳繃 `extra_variable_count` / `extra_variable_offset` 涓€绫绘槧灏勪俊鎭弿杩?
+   - JOBS 璺緞璧板叡浜?`interStageBuffer`
+   - VK 璺緞璧板叡浜?`stageBuffer`
+2. 鍚屽悕鍚岀粨鏋勭殑 custom container
+   - 浠呭厑璁?`custom -> custom`
+   - 鍚嶇О蹇呴』鐩稿悓
+   - 缁撴瀯蹇呴』瀹屽叏涓€鑷?
 
-### 3. 明确禁止的情况
+### 3. 鏄庣‘绂佹鐨勬儏鍐?
 
-1. `standard slot <-> custom container` 混传
-2. custom container 跨 stage 改名
-3. 共享前缀之外新增额外标准 `a`
-4. 把 `interStageBuffer` 当成完整 stage 状态副本
+1. `standard slot <-> custom container` 娣蜂紶
+2. custom container 璺?stage 鏀瑰悕
+3. 鍏变韩鍓嶇紑涔嬪鏂板棰濆鏍囧噯 `a`
+4. 鎶?`interStageBuffer` 褰撴垚瀹屾暣 stage 鐘舵€佸壇鏈?
 
-### 4. 选择规则
+### 4. 閫夋嫨瑙勫垯
 
-1. 只在当前 stage 内部使用的数据：放 scratch
-2. 只需传给下一 stage 的少量临时标量：优先走额外 `v` + offset
-3. 必须以容器形状跨 stage 传递的数据：只能走同名同结构 custom container
-4. 需要跨多个 tick 的数据：升格为 `standard container`
+1. 鍙湪褰撳墠 stage 鍐呴儴浣跨敤鐨勬暟鎹細鏀?scratch
+2. 鍙渶浼犵粰涓嬩竴 stage 鐨勫皯閲忎复鏃舵爣閲忥細浼樺厛璧伴澶?`v` + offset
+3. 蹇呴』浠ュ鍣ㄥ舰鐘惰法 stage 浼犻€掔殑鏁版嵁锛氬彧鑳借蛋鍚屽悕鍚岀粨鏋?custom container
+4. 闇€瑕佽法澶氫釜 tick 鐨勬暟鎹細鍗囨牸涓?`standard container`
 
-## 与现状的主要冲突
+## 涓庣幇鐘剁殑涓昏鍐茬獊
 
-### 大冲突
+### 澶у啿绐?
 
-1. `Agent` 里仍残留大量 pipeline 内部逻辑，包括 stage 顺序、lane 推进、bridge debug、replay、逐 stage timing 等。
-2. 这和“`Agent` 只把内部视为算法整体”的目标存在正面冲突。
+1. `Agent` 閲屼粛娈嬬暀澶ч噺 pipeline 鍐呴儴閫昏緫锛屽寘鎷?stage 椤哄簭銆乴ane 鎺ㄨ繘銆乥ridge debug銆乺eplay銆侀€?stage timing 绛夈€?
+2. 杩欏拰鈥渀Agent` 鍙妸鍐呴儴瑙嗕负绠楁硶鏁翠綋鈥濈殑鐩爣瀛樺湪姝ｉ潰鍐茬獊銆?
 
-### 小冲突
+### 灏忓啿绐?
 
-1. `AlgorithmObject` 内仍带有较多 pipeline 元数据。
-2. 这部分当前视为可接受历史包袱，不作为第一轮整改重点。
+1. `AlgorithmObject` 鍐呬粛甯︽湁杈冨 pipeline 鍏冩暟鎹€?
+2. 杩欓儴鍒嗗綋鍓嶈涓哄彲鎺ュ彈鍘嗗彶鍖呰⒈锛屼笉浣滀负绗竴杞暣鏀归噸鐐广€?
 
-### 延期项
+### 寤舵湡椤?
 
-1. stage/node 化改造冲击面太大。
-2. 如果未来重启这件事，要在 owner、lookup key、lane 模型、debug 视图统一后再做。
-3. 这一轮先不把它混入实施范围。
+1. stage/node 鍖栨敼閫犲啿鍑婚潰澶ぇ銆?
+2. 濡傛灉鏈潵閲嶅惎杩欎欢浜嬶紝瑕佸湪 owner銆乴ookup key銆乴ane 妯″瀷銆乨ebug 瑙嗗浘缁熶竴鍚庡啀鍋氥€?
+3. 杩欎竴杞厛涓嶆妸瀹冩贩鍏ュ疄鏂借寖鍥淬€?
 
-## 验收口径
+## 楠屾敹鍙ｅ緞
 
-### 边界收口验收
+### 杈圭晫鏀跺彛楠屾敹
 
-1. `runtime_systems` 的公开接口与实现中，不再出现 algorithm 专属 owner/调度语义。
-2. `Agent` 不再继续扩大对 pipeline 内部结构的直接控制。
-3. 耗时统计改成显式启用，而不是默认常驻。
-4. 调试构件和正式运行构件有明确边界。
+1. `runtime_systems` 鐨勫叕寮€鎺ュ彛涓庡疄鐜颁腑锛屼笉鍐嶅嚭鐜?algorithm 涓撳睘 owner/璋冨害璇箟銆?
+2. `Agent` 涓嶅啀缁х画鎵╁ぇ瀵?pipeline 鍐呴儴缁撴瀯鐨勭洿鎺ユ帶鍒躲€?
+3. 鑰楁椂缁熻鏀规垚鏄惧紡鍚敤锛岃€屼笉鏄粯璁ゅ父椹汇€?
+4. 璋冭瘯鏋勪欢鍜屾寮忚繍琛屾瀯浠舵湁鏄庣‘杈圭晫銆?
 
-## 执行顺序建议
+## 鎵ц椤哄簭寤鸿
 
-1. 先按本文档继续做 `runtime_systems` 去 algorithm 耦合。
-2. 再收 `Agent` 对 pipeline 内部执行细节的直接介入。
-3. 再把统计能力改成显式启用。
-4. 再整理 debug / release 下 intervention / reflector / render 的边界。
+1. 鍏堟寜鏈枃妗ｇ户缁仛 `runtime_systems` 鍘?algorithm 鑰﹀悎銆?
+2. 鍐嶆敹 `Agent` 瀵?pipeline 鍐呴儴鎵ц缁嗚妭鐨勭洿鎺ヤ粙鍏ャ€?
+3. 鍐嶆妸缁熻鑳藉姏鏀规垚鏄惧紡鍚敤銆?
+4. 鍐嶆暣鐞?debug / release 涓?intervention / reflector / render 鐨勮竟鐣屻€?

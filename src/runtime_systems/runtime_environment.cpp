@@ -8,6 +8,7 @@
 #include "runtime_systems/window/sdl_window.h"
 
 #include <cassert>
+#include <iostream>
 #include <string>
 #include <utility>
 
@@ -16,7 +17,7 @@ namespace runtime_systems {
 namespace {
 
 RuntimeShutdownCallback g_runtime_shutdown_callback = nullptr;
-RuntimeGpuCacheClearCallback g_runtime_gpu_cache_clear_callback = nullptr;
+RuntimeVkCacheClearCallback g_runtime_vk_cache_clear_callback = nullptr;
 
 }  // namespace
 
@@ -24,13 +25,13 @@ void SetRuntimeShutdownCallback(RuntimeShutdownCallback callback) {
   g_runtime_shutdown_callback = callback;
 }
 
-void SetRuntimeGpuCacheClearCallback(RuntimeGpuCacheClearCallback callback) {
-  g_runtime_gpu_cache_clear_callback = callback;
+void SetRuntimeVkCacheClearCallback(RuntimeVkCacheClearCallback callback) {
+  g_runtime_vk_cache_clear_callback = callback;
 }
 
-void InvokeRuntimeGpuCacheClearCallback() {
-  if (g_runtime_gpu_cache_clear_callback) {
-    g_runtime_gpu_cache_clear_callback();
+void InvokeRuntimeVkCacheClearCallback() {
+  if (g_runtime_vk_cache_clear_callback) {
+    g_runtime_vk_cache_clear_callback();
   }
 }
 
@@ -103,12 +104,15 @@ void RuntimeEnvironment::SetDrawCallback(DrawCallback callback) {
 
 void RuntimeEnvironment::SetRenderPreviewRequest(RenderPreviewRequest request) {
   if (request.valid) {
+    std::cerr << "Render preview request is missing a stage name.\n";
     assert(!request.stage_name.empty() && "Render preview request is missing a stage name.");
+    std::cerr << "Render preview request is missing storage buffers.\n";
     assert(!request.storage_buffers.empty() && "Render preview request is missing storage buffers.");
   }
   if (imgui_runtime_) {
     imgui_runtime_->SetRenderPreviewRequest(std::move(request));
   } else {
+    std::cerr << "A valid render preview request arrived before the runtime was initialized.\n";
     assert(!request.valid && "A valid render preview request arrived before the runtime was initialized.");
   }
 }
@@ -119,9 +123,9 @@ void RuntimeEnvironment::SetRenderPreviewExtent(ImVec2 extent) {
   }
 }
 
-void RuntimeEnvironment::ClearGpuRuntimeCaches() {
+void RuntimeEnvironment::ClearVkRuntimeCaches() {
   if (imgui_runtime_) {
-    imgui_runtime_->ClearGpuRuntimeCaches();
+    imgui_runtime_->ClearVkRuntimeCaches();
   }
 }
 

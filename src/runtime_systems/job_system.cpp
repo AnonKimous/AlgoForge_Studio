@@ -11,6 +11,7 @@
 #include <future>
 #include <functional>
 #include <limits>
+#include <iostream>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -25,12 +26,18 @@ namespace runtime_systems {
 namespace {
 
 #ifndef NDEBUG
-#define DEBUG_TOOL_ASSERT(condition, message) assert((condition) && (message))
+#define DEBUG_TOOL_ASSERT(condition, message) do { \
+  if (!(condition)) { \
+    std::cerr << (message) << '\n'; \
+    assert((condition) && (message)); \
+  } \
+} while (false)
 #else
 #define DEBUG_TOOL_ASSERT(condition, message) ((void)0)
 #endif
 
 [[noreturn]] void _AbortJobExecution(std::string message) {
+  std::cerr << message << '\n';
   assert(false && "Job execution failed");
   throw std::runtime_error(std::move(message));
 }
@@ -48,30 +55,30 @@ struct RuntimeJobTask {
 };
 
 
-struct CpuWorkerQueues {
+struct JobsWorkerQueues {
   std::deque<RuntimeJobTask> high;
   std::deque<RuntimeJobTask> normal;
   std::deque<RuntimeJobTask> low;
 };
 
-thread_local int g_current_cpu_worker_index = -1;
+thread_local int g_current_jobs_worker_index = -1;
 
-class CpuJobSystem {
+class JobsJobSystem {
  public:
-  static CpuJobSystem& Instance() {
-    static CpuJobSystem instance{};
+  static JobsJobSystem& Instance() {
+    static JobsJobSystem instance{};
     return instance;
   }
 
   bool Init(size_t worker_count) {
     if (worker_count == 0u) {
-      _AbortJobExecution("CPU job system requires at least one worker thread.");
+      _AbortJobExecution("JOBS job system requires at least one worker thread.");
     }
 
     std::lock_guard<std::mutex> lock(mutex_);
     if (initialized_) {
       if (worker_count_ != worker_count) {
-        _AbortJobExecution("CPU job system was already initialized with a different worker count.");
+        _AbortJobExecution("JOBS job system was already initialized with a different worker count.");
       }
       return true;
     }
@@ -147,9 +154,9 @@ class CpuJobSystem {
       std::lock_guard<std::mutex> lock(mutex_);
       if (!initialized_) {
         if (out_error_message) {
-          *out_error_message = "CPU job system is not initialized.";
+          *out_error_message = "JOBS job system is not initialized.";
         }
-        _AbortJobExecution("CPU job system is not initialized.");
+        _AbortJobExecution("JOBS job system is not initialized.");
       }
 
       const size_t target_worker_index = _SelectWorkerUnlocked(priority);
@@ -163,9 +170,9 @@ class CpuJobSystem {
 
     cv_.notify_all();
 
-    if (g_current_cpu_worker_index >= 0) {
+    if (g_current_jobs_worker_index >= 0) {
       while (future.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready) {
-        if (!_TryExecuteOneTask(static_cast<size_t>(g_current_cpu_worker_index))) {
+        if (!_TryExecuteOneTask(static_cast<size_t>(g_current_jobs_worker_index))) {
           std::this_thread::yield();
         }
       }
@@ -177,12 +184,12 @@ class CpuJobSystem {
     if (!completion->ok) {
       if (out_error_message) {
         *out_error_message = completion->error_message.empty()
-          ? "CPU job execution failed."
+          ? "JOBS job execution failed."
           : std::move(completion->error_message);
       } else {
         _AbortJobExecution(
           completion->error_message.empty()
-            ? "CPU job execution failed."
+            ? "JOBS job execution failed."
             : std::move(completion->error_message));
       }
       return false;
@@ -195,13 +202,13 @@ class CpuJobSystem {
   }
 
  private:
-  CpuJobSystem() = default;
-  ~CpuJobSystem() {
+  JobsJobSystem() = default;
+  ~JobsJobSystem() {
     Shutdown();
   }
 
   static std::deque<RuntimeJobTask>& _QueueForPriority(
-    CpuWorkerQueues& queues,
+    JobsWorkerQueues& queues,
     RuntimeJobPriority priority) {
     switch (priority) {
       case RuntimeJobPriority::High:
@@ -215,7 +222,7 @@ class CpuJobSystem {
   }
 
   static const std::deque<RuntimeJobTask>& _QueueForPriority(
-    const CpuWorkerQueues& queues,
+    const JobsWorkerQueues& queues,
     RuntimeJobPriority priority) {
     switch (priority) {
       case RuntimeJobPriority::High:
@@ -243,7 +250,7 @@ class CpuJobSystem {
   }
 
   bool _HasWorkUnlocked() const {
-    for (const CpuWorkerQueues& queues : queues_) {
+    for (const JobsWorkerQueues& queues : queues_) {
       if (!queues.high.empty() || !queues.normal.empty() || !queues.low.empty()) {
         return true;
       }
@@ -251,7 +258,7 @@ class CpuJobSystem {
     return false;
   }
 
-  size_t _QueueWeight(const CpuWorkerQueues& queues) const {
+  size_t _QueueWeight(const JobsWorkerQueues& queues) const {
     return queues.high.size() * 9u + queues.normal.size() * 3u + queues.low.size();
   }
 
@@ -281,7 +288,7 @@ class CpuJobSystem {
       return false;
     }
 
-    CpuWorkerQueues& queues = queues_[worker_index];
+    JobsWorkerQueues& queues = queues_[worker_index];
     if (!queues.high.empty()) {
       *out_task = std::move(queues.high.front());
       queues.high.pop_front();
@@ -309,7 +316,7 @@ class CpuJobSystem {
 
     for (size_t offset = 1u; offset < queues_.size(); ++offset) {
       const size_t victim_index = (thief_index + offset) % queues_.size();
-      CpuWorkerQueues& victim = queues_[victim_index];
+      JobsWorkerQueues& victim = queues_[victim_index];
       if (_StealFromQueue(victim.high, out_task)) {
         return true;
       }
@@ -359,7 +366,7 @@ class CpuJobSystem {
         task.body(*task.completion);
       } else if (task.completion) {
         task.completion->ok = false;
-        task.completion->error_message = "CPU job task body is missing.";
+        task.completion->error_message = "JOBS job task body is missing.";
       }
     } catch (const std::exception& ex) {
       if (task.completion) {
@@ -369,7 +376,7 @@ class CpuJobSystem {
     } catch (...) {
       if (task.completion) {
         task.completion->ok = false;
-        task.completion->error_message = "CPU job task failed with an unknown error.";
+        task.completion->error_message = "JOBS job task failed with an unknown error.";
       }
     }
 
@@ -380,7 +387,7 @@ class CpuJobSystem {
   }
 
   void _WorkerLoop(size_t worker_index) {
-    g_current_cpu_worker_index = static_cast<int>(worker_index);
+    g_current_jobs_worker_index = static_cast<int>(worker_index);
     while (true) {
       RuntimeJobTask task{};
       {
@@ -401,7 +408,7 @@ class CpuJobSystem {
           task.body(*task.completion);
         } else if (task.completion) {
           task.completion->ok = false;
-          task.completion->error_message = "CPU job task body is missing.";
+          task.completion->error_message = "JOBS job task body is missing.";
         }
       } catch (const std::exception& ex) {
         if (task.completion) {
@@ -411,7 +418,7 @@ class CpuJobSystem {
       } catch (...) {
         if (task.completion) {
           task.completion->ok = false;
-          task.completion->error_message = "CPU job task failed with an unknown error.";
+          task.completion->error_message = "JOBS job task failed with an unknown error.";
         }
       }
 
@@ -419,7 +426,7 @@ class CpuJobSystem {
         task.done->set_value();
       }
     }
-    g_current_cpu_worker_index = -1;
+    g_current_jobs_worker_index = -1;
   }
 
   mutable std::mutex mutex_{};
@@ -427,22 +434,22 @@ class CpuJobSystem {
   bool stop_requested_{false};
   bool initialized_{false};
   size_t worker_count_{0u};
-  std::vector<CpuWorkerQueues> queues_{};
+  std::vector<JobsWorkerQueues> queues_{};
   std::vector<std::thread> workers_{};
 };
 
 }  // namespace
 
 bool InitializeJobSystem(size_t worker_count) {
-  return CpuJobSystem::Instance().Init(worker_count);
+  return JobsJobSystem::Instance().Init(worker_count);
 }
 
 void ShutdownJobSystem() {
-  CpuJobSystem::Instance().Shutdown();
+  JobsJobSystem::Instance().Shutdown();
 }
 
 bool IsJobSystemInitialized() {
-  return CpuJobSystem::Instance().Initialized();
+  return JobsJobSystem::Instance().Initialized();
 }
 
 bool SubmitBlockingJob(
@@ -467,7 +474,7 @@ bool SubmitBlockingJob(
     completion.ok = true;
   };
 
-  return CpuJobSystem::Instance().SubmitBlocking(
+  return JobsJobSystem::Instance().SubmitBlocking(
     priority,
     std::move(wrapped_body),
     out_error_message);

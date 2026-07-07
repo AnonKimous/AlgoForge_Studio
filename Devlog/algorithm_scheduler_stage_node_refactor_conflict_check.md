@@ -1,169 +1,169 @@
-# AlgorithmScheduler Stage/Node 化改造冲突检查
+# AlgorithmScheduler Stage/Node 鍖栨敼閫犲啿绐佹鏌?
 
-## 1. 结论先行
+## 1. 缁撹鍏堣
 
-基于当前 checkout，这次“`AlgorithmScheduler` 不再持有整条 pipeline，而是按 stage / 单算法分别持有，并把 stage 视为 node 放进哈希表”的方向，和现有实现存在三类硬冲突：
+鍩轰簬褰撳墠 checkout锛岃繖娆♀€渀AlgorithmScheduler` 涓嶅啀鎸佹湁鏁存潯 pipeline锛岃€屾槸鎸?stage / 鍗曠畻娉曞垎鍒寔鏈夛紝骞舵妸 stage 瑙嗕负 node 鏀捐繘鍝堝笇琛ㄢ€濈殑鏂瑰悜锛屽拰鐜版湁瀹炵幇瀛樺湪涓夌被纭啿绐侊細
 
-- 当前文档把 `AlgorithmScheduler` 明确定义为 pipeline runtime owner，而不是 node registry owner。
-- 当前代码把 pipeline 当成一段连续的 stage 数组来挂载、查找、tick，不是松散 node 图。
-- 当前 bridge / transfer 协议是 `stage_name -> stage_container_set` 的 stage 名字路由，不是 node id 路由。
+- 褰撳墠鏂囨。鎶?`AlgorithmScheduler` 鏄庣‘瀹氫箟涓?pipeline runtime owner锛岃€屼笉鏄?node registry owner銆?
+- 褰撳墠浠ｇ爜鎶?pipeline 褰撴垚涓€娈佃繛缁殑 stage 鏁扮粍鏉ユ寕杞姐€佹煡鎵俱€乼ick锛屼笉鏄澗鏁?node 鍥俱€?
+- 褰撳墠 bridge / transfer 鍗忚鏄?`stage_name -> stage_container_set` 鐨?stage 鍚嶅瓧璺敱锛屼笉鏄?node id 璺敱銆?
 
-如果直接改存储结构而不先改 owner、索引和协议，最后会出现一层说“按 node 管”，另一层还在按“连续 pipeline 片段”跑的撕裂状态。
+濡傛灉鐩存帴鏀瑰瓨鍌ㄧ粨鏋勮€屼笉鍏堟敼 owner銆佺储寮曞拰鍗忚锛屾渶鍚庝細鍑虹幇涓€灞傝鈥滄寜 node 绠♀€濓紝鍙︿竴灞傝繕鍦ㄦ寜鈥滆繛缁?pipeline 鐗囨鈥濊窇鐨勬挄瑁傜姸鎬併€?
 
-## 2. 当前架构事实
+## 2. 褰撳墠鏋舵瀯浜嬪疄
 
-### 2.1 文档层目前默认 `AlgorithmScheduler` 持有整条 pipeline
+### 2.1 鏂囨。灞傜洰鍓嶉粯璁?`AlgorithmScheduler` 鎸佹湁鏁存潯 pipeline
 
-- [algorithm_scheduler_center.md](/D:/gptsandbox/Devlog/algorithm_scheduler_center.md:41) 第 41-42 行写明“流水线算法的运行态不能散落在 `Agent` 里，调度中心要保存对应的运行时状态”。
-- [algorithm_scheduler_center.md](/D:/gptsandbox/Devlog/algorithm_scheduler_center.md:77) 第 77-84 行写明调度中心持有“流水线定义、lane 列表、stage 状态、owner 归属、运行统计”。
-- [algorithm_scheduler_pipeline_model.md](/D:/gptsandbox/Devlog/algorithm_scheduler_pipeline_model.md:12) 第 12 行写明“流水线的调度、推进、统计、挂载和卸载，都由 `AlgorithmScheduler` 统一管理”。
-- [algorithm_scheduler_pipeline_model.md](/D:/gptsandbox/Devlog/algorithm_scheduler_pipeline_model.md:124) 第 124-132 行继续把“持有流水线 runtime、维护提交和 tick 关系、维护同步统计”定义成 `AlgorithmScheduler` 职责。
+- [algorithm_scheduler_center.md](/D:/gptsandbox/Devlog/algorithm_scheduler_center.md:41) 绗?41-42 琛屽啓鏄庘€滄祦姘寸嚎绠楁硶鐨勮繍琛屾€佷笉鑳芥暎钀藉湪 `Agent` 閲岋紝璋冨害涓績瑕佷繚瀛樺搴旂殑杩愯鏃剁姸鎬佲€濄€?
+- [algorithm_scheduler_center.md](/D:/gptsandbox/Devlog/algorithm_scheduler_center.md:77) 绗?77-84 琛屽啓鏄庤皟搴︿腑蹇冩寔鏈夆€滄祦姘寸嚎瀹氫箟銆乴ane 鍒楄〃銆乻tage 鐘舵€併€乷wner 褰掑睘銆佽繍琛岀粺璁♀€濄€?
+- [algorithm_scheduler_pipeline_model.md](/D:/gptsandbox/Devlog/algorithm_scheduler_pipeline_model.md:12) 绗?12 琛屽啓鏄庘€滄祦姘寸嚎鐨勮皟搴︺€佹帹杩涖€佺粺璁°€佹寕杞藉拰鍗歌浇锛岄兘鐢?`AlgorithmScheduler` 缁熶竴绠＄悊鈥濄€?
+- [algorithm_scheduler_pipeline_model.md](/D:/gptsandbox/Devlog/algorithm_scheduler_pipeline_model.md:124) 绗?124-132 琛岀户缁妸鈥滄寔鏈夋祦姘寸嚎 runtime銆佺淮鎶ゆ彁浜ゅ拰 tick 鍏崇郴銆佺淮鎶ゅ悓姝ョ粺璁♀€濆畾涔夋垚 `AlgorithmScheduler` 鑱岃矗銆?
 
-### 2.2 最新 `pipelineDevDoc` 已收口为“算法语义不上 runtime_systems”
+### 2.2 鏈€鏂?`pipelineDevDoc` 宸叉敹鍙ｄ负鈥滅畻娉曡涔変笉涓?runtime_systems鈥?
 
-- [devtask.md](/D:/gptsandbox/Devlog/devtask.md) 已明确要求：CPU pipeline 的算法语义、owner 和 runtime 状态留在 `agent` / `algorithm_management`，并补齐 stage 间临时自定义参数规则。
-- [devtask.md](/D:/gptsandbox/Devlog/devtask.md) 已明确说明 `runtime_systems` 不应理解 algorithm / pipeline / stage / lane / runtime transfer map。
-- [devtask.md](/D:/gptsandbox/Devlog/devtask.md) 已把分层重新收口为：`agent` 负责入口，`algorithm_management::AlgorithmScheduler` 负责 pipeline 注册与推进，`runtime_systems` 只保留下层执行原语。
-- [devtask.md](/D:/gptsandbox/Devlog/devtask.md) 已保留并统一了 stage 间临时自定义参数规则，把它们约束在 standard container / interStageBuffer / same-name custom container 这些通道里。
+- [devtask.md](/D:/gptsandbox/Devlog/devtask.md) 宸叉槑纭姹傦細JOBS pipeline 鐨勭畻娉曡涔夈€乷wner 鍜?runtime 鐘舵€佺暀鍦?`agent` / `algorithm_management`锛屽苟琛ラ綈 stage 闂翠复鏃惰嚜瀹氫箟鍙傛暟瑙勫垯銆?
+- [devtask.md](/D:/gptsandbox/Devlog/devtask.md) 宸叉槑纭鏄?`runtime_systems` 涓嶅簲鐞嗚В algorithm / pipeline / stage / lane / runtime transfer map銆?
+- [devtask.md](/D:/gptsandbox/Devlog/devtask.md) 宸叉妸鍒嗗眰閲嶆柊鏀跺彛涓猴細`agent` 璐熻矗鍏ュ彛锛宍algorithm_management::AlgorithmScheduler` 璐熻矗 pipeline 娉ㄥ唽涓庢帹杩涳紝`runtime_systems` 鍙繚鐣欎笅灞傛墽琛屽師璇€?
+- [devtask.md](/D:/gptsandbox/Devlog/devtask.md) 宸蹭繚鐣欏苟缁熶竴浜?stage 闂翠复鏃惰嚜瀹氫箟鍙傛暟瑙勫垯锛屾妸瀹冧滑绾︽潫鍦?standard container / interStageBuffer / same-name custom container 杩欎簺閫氶亾閲屻€?
 
-### 2.3 主干层级约束不允许随便跨层改 owner
+### 2.3 涓诲共灞傜骇绾︽潫涓嶅厑璁搁殢渚胯法灞傛敼 owner
 
-- [AGENTS.md](/D:/gptsandbox/AGENTS.md:12) 第 12 行要求调用链保持 `sdk -> agent_management -> agent -> algorithm_management -> runtime_systems`。
-- [src/README.md](/D:/gptsandbox/src/README.md:9) 第 9-12 行要求严格主干层只能依赖下一层公开接口。
-- [src/README.md](/D:/gptsandbox/src/README.md:22) 第 22-23、42、45-46 行要求 `algorithm_management/algorithm_manager.h` 和 `runtime_systems/runtime_systems.h` 分别是各层唯一公开入口。
+- [AGENTS.md](/D:/gptsandbox/AGENTS.md:12) 绗?12 琛岃姹傝皟鐢ㄩ摼淇濇寔 `sdk -> agent_management -> agent -> algorithm_management -> runtime_systems`銆?
+- [src/README.md](/D:/gptsandbox/src/README.md:9) 绗?9-12 琛岃姹備弗鏍间富骞插眰鍙兘渚濊禆涓嬩竴灞傚叕寮€鎺ュ彛銆?
+- [src/README.md](/D:/gptsandbox/src/README.md:22) 绗?22-23銆?2銆?5-46 琛岃姹?`algorithm_management/algorithm_manager.h` 鍜?`runtime_systems/runtime_systems.h` 鍒嗗埆鏄悇灞傚敮涓€鍏紑鍏ュ彛銆?
 
-## 3. 当前代码事实
+## 3. 褰撳墠浠ｇ爜浜嬪疄
 
-### 3.1 `AlgorithmScheduler` 现在就是“整条 pipeline runtime 持有者”
+### 3.1 `AlgorithmScheduler` 鐜板湪灏辨槸鈥滄暣鏉?pipeline runtime 鎸佹湁鑰呪€?
 
-- [src/algorithm_management/algorithm_manager.h](/D:/gptsandbox/src/algorithm_management/algorithm_manager.h:62) 到 [src/algorithm_management/algorithm_manager.h](/D:/gptsandbox/src/algorithm_management/algorithm_manager.h:108) 暴露的是 `RegisterPipeline`、`RegisterPipelineRuntime`、`TryGetPipelineRuntime`、`UpdatePipelineRuntime` 这套“整条 pipeline”接口。
-- [src/algorithm_management/algorithm_manager.h](/D:/gptsandbox/src/algorithm_management/algorithm_manager.h:116) 到 [src/algorithm_management/algorithm_manager.h](/D:/gptsandbox/src/algorithm_management/algorithm_manager.h:120) 的内部存储也是：
+- [src/algorithm_management/algorithm_manager.h](/D:/gptsandbox/src/algorithm_management/algorithm_manager.h:62) 鍒?[src/algorithm_management/algorithm_manager.h](/D:/gptsandbox/src/algorithm_management/algorithm_manager.h:108) 鏆撮湶鐨勬槸 `RegisterPipeline`銆乣RegisterPipelineRuntime`銆乣TryGetPipelineRuntime`銆乣UpdatePipelineRuntime` 杩欏鈥滄暣鏉?pipeline鈥濇帴鍙ｃ€?
+- [src/algorithm_management/algorithm_manager.h](/D:/gptsandbox/src/algorithm_management/algorithm_manager.h:116) 鍒?[src/algorithm_management/algorithm_manager.h](/D:/gptsandbox/src/algorithm_management/algorithm_manager.h:120) 鐨勫唴閮ㄥ瓨鍌ㄤ篃鏄細
   `pipeline_registrations_`
   `pipeline_runtime_states_`
   `pipeline_runtime_ref_counts_`
-- [src/algorithm_management/algorithm_abi.h](/D:/gptsandbox/src/algorithm_management/algorithm_abi.h:140) 到 [src/algorithm_management/algorithm_abi.h](/D:/gptsandbox/src/algorithm_management/algorithm_abi.h:192) 的 runtime 数据结构中心也是 `CpuPipelineRegistration`、`CpuPipelineLaneRuntimeState`、`CpuPipelineRuntimeState`，没有 node registry。
+- [src/algorithm_management/algorithm_abi.h](/D:/gptsandbox/src/algorithm_management/algorithm_abi.h:140) 鍒?[src/algorithm_management/algorithm_abi.h](/D:/gptsandbox/src/algorithm_management/algorithm_abi.h:192) 鐨?runtime 鏁版嵁缁撴瀯涓績涔熸槸 `JobsPipelineRegistration`銆乣JobsPipelineLaneRuntimeState`銆乣JobsPipelineRuntimeState`锛屾病鏈?node registry銆?
 
-### 3.2 `Agent` 现在仍把 pipeline 当成“连续 stage 段”
+### 3.2 `Agent` 鐜板湪浠嶆妸 pipeline 褰撴垚鈥滆繛缁?stage 娈碘€?
 
-- [src/agent/agent.cpp](/D:/gptsandbox/src/agent/agent.cpp:363) 到 [src/agent/agent.cpp](/D:/gptsandbox/src/agent/agent.cpp:392) 的 `_FindPipelineGroupRange` 通过 `pipeline_name + 连续 pipeline_stage_index` 来识别一整段 pipeline。
-- [src/agent/agent.cpp](/D:/gptsandbox/src/agent/agent.cpp:1628) 到 [src/agent/agent.cpp](/D:/gptsandbox/src/agent/agent.cpp:1734) 在挂载时，把每个 mounted `AlgorithmObject` 写入 `pipeline_name`、`pipeline_stage_index`、`pipeline_stage_count`，然后整条 pipeline 的 runtime 一次性注册进 scheduler。
-- [src/agent/agent.cpp](/D:/gptsandbox/src/agent/agent.cpp:1886) 到 [src/agent/agent.cpp](/D:/gptsandbox/src/agent/agent.cpp:2145) 的 tick 路径，先按 begin/end stage 区间取出一整组对象，再把它们作为一个 pipeline group 推进。
+- [src/agent/agent.cpp](/D:/gptsandbox/src/agent/agent.cpp:363) 鍒?[src/agent/agent.cpp](/D:/gptsandbox/src/agent/agent.cpp:392) 鐨?`_FindPipelineGroupRange` 閫氳繃 `pipeline_name + 杩炵画 pipeline_stage_index` 鏉ヨ瘑鍒竴鏁存 pipeline銆?
+- [src/agent/agent.cpp](/D:/gptsandbox/src/agent/agent.cpp:1628) 鍒?[src/agent/agent.cpp](/D:/gptsandbox/src/agent/agent.cpp:1734) 鍦ㄦ寕杞芥椂锛屾妸姣忎釜 mounted `AlgorithmObject` 鍐欏叆 `pipeline_name`銆乣pipeline_stage_index`銆乣pipeline_stage_count`锛岀劧鍚庢暣鏉?pipeline 鐨?runtime 涓€娆℃€ф敞鍐岃繘 scheduler銆?
+- [src/agent/agent.cpp](/D:/gptsandbox/src/agent/agent.cpp:1886) 鍒?[src/agent/agent.cpp](/D:/gptsandbox/src/agent/agent.cpp:2145) 鐨?tick 璺緞锛屽厛鎸?begin/end stage 鍖洪棿鍙栧嚭涓€鏁寸粍瀵硅薄锛屽啀鎶婂畠浠綔涓轰竴涓?pipeline group 鎺ㄨ繘銆?
 
-### 3.3 调度器内部 tick 仍按“整组 pipeline stage”执行
+### 3.3 璋冨害鍣ㄥ唴閮?tick 浠嶆寜鈥滄暣缁?pipeline stage鈥濇墽琛?
 
-- [src/algorithm_management/algorithm_manager.h](/D:/gptsandbox/src/algorithm_management/algorithm_manager.h:1503) 到 [src/algorithm_management/algorithm_manager.h](/D:/gptsandbox/src/algorithm_management/algorithm_manager.h:1540) 的 `TickMountedPipeline` 入参本身就是 `mounted_objects + begin_index + end_index`。
-- [src/algorithm_management/algorithm_manager.h](/D:/gptsandbox/src/algorithm_management/algorithm_manager.h:1701) 到 [src/algorithm_management/algorithm_manager.h](/D:/gptsandbox/src/algorithm_management/algorithm_manager.h:1724) 先构建整组 `stage_container_sets`，再计算可执行 stage 集合。
-- [src/algorithm_management/algorithm_manager.h](/D:/gptsandbox/src/algorithm_management/algorithm_manager.h:1878) 到 [src/algorithm_management/algorithm_manager.h](/D:/gptsandbox/src/algorithm_management/algorithm_manager.h:2135) 的执行流程仍是“本轮所有可执行 stage 做 ingress -> execute -> egress”，最后一次性提交整组 stage 状态。
+- [src/algorithm_management/algorithm_manager.h](/D:/gptsandbox/src/algorithm_management/algorithm_manager.h:1503) 鍒?[src/algorithm_management/algorithm_manager.h](/D:/gptsandbox/src/algorithm_management/algorithm_manager.h:1540) 鐨?`TickMountedPipeline` 鍏ュ弬鏈韩灏辨槸 `mounted_objects + begin_index + end_index`銆?
+- [src/algorithm_management/algorithm_manager.h](/D:/gptsandbox/src/algorithm_management/algorithm_manager.h:1701) 鍒?[src/algorithm_management/algorithm_manager.h](/D:/gptsandbox/src/algorithm_management/algorithm_manager.h:1724) 鍏堟瀯寤烘暣缁?`stage_container_sets`锛屽啀璁＄畻鍙墽琛?stage 闆嗗悎銆?
+- [src/algorithm_management/algorithm_manager.h](/D:/gptsandbox/src/algorithm_management/algorithm_manager.h:1878) 鍒?[src/algorithm_management/algorithm_manager.h](/D:/gptsandbox/src/algorithm_management/algorithm_manager.h:2135) 鐨勬墽琛屾祦绋嬩粛鏄€滄湰杞墍鏈夊彲鎵ц stage 鍋?ingress -> execute -> egress鈥濓紝鏈€鍚庝竴娆℃€ф彁浜ゆ暣缁?stage 鐘舵€併€?
 
-### 3.4 协议层还是 `stage_name -> container_set`，不是 `node_id -> runtime`
+### 3.4 鍗忚灞傝繕鏄?`stage_name -> container_set`锛屼笉鏄?`node_id -> runtime`
 
-- [src/algorithm_support/algorithm_protocol.h](/D:/gptsandbox/src/algorithm_support/algorithm_protocol.h:81) 到 [src/algorithm_support/algorithm_protocol.h](/D:/gptsandbox/src/algorithm_support/algorithm_protocol.h:127) 的 ingress/egress/debug API 都接受 `target_stage_name` / `source_stage_name` 和 `unordered_map<string, shared_ptr<AlgorithmContainerSet>> stage_container_sets`。
-- [src/algorithm_support/algorithm_package_decomposer.cpp](/D:/gptsandbox/src/algorithm_support/algorithm_package_decomposer.cpp:1270) 到 [src/algorithm_support/algorithm_package_decomposer.cpp](/D:/gptsandbox/src/algorithm_support/algorithm_package_decomposer.cpp:1276) 仍按 `target_stage_name` 查入边，并断言“不允许多个前驱”。
-- [src/algorithm_support/algorithm_package_decomposer.cpp](/D:/gptsandbox/src/algorithm_support/algorithm_package_decomposer.cpp:1326) 到 [src/algorithm_support/algorithm_package_decomposer.cpp](/D:/gptsandbox/src/algorithm_support/algorithm_package_decomposer.cpp:1356) 仍按 `source_stage_name` 查出边，并通过 `stage_container_sets.find(outgoing_edge->target_stage_name)` 找下一 stage。
+- [src/algorithm_catalog/algorithm_protocol.h](/D:/gptsandbox/src/algorithm_catalog/algorithm_protocol.h:81) 鍒?[src/algorithm_catalog/algorithm_protocol.h](/D:/gptsandbox/src/algorithm_catalog/algorithm_protocol.h:127) 鐨?ingress/egress/debug API 閮芥帴鍙?`target_stage_name` / `source_stage_name` 鍜?`unordered_map<string, shared_ptr<AlgorithmContainerSet>> stage_container_sets`銆?
+- [src/algorithm_catalog/algorithm_package_decomposer.cpp](/D:/gptsandbox/src/algorithm_catalog/algorithm_package_decomposer.cpp:1270) 鍒?[src/algorithm_catalog/algorithm_package_decomposer.cpp](/D:/gptsandbox/src/algorithm_catalog/algorithm_package_decomposer.cpp:1276) 浠嶆寜 `target_stage_name` 鏌ュ叆杈癸紝骞舵柇瑷€鈥滀笉鍏佽澶氫釜鍓嶉┍鈥濄€?
+- [src/algorithm_catalog/algorithm_package_decomposer.cpp](/D:/gptsandbox/src/algorithm_catalog/algorithm_package_decomposer.cpp:1326) 鍒?[src/algorithm_catalog/algorithm_package_decomposer.cpp](/D:/gptsandbox/src/algorithm_catalog/algorithm_package_decomposer.cpp:1356) 浠嶆寜 `source_stage_name` 鏌ュ嚭杈癸紝骞堕€氳繃 `stage_container_sets.find(outgoing_edge->target_stage_name)` 鎵句笅涓€ stage銆?
 
-## 4. 与这次 Stage/Node 化方向的直接冲突
+## 4. 涓庤繖娆?Stage/Node 鍖栨柟鍚戠殑鐩存帴鍐茬獊
 
-### 4.1 Owner 冲突
+### 4.1 Owner 鍐茬獊
 
-现在至少有两个 owner 说法：
+鐜板湪鑷冲皯鏈変袱涓?owner 璇存硶锛?
 
-- 文档 A：`AlgorithmScheduler` 持有整条 pipeline。
-- 文档 B：pipeline 语义留在 `agent` / `algorithm_management`，`runtime_systems` 不理解 algorithm。
-- 你的新方向：scheduler 不再持有整条 pipeline，而是分别持有 stage/node。
+- 鏂囨。 A锛歚AlgorithmScheduler` 鎸佹湁鏁存潯 pipeline銆?
+- 鏂囨。 B锛歱ipeline 璇箟鐣欏湪 `agent` / `algorithm_management`锛宍runtime_systems` 涓嶇悊瑙?algorithm銆?
+- 浣犵殑鏂版柟鍚戯細scheduler 涓嶅啀鎸佹湁鏁存潯 pipeline锛岃€屾槸鍒嗗埆鎸佹湁 stage/node銆?
 
-这里真正要定的是：在“算法语义不下沉到 `runtime_systems`”这个前提下，stage/node registry 最终落在 `agent` 兼容层，还是落在 `algorithm_management::AlgorithmScheduler`。
+杩欓噷鐪熸瑕佸畾鐨勬槸锛氬湪鈥滅畻娉曡涔変笉涓嬫矇鍒?`runtime_systems`鈥濊繖涓墠鎻愪笅锛宻tage/node registry 鏈€缁堣惤鍦?`agent` 鍏煎灞傦紝杩樻槸钀藉湪 `algorithm_management::AlgorithmScheduler`銆?
 
-- 方案 A：`algorithm_management::AlgorithmScheduler` 持有 node registry，`Agent` 保留兼容视图。
-- 方案 B：`Agent` 继续持有更多 pipeline/stage 视图，`AlgorithmScheduler` 只做部分注册/路由。
+- 鏂规 A锛歚algorithm_management::AlgorithmScheduler` 鎸佹湁 node registry锛宍Agent` 淇濈暀鍏煎瑙嗗浘銆?
+- 鏂规 B锛歚Agent` 缁х画鎸佹湁鏇村 pipeline/stage 瑙嗗浘锛宍AlgorithmScheduler` 鍙仛閮ㄥ垎娉ㄥ唽/璺敱銆?
 
-从现有分层和代码状态看，方案 A 更贴近 [devtask.md](/D:/gptsandbox/Devlog/devtask.md) 和 [src/README.md](/D:/gptsandbox/src/README.md:22)，也更利于把 pipeline 语义从 `Agent` 继续收口到 `algorithm_management`。
+浠庣幇鏈夊垎灞傚拰浠ｇ爜鐘舵€佺湅锛屾柟妗?A 鏇磋创杩?[devtask.md](/D:/gptsandbox/Devlog/devtask.md) 鍜?[src/README.md](/D:/gptsandbox/src/README.md:22)锛屼篃鏇村埄浜庢妸 pipeline 璇箟浠?`Agent` 缁х画鏀跺彛鍒?`algorithm_management`銆?
 
-### 4.2 数据模型冲突
+### 4.2 鏁版嵁妯″瀷鍐茬獊
 
-当前 runtime 的核心状态是：
+褰撳墠 runtime 鐨勬牳蹇冪姸鎬佹槸锛?
 
-- pipeline 级：`CpuPipelineRuntimeState`
-- lane 级：`CpuPipelineLaneRuntimeState`
-- stage 级：`stage_has_data`、`stage_runtime_stats`
+- pipeline 绾э細`JobsPipelineRuntimeState`
+- lane 绾э細`JobsPipelineLaneRuntimeState`
+- stage 绾э細`stage_has_data`銆乣stage_runtime_stats`
 
-如果改成 node registry，至少要补一层明确模型：
+濡傛灉鏀规垚 node registry锛岃嚦灏戣琛ヤ竴灞傛槑纭ā鍨嬶細
 
 - `PipelineDefinition`
 - `StageNodeDefinition`
 - `StageNodeRuntimeState`
-- `LaneCursor` 或 `LaneToken`
+- `LaneCursor` 鎴?`LaneToken`
 
-否则只是把 `unordered_map` 换进去，逻辑依然还是“整条 pipeline 的数组状态”，那不是真正的 node 化。
+鍚﹀垯鍙槸鎶?`unordered_map` 鎹㈣繘鍘伙紝閫昏緫渚濈劧杩樻槸鈥滄暣鏉?pipeline 鐨勬暟缁勭姸鎬佲€濓紝閭ｄ笉鏄湡姝ｇ殑 node 鍖栥€?
 
-### 4.3 `Agent` 视图冲突
+### 4.3 `Agent` 瑙嗗浘鍐茬獊
 
-`Agent` 当前默认假设：
+`Agent` 褰撳墠榛樿鍋囪锛?
 
-- pipeline 在 `algorithm_objects_` 里是一段连续范围；
-- range 是通过 `pipeline_stage_index` 顺序识别的；
-- tick 时可以直接把 begin/end 范围交给 scheduler。
+- pipeline 鍦?`algorithm_objects_` 閲屾槸涓€娈佃繛缁寖鍥达紱
+- range 鏄€氳繃 `pipeline_stage_index` 椤哄簭璇嗗埆鐨勶紱
+- tick 鏃跺彲浠ョ洿鎺ユ妸 begin/end 鑼冨洿浜ょ粰 scheduler銆?
 
-这和“node 离散持有”直接冲突。最小也得二选一：
+杩欏拰鈥渘ode 绂绘暎鎸佹湁鈥濈洿鎺ュ啿绐併€傛渶灏忎篃寰椾簩閫変竴锛?
 
-- 继续让 `Agent` 保留连续 mounted stage 视图，但 scheduler/runtime 内部转成 node registry。
-- 或者彻底取消 `Agent` 对 pipeline stage 数组的直接理解，让 `Agent` 只持有 pipeline handle。
+- 缁х画璁?`Agent` 淇濈暀杩炵画 mounted stage 瑙嗗浘锛屼絾 scheduler/runtime 鍐呴儴杞垚 node registry銆?
+- 鎴栬€呭交搴曞彇娑?`Agent` 瀵?pipeline stage 鏁扮粍鐨勭洿鎺ョ悊瑙ｏ紝璁?`Agent` 鍙寔鏈?pipeline handle銆?
 
-第二种更干净，但改动面明显更大。
+绗簩绉嶆洿骞插噣锛屼絾鏀瑰姩闈㈡槑鏄炬洿澶с€?
 
-### 4.4 Bridge 协议冲突
+### 4.4 Bridge 鍗忚鍐茬獊
 
-当前 bridge 协议天然偏 stage-name：
+褰撳墠 bridge 鍗忚澶╃劧鍋?stage-name锛?
 
-- 入边/出边 lookup 用 stage 名；
-- debug capture 用 stage 名；
-- `stage_container_sets` 的 key 也是 stage 名。
+- 鍏ヨ竟/鍑鸿竟 lookup 鐢?stage 鍚嶏紱
+- debug capture 鐢?stage 鍚嶏紱
+- `stage_container_sets` 鐨?key 涔熸槸 stage 鍚嶃€?
 
-如果 stage 被提升为 node，必须明确：
+濡傛灉 stage 琚彁鍗囦负 node锛屽繀椤绘槑纭細
 
-- node key 是否仍然允许直接退化成 `stage_name`；
-- 同一算法在不同 pipeline、不同 owner、不同 stage index 下是否允许重名；
-- debugTool 是显示 `stage_name` 还是 `node_id`。
+- node key 鏄惁浠嶇劧鍏佽鐩存帴閫€鍖栨垚 `stage_name`锛?
+- 鍚屼竴绠楁硶鍦ㄤ笉鍚?pipeline銆佷笉鍚?owner銆佷笉鍚?stage index 涓嬫槸鍚﹀厑璁搁噸鍚嶏紱
+- debugTool 鏄樉绀?`stage_name` 杩樻槸 `node_id`銆?
 
-只要存在“同一个算法名在多个 pipeline 或多个 owner 下重复挂载”，单独用 `stage_name` 做 key 就不够了。
+鍙瀛樺湪鈥滃悓涓€涓畻娉曞悕鍦ㄥ涓?pipeline 鎴栧涓?owner 涓嬮噸澶嶆寕杞解€濓紝鍗曠嫭鐢?`stage_name` 鍋?key 灏变笉澶熶簡銆?
 
-### 4.5 迁移路径冲突
+### 4.5 杩佺Щ璺緞鍐茬獊
 
-当前仓库里存在两套 CPU pipeline 执行逻辑：
+褰撳墠浠撳簱閲屽瓨鍦ㄤ袱濂?JOBS pipeline 鎵ц閫昏緫锛?
 
-- `Agent` 内部还有一套旧的 pipeline tick 主循环。
-- `AlgorithmScheduler::TickMountedPipeline` 又有一套调度后的主循环。
+- `Agent` 鍐呴儴杩樻湁涓€濂楁棫鐨?pipeline tick 涓诲惊鐜€?
+- `AlgorithmScheduler::TickMountedPipeline` 鍙堟湁涓€濂楄皟搴﹀悗鐨勪富寰幆銆?
 
-这说明仓库正处在“从 agent 内收口到 scheduler/executor”的过渡态。此时再直接上 node 化，如果不先确定以哪一套为准，很容易把重复逻辑扩大成三套。
+杩欒鏄庝粨搴撴澶勫湪鈥滀粠 agent 鍐呮敹鍙ｅ埌 scheduler/executor鈥濈殑杩囨浮鎬併€傛鏃跺啀鐩存帴涓?node 鍖栵紝濡傛灉涓嶅厛纭畾浠ュ摢涓€濂椾负鍑嗭紝寰堝鏄撴妸閲嶅閫昏緫鎵╁ぇ鎴愪笁濂椼€?
 
-## 5. 哈希表与哈希值建议
+## 5. 鍝堝笇琛ㄤ笌鍝堝笇鍊煎缓璁?
 
-### 5.1 已有工具可以直接复用
+### 5.1 宸叉湁宸ュ叿鍙互鐩存帴澶嶇敤
 
-仓库里已经有现成的 FNV-1a 64 位哈希实现，而且重复了两份：
+浠撳簱閲屽凡缁忔湁鐜版垚鐨?FNV-1a 64 浣嶅搱甯屽疄鐜帮紝鑰屼笖閲嶅浜嗕袱浠斤細
 
-- [src/algorithm_management/algorithm_manager.h](/D:/gptsandbox/src/algorithm_management/algorithm_manager.h:346) 到 [src/algorithm_management/algorithm_manager.h](/D:/gptsandbox/src/algorithm_management/algorithm_manager.h:370)
-- [src/agent/agent.cpp](/D:/gptsandbox/src/agent/agent.cpp:30) 到 [src/agent/agent.cpp](/D:/gptsandbox/src/agent/agent.cpp:54)
+- [src/algorithm_management/algorithm_manager.h](/D:/gptsandbox/src/algorithm_management/algorithm_manager.h:346) 鍒?[src/algorithm_management/algorithm_manager.h](/D:/gptsandbox/src/algorithm_management/algorithm_manager.h:370)
+- [src/agent/agent.cpp](/D:/gptsandbox/src/agent/agent.cpp:30) 鍒?[src/agent/agent.cpp](/D:/gptsandbox/src/agent/agent.cpp:54)
 
-建议不要再写第三份，直接收敛成一个公共 helper，例如：
+寤鸿涓嶈鍐嶅啓绗笁浠斤紝鐩存帴鏀舵暃鎴愪竴涓叕鍏?helper锛屼緥濡傦細
 
 - `algorithm_management/stage_node_hash.h`
-- 或 `common_data/hash_utils.h`
+- 鎴?`common_data/hash_utils.h`
 
-### 5.2 Node Key 建议
+### 5.2 Node Key 寤鸿
 
-不要直接拿“stage 名”做哈希 key，建议最少包含：
+涓嶈鐩存帴鎷库€渟tage 鍚嶁€濆仛鍝堝笇 key锛屽缓璁渶灏戝寘鍚細
 
 - `pipeline_name`
 - `owner_agent_name`
 - `stage_index`
 - `stage_name`
 
-如果后面要支持同 pipeline 多实例或热重挂，再加：
+濡傛灉鍚庨潰瑕佹敮鎸佸悓 pipeline 澶氬疄渚嬫垨鐑噸鎸傦紝鍐嶅姞锛?
 
 - `pipeline_instance_id`
-- 或 `registration_generation`
+- 鎴?`registration_generation`
 
-推荐形状：
+鎺ㄨ崘褰㈢姸锛?
 
 ```cpp
 struct StageNodeKey {
@@ -174,55 +174,55 @@ struct StageNodeKey {
 };
 ```
 
-然后提供：
+鐒跺悗鎻愪緵锛?
 
 - `bool operator==(const StageNodeKey&, const StageNodeKey&)`
 - `struct StageNodeKeyHash`
 
-如果还需要更轻量的索引，再把它压成 `uint64_t stage_node_id`，但展示层仍保留可读 key。
+濡傛灉杩橀渶瑕佹洿杞婚噺鐨勭储寮曪紝鍐嶆妸瀹冨帇鎴?`uint64_t stage_node_id`锛屼絾灞曠ず灞備粛淇濈暀鍙 key銆?
 
-### 5.3 哈希表里建议放什么
+### 5.3 鍝堝笇琛ㄩ噷寤鸿鏀句粈涔?
 
-如果按你这次目标推进，node 表里建议放“单 stage 持有物”，不要继续把整条 pipeline 塞回去：
+濡傛灉鎸変綘杩欐鐩爣鎺ㄨ繘锛宯ode 琛ㄩ噷寤鸿鏀锯€滃崟 stage 鎸佹湁鐗┾€濓紝涓嶈缁х画鎶婃暣鏉?pipeline 濉炲洖鍘伙細
 
-- stage 静态定义
-- stage 对应算法对象或算法句柄
-- stage runtime 状态
-- 入边/出边引用
-- debug 统计
+- stage 闈欐€佸畾涔?
+- stage 瀵瑰簲绠楁硶瀵硅薄鎴栫畻娉曞彞鏌?
+- stage runtime 鐘舵€?
+- 鍏ヨ竟/鍑鸿竟寮曠敤
+- debug 缁熻
 
-lane、pending stage0 submission、circular loopback 这些仍然更像 pipeline / lane 级状态，不建议硬塞进单 node。
+lane銆乸ending stage0 submission銆乧ircular loopback 杩欎簺浠嶇劧鏇村儚 pipeline / lane 绾х姸鎬侊紝涓嶅缓璁‖濉炶繘鍗?node銆?
 
-## 6. 这次改造前必须先定的架构决策
+## 6. 杩欐鏀归€犲墠蹇呴』鍏堝畾鐨勬灦鏋勫喅绛?
 
-建议先明确下面 4 个问题，否则代码改到一半一定返工：
+寤鸿鍏堟槑纭笅闈?4 涓棶棰橈紝鍚﹀垯浠ｇ爜鏀瑰埌涓€鍗婁竴瀹氳繑宸ワ細
 
-1. node registry 最终 owner 是 `Agent` 兼容层还是 `AlgorithmScheduler`？
-2. `Agent` 后续是继续持有“stage 连续数组视图”，还是只持有 pipeline handle？
-3. bridge / transfer map 的 lookup key 是继续用 `stage_name`，还是升级成 `StageNodeKey` / `stage_node_id`？
-4. lane 状态是继续 pipeline-owned，还是拆成 node 可见但不归 node 所有？
+1. node registry 鏈€缁?owner 鏄?`Agent` 鍏煎灞傝繕鏄?`AlgorithmScheduler`锛?
+2. `Agent` 鍚庣画鏄户缁寔鏈夆€渟tage 杩炵画鏁扮粍瑙嗗浘鈥濓紝杩樻槸鍙寔鏈?pipeline handle锛?
+3. bridge / transfer map 鐨?lookup key 鏄户缁敤 `stage_name`锛岃繕鏄崌绾ф垚 `StageNodeKey` / `stage_node_id`锛?
+4. lane 鐘舵€佹槸缁х画 pipeline-owned锛岃繕鏄媶鎴?node 鍙浣嗕笉褰?node 鎵€鏈夛紵
 
-## 7. 推荐的最小落地顺序
+## 7. 鎺ㄨ崘鐨勬渶灏忚惤鍦伴『搴?
 
-如果我们要尽量少返工，建议顺序是：
+濡傛灉鎴戜滑瑕佸敖閲忓皯杩斿伐锛屽缓璁『搴忔槸锛?
 
-1. 先定 owner：先选 `AlgorithmScheduler` 持有 node registry，还是暂时继续让 `Agent` 保留更多兼容 ownership。
-2. 先抽公共哈希 helper，把现有 FNV-1a 两份实现收敛。
-3. 先定义 `StageNodeKey`、`StageNodeDefinition`、`StageNodeRuntimeState`，只落类型，不改调度逻辑。
-4. 再把 scheduler 内部 `pipeline_runtime_states_` 旁边补一层 node registry，先做镜像索引。
-5. 等 node registry 稳定后，再改 tick 路径，从“range 驱动”逐步切到“node 驱动”。
-6. 最后才改 bridge 协议的 key，从 `stage_name` 升级到 node 级 key。
+1. 鍏堝畾 owner锛氬厛閫?`AlgorithmScheduler` 鎸佹湁 node registry锛岃繕鏄殏鏃剁户缁 `Agent` 淇濈暀鏇村鍏煎 ownership銆?
+2. 鍏堟娊鍏叡鍝堝笇 helper锛屾妸鐜版湁 FNV-1a 涓や唤瀹炵幇鏀舵暃銆?
+3. 鍏堝畾涔?`StageNodeKey`銆乣StageNodeDefinition`銆乣StageNodeRuntimeState`锛屽彧钀界被鍨嬶紝涓嶆敼璋冨害閫昏緫銆?
+4. 鍐嶆妸 scheduler 鍐呴儴 `pipeline_runtime_states_` 鏃佽竟琛ヤ竴灞?node registry锛屽厛鍋氶暅鍍忕储寮曘€?
+5. 绛?node registry 绋冲畾鍚庯紝鍐嶆敼 tick 璺緞锛屼粠鈥渞ange 椹卞姩鈥濋€愭鍒囧埌鈥渘ode 椹卞姩鈥濄€?
+6. 鏈€鍚庢墠鏀?bridge 鍗忚鐨?key锛屼粠 `stage_name` 鍗囩骇鍒?node 绾?key銆?
 
-## 8. 当前建议
+## 8. 褰撳墠寤鸿
 
-结合现有文档和代码，我更建议这样理解这次改造：
+缁撳悎鐜版湁鏂囨。鍜屼唬鐮侊紝鎴戞洿寤鸿杩欐牱鐞嗚В杩欐鏀归€狅細
 
-- 短期：先把 `AlgorithmScheduler` 从“整条 pipeline runtime owner”收敛成“pipeline/node 注册与路由中心”。
-- 中期：让 node registry 成为 scheduler 内的第一层索引，lane/runtime 仍暂时保持 pipeline-owned。
-- 长期：继续按 [devtask.md](/D:/gptsandbox/Devlog/devtask.md) 的方向，把 pipeline 语义收口到 `algorithm_management`，同时让 `runtime_systems` 维持“只提供执行原语”的边界。
+- 鐭湡锛氬厛鎶?`AlgorithmScheduler` 浠庘€滄暣鏉?pipeline runtime owner鈥濇敹鏁涙垚鈥減ipeline/node 娉ㄥ唽涓庤矾鐢变腑蹇冣€濄€?
+- 涓湡锛氳 node registry 鎴愪负 scheduler 鍐呯殑绗竴灞傜储寮曪紝lane/runtime 浠嶆殏鏃朵繚鎸?pipeline-owned銆?
+- 闀挎湡锛氱户缁寜 [devtask.md](/D:/gptsandbox/Devlog/devtask.md) 鐨勬柟鍚戯紝鎶?pipeline 璇箟鏀跺彛鍒?`algorithm_management`锛屽悓鏃惰 `runtime_systems` 缁存寔鈥滃彧鎻愪緵鎵ц鍘熻鈥濈殑杈圭晫銆?
 
-这样和现有分层、call chain、以及 executor 化方向都更不冲突。
+杩欐牱鍜岀幇鏈夊垎灞傘€乧all chain銆佷互鍙?executor 鍖栨柟鍚戦兘鏇翠笉鍐茬獊銆?
 
-## 9. 备注
+## 9. 澶囨敞
 
-这份检查基于当前本地仓库代码与文档完成。Echo Engine 知识库查询在本环境里被自动审批拦下，因此这里的结论全部以当前 checkout 为准，没有额外引入知识库侧的口径。
+杩欎唤妫€鏌ュ熀浜庡綋鍓嶆湰鍦颁粨搴撲唬鐮佷笌鏂囨。瀹屾垚銆侲cho Engine 鐭ヨ瘑搴撴煡璇㈠湪鏈幆澧冮噷琚嚜鍔ㄥ鎵规嫤涓嬶紝鍥犳杩欓噷鐨勭粨璁哄叏閮ㄤ互褰撳墠 checkout 涓哄噯锛屾病鏈夐澶栧紩鍏ョ煡璇嗗簱渚х殑鍙ｅ緞銆?

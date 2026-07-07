@@ -2,7 +2,9 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$AlgorithmSourceRoot,
   [Parameter(Mandatory = $true)]
-  [string]$AlgorithmRuntimeRoot
+  [string]$AlgorithmRuntimeRoot,
+  [Parameter(Mandatory = $false)]
+  [string]$AlgorithmBuildConfiguration = 'Debug'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -116,6 +118,37 @@ function Convert-ToCIdentifier {
   return $result
 }
 
+function Test-ReleaseWithDebugInfoRuntimeFileAllowed {
+  param(
+    [Parameter(Mandatory = $true)][string]$PackageRelativeDir,
+    [Parameter(Mandatory = $true)][string]$RelativeFilePath
+  )
+
+  $normalizedPackageRelativeDir = $PackageRelativeDir.Replace('\', '/')
+  $normalizedRelativeFilePath = $RelativeFilePath.Replace('\', '/')
+  $fileName = [System.IO.Path]::GetFileName($normalizedRelativeFilePath)
+
+  if ($normalizedPackageRelativeDir.StartsWith('norm/')) {
+    return $fileName.Contains('_exec.') -or $fileName.Contains('_result_render.')
+  }
+
+  if ($normalizedPackageRelativeDir.StartsWith('pipeline/')) {
+    if ($normalizedPackageRelativeDir.EndsWith('_stageBegin')) {
+      return $fileName.Contains('_exec.')
+    }
+
+    if ($normalizedPackageRelativeDir.EndsWith('_stageEnd')) {
+      return $fileName.Contains('_exec.') -or $fileName.Contains('_result_render.')
+    }
+
+    if ($normalizedPackageRelativeDir -match '_stage[0-9]+$') {
+      return $true
+    }
+  }
+
+  return $true
+}
+
 function Get-AlgorithmPluginBuildSpec {
   param(
     [Parameter(Mandatory = $true)][object]$PackageEntry
@@ -131,7 +164,8 @@ function Get-AlgorithmPluginBuildSpec {
       Where-Object { $_.Extension -in '.vert', '.frag' }
   )
   $pluginSources = @(
-    Get-ChildItem -LiteralPath $effectivePluginSourceDir -Filter '*_plugin.cpp' -File -ErrorAction SilentlyContinue
+    Get-ChildItem -LiteralPath $effectivePluginSourceDir -File -ErrorAction SilentlyContinue |
+      Where-Object { $_.Name -like '*_plugin.cpp' -or $_.Extension -eq '.cu' }
   )
 
   if ($shaderSources.Count -eq 0 -and $pluginSources.Count -eq 0) {
@@ -143,13 +177,10 @@ function Get-AlgorithmPluginBuildSpec {
           Where-Object { $_.Extension -in '.vert', '.frag' }
       )
       $pluginSources = @(
-        Get-ChildItem -LiteralPath $effectivePluginSourceDir -Filter '*_plugin.cpp' -File -ErrorAction SilentlyContinue
+        Get-ChildItem -LiteralPath $effectivePluginSourceDir -File -ErrorAction SilentlyContinue |
+          Where-Object { $_.Name -like '*_plugin.cpp' -or $_.Extension -eq '.cu' }
       )
     }
-  }
-
-  if ($pluginSources.Count -gt 1) {
-    throw "Multiple plugin sources were found for package '$packageName' under '$effectivePluginSourceDir'."
   }
 
   if ($pluginSources.Count -eq 0) {
@@ -178,6 +209,7 @@ function Invoke-AlgorithmPluginBuild {
     [Parameter(Mandatory = $true)][string]$AlgorithmLibraryRoot,
     [Parameter(Mandatory = $true)][string]$AlgorithmSourceRoot,
     [Parameter(Mandatory = $true)][string]$AlgorithmRuntimeRoot,
+    [Parameter(Mandatory = $true)][string]$AlgorithmBuildConfiguration,
     [Parameter(Mandatory = $true)][object[]]$BuildSpecs
   )
 
@@ -201,7 +233,10 @@ function Invoke-AlgorithmPluginBuild {
     Remove-Item -LiteralPath $pluginBuildDir -Recurse -Force
   }
 
+  $originalCL = $env:CL
   try {
+    $env:CL = '/D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH'
+
     & cmake -S $AlgorithmLibraryRoot -B $pluginBuildDir --fresh `
       -DBUILD_ALGORITHM_SAMPLE_PLUGIN=ON `
       -DCORE_BUILD_DIR="$coreBuildDir" `
@@ -217,13 +252,18 @@ function Invoke-AlgorithmPluginBuild {
       if ([string]::IsNullOrWhiteSpace($pluginTarget) -or $builtTargets.ContainsKey($pluginTarget)) {
         continue
       }
-      & cmake --build $pluginBuildDir --config Debug --target $pluginTarget --parallel
+      & cmake --build $pluginBuildDir --config $AlgorithmBuildConfiguration --target $pluginTarget --parallel
       if ($LASTEXITCODE -ne 0) {
         throw "Failed to build algorithm plugin target '$pluginTarget'."
       }
       $builtTargets[$pluginTarget] = $true
     }
   } finally {
+    if ($null -eq $originalCL) {
+      Remove-Item Env:CL -ErrorAction SilentlyContinue
+    } else {
+      $env:CL = $originalCL
+    }
     if (Test-Path -LiteralPath $pluginBuildDir) {
       Remove-Item -LiteralPath $pluginBuildDir -Recurse -Force
     }
@@ -337,6 +377,7 @@ Invoke-AlgorithmPluginBuild `
   -AlgorithmLibraryRoot $algorithmLibraryRoot `
   -AlgorithmSourceRoot $sourceRoot `
   -AlgorithmRuntimeRoot $runtimeRoot `
+  -AlgorithmBuildConfiguration $AlgorithmBuildConfiguration `
   -BuildSpecs $packageBuildSpecs
 
 $allRuntimePackageDirs = @($packageEntries | ForEach-Object { $_.RuntimeDir })
@@ -370,6 +411,7 @@ foreach ($entry in $packageEntries) {
 
     $packageDllCandidates = @(
       (Join-Path (Join-Path $runtimeDir 'Debug') ($packageName + '.dll'))
+      (Join-Path (Join-Path $runtimeDir 'RelWithDebInfo') ($packageName + '.dll'))
       (Join-Path $runtimeDir ($packageName + '.dll'))
     )
     $resolvedPackageDllPath = $null
@@ -387,7 +429,13 @@ foreach ($entry in $packageEntries) {
       $_.Extension -ne '.algo' -and
       $_.Extension -notin '.exp', '.lib', '.pdb', '.ilk', '.obj', '.manifest' -and
       ($nestedRuntimePackageDirs.Count -eq 0 -or
-        -not (Test-PathUnderAnyRoot -ChildPath $_.FullName -RootPaths $nestedRuntimePackageDirs))
+        -not (Test-PathUnderAnyRoot -ChildPath $_.FullName -RootPaths $nestedRuntimePackageDirs)) -and
+      (
+        $AlgorithmBuildConfiguration -ne 'RelWithDebInfo' -or
+        (Test-ReleaseWithDebugInfoRuntimeFileAllowed `
+          -PackageRelativeDir $entry.RelativeDir `
+          -RelativeFilePath (Get-RelativePath -BasePath $runtimeDir -TargetPath $_.FullName))
+      )
     }
 
     if ($runtimeFiles.Count -eq 0) {

@@ -37,8 +37,8 @@ class RuntimeSystemsHooker {
     return runtime_environment_.MousePosition();
   }
 
-  void ClearGpuRuntimeCaches() {
-    runtime_environment_.ClearGpuRuntimeCaches();
+  void ClearVkRuntimeCaches() {
+    runtime_environment_.ClearVkRuntimeCaches();
   }
 
   bool HasRenderPreviewTexture() const {

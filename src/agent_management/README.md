@@ -10,7 +10,7 @@ This layer owns the runtime manager for agents.
 - Drive one macro ticker per managed agent every frame.
 - Forward descriptor and resource data down to the agent when mounting algorithms.
 - Check each managed agent's tick budget before ticking it.
-- Stay below `debug_tool` and `sdk`, and above `agent`.
+- Stay below `debug_tool` and `sdk`, and own the merged runtime-agent submodule internally.
 
 ## Notes
 

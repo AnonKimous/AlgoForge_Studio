@@ -113,14 +113,14 @@
         },
         "shader": {
           "pipeline": "graphics",
-          "vertex": "sample_algorithm_gpu_tick.vert",
-          "fragment": "sample_algorithm_gpu_tick.frag"
+          "vertex": "sample_algorithm_vk_tick.vert",
+          "fragment": "sample_algorithm_vk_tick.frag"
         }
       },
       "resultRender": {
         "stage_name": "resultRender",
         "stage_kind": "resultRender",
-        "side": "gpu",
+        "side": "vk",
         "functions": [
           "FillAgentToAlgorithmSignal",
           "GetInterventionStageSpecs",

@@ -8,7 +8,7 @@
 
 namespace runtime_systems {
 
-struct RuntimeGpuExecutionContext {
+struct RuntimeVkExecutionContext {
   VkInstance instance{VK_NULL_HANDLE};
   VkPhysicalDevice physical_device{VK_NULL_HANDLE};
   VkDevice device{VK_NULL_HANDLE};
@@ -28,20 +28,20 @@ struct RuntimeGpuExecutionContext {
   }
 };
 
-class RuntimeGpuContextRegistry {
+class RuntimeVkContextRegistry {
  public:
-  static RuntimeGpuContextRegistry& Instance();
+  static RuntimeVkContextRegistry& Instance();
 
-  void Set(RuntimeGpuExecutionContext context);
-  RuntimeGpuExecutionContext Snapshot() const;
+  void Set(RuntimeVkExecutionContext context);
+  RuntimeVkExecutionContext Snapshot() const;
   bool HasContext() const;
   void Clear();
 
  private:
-  RuntimeGpuContextRegistry() = default;
+  RuntimeVkContextRegistry() = default;
 
   mutable std::mutex mutex_{};
-  RuntimeGpuExecutionContext context_{};
+  RuntimeVkExecutionContext context_{};
 };
 
 }  // namespace runtime_systems

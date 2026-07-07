@@ -9,6 +9,7 @@
 #include <cassert>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <memory>
 #include <unordered_set>
 #include <system_error>
@@ -79,8 +80,8 @@ inline bool LoadAlgorithmPackageTransferMapFromLocation(
 
 inline bool LoadAlgorithmPackageDefaultBindingsFromLocation(
   const ::algorithm::AlgorithmPackageLocation& package_location,
-  std::vector<algorithm_management::AlgorithmResourceBinding>* out_resource_bindings,
-  std::vector<algorithm_management::AlgorithmDescriptorValue>* out_descriptor_values,
+  std::vector<algorithmManager::AlgorithmResourceBinding>* out_resource_bindings,
+  std::vector<algorithmManager::AlgorithmDescriptorValue>* out_descriptor_values,
   bool* out_has_default_file = nullptr,
   std::string* out_error_message = nullptr) {
   return algorithm_manager_hooker::LoadAlgorithmPackageDefaultBindingsFromLocation(
@@ -93,8 +94,8 @@ inline bool LoadAlgorithmPackageDefaultBindingsFromLocation(
 
 inline bool LoadAlgorithmPackageDefaultBindings(
   const std::string& algorithm_name,
-  std::vector<algorithm_management::AlgorithmResourceBinding>* out_resource_bindings,
-  std::vector<algorithm_management::AlgorithmDescriptorValue>* out_descriptor_values,
+  std::vector<algorithmManager::AlgorithmResourceBinding>* out_resource_bindings,
+  std::vector<algorithmManager::AlgorithmDescriptorValue>* out_descriptor_values,
   bool* out_has_default_file = nullptr,
   std::string* out_error_message = nullptr) {
   return algorithm_manager_hooker::LoadAlgorithmPackageDefaultBindings(
@@ -107,8 +108,8 @@ inline bool LoadAlgorithmPackageDefaultBindings(
 
 inline bool QueryAlgorithmRequestedBindings(
   const std::string& algorithm_name,
-  algorithm_management::AlgorithmRequestedResources* out_resources,
-  algorithm_management::AlgorithmRequestedDescriptorBindings* out_descriptors,
+  algorithmManager::AlgorithmRequestedResources* out_resources,
+  algorithmManager::AlgorithmRequestedDescriptorBindings* out_descriptors,
   std::string* out_error_message = nullptr) {
   return algorithm_manager_hooker::QueryAlgorithmRequestedBindings(
     algorithm_name,
@@ -120,7 +121,7 @@ inline bool QueryAlgorithmRequestedBindings(
 inline bool TryGetMountedPipelineRuntime(
   const std::string& pipeline_name,
   const std::string& agent_name,
-  algorithm_management::CpuPipelineRuntimeState* out_runtime_state) {
+  algorithmManager::JobsPipelineRuntimeState* out_runtime_state) {
   return algorithm_manager_hooker::TryGetMountedPipelineRuntime(
     pipeline_name,
     agent_name,
@@ -129,7 +130,7 @@ inline bool TryGetMountedPipelineRuntime(
 
 inline bool TryGetMountedPipelineRegistration(
   const std::string& pipeline_name,
-  algorithm_management::CpuPipelineRegistration* out_registration) {
+  algorithmManager::JobsPipelineRegistration* out_registration) {
   return algorithm_manager_hooker::TryGetMountedPipelineRegistration(
     pipeline_name,
     out_registration);
@@ -147,15 +148,15 @@ inline void ClearAlgorithmExecutionCaches() {
   algorithm_manager_hooker::ClearAlgorithmExecutionCaches();
 }
 
-inline bool ExecuteCpuAlgorithmObject(
-  const ::agent::AlgorithmObject& object,
-  const ::agent::AgentTickContext& context,
+inline bool ExecuteJobsAlgorithmObject(
+  const ::agentmanager::agent::AlgorithmObject& object,
+  const ::agentmanager::agent::AgentTickContext& context,
   const common_data::AgentToAlgorithmSignal& agent_to_algorithm_signal,
   ::algorithm::AlgorithmContainerSet* container_set,
   common_data::AlgorithmToAgentSignal* out_algorithm_to_agent_signal,
-  ::agent::AlgorithmPackageDebugState* out_debug_state,
+  ::agentmanager::agent::AlgorithmPackageDebugState* out_debug_state,
   std::string* out_error_message = nullptr) {
-  return algorithm_manager_hooker::ExecuteCpuAlgorithmObject(
+  return algorithm_manager_hooker::ExecuteJobsAlgorithmObject(
     object,
     context,
     agent_to_algorithm_signal,
@@ -165,27 +166,27 @@ inline bool ExecuteCpuAlgorithmObject(
     out_error_message);
 }
 
-inline bool ExecuteGpuAlgorithmObject(
-  const ::agent::AlgorithmObject& object,
+inline bool ExecuteVkAlgorithmObject(
+  const ::agentmanager::agent::AlgorithmObject& object,
   ::algorithm::AlgorithmContainerSet* container_set,
-  const ::agent::AgentTickContext& context,
+  const ::agentmanager::agent::AgentTickContext& context,
   std::string* out_error_message = nullptr) {
-  return algorithm_manager_hooker::ExecuteGpuAlgorithmObject(
+  return algorithm_manager_hooker::ExecuteVkAlgorithmObject(
     object,
     container_set,
     context,
     out_error_message);
 }
 
-inline bool HasExecutableGpuAlgorithmStage(const ::agent::AlgorithmObject& object) {
-  return algorithm_manager_hooker::HasExecutableGpuAlgorithmStage(object);
+inline bool HasExecutableVkAlgorithmStage(const ::agentmanager::agent::AlgorithmObject& object) {
+  return algorithm_manager_hooker::HasExecutableVkAlgorithmStage(object);
 }
 
-inline bool SynchronizeGpuAlgorithmObject(
-  const ::agent::AlgorithmObject& object,
+inline bool SynchronizeVkAlgorithmObject(
+  const ::agentmanager::agent::AlgorithmObject& object,
   ::algorithm::AlgorithmContainerSet* container_set,
   std::string* out_error_message = nullptr) {
-  return algorithm_manager_hooker::SynchronizeGpuAlgorithmObject(
+  return algorithm_manager_hooker::SynchronizeVkAlgorithmObject(
     object,
     container_set,
     out_error_message);
@@ -207,7 +208,7 @@ inline void AppendPipelineRunnerProbe(const std::string& file_name, const std::s
 }
 
 inline std::string ResolveAlgorithmShaderPath(
-  const ::agent::AlgorithmObject& object,
+  const ::agentmanager::agent::AlgorithmObject& object,
   const std::string& shader_path) {
   if (shader_path.empty()) {
     return {};
@@ -226,6 +227,7 @@ inline std::string ResolveAlgorithmShaderPath(
       object.algorithm_profile.algorithm_name,
       &package_location,
       &error_message);
+    std::cerr << "Failed to resolve algorithm package location for shader path.\n";
     assert(resolved && "Failed to resolve algorithm package location for shader path.");
     if (!resolved) {
       return {};
@@ -233,6 +235,7 @@ inline std::string ResolveAlgorithmShaderPath(
     runtime_package_root = package_location.runtime_package_root;
   }
   if (runtime_package_root.empty()) {
+    std::cerr << "Runtime package root is empty for shader path.\n";
     assert(false && "Runtime package root is empty for shader path.");
     return {};
   }
@@ -270,15 +273,15 @@ inline bool IsReadableNonEmptyFile(const std::string& path) {
   return !ec && file_size > 0u;
 }
 
-inline const agent::AlgorithmReflectionValue* FindReflectionValue(
-  const agent::AlgorithmReflectionSnapshot& snapshot,
+inline const agentmanager::agent::AlgorithmReflectionValue* FindReflectionValue(
+  const agentmanager::agent::AlgorithmReflectionSnapshot& snapshot,
   const std::string& container_name) {
-  for (const agent::AlgorithmReflectionValue& value : snapshot.variables) {
+  for (const agentmanager::agent::AlgorithmReflectionValue& value : snapshot.variables) {
     if (value.container_name == container_name) {
       return &value;
     }
   }
-  for (const agent::AlgorithmReflectionValue& value : snapshot.variable_arrays) {
+  for (const agentmanager::agent::AlgorithmReflectionValue& value : snapshot.variable_arrays) {
     if (value.container_name == container_name) {
       return &value;
     }
@@ -287,7 +290,7 @@ inline const agent::AlgorithmReflectionValue* FindReflectionValue(
 }
 
 inline bool TryFindPipelineGroupRange(
-  const agent::Agent& managed_agent,
+  const agentmanager::agent::Agent& managed_agent,
   size_t anchor_index,
   size_t* out_begin_index,
   size_t* out_end_index) {
@@ -295,15 +298,15 @@ inline bool TryFindPipelineGroupRange(
     return false;
   }
 
-  const agent::AlgorithmObject* anchor = AlgorithmObjectAt(managed_agent, anchor_index);
+  const agentmanager::agent::AlgorithmObject* anchor = AlgorithmObjectAt(managed_agent, anchor_index);
   if (!anchor || !anchor->pipeline_stage || anchor->pipeline_name.empty()) {
     return false;
   }
 
   size_t begin_index = anchor_index;
   while (begin_index > 0u) {
-    const agent::AlgorithmObject* previous = AlgorithmObjectAt(managed_agent, begin_index - 1u);
-    const agent::AlgorithmObject* current = AlgorithmObjectAt(managed_agent, begin_index);
+    const agentmanager::agent::AlgorithmObject* previous = AlgorithmObjectAt(managed_agent, begin_index - 1u);
+    const agentmanager::agent::AlgorithmObject* current = AlgorithmObjectAt(managed_agent, begin_index);
     if (!previous ||
         !current ||
         !previous->pipeline_stage ||
@@ -316,8 +319,8 @@ inline bool TryFindPipelineGroupRange(
 
   size_t end_index = anchor_index + 1u;
   while (end_index < AlgorithmCount(managed_agent)) {
-    const agent::AlgorithmObject* previous = AlgorithmObjectAt(managed_agent, end_index - 1u);
-    const agent::AlgorithmObject* next = AlgorithmObjectAt(managed_agent, end_index);
+    const agentmanager::agent::AlgorithmObject* previous = AlgorithmObjectAt(managed_agent, end_index - 1u);
+    const agentmanager::agent::AlgorithmObject* next = AlgorithmObjectAt(managed_agent, end_index);
     if (!previous ||
         !next ||
         !next->pipeline_stage ||
@@ -333,27 +336,27 @@ inline bool TryFindPipelineGroupRange(
   return true;
 }
 
-inline bool TryLoadInterventionStageSpecs(
-  const agent::AlgorithmObject& object,
-  std::vector<agent::AlgorithmInterventionStageSpec>* out_stage_specs) {
-  if (!out_stage_specs) {
+inline bool TryLoadInterventionPhaseSpecs(
+  const agentmanager::agent::AlgorithmObject& object,
+  std::vector<agentmanager::agent::AlgorithmPhaseSpec>* out_phase_specs) {
+  if (!out_phase_specs) {
     return false;
   }
-  out_stage_specs->clear();
+  out_phase_specs->clear();
   if (!object.intervention) {
     return true;
   }
-  std::vector<agent::AlgorithmInterventionStageSpec> stage_specs;
-  if (!object.intervention->GetInterventionStageSpecs(&stage_specs) || stage_specs.empty()) {
+  std::vector<agentmanager::agent::AlgorithmPhaseSpec> phase_specs;
+  if (!object.intervention->GetInterventionPhaseSpecs(&phase_specs) || phase_specs.empty()) {
     return true;
   }
-  *out_stage_specs = std::move(stage_specs);
+  *out_phase_specs = std::move(phase_specs);
   return true;
 }
 
-inline bool ContainsResultRenderStage(const std::vector<agent::AlgorithmInterventionStageSpec>& stage_specs) {
-  for (const agent::AlgorithmInterventionStageSpec& stage_spec : stage_specs) {
-    if (stage_spec.stage_kind == agent::AlgorithmInterventionStageKind::ResultRender) {
+inline bool ContainsResultRenderPhase(const std::vector<agentmanager::agent::AlgorithmPhaseSpec>& phase_specs) {
+  for (const agentmanager::agent::AlgorithmPhaseSpec& phase_spec : phase_specs) {
+    if (phase_spec.stage_kind == agentmanager::agent::AlgorithmPhaseKind::ResultRender) {
       return true;
     }
   }
@@ -369,11 +372,11 @@ inline void AppendUniquePipelineStageIndex(
   }
 }
 
-inline void AppendPipelineSummaryInterventionStages(
-  const agent::Agent& managed_agent,
+inline void AppendPipelineSummaryInterventionPhases(
+  const agentmanager::agent::Agent& managed_agent,
   size_t stage_index,
-  const algorithm_management::CpuPipelineRegistration& registration,
-  std::vector<agent::AlgorithmInterventionStageSpec>* out_stage_specs) {
+  const algorithmManager::JobsPipelineRegistration& registration,
+  std::vector<agentmanager::agent::AlgorithmPhaseSpec>* out_phase_specs) {
   size_t pipeline_begin_index = 0u;
   size_t pipeline_end_index = 0u;
   if (!TryFindPipelineGroupRange(managed_agent, stage_index, &pipeline_begin_index, &pipeline_end_index)) {
@@ -388,13 +391,13 @@ inline void AppendPipelineSummaryInterventionStages(
     pipeline_begin_index + static_cast<size_t>(registration.effective_tail_stage_index);
 
   if (static_cast<size_t>(registration.body_begin_stage_index) > 0u && pipeline_begin_index < pipeline_end_index) {
-    const agent::AlgorithmObject* wrapper_begin = AlgorithmObjectAt(managed_agent, pipeline_begin_index);
+    const agentmanager::agent::AlgorithmObject* wrapper_begin = AlgorithmObjectAt(managed_agent, pipeline_begin_index);
     if (wrapper_begin) {
-      std::vector<agent::AlgorithmInterventionStageSpec> wrapper_begin_specs;
-      if (TryLoadInterventionStageSpecs(*wrapper_begin, &wrapper_begin_specs) &&
+      std::vector<agentmanager::agent::AlgorithmPhaseSpec> wrapper_begin_specs;
+      if (TryLoadInterventionPhaseSpecs(*wrapper_begin, &wrapper_begin_specs) &&
           !wrapper_begin_specs.empty()) {
-        out_stage_specs->insert(
-          out_stage_specs->end(),
+        out_phase_specs->insert(
+          out_phase_specs->end(),
           wrapper_begin_specs.begin(),
           wrapper_begin_specs.end());
       }
@@ -405,13 +408,13 @@ inline void AppendPipelineSummaryInterventionStages(
     effective_tail_index >= body_end_index &&
     effective_tail_index < pipeline_end_index;
   if (has_wrapper_end) {
-    const agent::AlgorithmObject* wrapper_end = AlgorithmObjectAt(managed_agent, effective_tail_index);
+    const agentmanager::agent::AlgorithmObject* wrapper_end = AlgorithmObjectAt(managed_agent, effective_tail_index);
     if (wrapper_end) {
-      std::vector<agent::AlgorithmInterventionStageSpec> wrapper_end_specs;
-      if (TryLoadInterventionStageSpecs(*wrapper_end, &wrapper_end_specs) &&
+      std::vector<agentmanager::agent::AlgorithmPhaseSpec> wrapper_end_specs;
+      if (TryLoadInterventionPhaseSpecs(*wrapper_end, &wrapper_end_specs) &&
           !wrapper_end_specs.empty()) {
-        out_stage_specs->insert(
-          out_stage_specs->end(),
+        out_phase_specs->insert(
+          out_phase_specs->end(),
           wrapper_end_specs.begin(),
           wrapper_end_specs.end());
       }
@@ -420,12 +423,12 @@ inline void AppendPipelineSummaryInterventionStages(
 }
 
 inline bool TryResolveRenderPreviewSource(
-  const agent::Agent& managed_agent,
+  const agentmanager::agent::Agent& managed_agent,
   size_t selected_index,
   size_t* out_source_index,
-  std::vector<agent::AlgorithmInterventionStageSpec>* out_stage_specs,
+  std::vector<agentmanager::agent::AlgorithmPhaseSpec>* out_phase_specs,
   std::string* out_error_message) {
-  if (!out_source_index || !out_stage_specs) {
+  if (!out_source_index || !out_phase_specs) {
     if (out_error_message) {
       *out_error_message = "Preview source output pointer is null.";
     }
@@ -433,8 +436,8 @@ inline bool TryResolveRenderPreviewSource(
   }
 
   *out_source_index = selected_index;
-  out_stage_specs->clear();
-  const agent::AlgorithmObject* selected_object = AlgorithmObjectAt(managed_agent, selected_index);
+  out_phase_specs->clear();
+  const agentmanager::agent::AlgorithmObject* selected_object = AlgorithmObjectAt(managed_agent, selected_index);
   if (!selected_object) {
     if (out_error_message) {
       *out_error_message = "Selected algorithm object is unavailable.";
@@ -443,9 +446,9 @@ inline bool TryResolveRenderPreviewSource(
   }
 
   if (!selected_object->pipeline_stage || selected_object->pipeline_name.empty()) {
-    if (!TryLoadInterventionStageSpecs(*selected_object, out_stage_specs) || out_stage_specs->empty()) {
+    if (!TryLoadInterventionPhaseSpecs(*selected_object, out_phase_specs) || out_phase_specs->empty()) {
       if (out_error_message) {
-        *out_error_message = "Algorithm intervention did not expose any stages.";
+        *out_error_message = "Algorithm intervention did not expose any phases.";
       }
       return false;
     }
@@ -464,7 +467,7 @@ inline bool TryResolveRenderPreviewSource(
     return false;
   }
 
-  algorithm_management::CpuPipelineRegistration registration{};
+  algorithmManager::JobsPipelineRegistration registration{};
   const bool has_registration = TryGetMountedPipelineRegistration(selected_object->pipeline_name, &registration);
   std::unordered_set<size_t> seen_indices{};
   std::vector<size_t> candidate_indices{};
@@ -506,18 +509,18 @@ inline bool TryResolveRenderPreviewSource(
     }
   }
 
-  std::vector<agent::AlgorithmInterventionStageSpec> stage_specs{};
+  std::vector<agentmanager::agent::AlgorithmPhaseSpec> phase_specs{};
   for (size_t candidate_index : candidate_indices) {
-    const agent::AlgorithmObject* candidate = AlgorithmObjectAt(managed_agent, candidate_index);
+    const agentmanager::agent::AlgorithmObject* candidate = AlgorithmObjectAt(managed_agent, candidate_index);
     if (!candidate) {
       continue;
     }
-    if (!TryLoadInterventionStageSpecs(*candidate, &stage_specs) || stage_specs.empty()) {
+    if (!TryLoadInterventionPhaseSpecs(*candidate, &phase_specs) || phase_specs.empty()) {
       continue;
     }
-    if (ContainsResultRenderStage(stage_specs)) {
+    if (ContainsResultRenderPhase(phase_specs)) {
       *out_source_index = candidate_index;
-      *out_stage_specs = stage_specs;
+      *out_phase_specs = phase_specs;
       if (out_error_message) {
         out_error_message->clear();
       }
@@ -532,3 +535,4 @@ inline bool TryResolveRenderPreviewSource(
 }
 
 }  // namespace debug_tool_backend::hooker
+

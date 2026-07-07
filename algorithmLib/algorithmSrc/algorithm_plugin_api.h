@@ -1,4 +1,7 @@
 #pragma once
 
-#include "algorithm_support/algorithm_package_location.h"
-#include "algorithm_support/algorithm_protocol.h"
+#include "algorithm_catalog/algorithm_package_location.h"
+#include "algorithm_catalog/algorithm_protocol.h"
+
+namespace agent = agentmanager::agent;
+namespace algorithm_management = algorithmManager::scheduler;

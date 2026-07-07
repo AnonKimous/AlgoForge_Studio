@@ -1,25 +1,16 @@
 #pragma once
 
 #if !defined(RUNTIME_SYSTEMS_LAYER_INTERNAL_BUILD) && !defined(RUNTIME_SYSTEMS_LAYER_PUBLIC_FACADE_INCLUDE)
-#error "Do not include runtime_systems/gpu_job_system.h directly. Use runtime_systems/runtime_systems.h."
+#error "Do not include runtime_systems/vk_job_system.h directly. Use runtime_systems/runtime_systems.h."
 #endif
 
 #include <cstddef>
 #include <string>
 #include <vector>
 
-namespace agent {
-struct AlgorithmObject;
-struct AgentTickContext;
-}  // namespace agent
-
-namespace algorithm {
-struct AlgorithmContainerSet;
-}  // namespace algorithm
-
 namespace runtime_systems {
 
-struct RuntimeGpuBufferBindingView {
+struct RuntimeVkBufferBindingView {
   std::string binding_name;
   std::byte* bytes{nullptr};
   size_t size_bytes{0u};
@@ -28,15 +19,15 @@ struct RuntimeGpuBufferBindingView {
   bool required{true};
 };
 
-struct RuntimeGpuStageSubJob {
+struct RuntimeVkStageSubJob {
   std::string debug_name;
   std::string stage_name;
   std::string vertex_shader_path;
   std::string fragment_shader_path;
-  std::vector<RuntimeGpuBufferBindingView> buffer_bindings;
+  std::vector<RuntimeVkBufferBindingView> buffer_bindings;
 };
 
-struct RuntimeGpuStageJob {
+struct RuntimeVkStageJob {
   std::string debug_name;
   std::string shader_namespace;
   std::string stage_name;
@@ -45,26 +36,17 @@ struct RuntimeGpuStageJob {
   float viewport_width{1.0f};
   float viewport_height{1.0f};
   const void* execution_key{nullptr};
-  std::vector<RuntimeGpuBufferBindingView> buffer_bindings;
-  std::vector<RuntimeGpuStageSubJob> stage_jobs;
+  std::vector<RuntimeVkBufferBindingView> buffer_bindings;
+  std::vector<RuntimeVkStageSubJob> stage_jobs;
 };
 
-void ClearRuntimeGpuJobCaches();
-bool ExecuteRuntimeGpuJob(
-  const RuntimeGpuStageJob& job,
+void ClearRuntimeVkJobCaches();
+bool ExecuteRuntimeVkJob(
+  const RuntimeVkStageJob& job,
   std::string* out_error_message = nullptr);
-bool SynchronizeRuntimeGpuJob(
-  const RuntimeGpuStageJob& job,
-  std::string* out_error_message = nullptr);
-bool HasExecutableRuntimeGpuAlgorithmStage(const ::agent::AlgorithmObject& object);
-bool ExecuteRuntimeGpuAlgorithmObject(
-  const ::agent::AlgorithmObject& object,
-  ::algorithm::AlgorithmContainerSet* container_set,
-  const ::agent::AgentTickContext& context,
-  std::string* out_error_message = nullptr);
-bool SynchronizeRuntimeGpuAlgorithmObject(
-  const ::agent::AlgorithmObject& object,
-  ::algorithm::AlgorithmContainerSet* container_set,
+bool SynchronizeRuntimeVkJob(
+  const RuntimeVkStageJob& job,
   std::string* out_error_message = nullptr);
 
 }  // namespace runtime_systems
+

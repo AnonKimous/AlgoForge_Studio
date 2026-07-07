@@ -17,17 +17,17 @@ class ImGuiVulkanRuntime;
 class SdlWindow;
 
 using RuntimeShutdownCallback = void (*)();
-using RuntimeGpuCacheClearCallback = void (*)();
+using RuntimeVkCacheClearCallback = void (*)();
 
 void SetRuntimeShutdownCallback(RuntimeShutdownCallback callback);
-void SetRuntimeGpuCacheClearCallback(RuntimeGpuCacheClearCallback callback);
-void InvokeRuntimeGpuCacheClearCallback();
+void SetRuntimeVkCacheClearCallback(RuntimeVkCacheClearCallback callback);
+void InvokeRuntimeVkCacheClearCallback();
 
 // Advisory runtime backend symbols. They default to true and do not change
 // the main-thread callback execution path yet.
 struct RuntimeExecutionSymbols {
-  bool cpu_symbol{true};
-  bool gpu_symbol{true};
+  bool jobs_symbol{true};
+  bool vk_symbol{true};
 };
 
 struct SdlWindowDeleter {
@@ -53,7 +53,7 @@ class RuntimeEnvironment {
   void SetDrawCallback(DrawCallback callback);
   void SetRenderPreviewRequest(RenderPreviewRequest request);
   void SetRenderPreviewExtent(ImVec2 extent);
-  void ClearGpuRuntimeCaches();
+  void ClearVkRuntimeCaches();
   bool HasRenderPreviewTexture() const;
   bool ReadbackRenderPreviewTexture(std::vector<std::byte>* out_rgba, ImVec2* out_size);
   std::string RenderPreviewDebugSummary() const;
@@ -67,7 +67,7 @@ class RuntimeEnvironment {
 
  private:
   bool sdl_initialized_{false};
-  std::unique_ptr<SdlWindow, SdlWindowDeleter> window_{};
+  std::unique_ptr<SdlWindow, SdlWindowDeleter> window_{}; 
   std::unique_ptr<ImGuiVulkanRuntime, ImGuiVulkanRuntimeDeleter> imgui_runtime_{};
   RuntimeExecutionSymbols execution_symbols_{};
 };

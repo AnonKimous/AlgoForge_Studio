@@ -1,8 +1,6 @@
 #pragma once
 
 #include "algorithm_management/algorithm_manager.h"
-#include "algorithm_support/algorithm_library_paths.h"
-#include "algorithm_support/algorithm_protocol.h"
 
 #include <filesystem>
 #include <memory>
@@ -12,12 +10,12 @@
 namespace debug_tool_backend::algorithm_manager_hooker {
 
 inline std::string AlgorithmCatalogPath() {
-  return (algorithm::library_paths::ResolveAlgorithmLibrarySourceRoot() / "algorithm_catalog.json").string();
+  return (algorithmManager::ResolveAlgorithmLibrarySourceRoot() / "algorithm_catalog.json").string();
 }
 
 inline std::string ProjectRootPath() {
-  const std::filesystem::path root = algorithm::library_paths::ResolveProjectRootFromAlgorithmLibraryRoot(
-    algorithm::library_paths::ResolveAlgorithmLibrarySourceRoot());
+  const std::filesystem::path root = algorithmManager::ResolveProjectRootFromAlgorithmLibraryRoot(
+    algorithmManager::ResolveAlgorithmLibrarySourceRoot());
   if (!root.empty()) {
     return root.string();
   }
@@ -25,20 +23,25 @@ inline std::string ProjectRootPath() {
 }
 
 inline std::filesystem::path ResolveAlgorithmLibrarySourceRoot() {
-  return algorithm::library_paths::ResolveAlgorithmLibrarySourceRoot();
+  return algorithmManager::ResolveAlgorithmLibrarySourceRoot();
 }
 
 inline std::filesystem::path ResolveAlgorithmLibraryRuntimeRoot() {
-  return algorithm::library_paths::ResolveAlgorithmLibraryRuntimeRoot();
+  return algorithmManager::ResolveAlgorithmLibraryRuntimeRoot();
 }
 
 inline std::filesystem::path ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot() {
-  return algorithm::library_paths::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot();
+  return algorithmManager::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot();
 }
 
 inline std::string HotReloadBuildCommand(const std::string& algorithm_name) {
   const std::string root = ProjectRootPath();
-  const std::string script_path = (std::filesystem::path(root) / "build_algorithm.bat").string();
+  const std::string script_name =
+    algorithmManager::GetAlgorithmLibraryRuntimeBuildFlavor() ==
+      algorithm::library_paths::AlgorithmLibraryRuntimeBuildFlavor::ReleaseWithDebugInfo
+      ? "build_algorithm_releaseWithDebugInfo.bat"
+      : "build_algorithm.bat";
+  const std::string script_path = (std::filesystem::path(root) / script_name).string();
   const std::string target_name = algorithm_name;
   std::string normalized_target_name;
   normalized_target_name.reserve(target_name.size() + 1u);
@@ -61,7 +64,7 @@ inline bool TryResolveAlgorithmPackageLocation(
   const std::string& algorithm_name,
   ::algorithm::AlgorithmPackageLocation* out_location,
   std::string* out_error_message = nullptr) {
-  return algorithm_management::TryResolveAlgorithmPackageLocation(
+  return algorithm::TryResolveAlgorithmPackageLocation(
     algorithm_name,
     out_location,
     out_error_message);
@@ -72,20 +75,30 @@ inline bool LoadAlgorithmPackageTransferMapFromLocation(
   std::shared_ptr<algorithm::AlgorithmRuntimeTransferMap>* out_transfer_map,
   bool* out_has_transfer_map = nullptr,
   std::string* out_error_message = nullptr) {
-  return algorithm_support::LoadAlgorithmPackageTransferMapFromLocation(
+  return algorithmManager::LoadAlgorithmPackageTransferMapFromLocation(
     package_location,
     out_transfer_map,
     out_has_transfer_map,
     out_error_message);
 }
 
+inline bool LoadAlgorithmPipelineWrapperSpecFromLocation(
+  const ::algorithm::AlgorithmPackageLocation& package_location,
+  algorithmManager::catalog::AlgorithmPipelineWrapperSpec* out_wrapper_spec,
+  std::string* out_error_message = nullptr) {
+  return algorithmManager::LoadAlgorithmPipelineWrapperSpecFromLocation(
+    package_location,
+    out_wrapper_spec,
+    out_error_message);
+}
+
 inline bool LoadAlgorithmPackageDefaultBindingsFromLocation(
   const ::algorithm::AlgorithmPackageLocation& package_location,
-  std::vector<algorithm_management::AlgorithmResourceBinding>* out_resource_bindings,
-  std::vector<algorithm_management::AlgorithmDescriptorValue>* out_descriptor_values,
+  std::vector<algorithmManager::AlgorithmResourceBinding>* out_resource_bindings,
+  std::vector<algorithmManager::AlgorithmDescriptorValue>* out_descriptor_values,
   bool* out_has_default_file = nullptr,
   std::string* out_error_message = nullptr) {
-  return algorithm_support::LoadAlgorithmPackageDefaultBindingsFromLocation(
+  return algorithmManager::LoadAlgorithmPackageDefaultBindingsFromLocation(
     package_location,
     out_resource_bindings,
     out_descriptor_values,
@@ -95,11 +108,11 @@ inline bool LoadAlgorithmPackageDefaultBindingsFromLocation(
 
 inline bool LoadAlgorithmPackageDefaultBindings(
   const std::string& algorithm_name,
-  std::vector<algorithm_management::AlgorithmResourceBinding>* out_resource_bindings,
-  std::vector<algorithm_management::AlgorithmDescriptorValue>* out_descriptor_values,
+  std::vector<algorithmManager::AlgorithmResourceBinding>* out_resource_bindings,
+  std::vector<algorithmManager::AlgorithmDescriptorValue>* out_descriptor_values,
   bool* out_has_default_file = nullptr,
   std::string* out_error_message = nullptr) {
-  return algorithm_management::LoadAlgorithmPackageDefaultBindings(
+  return algorithmManager::LoadAlgorithmPackageDefaultBindings(
     algorithm_name,
     out_resource_bindings,
     out_descriptor_values,
@@ -109,10 +122,10 @@ inline bool LoadAlgorithmPackageDefaultBindings(
 
 inline bool QueryAlgorithmRequestedBindings(
   const std::string& algorithm_name,
-  algorithm_management::AlgorithmRequestedResources* out_resources,
-  algorithm_management::AlgorithmRequestedDescriptorBindings* out_descriptors,
+  algorithmManager::AlgorithmRequestedResources* out_resources,
+  algorithmManager::AlgorithmRequestedDescriptorBindings* out_descriptors,
   std::string* out_error_message = nullptr) {
-  return algorithm_management::QueryAlgorithmRequestedBindings(
+  return algorithmManager::QueryAlgorithmRequestedBindings(
     algorithm_name,
     out_resources,
     out_descriptors,
@@ -122,8 +135,8 @@ inline bool QueryAlgorithmRequestedBindings(
 inline bool TryGetMountedPipelineRuntime(
   const std::string& pipeline_name,
   const std::string& agent_name,
-  algorithm_management::CpuPipelineRuntimeState* out_runtime_state) {
-  return algorithm_management::TryGetMountedPipelineRuntime(
+  algorithmManager::JobsPipelineRuntimeState* out_runtime_state) {
+  return algorithmManager::TryGetMountedPipelineRuntime(
     pipeline_name,
     agent_name,
     out_runtime_state);
@@ -131,33 +144,33 @@ inline bool TryGetMountedPipelineRuntime(
 
 inline bool TryGetMountedPipelineRegistration(
   const std::string& pipeline_name,
-  algorithm_management::CpuPipelineRegistration* out_registration) {
-  return algorithm_management::AlgorithmScheduler::Instance().TryGetPipelineRegistration(
+  algorithmManager::JobsPipelineRegistration* out_registration) {
+  return algorithmManager::TryGetMountedPipelineRegistration(
     pipeline_name,
     out_registration);
 }
 
 inline void ClearAlgorithmScheduler() {
-  algorithm_management::ClearAlgorithmScheduler();
+  algorithmManager::ClearAlgorithmScheduler();
 }
 
 inline void SetAlgorithmRuntimeShutdownHook() {
-  algorithm_management::SetAlgorithmRuntimeShutdownHook();
+  algorithmManager::SetAlgorithmRuntimeShutdownHook();
 }
 
 inline void ClearAlgorithmExecutionCaches() {
-  algorithm_management::ClearAlgorithmExecutionCaches();
+  algorithmManager::ClearAlgorithmExecutionCaches();
 }
 
-inline bool ExecuteCpuAlgorithmObject(
-  const ::agent::AlgorithmObject& object,
-  const ::agent::AgentTickContext& context,
+inline bool ExecuteJobsAlgorithmObject(
+  const ::agentmanager::agent::AlgorithmObject& object,
+  const ::agentmanager::agent::AgentTickContext& context,
   const common_data::AgentToAlgorithmSignal& agent_to_algorithm_signal,
   ::algorithm::AlgorithmContainerSet* container_set,
   common_data::AlgorithmToAgentSignal* out_algorithm_to_agent_signal,
-  ::agent::AlgorithmPackageDebugState* out_debug_state,
+  ::agentmanager::agent::AlgorithmPackageDebugState* out_debug_state,
   std::string* out_error_message = nullptr) {
-  return algorithm_management::ExecuteCpuAlgorithmObject(
+  return algorithmManager::ExecuteJobsAlgorithmObject(
     object,
     context,
     agent_to_algorithm_signal,
@@ -167,27 +180,27 @@ inline bool ExecuteCpuAlgorithmObject(
     out_error_message);
 }
 
-inline bool ExecuteGpuAlgorithmObject(
-  const ::agent::AlgorithmObject& object,
+inline bool ExecuteVkAlgorithmObject(
+  const ::agentmanager::agent::AlgorithmObject& object,
   ::algorithm::AlgorithmContainerSet* container_set,
-  const ::agent::AgentTickContext& context,
+  const ::agentmanager::agent::AgentTickContext& context,
   std::string* out_error_message = nullptr) {
-  return algorithm_management::ExecuteGpuAlgorithmObject(
+  return algorithmManager::ExecuteVkAlgorithmObject(
     object,
     container_set,
     context,
     out_error_message);
 }
 
-inline bool HasExecutableGpuAlgorithmStage(const ::agent::AlgorithmObject& object) {
-  return algorithm_management::HasExecutableGpuAlgorithmStage(object);
+inline bool HasExecutableVkAlgorithmStage(const ::agentmanager::agent::AlgorithmObject& object) {
+  return algorithmManager::HasExecutableVkAlgorithmStage(object);
 }
 
-inline bool SynchronizeGpuAlgorithmObject(
-  const ::agent::AlgorithmObject& object,
+inline bool SynchronizeVkAlgorithmObject(
+  const ::agentmanager::agent::AlgorithmObject& object,
   ::algorithm::AlgorithmContainerSet* container_set,
   std::string* out_error_message = nullptr) {
-  return algorithm_management::SynchronizeGpuAlgorithmObject(
+  return algorithmManager::SynchronizeVkAlgorithmObject(
     object,
     container_set,
     out_error_message);

@@ -1,242 +1,242 @@
-Pipeline Runtime 开发草案
-状态：draft
-最后更新：2026-06-18
+Pipeline Runtime 寮€鍙戣崏妗?
+鐘舵€侊細draft
+鏈€鍚庢洿鏂帮細2026-06-18
 
-1. 文档目的
+1. 鏂囨。鐩殑
 
-这份文档用于整理当前 pipeline runtime 的修改意见。
-它不是最终实现规范，而是给用户先确认目标模型、术语、边界和改造顺序。
-等这份文档被用户改到满意之后，后续代码再严格对照文档修改。
+杩欎唤鏂囨。鐢ㄤ簬鏁寸悊褰撳墠 pipeline runtime 鐨勪慨鏀规剰瑙併€?
+瀹冧笉鏄渶缁堝疄鐜拌鑼冿紝鑰屾槸缁欑敤鎴峰厛纭鐩爣妯″瀷銆佹湳璇€佽竟鐣屽拰鏀归€犻『搴忋€?
+绛夎繖浠芥枃妗ｈ鐢ㄦ埛鏀瑰埌婊℃剰涔嬪悗锛屽悗缁唬鐮佸啀涓ユ牸瀵圭収鏂囨。淇敼銆?
 
-需要特别说明：
-当前主干里 pipeline 的搭建方式本身是有问题的。
-这份文档描述的是目标方向，不是替当前主干实现辩护。
+闇€瑕佺壒鍒鏄庯細
+褰撳墠涓诲共閲?pipeline 鐨勬惌寤烘柟寮忔湰韬槸鏈夐棶棰樼殑銆?
+杩欎唤鏂囨。鎻忚堪鐨勬槸鐩爣鏂瑰悜锛屼笉鏄浛褰撳墠涓诲共瀹炵幇杈╂姢銆?
 
-2. 当前主干 pipeline 的主要问题
+2. 褰撳墠涓诲共 pipeline 鐨勪富瑕侀棶棰?
 
-当前主干已经有一些 pipeline 雏形，例如：
+褰撳墠涓诲共宸茬粡鏈変竴浜?pipeline 闆忓舰锛屼緥濡傦細
 
-- pipeline 算法可单独挂载
-- 支持 circular / non-circular 提交模式
-- 有 runtime transfer map
-- 有 stage bridge debug
-- 有 stage stall log
+- pipeline 绠楁硶鍙崟鐙寕杞?
+- 鏀寔 circular / non-circular 鎻愪氦妯″紡
+- 鏈?runtime transfer map
+- 鏈?stage bridge debug
+- 鏈?stage stall log
 
-但从目标语义看，当前主干仍然有几个结构性问题：
+浣嗕粠鐩爣璇箟鐪嬶紝褰撳墠涓诲共浠嶇劧鏈夊嚑涓粨鏋勬€ч棶棰橈細
 
-2.1 bridge 仍然太像 CPU 侧的后处理
-- stage 先执行
-- bridge 再做转发或搬运
-- 这不符合目标执行模型
+2.1 bridge 浠嶇劧澶儚 JOBS 渚х殑鍚庡鐞?
+- stage 鍏堟墽琛?
+- bridge 鍐嶅仛杞彂鎴栨惉杩?
+- 杩欎笉绗﹀悎鐩爣鎵ц妯″瀷
 
-2.2 standard container 还没有成为 lane 状态的绝对宿主
-- pipeline 里的状态应当跟随每一套资源流动
-- 每一套资源都必须带有自己的 standard container
-- 当前结构仍然偏 stage 中心，而不是 lane 中心
+2.2 standard container 杩樻病鏈夋垚涓?lane 鐘舵€佺殑缁濆瀹夸富
+- pipeline 閲岀殑鐘舵€佸簲褰撹窡闅忔瘡涓€濂楄祫婧愭祦鍔?
+- 姣忎竴濂楄祫婧愰兘蹇呴』甯︽湁鑷繁鐨?standard container
+- 褰撳墠缁撴瀯浠嶇劧鍋?stage 涓績锛岃€屼笉鏄?lane 涓績
 
-2.3 stage 执行看到的容器仍然太像“独立私有 container set”
-- 目标模型更接近“映射”和“绑定”
-- 而不是长期维护一整套独立 stage 容器副本
+2.3 stage 鎵ц鐪嬪埌鐨勫鍣ㄤ粛鐒跺お鍍忊€滅嫭绔嬬鏈?container set鈥?
+- 鐩爣妯″瀷鏇存帴杩戔€滄槧灏勨€濆拰鈥滅粦瀹氣€?
+- 鑰屼笉鏄暱鏈熺淮鎶や竴鏁村鐙珛 stage 瀹瑰櫒鍓湰
 
-2.4 GPU 执行模型里还没有自然包含 bridge
-- 当前执行路径仍倾向于把 stage 本体和 bridge 看成两个运行时阶段
-- 目标语义要求 bridge 是 stage 执行体的一部分
+2.4 VK 鎵ц妯″瀷閲岃繕娌℃湁鑷劧鍖呭惈 bridge
+- 褰撳墠鎵ц璺緞浠嶅€惧悜浜庢妸 stage 鏈綋鍜?bridge 鐪嬫垚涓や釜杩愯鏃堕樁娈?
+- 鐩爣璇箟瑕佹眰 bridge 鏄?stage 鎵ц浣撶殑涓€閮ㄥ垎
 
-2.5 CPU bridge 和 GPU bridge 不应混为一谈
-- CPU bridge 和 GPU bridge 本来就是两套东西
-- GPU 侧继续沿用“standard container 共享前缀 + 隐式 stageBuffer 卡位”的方案
-- CPU 侧改为“同一 lane 的所有 bridge 共享一份 interStageBuffer”
-- 这份共享 interStageBuffer 由 lane 持有，不再把标准容器里的隐式 stageBuffer 当成 CPU 运行时真正的跨 stage 缓冲
+2.5 JOBS bridge 鍜?VK bridge 涓嶅簲娣蜂负涓€璋?
+- JOBS bridge 鍜?VK bridge 鏈潵灏辨槸涓ゅ涓滆タ
+- VK 渚х户缁部鐢ㄢ€渟tandard container 鍏变韩鍓嶇紑 + 闅愬紡 stageBuffer 鍗′綅鈥濈殑鏂规
+- JOBS 渚ф敼涓衡€滃悓涓€ lane 鐨勬墍鏈?bridge 鍏变韩涓€浠?interStageBuffer鈥?
+- 杩欎唤鍏变韩 interStageBuffer 鐢?lane 鎸佹湁锛屼笉鍐嶆妸鏍囧噯瀹瑰櫒閲岀殑闅愬紡 stageBuffer 褰撴垚 JOBS 杩愯鏃剁湡姝ｇ殑璺?stage 缂撳啿
 
-3. 已经确认的核心规则
+3. 宸茬粡纭鐨勬牳蹇冭鍒?
 
-下面这些规则，本草案按“已经确认”处理。
+涓嬮潰杩欎簺瑙勫垯锛屾湰鑽夋鎸夆€滃凡缁忕‘璁も€濆鐞嗐€?
 
-3.1 pipeline 的本质
-- pipeline 本质是一组算法被当成一个算法提交
-- agent 不理解 pipeline 的业务细节
-- agent 只知道这个对象有一个 tick
-- 一次 tick 到底意味着什么，由算法自己决定
+3.1 pipeline 鐨勬湰璐?
+- pipeline 鏈川鏄竴缁勭畻娉曡褰撴垚涓€涓畻娉曟彁浜?
+- agent 涓嶇悊瑙?pipeline 鐨勪笟鍔＄粏鑺?
+- agent 鍙煡閬撹繖涓璞℃湁涓€涓?tick
+- 涓€娆?tick 鍒板簳鎰忓懗鐫€浠€涔堬紝鐢辩畻娉曡嚜宸卞喅瀹?
 
-3.2 每一套资源都拥有自己的 standard container
-- 进入 pipeline 的每一套资源，必须拥有自己独立的一份 standard container
-- 这份 standard container 只属于这一套资源流
-- 不同资源流之间不能共享同一份 standard container
+3.2 姣忎竴濂楄祫婧愰兘鎷ユ湁鑷繁鐨?standard container
+- 杩涘叆 pipeline 鐨勬瘡涓€濂楄祫婧愶紝蹇呴』鎷ユ湁鑷繁鐙珛鐨勪竴浠?standard container
+- 杩欎唤 standard container 鍙睘浜庤繖涓€濂楄祫婧愭祦
+- 涓嶅悓璧勬簮娴佷箣闂翠笉鑳藉叡浜悓涓€浠?standard container
 
-3.3 bridge 不生成大块新内存
-- bridge 可以使用极细碎的临时 scratch 数据
-- bridge 不能生成一整套长期存在的 stage 私有 container 内存
-- bridge 的主要职责是映射、绑定、缓冲、写回、转发
+3.3 bridge 涓嶇敓鎴愬ぇ鍧楁柊鍐呭瓨
+- bridge 鍙互浣跨敤鏋佺粏纰庣殑涓存椂 scratch 鏁版嵁
+- bridge 涓嶈兘鐢熸垚涓€鏁村闀挎湡瀛樺湪鐨?stage 绉佹湁 container 鍐呭瓨
+- bridge 鐨勪富瑕佽亴璐ｆ槸鏄犲皠銆佺粦瀹氥€佺紦鍐层€佸啓鍥炪€佽浆鍙?
 
-3.4 stage 本地名字不是底层状态真正的宿主
-- stage 内部看到的 a1、v1、v2 只是这个 stage 的视图名字
-- 真正长期存在的底层状态应该来自：
-  - lane 的 standard container
-  - stage 之间的 edge buffer
+3.4 stage 鏈湴鍚嶅瓧涓嶆槸搴曞眰鐘舵€佺湡姝ｇ殑瀹夸富
+- stage 鍐呴儴鐪嬪埌鐨?a1銆乿1銆乿2 鍙槸杩欎釜 stage 鐨勮鍥惧悕瀛?
+- 鐪熸闀挎湡瀛樺湪鐨勫簳灞傜姸鎬佸簲璇ユ潵鑷細
+  - lane 鐨?standard container
+  - stage 涔嬮棿鐨?edge buffer
 
-3.5 bridge 是 stage 执行体的一部分
-- stageX 的运行时行为不应该是：
-  - 先执行 stageX
-  - 再由 CPU 做 bridge
-- stageX 的运行时行为应该是：
+3.5 bridge 鏄?stage 鎵ц浣撶殑涓€閮ㄥ垎
+- stageX 鐨勮繍琛屾椂琛屼负涓嶅簲璇ユ槸锛?
+  - 鍏堟墽琛?stageX
+  - 鍐嶇敱 JOBS 鍋?bridge
+- stageX 鐨勮繍琛屾椂琛屼负搴旇鏄細
   - bridge ingress
   - stageX execute
   - bridge egress
 
-4. 建议统一使用的术语
+4. 寤鸿缁熶竴浣跨敤鐨勬湳璇?
 
-为了避免后续代码和文档再次散掉，建议统一使用以下术语。
+涓轰簡閬垮厤鍚庣画浠ｇ爜鍜屾枃妗ｅ啀娆℃暎鎺夛紝寤鸿缁熶竴浣跨敤浠ヤ笅鏈銆?
 
 4.1 PipelineAlgorithm
-- 一个支持 pipeline 运行时语义的算法包
+- 涓€涓敮鎸?pipeline 杩愯鏃惰涔夌殑绠楁硶鍖?
 
 4.2 PipelineInstance
-- 一个已经挂载到 agent 上的 pipeline 运行时实例
-- 一个 instance 内可以同时承载多套资源流
+- 涓€涓凡缁忔寕杞藉埌 agent 涓婄殑 pipeline 杩愯鏃跺疄渚?
+- 涓€涓?instance 鍐呭彲浠ュ悓鏃舵壙杞藉濂楄祫婧愭祦
 
 4.3 PipelineLane
-- PipelineInstance 内的一条资源流
-- 一次外部提交，对应一条 lane
+- PipelineInstance 鍐呯殑涓€鏉¤祫婧愭祦
+- 涓€娆″閮ㄦ彁浜わ紝瀵瑰簲涓€鏉?lane
 
 4.3.1 LoopLane
-- 仅对 circular pipeline 有意义
-- 表示由 pipeline 内部回灌形成的继续流动语义
-- 因为 circular pipeline 存在 stage-1 回灌 stage0，所以 lane 之外需要有一个 looplane 语义用于描述内部回流
-- looplane 不是普通外部提交出来的新资源流，而是已有 lane 在环形结构中的继续推进语义
+- 浠呭 circular pipeline 鏈夋剰涔?
+- 琛ㄧず鐢?pipeline 鍐呴儴鍥炵亴褰㈡垚鐨勭户缁祦鍔ㄨ涔?
+- 鍥犱负 circular pipeline 瀛樺湪 stage-1 鍥炵亴 stage0锛屾墍浠?lane 涔嬪闇€瑕佹湁涓€涓?looplane 璇箟鐢ㄤ簬鎻忚堪鍐呴儴鍥炴祦
+- looplane 涓嶆槸鏅€氬閮ㄦ彁浜ゅ嚭鏉ョ殑鏂拌祫婧愭祦锛岃€屾槸宸叉湁 lane 鍦ㄧ幆褰㈢粨鏋勪腑鐨勭户缁帹杩涜涔?
 
 4.4 StandardContainer
-- 某条 lane 持有的主状态容器
-- 是这条 lane 的主要长期状态宿主
+- 鏌愭潯 lane 鎸佹湁鐨勪富鐘舵€佸鍣?
+- 鏄繖鏉?lane 鐨勪富瑕侀暱鏈熺姸鎬佸涓?
 
 4.5 InterStageBuffer / StageBuffer
-- 某条 lane 内，两个 stage 之间那条边上的运行时缓冲区
-- 只保存上一个 stage 写给当前 stage 的那部分碎数据
-- 本文后续默认优先使用 InterStageBuffer 这个名字
-- 如果后续用户觉得 StageBuffer 更顺手，可以整体替换
+- 鏌愭潯 lane 鍐咃紝涓や釜 stage 涔嬮棿閭ｆ潯杈逛笂鐨勮繍琛屾椂缂撳啿鍖?
+- 鍙繚瀛樹笂涓€涓?stage 鍐欑粰褰撳墠 stage 鐨勯偅閮ㄥ垎纰庢暟鎹?
+- 鏈枃鍚庣画榛樿浼樺厛浣跨敤 InterStageBuffer 杩欎釜鍚嶅瓧
+- 濡傛灉鍚庣画鐢ㄦ埛瑙夊緱 StageBuffer 鏇撮『鎵嬶紝鍙互鏁翠綋鏇挎崲
 
 4.6 StageBindingPlan
-- 由映射表预编译出来的绑定计划
-- 描述某个 stage 如何：
-  - 从 standard container 读取
-  - 从 ingress edge 读取
-  - 暴露本地 a/v 名字
-  - 写回 standard container
-  - 写入 egress edge
+- 鐢辨槧灏勮〃棰勭紪璇戝嚭鏉ョ殑缁戝畾璁″垝
+- 鎻忚堪鏌愪釜 stage 濡備綍锛?
+  - 浠?standard container 璇诲彇
+  - 浠?ingress edge 璇诲彇
+  - 鏆撮湶鏈湴 a/v 鍚嶅瓧
+  - 鍐欏洖 standard container
+  - 鍐欏叆 egress edge
 
 4.7 StageBindingView
-- stage 在执行时真正看到的容器视图
-- 它应该表现得像 stage 平时使用的 a/v 容器
-- 但它本身不拥有大块长期内存
+- stage 鍦ㄦ墽琛屾椂鐪熸鐪嬪埌鐨勫鍣ㄨ鍥?
+- 瀹冨簲璇ヨ〃鐜板緱鍍?stage 骞虫椂浣跨敤鐨?a/v 瀹瑰櫒
+- 浣嗗畠鏈韩涓嶆嫢鏈夊ぇ鍧楅暱鏈熷唴瀛?
 
 4.8 PipelineStageBridge
-- 某个 stage 对应的运行时解释层
-- 负责：
-  - ingress 映射
-  - 本地绑定
-  - egress 路由
-  - standard container 写回
+- 鏌愪釜 stage 瀵瑰簲鐨勮繍琛屾椂瑙ｉ噴灞?
+- 璐熻矗锛?
+  - ingress 鏄犲皠
+  - 鏈湴缁戝畾
+  - egress 璺敱
+  - standard container 鍐欏洖
 
-5. 目标内存模型
+5. 鐩爣鍐呭瓨妯″瀷
 
-5.1 一条 lane 至少应当持有
+5.1 涓€鏉?lane 鑷冲皯搴斿綋鎸佹湁
 - lane id
-- 一份 standard container
-- 每条 stage 边对应的一份 interStageBuffer 语义
-- 每个 stage 的执行状态位
-- debug / stall / profiling 统计信息
+- 涓€浠?standard container
+- 姣忔潯 stage 杈瑰搴旂殑涓€浠?interStageBuffer 璇箟
+- 姣忎釜 stage 鐨勬墽琛岀姸鎬佷綅
+- debug / stall / profiling 缁熻淇℃伅
 
-5.2 standard container 是主状态宿主
-- pipeline 的长期状态应当归属于 lane
-- 不应再把 stage 的 shared container set 当成 pipeline 长期状态的真正宿主
+5.2 standard container 鏄富鐘舵€佸涓?
+- pipeline 鐨勯暱鏈熺姸鎬佸簲褰撳綊灞炰簬 lane
+- 涓嶅簲鍐嶆妸 stage 鐨?shared container set 褰撴垚 pipeline 闀挎湡鐘舵€佺殑鐪熸瀹夸富
 
-5.3 interStageBuffer 只负责保存跨 stage 传递数据
-- interStageBuffer 不是另一份 standard container
-- interStageBuffer 也不是完整 stage 状态副本
-- interStageBuffer 只保留上一个 stage 写入给当前 stage 的碎数据
-- 对 CPU 侧来说，同一条 lane 的所有 stage bridge 共享这一份 interStageBuffer
-- 同一时刻只允许一个 stage 在 egress 阶段写它
+5.3 interStageBuffer 鍙礋璐ｄ繚瀛樿法 stage 浼犻€掓暟鎹?
+- interStageBuffer 涓嶆槸鍙︿竴浠?standard container
+- interStageBuffer 涔熶笉鏄畬鏁?stage 鐘舵€佸壇鏈?
+- interStageBuffer 鍙繚鐣欎笂涓€涓?stage 鍐欏叆缁欏綋鍓?stage 鐨勭鏁版嵁
+- 瀵?JOBS 渚ф潵璇达紝鍚屼竴鏉?lane 鐨勬墍鏈?stage bridge 鍏变韩杩欎竴浠?interStageBuffer
+- 鍚屼竴鏃跺埢鍙厑璁镐竴涓?stage 鍦?egress 闃舵鍐欏畠
 
-5.4 GPU 侧不建议单独绑定 ingress buffer
-- 对 GPU 侧 bridge，不建议单独再绑定一份 ingress buffer
-- 更推荐在 standard container 内隐式指定一个统一的 a 作为公共 stage 间缓冲区
-- 各 stage 自己约定在这个统一 buffer 里的偏移量和布局
-- 这个统一 stageBuffer 必须落在所有 stage 共享的 standard array 前缀里，不能落到某个 stage 私有多出来的 a 槽位上
-- 这样 GPU bridge 读写的仍然是 standard container 内的一部分，而不是额外一套独立 ingress buffer
-- 这条规则不是推荐项，而是强制项
+5.4 VK 渚т笉寤鸿鍗曠嫭缁戝畾 ingress buffer
+- 瀵?VK 渚?bridge锛屼笉寤鸿鍗曠嫭鍐嶇粦瀹氫竴浠?ingress buffer
+- 鏇存帹鑽愬湪 standard container 鍐呴殣寮忔寚瀹氫竴涓粺涓€鐨?a 浣滀负鍏叡 stage 闂寸紦鍐插尯
+- 鍚?stage 鑷繁绾﹀畾鍦ㄨ繖涓粺涓€ buffer 閲岀殑鍋忕Щ閲忓拰甯冨眬
+- 杩欎釜缁熶竴 stageBuffer 蹇呴』钀藉湪鎵€鏈?stage 鍏变韩鐨?standard array 鍓嶇紑閲岋紝涓嶈兘钀藉埌鏌愪釜 stage 绉佹湁澶氬嚭鏉ョ殑 a 妲戒綅涓?
+- 杩欐牱 VK bridge 璇诲啓鐨勪粛鐒舵槸 standard container 鍐呯殑涓€閮ㄥ垎锛岃€屼笉鏄澶栦竴濂楃嫭绔?ingress buffer
+- 杩欐潯瑙勫垯涓嶆槸鎺ㄨ崘椤癸紝鑰屾槸寮哄埗椤?
 
-5.4.1 CPU 侧的对应方案
-- CPU 侧不强制把跨 stage 碎数据塞回 standard container 的隐式 stageBuffer
-- CPU 侧 bridge 直接读写 lane 共享 interStageBuffer
-- 映射表负责记录每个 stage 的额外 `v` 在这份共享缓冲里的偏移
-- circular pipeline 回灌时，只回灌共享 standard prefix；额外 `v` 继续通过 interStageBuffer 回流
+5.4.1 JOBS 渚х殑瀵瑰簲鏂规
+- JOBS 渚т笉寮哄埗鎶婅法 stage 纰庢暟鎹鍥?standard container 鐨勯殣寮?stageBuffer
+- JOBS 渚?bridge 鐩存帴璇诲啓 lane 鍏变韩 interStageBuffer
+- 鏄犲皠琛ㄨ礋璐ｈ褰曟瘡涓?stage 鐨勯澶?`v` 鍦ㄨ繖浠藉叡浜紦鍐查噷鐨勫亸绉?
+- circular pipeline 鍥炵亴鏃讹紝鍙洖鐏屽叡浜?standard prefix锛涢澶?`v` 缁х画閫氳繃 interStageBuffer 鍥炴祦
 
-5.5 bridge 应保持轻量
-- 负责绑定
-- 负责翻译
-- 负责转发
-- 负责写回
-- 只允许极小 scratch
+5.5 bridge 搴斾繚鎸佽交閲?
+- 璐熻矗缁戝畾
+- 璐熻矗缈昏瘧
+- 璐熻矗杞彂
+- 璐熻矗鍐欏洖
+- 鍙厑璁告瀬灏?scratch
 
-6. 目标数据流
+6. 鐩爣鏁版嵁娴?
 
-对于任意 stageX，目标数据流建议明确为：
+瀵逛簬浠绘剰 stageX锛岀洰鏍囨暟鎹祦寤鸿鏄庣‘涓猴細
 
-上一 stage 写入的 interStageBuffer + lane standard container
+涓婁竴 stage 鍐欏叆鐨?interStageBuffer + lane standard container
 -> bridgeX ingress
 -> stage binding view
 -> stageX execute
 -> bridgeX egress
--> lane standard container + 下一 stage 可见的 interStageBuffer
+-> lane standard container + 涓嬩竴 stage 鍙鐨?interStageBuffer
 
-如果用更贴近用户描述的形式来写，就是：
+濡傛灉鐢ㄦ洿璐磋繎鐢ㄦ埛鎻忚堪鐨勫舰寮忔潵鍐欙紝灏辨槸锛?
 
-入边 + 标准容器
+鍏ヨ竟 + 鏍囧噯瀹瑰櫒
 -> bridgeX
 -> stageX
--> 出边 + 标准容器
+-> 鍑鸿竟 + 鏍囧噯瀹瑰櫒
 -> bridgeX+1
 
-它真正表达的意思是：
-- 真正流动的是 lane 状态
-- 不是每个 stage 各自抱着一整套复制出来的完整状态往前传
-- 对 GPU 侧来说，这里的“入边”更偏向 standard container 内统一 stage buffer 的某一段，而不是单独绑定的新 ingress buffer
-- 对 CPU 侧来说，这里的“入边”就是 lane 共享 interStageBuffer 里对应 stage 的那一段
+瀹冪湡姝ｈ〃杈剧殑鎰忔€濇槸锛?
+- 鐪熸娴佸姩鐨勬槸 lane 鐘舵€?
+- 涓嶆槸姣忎釜 stage 鍚勮嚜鎶辩潃涓€鏁村澶嶅埗鍑烘潵鐨勫畬鏁寸姸鎬佸線鍓嶄紶
+- 瀵?VK 渚ф潵璇达紝杩欓噷鐨勨€滃叆杈光€濇洿鍋忓悜 standard container 鍐呯粺涓€ stage buffer 鐨勬煇涓€娈碉紝鑰屼笉鏄崟鐙粦瀹氱殑鏂?ingress buffer
+- 瀵?JOBS 渚ф潵璇达紝杩欓噷鐨勨€滃叆杈光€濆氨鏄?lane 鍏变韩 interStageBuffer 閲屽搴?stage 鐨勯偅涓€娈?
 
-7. 映射表语义
+7. 鏄犲皠琛ㄨ涔?
 
-映射表不应再被理解成单纯的 copy 规则，而应理解成绑定和解释规则。
+鏄犲皠琛ㄤ笉搴斿啀琚悊瑙ｆ垚鍗曠函鐨?copy 瑙勫垯锛岃€屽簲鐞嗚В鎴愮粦瀹氬拰瑙ｉ噴瑙勫垯銆?
 
 7.1 Standard Read Mapping
-- 把 standard container 里的 An / Vn
-- 映射成当前 stage 看到的 Ax / Vx
+- 鎶?standard container 閲岀殑 An / Vn
+- 鏄犲皠鎴愬綋鍓?stage 鐪嬪埌鐨?Ax / Vx
 
 7.2 Edge Ingress Mapping
-- 把上一个 stage 留给当前 stage 的 interStageBuffer 数据
-- 映射成当前 stage 使用的变量或数组
+- 鎶婁笂涓€涓?stage 鐣欑粰褰撳墠 stage 鐨?interStageBuffer 鏁版嵁
+- 鏄犲皠鎴愬綋鍓?stage 浣跨敤鐨勫彉閲忔垨鏁扮粍
 
 7.3 Standard Writeback Mapping
-- 当前 stage 执行结束后
-- 哪些值要写回当前 lane 的 standard container
+- 褰撳墠 stage 鎵ц缁撴潫鍚?
+- 鍝簺鍊艰鍐欏洖褰撳墠 lane 鐨?standard container
 
 7.4 Edge Egress Mapping
-- 当前 stage 执行结束后
-- 哪些值要写进下一段 interStageBuffer
+- 褰撳墠 stage 鎵ц缁撴潫鍚?
+- 鍝簺鍊艰鍐欒繘涓嬩竴娈?interStageBuffer
 
-7.5 自定义变量规则
-- standard slot direct transfer 可支持：
-  - 变量 -> 变量
-  - 数组 -> 数组
-  - 变量 -> 数组
-- 这些 standard slot direct transfer 不要求同名
-- 开发者自定义变量要求同名
-- 结构不一致直接断言报错
+7.5 鑷畾涔夊彉閲忚鍒?
+- standard slot direct transfer 鍙敮鎸侊細
+  - 鍙橀噺 -> 鍙橀噺
+  - 鏁扮粍 -> 鏁扮粍
+  - 鍙橀噺 -> 鏁扮粍
+- 杩欎簺 standard slot direct transfer 涓嶈姹傚悓鍚?
+- 寮€鍙戣€呰嚜瀹氫箟鍙橀噺瑕佹眰鍚屽悕
+- 缁撴瀯涓嶄竴鑷寸洿鎺ユ柇瑷€鎶ラ敊
 
-7.6 stage 标准槽共享前缀和额外槽偏移
-- pipeline 运行时不能假设每个 stage 声明的标准容器完全一样
-- 某些 stage 可以故意比共享前缀多声明几个 v，或者多声明几个 a
-- 当前实现先收紧为：只允许多声明 `v`，不允许多声明 `a`
-- 一旦某个 stage 出现共享前缀之外的额外 `a`，直接断言报错
-- 映射表里必须额外收集每个 stage 的布局摘要，至少包括：
+7.6 stage 鏍囧噯妲藉叡浜墠缂€鍜岄澶栨Ы鍋忕Щ
+- pipeline 杩愯鏃朵笉鑳藉亣璁炬瘡涓?stage 澹版槑鐨勬爣鍑嗗鍣ㄥ畬鍏ㄤ竴鏍?
+- 鏌愪簺 stage 鍙互鏁呮剰姣斿叡浜墠缂€澶氬０鏄庡嚑涓?v锛屾垨鑰呭澹版槑鍑犱釜 a
+- 褰撳墠瀹炵幇鍏堟敹绱т负锛氬彧鍏佽澶氬０鏄?`v`锛屼笉鍏佽澶氬０鏄?`a`
+- 涓€鏃︽煇涓?stage 鍑虹幇鍏变韩鍓嶇紑涔嬪鐨勯澶?`a`锛岀洿鎺ユ柇瑷€鎶ラ敊
+- 鏄犲皠琛ㄩ噷蹇呴』棰濆鏀堕泦姣忎釜 stage 鐨勫竷灞€鎽樿锛岃嚦灏戝寘鎷細
   - declared_variable_count
   - declared_array_count
   - shared_variable_count
@@ -245,126 +245,126 @@ Pipeline Runtime 开发草案
   - extra_array_count
   - extra_variable_offset
   - extra_array_offset
-- shared 前缀的含义是：所有 stage 都至少拥有、并且结构兼容的那一段标准 v/a
-- extra 偏移按 stage 顺序累加，例如：
-  - stage0 多 1 个 v，则 offset = 0
-  - stage1 多 2 个 v，则 offset = 1
-  - stage2 多 0 个 v，则 offset = 3
-  - stage3 多 1 个 v，则 offset = 3
-- 后续 bridge / binding plan 看到的不是“这个 stage 自己随便多了几个槽”，而是“共享前缀 + 已登记偏移后的 stage 私有扩展槽”
-- 如果共享前缀范围内结构不兼容，直接断言报错
+- shared 鍓嶇紑鐨勫惈涔夋槸锛氭墍鏈?stage 閮借嚦灏戞嫢鏈夈€佸苟涓旂粨鏋勫吋瀹圭殑閭ｄ竴娈垫爣鍑?v/a
+- extra 鍋忕Щ鎸?stage 椤哄簭绱姞锛屼緥濡傦細
+  - stage0 澶?1 涓?v锛屽垯 offset = 0
+  - stage1 澶?2 涓?v锛屽垯 offset = 1
+  - stage2 澶?0 涓?v锛屽垯 offset = 3
+  - stage3 澶?1 涓?v锛屽垯 offset = 3
+- 鍚庣画 bridge / binding plan 鐪嬪埌鐨勪笉鏄€滆繖涓?stage 鑷繁闅忎究澶氫簡鍑犱釜妲解€濓紝鑰屾槸鈥滃叡浜墠缂€ + 宸茬櫥璁板亸绉诲悗鐨?stage 绉佹湁鎵╁睍妲解€?
+- 濡傛灉鍏变韩鍓嶇紑鑼冨洿鍐呯粨鏋勪笉鍏煎锛岀洿鎺ユ柇瑷€鎶ラ敊
 
-8. tick 模型
+8. tick 妯″瀷
 
-8.1 普通算法
-- 普通算法保持现有语义
-- 仍走普通挂载和普通 tick 路径
+8.1 鏅€氱畻娉?
+- 鏅€氱畻娉曚繚鎸佺幇鏈夎涔?
+- 浠嶈蛋鏅€氭寕杞藉拰鏅€?tick 璺緞
 
-8.2 pipeline 算法
-- pipeline 的一次 tick 建议定义为：
-  - 对当前 instance 内所有活跃 lane
-  - 让所有 stage 并发执行一轮
-  - 每个 stage 内部完成：
+8.2 pipeline 绠楁硶
+- pipeline 鐨勪竴娆?tick 寤鸿瀹氫箟涓猴細
+  - 瀵瑰綋鍓?instance 鍐呮墍鏈夋椿璺?lane
+  - 璁╂墍鏈?stage 骞跺彂鎵ц涓€杞?
+  - 姣忎釜 stage 鍐呴儴瀹屾垚锛?
     - bridge ingress
     - stage execute
     - bridge egress
-  - 然后 pipeline 状态整体向下一 stage 推进
+  - 鐒跺悗 pipeline 鐘舵€佹暣浣撳悜涓嬩竴 stage 鎺ㄨ繘
 
-8.3 circular 和 non-circular
+8.3 circular 鍜?non-circular
 
-non-circular：
-- 最后一个 stage 输出后直接离开 pipeline
+non-circular锛?
+- 鏈€鍚庝竴涓?stage 杈撳嚭鍚庣洿鎺ョ寮€ pipeline
 
-circular：
-- 最后一个 stage 输出后回灌 stage0
-- stage-1 和 stage0 之间也存在一层 bridge
-- circular pipeline 内部可理解为存在 looplane 语义
-- 当内部回灌和外部提交冲突时：
-  - 先响应内部回灌
-  - 外部提交可能被拒绝
+circular锛?
+- 鏈€鍚庝竴涓?stage 杈撳嚭鍚庡洖鐏?stage0
+- stage-1 鍜?stage0 涔嬮棿涔熷瓨鍦ㄤ竴灞?bridge
+- circular pipeline 鍐呴儴鍙悊瑙ｄ负瀛樺湪 looplane 璇箟
+- 褰撳唴閮ㄥ洖鐏屽拰澶栭儴鎻愪氦鍐茬獊鏃讹細
+  - 鍏堝搷搴斿唴閮ㄥ洖鐏?
+  - 澶栭儴鎻愪氦鍙兘琚嫆缁?
 
-8.4 支持关系
-- 支持 circular 的 pipeline 算法，可以按 circular 或 non-circular 挂载
-- 不支持 circular 的 pipeline 算法，只能按 non-circular 挂载
+8.4 鏀寔鍏崇郴
+- 鏀寔 circular 鐨?pipeline 绠楁硶锛屽彲浠ユ寜 circular 鎴?non-circular 鎸傝浇
+- 涓嶆敮鎸?circular 鐨?pipeline 绠楁硶锛屽彧鑳芥寜 non-circular 鎸傝浇
 
-9. GPU 执行方向
+9. VK 鎵ц鏂瑰悜
 
-9.1 CPU bridge 和 GPU bridge 分开定义
-- CPU bridge 和 GPU bridge 不是同一套东西
-- 本文目前重点约束 GPU bridge
-- CPU bridge 先保留独立口子，后续再单独收紧
+9.1 JOBS bridge 鍜?VK bridge 鍒嗗紑瀹氫箟
+- JOBS bridge 鍜?VK bridge 涓嶆槸鍚屼竴濂椾笢瑗?
+- 鏈枃鐩墠閲嶇偣绾︽潫 VK bridge
+- JOBS bridge 鍏堜繚鐣欑嫭绔嬪彛瀛愶紝鍚庣画鍐嶅崟鐙敹绱?
 
-9.2 GPU bridge 在执行里的目标定位
-- GPU bridge 应被视为 stage 执行体的一部分
-- 不应再只是 CPU 侧的事后搬运器
+9.2 VK bridge 鍦ㄦ墽琛岄噷鐨勭洰鏍囧畾浣?
+- VK bridge 搴旇瑙嗕负 stage 鎵ц浣撶殑涓€閮ㄥ垎
+- 涓嶅簲鍐嶅彧鏄?JOBS 渚х殑浜嬪悗鎼繍鍣?
 
-9.3 GPU 侧第一版可行方向
-- runtime 在提交某个 stage 的 GPU 执行时
-- 一并绑定：
-  - lane standard container 对应的底层 buffer
-  - 该 stage 的 binding plan / mapping metadata
-- standard container 内隐式指定的统一 stage buffer
-- 各 stage 通过约定好的偏移量和布局访问这一块公共 buffer
-- 从语义上看，这次 stage 提交应同时完成：
-  - 读取 standard container
-  - 读取属于自己的 interStageBuffer 区段
-  - 暴露 stage 本地视图
-  - 执行 stage 本体
-  - 写回 standard container
-  - 写入下一 stage 使用的 interStageBuffer 区段
+9.3 VK 渚х涓€鐗堝彲琛屾柟鍚?
+- runtime 鍦ㄦ彁浜ゆ煇涓?stage 鐨?VK 鎵ц鏃?
+- 涓€骞剁粦瀹氾細
+  - lane standard container 瀵瑰簲鐨勫簳灞?buffer
+  - 璇?stage 鐨?binding plan / mapping metadata
+- standard container 鍐呴殣寮忔寚瀹氱殑缁熶竴 stage buffer
+- 鍚?stage 閫氳繃绾﹀畾濂界殑鍋忕Щ閲忓拰甯冨眬璁块棶杩欎竴鍧楀叕鍏?buffer
+- 浠庤涔変笂鐪嬶紝杩欐 stage 鎻愪氦搴斿悓鏃跺畬鎴愶細
+  - 璇诲彇 standard container
+  - 璇诲彇灞炰簬鑷繁鐨?interStageBuffer 鍖烘
+  - 鏆撮湶 stage 鏈湴瑙嗗浘
+  - 鎵ц stage 鏈綋
+  - 鍐欏洖 standard container
+  - 鍐欏叆涓嬩竴 stage 浣跨敤鐨?interStageBuffer 鍖烘
 
-9.4 GPU bridge 第一版不要过度追求的事情
-- 第一版不需要立刻解决完全自动的 bridge shader 生成
-- 第一版不需要把任意复杂映射直接压成通用 GPU DSL
-- 第一版应先把 runtime ownership 和提交语义改对
+9.4 VK bridge 绗竴鐗堜笉瑕佽繃搴﹁拷姹傜殑浜嬫儏
+- 绗竴鐗堜笉闇€瑕佺珛鍒昏В鍐冲畬鍏ㄨ嚜鍔ㄧ殑 bridge shader 鐢熸垚
+- 绗竴鐗堜笉闇€瑕佹妸浠绘剰澶嶆潅鏄犲皠鐩存帴鍘嬫垚閫氱敤 VK DSL
+- 绗竴鐗堝簲鍏堟妸 runtime ownership 鍜屾彁浜よ涔夋敼瀵?
 
-10. debug 和 stall 方向
+10. debug 鍜?stall 鏂瑰悜
 
-10.1 debug 观察面建议改成 lane 视角
-- debug 至少应能看到：
+10.1 debug 瑙傚療闈㈠缓璁敼鎴?lane 瑙嗚
+- debug 鑷冲皯搴旇兘鐪嬪埌锛?
   - pipeline instance
   - lanes
-  - looplane 语义状态
+  - looplane 璇箟鐘舵€?
   - lane standard container
   - lane interStageBuffer / stage buffer
-  - stage ingress 视图
-  - stage 本地 binding 视图
-  - stage egress 输出
+  - stage ingress 瑙嗗浘
+  - stage 鏈湴 binding 瑙嗗浘
+  - stage egress 杈撳嚭
 
-10.2 stage 单步调试建议语义
-- 单步调试某个 stage 时，应能观察：
-  - lane standard container 提供了什么
-  - interStageBuffer 提供了什么
-  - 映射后 stage 实际读到了什么
-  - stage 写回了什么
-  - stage 输出给下一段 interStageBuffer 什么
+10.2 stage 鍗曟璋冭瘯寤鸿璇箟
+- 鍗曟璋冭瘯鏌愪釜 stage 鏃讹紝搴旇兘瑙傚療锛?
+  - lane standard container 鎻愪緵浜嗕粈涔?
+  - interStageBuffer 鎻愪緵浜嗕粈涔?
+  - 鏄犲皠鍚?stage 瀹為檯璇诲埌浜嗕粈涔?
+  - stage 鍐欏洖浜嗕粈涔?
+  - stage 杈撳嚭缁欎笅涓€娈?interStageBuffer 浠€涔?
 
-10.3 stall 判定方向
-- 区分正常空闲和异常无进展
+10.3 stall 鍒ゅ畾鏂瑰悜
+- 鍖哄垎姝ｅ父绌洪棽鍜屽紓甯告棤杩涘睍
 
-正常空闲：
-- non-circular 当前没有新资源
-- circular 当前没有可运行 lane
+姝ｅ父绌洪棽锛?
+- non-circular 褰撳墠娌℃湁鏂拌祫婧?
+- circular 褰撳墠娌℃湁鍙繍琛?lane
 
-异常无进展：
-- 当前至少存在一条活跃 lane
-- 某些 stage 理论上应当可以推进
-- 但可观察 pipeline 状态长时间不变
+寮傚父鏃犺繘灞曪細
+- 褰撳墠鑷冲皯瀛樺湪涓€鏉℃椿璺?lane
+- 鏌愪簺 stage 鐞嗚涓婂簲褰撳彲浠ユ帹杩?
+- 浣嗗彲瑙傚療 pipeline 鐘舵€侀暱鏃堕棿涓嶅彉
 
-10.4 stall 日志建议内容
-- pipeline instance 名字
-- lane 数量和每条 lane 当前停在什么 stage
-- looplane 是否处于活跃回灌状态
-- 每个 stage 耗时
-- 每个 stage 未推进的原因
-- standard container 和 interStageBuffer 摘要
-- 然后直接断言报错
+10.4 stall 鏃ュ織寤鸿鍐呭
+- pipeline instance 鍚嶅瓧
+- lane 鏁伴噺鍜屾瘡鏉?lane 褰撳墠鍋滃湪浠€涔?stage
+- looplane 鏄惁澶勪簬娲昏穬鍥炵亴鐘舵€?
+- 姣忎釜 stage 鑰楁椂
+- 姣忎釜 stage 鏈帹杩涚殑鍘熷洜
+- standard container 鍜?interStageBuffer 鎽樿
+- 鐒跺悗鐩存帴鏂█鎶ラ敊
 
-11. 建议改造顺序
+11. 寤鸿鏀归€犻『搴?
 
-11.1 第一阶段
-- 先把 runtime 数据归属模型改对
-- 明确：
+11.1 绗竴闃舵
+- 鍏堟妸 runtime 鏁版嵁褰掑睘妯″瀷鏀瑰
+- 鏄庣‘锛?
   - PipelineInstance
   - PipelineLane
   - LoopLane
@@ -372,60 +372,60 @@ circular：
   - InterStageBuffer
   - StageBindingPlan
 
-11.2 第二阶段
-- 把 stage tick 语义改成：
+11.2 绗簩闃舵
+- 鎶?stage tick 璇箟鏀规垚锛?
   - ingress
   - execute
   - egress
 
-11.3 第三阶段
-- 调整 GPU 提交语义
-- 让一次 stage 提交代表完整执行单元
-- 不再只提交一个“裸 stage 本体”
+11.3 绗笁闃舵
+- 璋冩暣 VK 鎻愪氦璇箟
+- 璁╀竴娆?stage 鎻愪氦浠ｈ〃瀹屾暣鎵ц鍗曞厓
+- 涓嶅啀鍙彁浜や竴涓€滆８ stage 鏈綋鈥?
 
-11.4 第四阶段
-- 把 debug 和 stall 报告收口到 lane 中心模型
+11.4 绗洓闃舵
+- 鎶?debug 鍜?stall 鎶ュ憡鏀跺彛鍒?lane 涓績妯″瀷
 
-12. 需要用户拍板的实现选项
+12. 闇€瑕佺敤鎴锋媿鏉跨殑瀹炵幇閫夐」
 
-下面这些实现选项，建议由用户最终定档。
+涓嬮潰杩欎簺瀹炵幇閫夐」锛屽缓璁敱鐢ㄦ埛鏈€缁堝畾妗ｃ€?
 
-12.1 lane 生命周期
-选项 A：动态创建 / 动态销毁
-选项 B：固定槽位池复用
-当前建议：A
+12.1 lane 鐢熷懡鍛ㄦ湡
+閫夐」 A锛氬姩鎬佸垱寤?/ 鍔ㄦ€侀攢姣?
+閫夐」 B锛氬浐瀹氭Ы浣嶆睜澶嶇敤
+褰撳墠寤鸿锛欰
 
-12.2 edge buffer 的归属
-选项 A：全局 interStageBuffer，用 lane id 索引
-选项 B：每条 lane 自己持有自己的 interStageBuffer
-当前建议：B
+12.2 edge buffer 鐨勫綊灞?
+閫夐」 A锛氬叏灞€ interStageBuffer锛岀敤 lane id 绱㈠紩
+閫夐」 B锛氭瘡鏉?lane 鑷繁鎸佹湁鑷繁鐨?interStageBuffer
+褰撳墠寤鸿锛欱
 
-12.3 binding plan 的生成时机
-选项 A：挂载 pipeline 时预编译
-选项 B：每次 tick 重新解释映射表
-当前建议：A
+12.3 binding plan 鐨勭敓鎴愭椂鏈?
+閫夐」 A锛氭寕杞?pipeline 鏃堕缂栬瘧
+閫夐」 B锛氭瘡娆?tick 閲嶆柊瑙ｉ噴鏄犲皠琛?
+褰撳墠寤鸿锛欰
 
-12.4 pipeline stage 本地容器兼容策略
-选项 A：尽快移除 stage shared container ownership
-选项 B：暂时保留兼容层，再逐步把真实状态迁到 lane
-当前建议：B
+12.4 pipeline stage 鏈湴瀹瑰櫒鍏煎绛栫暐
+閫夐」 A锛氬敖蹇Щ闄?stage shared container ownership
+閫夐」 B锛氭殏鏃朵繚鐣欏吋瀹瑰眰锛屽啀閫愭鎶婄湡瀹炵姸鎬佽縼鍒?lane
+褰撳墠寤鸿锛欱
 
-12.5 第一版 GPU bridge 边界
-选项 A：先把 bridge 语义并入 stage 提交，CPU 仍负责组织绑定
-选项 B：立刻做更激进的 bridge GPU 化
-当前建议：A
+12.5 绗竴鐗?VK bridge 杈圭晫
+閫夐」 A锛氬厛鎶?bridge 璇箟骞跺叆 stage 鎻愪氦锛孋PU 浠嶈礋璐ｇ粍缁囩粦瀹?
+閫夐」 B锛氱珛鍒诲仛鏇存縺杩涚殑 bridge VK 鍖?
+褰撳墠寤鸿锛欰
 
-12.6 GPU 侧 stage 间碎数据的承载方式
-这项不再保留为可选项，直接定为强制规则：
-- 在 standard container 内隐式指定统一 a 作为 stage buffer
-- 由 stage 自己约定偏移量和布局
-- 不再推荐单独为 ingress / egress 绑定独立 buffer
+12.6 VK 渚?stage 闂寸鏁版嵁鐨勬壙杞芥柟寮?
+杩欓」涓嶅啀淇濈暀涓哄彲閫夐」锛岀洿鎺ュ畾涓哄己鍒惰鍒欙細
+- 鍦?standard container 鍐呴殣寮忔寚瀹氱粺涓€ a 浣滀负 stage buffer
+- 鐢?stage 鑷繁绾﹀畾鍋忕Щ閲忓拰甯冨眬
+- 涓嶅啀鎺ㄨ崘鍗曠嫭涓?ingress / egress 缁戝畾鐙珛 buffer
 
-13. 一句话总方向
+13. 涓€鍙ヨ瘽鎬绘柟鍚?
 
-目标方向是：
-把当前以 stage 事后搬运为主的 pipeline 运行方式，改成以 lane 为中心的 runtime；
-每套资源拥有自己的 standard container；
-GPU bridge 只负责映射、绑定、写回、转发；
-并优先基于 standard container 内统一 stage buffer 组织 stage 间碎数据；
-每个 stage 的天然执行单元就是 bridge 加 stage 本体。
+鐩爣鏂瑰悜鏄細
+鎶婂綋鍓嶄互 stage 浜嬪悗鎼繍涓轰富鐨?pipeline 杩愯鏂瑰紡锛屾敼鎴愪互 lane 涓轰腑蹇冪殑 runtime锛?
+姣忓璧勬簮鎷ユ湁鑷繁鐨?standard container锛?
+VK bridge 鍙礋璐ｆ槧灏勩€佺粦瀹氥€佸啓鍥炪€佽浆鍙戯紱
+骞朵紭鍏堝熀浜?standard container 鍐呯粺涓€ stage buffer 缁勭粐 stage 闂寸鏁版嵁锛?
+姣忎釜 stage 鐨勫ぉ鐒舵墽琛屽崟鍏冨氨鏄?bridge 鍔?stage 鏈綋銆?

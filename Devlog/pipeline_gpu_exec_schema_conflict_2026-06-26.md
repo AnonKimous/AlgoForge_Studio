@@ -1,4 +1,4 @@
-# Pipeline GPU Exec Schema Conflict
+# Pipeline VK Exec Schema Conflict
 
 ## Date
 
@@ -36,23 +36,23 @@ Runner probe sequence:
 
 Then `SubmitAlgorithmObject(...)` resolves the execution branch as:
 
-- `submit.branch=missing_gpu_exec stage=v2a0_pipeline_square_vertex_demo`
+- `submit.branch=missing_vk_exec stage=v2a0_pipeline_square_vertex_demo`
 
-That means the runtime does **not** see a valid executable GPU stage for this
+That means the runtime does **not** see a valid executable VK stage for this
 algorithm package.
 
 ## Why this happens
 
-Current runtime GPU execution anchor is still determined by intervention-stage
+Current runtime VK execution anchor is still determined by intervention-stage
 metadata from:
 
-- [src/algorithm_support/algorithm_runtime_bridge.cpp](D:/gptsandbox/src/algorithm_support/algorithm_runtime_bridge.cpp)
+- [src/algorithm_catalog/algorithm_runtime_bridge.cpp](D:/gptsandbox/src/algorithm_catalog/algorithm_runtime_bridge.cpp)
 
-Specifically, GPU execution is only recognized when intervention metadata
+Specifically, VK execution is only recognized when intervention metadata
 matches the old runtime expectation.
 
 But the current package content for the mounted demo does not expose an
-explicit runtime GPU `exec` stage in the clarified sense.
+explicit runtime VK `exec` stage in the clarified sense.
 
 So after the package/DLL fix, the next real blocker is now exactly the schema
 gap that had been suspected before:
@@ -60,7 +60,7 @@ gap that had been suspected before:
 - package is mounted
 - package has intervention metadata
 - package has DLL
-- but package still has no recognized executable GPU `exec` stage
+- but package still has no recognized executable VK `exec` stage
 
 ## Why this is a severe conflict
 
@@ -75,13 +75,13 @@ Your clarified rule says:
 3. if shader execution is being treated as `afterTick`, the algorithm is
    mounted wrong
 
-The currently mounted legacy GPU pipeline packages do not yet satisfy that
+The currently mounted legacy VK pipeline packages do not yet satisfy that
 schema.
 
 So there is now a direct conflict between:
 
 - the clarified execution model
-- the existing package schema/content for legacy GPU algorithms
+- the existing package schema/content for legacy VK algorithms
 
 ## What I verified
 
@@ -89,18 +89,18 @@ This is not a mount failure anymore.
 It is not a wrapper failure anymore.
 It is not a missing-DLL failure anymore.
 
-It is specifically an execution-schema failure at first GPU stage execution.
+It is specifically an execution-schema failure at first VK stage execution.
 
 ## Decision needed
 
 Please choose one direction:
 
 1. **Schema migration now**
-   Introduce/consume explicit `exec` metadata and migrate legacy GPU packages
+   Introduce/consume explicit `exec` metadata and migrate legacy VK packages
    to expose it correctly.
 
 2. **Temporary legacy compatibility**
-   Keep the clarified long-term model, but temporarily allow current legacy GPU
+   Keep the clarified long-term model, but temporarily allow current legacy VK
    packages to map their existing stage metadata into runtime executable `exec`
    discovery.
 

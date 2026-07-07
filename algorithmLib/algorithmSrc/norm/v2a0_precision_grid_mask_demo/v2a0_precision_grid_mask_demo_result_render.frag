@@ -1,8 +1,8 @@
 #version 450
 
-layout(set = 0, binding = 0) readonly buffer PackedGridStateBuffer {
+layout(set = 0, binding = 0) readonly buffer GridMaskBuffer {
   uint data[];
-} packed_grid_state_buffer;
+} grid_mask_buffer;
 
 layout(set = 0, binding = 1) readonly buffer TickCounterBuffer {
   uint data[];
@@ -23,9 +23,9 @@ void main() {
   int row_from_top = 3 - cell.y;
   int linear_index = row_from_top * 4 + cell.x;
 
-  uint packed_state = packed_grid_state_buffer.data[0];
-  uint high_mask = (packed_state >> 16u) & 0xFFFFu;
-  uint low_mask = packed_state & 0xFFFFu;
+  uint grid_mask = grid_mask_buffer.data[0];
+  uint high_mask = grid_mask >> 16u;
+  uint low_mask = grid_mask & 0xFFFFu;
   bool high_active = IsActiveCell(high_mask, linear_index);
   bool low_active = IsActiveCell(low_mask, linear_index);
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "algorithm_support/algorithm_abi.h"
+#include "algorithm_management/algorithm_manager.h"
 #include "common_data/common_data.h"
 #include "runtime_systems/runtime_systems.h"
 
@@ -12,6 +12,11 @@
 #include <vector>
 
 namespace debug_tool {
+
+enum class AlgorithmRuntimeBuildFlavor {
+  Debug = 0,
+  ReleaseWithDebugInfo = 1,
+};
 
 struct AlgorithmCatalogEntry {
   std::string algorithm_name;
@@ -47,14 +52,14 @@ struct AlgorithmDescriptorValue {
   double scalar_value{0.0};
 };
 
-struct AlgorithmInterventionStageSummary {
-  std::string stage_name;
-  algorithm_management::AlgorithmInterventionStageKind stage_kind{
-    algorithm_management::AlgorithmInterventionStageKind::Custom};
-  algorithm_management::AlgorithmExecutionPreference execution_preference{
-    algorithm_management::AlgorithmExecutionPreference::Cpu};
+struct AlgorithmPhaseSummary {
+  std::string phase_name;
+  algorithmManager::AlgorithmPhaseKind phase_kind{
+    algorithmManager::AlgorithmPhaseKind::Custom};
+  algorithmManager::AlgorithmExecutionPreference execution_preference{
+    algorithmManager::AlgorithmExecutionPreference::Jobs};
   std::vector<std::string> functions;
-  std::vector<algorithm_management::AlgorithmInterventionContainerBinding> used_algorithm_containers;
+  std::vector<algorithmManager::AlgorithmPhaseContainerBinding> used_algorithm_containers;
   std::string vertex_shader_path;
   std::string fragment_shader_path;
   std::string pipeline_kind;
@@ -67,15 +72,16 @@ enum class AlgorithmMountMode {
 };
 
 enum class AlgorithmExecutionPreference {
-  Cpu = 0,
-  Gpu = 1,
+  Jobs = 0,
+  Vk = 1,
+  Cuda = 2,
 };
 
 struct AlgorithmPipelineStageSubmission {
   std::string stage_name;
   std::vector<AlgorithmResourceBinding> resource_bindings;
   std::vector<AlgorithmDescriptorValue> descriptor_values;
-  AlgorithmExecutionPreference execution_preference{AlgorithmExecutionPreference::Gpu};
+  AlgorithmExecutionPreference execution_preference{AlgorithmExecutionPreference::Vk};
 };
 
 enum class AlgorithmPipelineTopology {
@@ -92,10 +98,10 @@ enum class AlgorithmPipelineSyncMode {
 
 inline const char* AlgorithmPipelineTopologyDisplayName(AlgorithmPipelineTopology mode) {
   switch (mode) {
-    case AlgorithmPipelineTopology::NonCircular: return "非环形";
-    case AlgorithmPipelineTopology::Circular: return "环形";
+    case AlgorithmPipelineTopology::NonCircular: return "non-circular";
+    case AlgorithmPipelineTopology::Circular: return "circular";
   }
-  return "非环形";
+  return "non-circular";
 }
 
 inline const char* AlgorithmPipelineSubmissionModeDisplayName(AlgorithmPipelineSubmissionMode mode) {
@@ -104,10 +110,10 @@ inline const char* AlgorithmPipelineSubmissionModeDisplayName(AlgorithmPipelineS
 
 inline const char* AlgorithmPipelineSyncModeDisplayName(AlgorithmPipelineSyncMode mode) {
   switch (mode) {
-    case AlgorithmPipelineSyncMode::Forced: return "强制同步";
-    case AlgorithmPipelineSyncMode::NonForced: return "非强制同步";
+    case AlgorithmPipelineSyncMode::Forced: return "forced";
+    case AlgorithmPipelineSyncMode::NonForced: return "non-forced";
   }
-  return "强制同步";
+  return "forced";
 }
 
 enum class AlgorithmAssemblyState {
@@ -214,8 +220,8 @@ struct AlgorithmRuntimeSummary {
   uint32_t pipeline_body_stage_count{0u};
   uint32_t pipeline_effective_tail_stage_index{0u};
   bool pipeline_stage{false};
-  algorithm_management::AlgorithmPipelineWrapperRole pipeline_wrapper_role{
-    algorithm_management::AlgorithmPipelineWrapperRole::None};
+  algorithmManager::AlgorithmPipelineWrapperRole pipeline_wrapper_role{
+    algorithmManager::AlgorithmPipelineWrapperRole::None};
   bool pipeline_wrapper_empty{false};
   AlgorithmPipelineTopology pipeline_topology{AlgorithmPipelineTopology::NonCircular};
   AlgorithmPipelineSyncMode pipeline_sync_mode{AlgorithmPipelineSyncMode::Forced};
@@ -223,22 +229,22 @@ struct AlgorithmRuntimeSummary {
   bool pipeline_active_stage_index_valid{false};
   uint32_t pipeline_active_bundle_begin_stage_index{0u};
   uint32_t pipeline_active_bundle_stage_count{0u};
-  AlgorithmExecutionPreference pipeline_active_bundle_preference{AlgorithmExecutionPreference::Gpu};
+  AlgorithmExecutionPreference pipeline_active_bundle_preference{AlgorithmExecutionPreference::Vk};
   bool pipeline_active_bundle_valid{false};
   std::vector<AlgorithmResourceBinding> resource_bindings;
   std::vector<AlgorithmDescriptorValue> descriptor_values;
-  bool cpu_symbol{true};
-  bool gpu_symbol{true};
+  bool jobs_symbol{true};
+  bool vk_symbol{true};
   bool has_reflector{false};
   bool has_intervention{false};
   AlgorithmMountMode mount_mode{AlgorithmMountMode::Direct};
-  AlgorithmExecutionPreference execution_preference{AlgorithmExecutionPreference::Gpu};
+  AlgorithmExecutionPreference execution_preference{AlgorithmExecutionPreference::Vk};
   AgentToAlgorithmSignal agent_to_algorithm_signal{};
   AlgorithmToAgentSignal algorithm_to_agent_signal{};
   AlgorithmReflectionSnapshot reflection_snapshot{};
-  std::vector<AlgorithmInterventionStageSummary> intervention_stage_summaries;
+  std::vector<AlgorithmPhaseSummary> intervention_phase_summaries;
   float pipeline_total_elapsed_seconds{0.0f};
-  std::vector<algorithm_management::AlgorithmPipelineStageRuntimeStat> pipeline_stage_runtime_stats;
+  std::vector<algorithmManager::AlgorithmPipelineStageRuntimeStat> pipeline_stage_runtime_stats;
   PipelineStageBridgeDebugSummary bridge_debug_set{};
 };
 
@@ -260,6 +266,7 @@ class IDebugToolHost {
     const std::string& algorithm_name,
     bool* out_is_pipeline,
     std::string* out_error_message = nullptr) const = 0;
+  virtual void SetAlgorithmRuntimeBuildFlavor(AlgorithmRuntimeBuildFlavor build_flavor) = 0;
 
   virtual bool AttachAlgorithmToAgent(
     size_t agent_index,
@@ -269,14 +276,14 @@ class IDebugToolHost {
     size_t* out_algorithm_index = nullptr,
     std::string* out_error_message = nullptr,
     AlgorithmMountMode mount_mode = AlgorithmMountMode::Direct,
-    AlgorithmExecutionPreference execution_preference = AlgorithmExecutionPreference::Gpu) = 0;
+    AlgorithmExecutionPreference execution_preference = AlgorithmExecutionPreference::Vk) = 0;
   virtual bool AttachPipelineAlgorithmToAgent(
     size_t agent_index,
     const std::string& pipeline_name,
     const std::vector<AlgorithmPipelineStageSubmission>& stage_submissions,
     size_t* out_algorithm_index = nullptr,
     std::string* out_error_message = nullptr,
-    AlgorithmExecutionPreference execution_preference = AlgorithmExecutionPreference::Gpu) = 0;
+    AlgorithmExecutionPreference execution_preference = AlgorithmExecutionPreference::Vk) = 0;
   virtual bool AttachPipelinePackageToAgent(
     size_t agent_index,
     const std::string& pipeline_name,
@@ -285,7 +292,7 @@ class IDebugToolHost {
     const std::vector<AlgorithmDescriptorValue>& descriptor_values,
     size_t* out_algorithm_index = nullptr,
     std::string* out_error_message = nullptr,
-    AlgorithmExecutionPreference execution_preference = AlgorithmExecutionPreference::Gpu) = 0;
+    AlgorithmExecutionPreference execution_preference = AlgorithmExecutionPreference::Vk) = 0;
   virtual bool DetachAlgorithmFromAgent(
     size_t agent_index,
     size_t algorithm_index,
@@ -304,7 +311,7 @@ class IDebugToolHost {
   virtual bool tick_enabled() const = 0;
   virtual bool TickManagedAgents() = 0;
   virtual void ClearAgents() = 0;
-  virtual void ClearGpuRuntimeCaches() = 0;
+  virtual void ClearVkRuntimeCaches() = 0;
   virtual bool LoadAlgorithmCatalog(
     std::vector<AlgorithmCatalogEntry>* out_entries,
     std::string* out_error_message = nullptr) const = 0;

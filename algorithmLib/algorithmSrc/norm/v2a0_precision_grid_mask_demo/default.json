@@ -3,7 +3,7 @@
   "resource_bindings": [],
   "descriptor_values": [
     {
-      "descriptor_name": "packed_state_seed",
+      "descriptor_name": "grid_mask_seed",
       "scalar_value": 2147483649.0
     },
     {

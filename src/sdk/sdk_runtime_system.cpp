@@ -2,7 +2,9 @@
 #include "sdk_runtime_system.h"
 #undef SDK_LAYER_INTERNAL_BUILD
 
+#define AGENT_MANAGEMENT_LAYER_INTERNAL_BUILD 1
 #include "agent_management/agent_management.h"
+#undef AGENT_MANAGEMENT_LAYER_INTERNAL_BUILD
 #include "common_data/kernel_cfg.h"
 
 #include <algorithm>
@@ -19,12 +21,12 @@ void _SetError(std::string* out_error_message, std::string message) {
   }
 }
 
-std::vector<agent::AlgorithmResourceBinding> _ToAgentResourceBindings(
+std::vector<agentmanager::agent::AlgorithmResourceBinding> _ToAgentResourceBindings(
   const std::vector<ResourceBinding>& bindings) {
-  std::vector<agent::AlgorithmResourceBinding> result;
+  std::vector<agentmanager::agent::AlgorithmResourceBinding> result;
   result.reserve(bindings.size());
   for (const ResourceBinding& binding : bindings) {
-    result.push_back(agent::AlgorithmResourceBinding{
+    result.push_back(agentmanager::agent::AlgorithmResourceBinding{
       .resource_name = binding.resource_name,
       .resource_kind = binding.resource_kind,
       .source_path = binding.source_path,
@@ -33,12 +35,12 @@ std::vector<agent::AlgorithmResourceBinding> _ToAgentResourceBindings(
   return result;
 }
 
-std::vector<agent::AlgorithmDescriptorValue> _ToAgentDescriptorValues(
+std::vector<agentmanager::agent::AlgorithmDescriptorValue> _ToAgentDescriptorValues(
   const std::vector<DescriptorValue>& values) {
-  std::vector<agent::AlgorithmDescriptorValue> result;
+  std::vector<agentmanager::agent::AlgorithmDescriptorValue> result;
   result.reserve(values.size());
   for (const DescriptorValue& value : values) {
-    result.push_back(agent::AlgorithmDescriptorValue{
+    result.push_back(agentmanager::agent::AlgorithmDescriptorValue{
       .descriptor_name = value.descriptor_name,
       .scalar_value = value.scalar_value,
     });
@@ -49,7 +51,7 @@ std::vector<agent::AlgorithmDescriptorValue> _ToAgentDescriptorValues(
 }  // namespace
 
 SdkRuntimeSystem::SdkRuntimeSystem()
-  : agent_manager_(std::make_unique<agent_management::AgentManager>()) {}
+  : agent_manager_(std::make_unique<agentmanager::AgentManager>()) {}
 
 SdkRuntimeSystem::~SdkRuntimeSystem() = default;
 
@@ -215,9 +217,9 @@ AlgorithmHandle SdkRuntimeSystem::MountAlgorithm(
     return 0;
   }
 
-  agent::AlgorithmRequestedResources requested_resources{};
-  agent::AlgorithmRequestedDescriptorBindings requested_descriptors{};
-  const bool queried_bindings_ok = agent::QueryAlgorithmRequestedBindingsByName(
+  agentmanager::agent::AlgorithmRequestedResources requested_resources{};
+  agentmanager::agent::AlgorithmRequestedDescriptorBindings requested_descriptors{};
+  const bool queried_bindings_ok = agentmanager::agent::QueryAlgorithmRequestedBindingsByName(
     algorithm_name,
     &requested_resources,
     &requested_descriptors,
@@ -237,7 +239,7 @@ AlgorithmHandle SdkRuntimeSystem::MountAlgorithm(
     ? algorithm_name
     : requested_resources.algorithm_name;
   draft.resource_bindings.reserve(requested_resources.required_resources.size());
-  for (const agent::AlgorithmRequestedResources::RequiredResource& resource : requested_resources.required_resources) {
+  for (const agentmanager::agent::AlgorithmRequestedResources::RequiredResource& resource : requested_resources.required_resources) {
     draft.resource_bindings.push_back(ResourceBinding{
       .resource_name = resource.resource_name,
       .resource_kind = resource.resource_kind,
@@ -247,7 +249,7 @@ AlgorithmHandle SdkRuntimeSystem::MountAlgorithm(
   }
   draft.descriptor_values.reserve(requested_descriptors.descriptor_slots.size());
   std::unordered_set<std::string> seen_descriptor_names{};
-  for (const agent::AlgorithmRequestedDescriptorBindings::DescriptorSlot& descriptor :
+  for (const agentmanager::agent::AlgorithmRequestedDescriptorBindings::DescriptorSlot& descriptor :
        requested_descriptors.descriptor_slots) {
     if (!seen_descriptor_names.insert(descriptor.descriptor_name).second) {
       continue;
@@ -357,9 +359,9 @@ bool SdkRuntimeSystem::SubmitAlgorithm(
     return false;
   }
 
-  std::vector<agent::AlgorithmResourceBinding> resource_bindings =
+  std::vector<agentmanager::agent::AlgorithmResourceBinding> resource_bindings =
     _ToAgentResourceBindings(draft->resource_bindings);
-  std::vector<agent::AlgorithmDescriptorValue> descriptor_values =
+  std::vector<agentmanager::agent::AlgorithmDescriptorValue> descriptor_values =
     _ToAgentDescriptorValues(draft->descriptor_values);
   size_t submitted_algorithm_index = 0u;
   if (!agent_manager_->AttachAlgorithmToAgent(
@@ -383,3 +385,4 @@ bool SdkRuntimeSystem::SubmitAlgorithm(
 }
 
 }  // namespace sdk
+

@@ -1,8 +1,7 @@
 #define RUNTIME_SYSTEMS_LAYER_INTERNAL_BUILD 1
-#include "algorithm_support/algorithm_support.h"
-#include "runtime_systems/gpu_job_system.h"
+#include "runtime_systems/vk_job_system.h"
 #undef RUNTIME_SYSTEMS_LAYER_INTERNAL_BUILD
-#include "runtime_systems/runtime_gpu_context.h"
+#include "runtime_systems/runtime_vk_context.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -11,6 +10,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <limits>
 #include <stdexcept>
 #include <unordered_map>
@@ -29,23 +29,23 @@ namespace runtime_systems {
 
 namespace {
 
-struct GpuBufferResource {
+struct VkBufferResource {
   VkBuffer buffer{VK_NULL_HANDLE};
   VmaAllocation allocation{VK_NULL_HANDLE};
   VmaAllocationInfo allocation_info{};
   VkDeviceSize size_bytes{0u};
 };
 
-struct GpuBufferPairResource {
-  GpuBufferResource input;
-  GpuBufferResource output;
+struct VkBufferPairResource {
+  VkBufferResource input;
+  VkBufferResource output;
 };
 
-struct GpuExecutionState {
-  std::vector<GpuBufferPairResource> buffers;
+struct VkExecutionState {
+  std::vector<VkBufferPairResource> buffers;
 };
 
-struct GpuOffscreenTarget {
+struct VkOffscreenTarget {
   VkImage image{VK_NULL_HANDLE};
   VmaAllocation allocation{VK_NULL_HANDLE};
   VkImageView view{VK_NULL_HANDLE};
@@ -55,7 +55,7 @@ struct GpuOffscreenTarget {
   VkFormat format{VK_FORMAT_R8G8B8A8_UNORM};
 };
 
-struct GpuPipelineResource {
+struct VkPipelineResource {
   VkDescriptorSetLayout descriptor_set_layout{VK_NULL_HANDLE};
   VkPipelineLayout pipeline_layout{VK_NULL_HANDLE};
   VkPipeline pipeline{VK_NULL_HANDLE};
@@ -63,7 +63,7 @@ struct GpuPipelineResource {
   std::string shader_key;
 };
 
-struct RuntimeGpuViewportPushConstants {
+struct RuntimeVkViewportPushConstants {
   float width{0.0f};
   float height{0.0f};
 };
@@ -122,10 +122,10 @@ std::string _ResolveShaderBinaryPath(const std::string& path) {
   return std::filesystem::path(source_path.string() + ".spv").string();
 }
 
-[[noreturn]] void _AbortGpuTick(std::string message);
+[[noreturn]] void _AbortVkTick(std::string message);
 
 std::string _StageShaderKey(
-  const RuntimeGpuStageJob& job) {
+  const RuntimeVkStageJob& job) {
   return job.shader_namespace + "|" + job.stage_name + "|" +
     job.vertex_shader_path + "|" +
     job.fragment_shader_path + "|" +
@@ -133,258 +133,38 @@ std::string _StageShaderKey(
 }
 
 std::string _ExecutionStateKey(
-  const RuntimeGpuStageJob& job,
+  const RuntimeVkStageJob& job,
   const std::string& shader_key) {
   return job.shader_namespace + "|" + shader_key + "|" +
     std::to_string(reinterpret_cast<std::uintptr_t>(job.execution_key));
 }
 
-[[noreturn]] void _ThrowGpuTickError(std::string message, std::string* out_error_message = nullptr) {
+[[noreturn]] void _ThrowVkTickError(std::string message, std::string* out_error_message = nullptr) {
   if (out_error_message) {
     *out_error_message = message;
   }
+  std::cerr << message << '\n';
   OutputDebugStringA((message + "\n").c_str());
-  MessageBoxA(nullptr, message.c_str(), "GPU tick execution failed", MB_OK | MB_ICONERROR);
-  assert(false && "GPU tick execution failed");
+  MessageBoxA(nullptr, message.c_str(), "VK tick execution failed", MB_OK | MB_ICONERROR);
+  assert(false && "VK tick execution failed");
   throw std::runtime_error(std::move(message));
 }
 
-[[noreturn]] void _AbortGpuTick(std::string message) {
+[[noreturn]] void _AbortVkTick(std::string message) {
+  std::cerr << message << '\n';
   OutputDebugStringA((message + "\n").c_str());
-  MessageBoxA(nullptr, message.c_str(), "GPU tick execution failed", MB_OK | MB_ICONERROR);
-  assert(false && "GPU tick execution failed");
+  MessageBoxA(nullptr, message.c_str(), "VK tick execution failed", MB_OK | MB_ICONERROR);
+  assert(false && "VK tick execution failed");
   throw std::runtime_error(std::move(message));
-}
-
-bool _ResolveRuntimeGpuShaderPath(
-  const ::agent::AlgorithmObject& object,
-  const std::string& shader_path,
-  std::string* out_resolved_path,
-  std::string* out_error_message) {
-  if (!out_resolved_path) {
-    if (out_error_message) {
-      *out_error_message = "Resolved GPU shader path output pointer is null.";
-    }
-    return false;
-  }
-  if (shader_path.empty()) {
-    if (out_error_message) {
-      *out_error_message = "GPU shader path must not be empty.";
-    }
-    return false;
-  }
-
-  const std::filesystem::path path(shader_path);
-  if (path.is_absolute()) {
-    *out_resolved_path = path.string();
-    if (out_error_message) {
-      out_error_message->clear();
-    }
-    return true;
-  }
-
-  std::filesystem::path runtime_package_root(object.runtime_package_root_path);
-  if (runtime_package_root.empty()) {
-    ::algorithm::AlgorithmPackageLocation package_location{};
-    std::string resolve_error_message;
-    if (!TryResolveAlgorithmPackageLocation(
-          object.algorithm_profile.algorithm_name,
-          &package_location,
-          &resolve_error_message)) {
-      if (out_error_message) {
-        *out_error_message = resolve_error_message.empty()
-          ? ("Failed to resolve algorithm package location for '" + object.algorithm_profile.algorithm_name + "'.")
-          : std::move(resolve_error_message);
-      }
-      return false;
-    }
-    runtime_package_root = package_location.runtime_package_root;
-  }
-  if (runtime_package_root.empty()) {
-    if (out_error_message) {
-      *out_error_message =
-        "Algorithm runtime package root is empty for '" + object.algorithm_profile.algorithm_name + "'.";
-    }
-    return false;
-  }
-
-  *out_resolved_path = (runtime_package_root / path).lexically_normal().string();
-  if (out_resolved_path->empty()) {
-    if (out_error_message) {
-      *out_error_message =
-        "Failed to resolve GPU shader path for '" + object.algorithm_profile.algorithm_name + "'.";
-    }
-    return false;
-  }
-  if (out_error_message) {
-    out_error_message->clear();
-  }
-  return true;
-}
-
-bool _TryLoadRuntimeGpuExecSpec(
-  const ::agent::AlgorithmObject& object,
-  agent::AlgorithmGpuExecSpec* out_spec,
-  bool* out_has_gpu_exec,
-  std::string* out_error_message) {
-  if (!out_spec || !out_has_gpu_exec) {
-    if (out_error_message) {
-      *out_error_message = "Runtime GPU exec spec output pointer is null.";
-    }
-    return false;
-  }
-
-  *out_spec = {};
-  *out_has_gpu_exec = false;
-  if (!object.gpu_executor) {
-    if (out_error_message) {
-      out_error_message->clear();
-    }
-    return true;
-  }
-  if (!object.gpu_executor->GetGpuExecSpec(out_spec)) {
-    if (out_error_message) {
-      *out_error_message = "GPU executor failed to provide its exec specification.";
-    }
-    return false;
-  }
-  if (out_spec->shader.vertex_shader_path.empty() ||
-      out_spec->shader.fragment_shader_path.empty()) {
-    if (out_error_message) {
-      *out_error_message = "GPU exec stage is missing shader paths.";
-    }
-    return false;
-  }
-  if (out_spec->used_algorithm_containers.empty()) {
-    if (out_error_message) {
-      *out_error_message = "GPU exec stage does not bind any containers.";
-    }
-    return false;
-  }
-  if (out_spec->stage_name.empty()) {
-    out_spec->stage_name = "exec";
-  }
-  *out_has_gpu_exec = true;
-  if (out_error_message) {
-    out_error_message->clear();
-  }
-  return true;
-}
-
-bool _TryBuildRuntimeGpuStageJob(
-  const ::agent::AlgorithmObject& object,
-  ::algorithm::AlgorithmContainerSet* container_set,
-  runtime_systems::RuntimeGpuStageJob* out_job,
-  bool* out_has_gpu_stage,
-  std::string* out_error_message) {
-  if (!container_set || !out_job || !out_has_gpu_stage) {
-    if (out_error_message) {
-      *out_error_message = "Runtime GPU stage job output pointer is null.";
-    }
-    return false;
-  }
-
-  *out_job = {};
-  *out_has_gpu_stage = false;
-  agent::AlgorithmGpuExecSpec gpu_exec_spec{};
-  if (!_TryLoadRuntimeGpuExecSpec(
-        object,
-        &gpu_exec_spec,
-        out_has_gpu_stage,
-        out_error_message)) {
-    return false;
-  }
-  if (!*out_has_gpu_stage) {
-    if (out_error_message) {
-      out_error_message->clear();
-    }
-    return true;
-  }
-
-  out_job->debug_name = object.algorithm_profile.algorithm_name + "::" + gpu_exec_spec.stage_name;
-  out_job->shader_namespace = object.algorithm_profile.algorithm_name;
-  out_job->stage_name = gpu_exec_spec.stage_name;
-  out_job->execution_key = container_set;
-  if (!_ResolveRuntimeGpuShaderPath(
-        object,
-        gpu_exec_spec.shader.vertex_shader_path,
-        &out_job->vertex_shader_path,
-        out_error_message)) {
-    return false;
-  }
-  if (!_ResolveRuntimeGpuShaderPath(
-        object,
-        gpu_exec_spec.shader.fragment_shader_path,
-        &out_job->fragment_shader_path,
-        out_error_message)) {
-    return false;
-  }
-
-  out_job->buffer_bindings.reserve(gpu_exec_spec.used_algorithm_containers.size());
-  for (const agent::AlgorithmGpuExecContainerBinding& binding : gpu_exec_spec.used_algorithm_containers) {
-    algorithm::AlgorithmContainer* container = algorithm::FindAlgorithmContainer(container_set, binding.container_name);
-    if (!container) {
-      if (out_error_message) {
-        *out_error_message = binding.required
-          ? ("GPU exec stage is missing container '" + binding.container_name + "'.")
-          : ("GPU exec optional container '" + binding.container_name +
-              "' is not supported because runtime GPU bindings must stay positional.");
-      }
-      return false;
-    }
-    if (container->element_stride == 0u || container->bytes.empty()) {
-      if (out_error_message) {
-        *out_error_message = binding.required
-          ? ("GPU exec stage container '" + binding.container_name + "' has no data.")
-          : ("GPU exec optional container '" + binding.container_name +
-              "' has no data, and sparse GPU bindings are not supported.");
-      }
-      return false;
-    }
-
-    runtime_systems::RuntimeGpuBufferBindingView binding_view{};
-    binding_view.binding_name = binding.container_name;
-    binding_view.bytes = container->bytes.data();
-    binding_view.size_bytes = container->bytes.size();
-    binding_view.element_stride = container->element_stride;
-    binding_view.array_like = container->storage_kind == algorithm::AlgorithmContainerStorageKind::Array;
-    binding_view.required = binding.required;
-    out_job->buffer_bindings.push_back(std::move(binding_view));
-  }
-
-  if (out_error_message) {
-    out_error_message->clear();
-  }
-  return true;
 }
 
 }  // namespace
 
-class GpuJobRuntimeSystem {
+class VkJobRuntimeSystem {
  public:
-  static GpuJobRuntimeSystem& Instance() {
-    static GpuJobRuntimeSystem instance{};
+  static VkJobRuntimeSystem& Instance() {
+    static VkJobRuntimeSystem instance{};
     return instance;
-  }
-
-  bool HasExecutableRuntimeGpuAlgorithmStage(const ::agent::AlgorithmObject& object) {
-    agent::AlgorithmGpuExecSpec gpu_exec_spec{};
-    bool has_gpu_exec = false;
-    return _TryLoadRuntimeGpuExecSpec(object, &gpu_exec_spec, &has_gpu_exec, nullptr) && has_gpu_exec;
-  }
-
-  bool BuildRuntimeGpuStageJob(
-    const ::agent::AlgorithmObject& object,
-    ::algorithm::AlgorithmContainerSet* container_set,
-    RuntimeGpuStageJob* out_job,
-    bool* out_has_gpu_stage,
-    std::string* out_error_message) {
-    return _TryBuildRuntimeGpuStageJob(
-      object,
-      container_set,
-      out_job,
-      out_has_gpu_stage,
-      out_error_message);
   }
 
   void Clear() {
@@ -401,13 +181,13 @@ class GpuJobRuntimeSystem {
     context_ = {};
   }
 
-  bool ExecuteRuntimeGpuJob(
-    const RuntimeGpuStageJob& job,
+  bool ExecuteRuntimeVkJob(
+    const RuntimeVkStageJob& job,
     std::string* out_error_message) {
     if (!job.stage_jobs.empty()) {
       for (size_t stage_index = 0u; stage_index < job.stage_jobs.size(); ++stage_index) {
-        const RuntimeGpuStageSubJob& stage_job_spec = job.stage_jobs[stage_index];
-        RuntimeGpuStageJob stage_job = job;
+        const RuntimeVkStageSubJob& stage_job_spec = job.stage_jobs[stage_index];
+        RuntimeVkStageJob stage_job = job;
         stage_job.debug_name = stage_job_spec.debug_name.empty()
           ? (job.debug_name + "::" + stage_job_spec.stage_name)
           : stage_job_spec.debug_name;
@@ -416,11 +196,11 @@ class GpuJobRuntimeSystem {
         stage_job.fragment_shader_path = stage_job_spec.fragment_shader_path;
         stage_job.buffer_bindings = stage_job_spec.buffer_bindings;
         stage_job.stage_jobs.clear();
-        if (!ExecuteRuntimeGpuJob(stage_job, out_error_message)) {
+        if (!ExecuteRuntimeVkJob(stage_job, out_error_message)) {
           return false;
         }
         if (stage_index + 1u < job.stage_jobs.size()) {
-          if (!SynchronizeRuntimeGpuJob(stage_job, out_error_message)) {
+          if (!SynchronizeRuntimeVkJob(stage_job, out_error_message)) {
             return false;
           }
         }
@@ -428,19 +208,19 @@ class GpuJobRuntimeSystem {
       return true;
     }
     if (job.execution_key == nullptr) {
-      _ThrowGpuTickError("Runtime GPU job execution key is null.", out_error_message);
+      _ThrowVkTickError("Runtime VK job execution key is null.", out_error_message);
     }
     if (job.vertex_shader_path.empty() || job.fragment_shader_path.empty()) {
-      _ThrowGpuTickError("Runtime GPU job is missing shader paths.", out_error_message);
+      _ThrowVkTickError("Runtime VK job is missing shader paths.", out_error_message);
     }
     if (job.buffer_bindings.empty()) {
-      _ThrowGpuTickError("Runtime GPU job does not bind any buffers.", out_error_message);
+      _ThrowVkTickError("Runtime VK job does not bind any buffers.", out_error_message);
     }
 
-    runtime_systems::RuntimeGpuExecutionContext execution_context =
-      runtime_systems::RuntimeGpuContextRegistry::Instance().Snapshot();
+    runtime_systems::RuntimeVkExecutionContext execution_context =
+      runtime_systems::RuntimeVkContextRegistry::Instance().Snapshot();
     if (!execution_context.valid()) {
-      _ThrowGpuTickError("GPU execution context is unavailable.", out_error_message);
+      _ThrowVkTickError("VK execution context is unavailable.", out_error_message);
     }
 
     try {
@@ -449,25 +229,35 @@ class GpuJobRuntimeSystem {
         static_cast<uint32_t>(std::max(job.viewport_width, 1.0f)),
         static_cast<uint32_t>(std::max(job.viewport_height, 1.0f)));
       if (!_EnsureOffscreenTarget()) {
-        _ThrowGpuTickError("Failed to create offscreen GPU target.", out_error_message);
+        _ThrowVkTickError("Failed to create offscreen VK target.", out_error_message);
       }
 
       const std::string shader_key = _StageShaderKey(job);
-      GpuPipelineResource* pipeline =
+      std::cerr
+        << "vk_runtime.pipeline.begin debug_name=" << job.debug_name
+        << " shader_key=" << shader_key
+        << " vertex=" << job.vertex_shader_path
+        << " fragment=" << job.fragment_shader_path
+        << '\n';
+      VkPipelineResource* pipeline =
         _GetOrCreatePipeline(shader_key, job);
       if (!pipeline) {
-        _ThrowGpuTickError("Failed to create GPU pipeline.", out_error_message);
+        _ThrowVkTickError("Failed to create VK pipeline.", out_error_message);
       }
+      std::cerr
+        << "vk_runtime.pipeline.end debug_name=" << job.debug_name
+        << " shader_key=" << shader_key
+        << '\n';
 
       const std::string execution_state_key = _ExecutionStateKey(job, shader_key);
       auto state_it = execution_state_cache_.find(execution_state_key);
       if (state_it == execution_state_cache_.end()) {
-        state_it = execution_state_cache_.emplace(execution_state_key, GpuExecutionState{}).first;
+        state_it = execution_state_cache_.emplace(execution_state_key, VkExecutionState{}).first;
       }
-      GpuExecutionState working_state = std::move(state_it->second);
+      VkExecutionState working_state = std::move(state_it->second);
 
       struct ExecutionCleanup {
-        runtime_systems::RuntimeGpuExecutionContext context{};
+        runtime_systems::RuntimeVkExecutionContext context{};
         VkDescriptorSet descriptor_set{VK_NULL_HANDLE};
         ~ExecutionCleanup() {
           if (context.device != VK_NULL_HANDLE && descriptor_set != VK_NULL_HANDLE && context.descriptor_pool != VK_NULL_HANDLE) {
@@ -476,24 +266,29 @@ class GpuJobRuntimeSystem {
         }
       } cleanup{execution_context, VK_NULL_HANDLE};
 
+      std::cerr
+        << "vk_runtime.buffers.begin debug_name=" << job.debug_name
+        << " shader_key=" << shader_key
+        << " bindings=" << job.buffer_bindings.size()
+        << '\n';
       uint32_t array_instance_count = 0u;
       bool have_array_instance_count = false;
       uint32_t fallback_instance_count = 0u;
       bool have_fallback_instance_count = false;
       size_t buffer_index = 0u;
-      for (const RuntimeGpuBufferBindingView& binding : job.buffer_bindings) {
+      for (const RuntimeVkBufferBindingView& binding : job.buffer_bindings) {
         if (binding.bytes == nullptr) {
           if (binding.required) {
-            _ThrowGpuTickError(
-              "Runtime GPU job is missing buffer '" + binding.binding_name + "'.",
+            _ThrowVkTickError(
+              "Runtime VK job is missing buffer '" + binding.binding_name + "'.",
               out_error_message);
           }
           continue;
         }
         if (binding.element_stride == 0u || binding.size_bytes == 0u) {
           if (binding.required) {
-            _ThrowGpuTickError(
-              "Runtime GPU buffer '" + binding.binding_name + "' has no data.",
+            _ThrowVkTickError(
+              "Runtime VK buffer '" + binding.binding_name + "' has no data.",
               out_error_message);
           }
           continue;
@@ -502,15 +297,15 @@ class GpuJobRuntimeSystem {
         if (buffer_index >= working_state.buffers.size()) {
           working_state.buffers.emplace_back();
         }
-        GpuBufferPairResource& buffer_pair = working_state.buffers[buffer_index];
+        VkBufferPairResource& buffer_pair = working_state.buffers[buffer_index];
         const VkDeviceSize required_size = static_cast<VkDeviceSize>(binding.size_bytes);
 
         if (buffer_pair.input.buffer == VK_NULL_HANDLE || buffer_pair.input.size_bytes < required_size) {
           const VkDeviceSize grow_size = _GrowBufferSize(buffer_pair.input.size_bytes, required_size);
           _DestroyBuffer(buffer_pair.input);
           if (!_CreateStorageBuffer(grow_size, &buffer_pair.input)) {
-            _ThrowGpuTickError(
-              "Failed to create GPU buffer for '" + binding.binding_name + "'.",
+            _ThrowVkTickError(
+              "Failed to create VK buffer for '" + binding.binding_name + "'.",
               out_error_message);
           }
           std::memcpy(buffer_pair.input.allocation_info.pMappedData, binding.bytes, binding.size_bytes);
@@ -524,8 +319,8 @@ class GpuJobRuntimeSystem {
           const VkDeviceSize grow_size = _GrowBufferSize(buffer_pair.output.size_bytes, required_size);
           _DestroyBuffer(buffer_pair.output);
           if (!_CreateStorageBuffer(grow_size, &buffer_pair.output)) {
-            _ThrowGpuTickError(
-              "Failed to create GPU output buffer for '" + binding.binding_name + "'.",
+            _ThrowVkTickError(
+              "Failed to create VK output buffer for '" + binding.binding_name + "'.",
               out_error_message);
           }
           std::memcpy(buffer_pair.output.allocation_info.pMappedData, binding.bytes, binding.size_bytes);
@@ -567,15 +362,21 @@ class GpuJobRuntimeSystem {
       }
 
       if (buffer_index == 0u) {
-        _ThrowGpuTickError("GPU tick stage could not build any usable buffers.", out_error_message);
+        _ThrowVkTickError("VK tick stage could not build any usable buffers.", out_error_message);
       }
 
       const uint32_t instance_count = have_array_instance_count
         ? array_instance_count
         : fallback_instance_count;
       if (instance_count == 0u) {
-        _ThrowGpuTickError("GPU tick stage has no drawable instances.", out_error_message);
+        _ThrowVkTickError("VK tick stage has no drawable instances.", out_error_message);
       }
+      std::cerr
+        << "vk_runtime.buffers.end debug_name=" << job.debug_name
+        << " shader_key=" << shader_key
+        << " buffers=" << buffer_index
+        << " instance_count=" << instance_count
+        << '\n';
 
       if (working_state.buffers.size() > buffer_index) {
         for (size_t i = buffer_index; i < working_state.buffers.size(); ++i) {
@@ -586,14 +387,22 @@ class GpuJobRuntimeSystem {
       }
 
       VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
+      std::cerr
+        << "vk_runtime.descriptor.begin debug_name=" << job.debug_name
+        << " shader_key=" << shader_key
+        << '\n';
       if (!_AllocateDescriptorSet(pipeline->descriptor_set_layout, &descriptor_set)) {
-        _ThrowGpuTickError("Failed to allocate GPU descriptor set.", out_error_message);
+        _ThrowVkTickError("Failed to allocate VK descriptor set.", out_error_message);
       }
+      std::cerr
+        << "vk_runtime.descriptor.end debug_name=" << job.debug_name
+        << " shader_key=" << shader_key
+        << '\n';
       cleanup.descriptor_set = descriptor_set;
 
       std::vector<VkDescriptorBufferInfo> buffer_infos;
       buffer_infos.reserve(working_state.buffers.size() * 2u);
-      for (const GpuBufferPairResource& buffer_pair : working_state.buffers) {
+      for (const VkBufferPairResource& buffer_pair : working_state.buffers) {
         VkDescriptorBufferInfo input_info{};
         input_info.buffer = buffer_pair.input.buffer;
         input_info.offset = 0u;
@@ -629,9 +438,17 @@ class GpuJobRuntimeSystem {
           nullptr);
       }
 
+      std::cerr
+        << "vk_runtime.record.begin debug_name=" << job.debug_name
+        << " shader_key=" << shader_key
+        << '\n';
       _RecordAndSubmit(*pipeline, descriptor_set, instance_count, execution_context);
+      std::cerr
+        << "vk_runtime.record.end debug_name=" << job.debug_name
+        << " shader_key=" << shader_key
+        << '\n';
 
-      for (GpuBufferPairResource& buffer_pair : working_state.buffers) {
+      for (VkBufferPairResource& buffer_pair : working_state.buffers) {
         std::swap(buffer_pair.input, buffer_pair.output);
       }
 
@@ -642,23 +459,23 @@ class GpuJobRuntimeSystem {
       if (out_error_message) {
         *out_error_message = ex.what();
       }
-      assert(false && "GPU tick execution failed");
+      assert(false && "VK tick execution failed");
       return false;
     } catch (...) {
       if (out_error_message) {
-        *out_error_message = "GPU tick execution failed with an unknown error.";
+        *out_error_message = "VK tick execution failed with an unknown error.";
       }
-      assert(false && "GPU tick execution failed");
+      assert(false && "VK tick execution failed");
       return false;
     }
   }
 
-  bool SynchronizeRuntimeGpuJob(
-    const RuntimeGpuStageJob& job,
+  bool SynchronizeRuntimeVkJob(
+    const RuntimeVkStageJob& job,
     std::string* out_error_message) {
     if (!job.stage_jobs.empty()) {
-      for (const RuntimeGpuStageSubJob& stage_job_spec : job.stage_jobs) {
-        RuntimeGpuStageJob stage_job = job;
+      for (const RuntimeVkStageSubJob& stage_job_spec : job.stage_jobs) {
+        RuntimeVkStageJob stage_job = job;
         stage_job.debug_name = stage_job_spec.debug_name.empty()
           ? (job.debug_name + "::" + stage_job_spec.stage_name)
           : stage_job_spec.debug_name;
@@ -667,46 +484,46 @@ class GpuJobRuntimeSystem {
         stage_job.fragment_shader_path = stage_job_spec.fragment_shader_path;
         stage_job.buffer_bindings = stage_job_spec.buffer_bindings;
         stage_job.stage_jobs.clear();
-        if (!SynchronizeRuntimeGpuJob(stage_job, out_error_message)) {
+        if (!SynchronizeRuntimeVkJob(stage_job, out_error_message)) {
           return false;
         }
       }
       return true;
     }
     if (job.execution_key == nullptr) {
-      _ThrowGpuTickError("Runtime GPU job synchronization key is null.", out_error_message);
+      _ThrowVkTickError("Runtime VK job synchronization key is null.", out_error_message);
     }
 
     const std::string shader_key = _StageShaderKey(job);
     const std::string execution_state_key = _ExecutionStateKey(job, shader_key);
     auto state_it = execution_state_cache_.find(execution_state_key);
     if (state_it == execution_state_cache_.end() || state_it->second.buffers.empty()) {
-      _ThrowGpuTickError(
-        "GPU tick synchronization failed because no cached GPU state exists.",
+      _ThrowVkTickError(
+        "VK tick synchronization failed because no cached VK state exists.",
         out_error_message);
     }
 
     uint32_t synced_bindings = 0u;
-    for (const RuntimeGpuBufferBindingView& binding : job.buffer_bindings) {
+    for (const RuntimeVkBufferBindingView& binding : job.buffer_bindings) {
       if (binding.bytes == nullptr) {
         if (binding.required) {
-          _ThrowGpuTickError(
-            "Runtime GPU synchronization is missing buffer '" + binding.binding_name + "'.",
+          _ThrowVkTickError(
+            "Runtime VK synchronization is missing buffer '" + binding.binding_name + "'.",
             out_error_message);
         }
         continue;
       }
 
       if (synced_bindings >= state_it->second.buffers.size()) {
-        _ThrowGpuTickError(
-          "GPU tick synchronization ran out of cached GPU buffers.",
+        _ThrowVkTickError(
+          "VK tick synchronization ran out of cached VK buffers.",
           out_error_message);
       }
 
-      GpuBufferPairResource& buffer_pair = state_it->second.buffers[synced_bindings];
+      VkBufferPairResource& buffer_pair = state_it->second.buffers[synced_bindings];
       if (buffer_pair.input.buffer == VK_NULL_HANDLE || buffer_pair.input.allocation_info.pMappedData == nullptr) {
-        _ThrowGpuTickError(
-          "GPU tick synchronization encountered an invalid GPU input buffer.",
+        _ThrowVkTickError(
+          "VK tick synchronization encountered an invalid VK input buffer.",
           out_error_message);
       }
       _CheckVkResult(vmaInvalidateAllocation(
@@ -729,13 +546,13 @@ class GpuJobRuntimeSystem {
     }
 
     if (synced_bindings == 0u) {
-      _ThrowGpuTickError(
-        "GPU tick synchronization found no usable containers.",
+      _ThrowVkTickError(
+        "VK tick synchronization found no usable containers.",
         out_error_message);
     }
     if (synced_bindings != state_it->second.buffers.size()) {
-      _ThrowGpuTickError(
-        "GPU tick synchronization ended with an unexpected cached buffer count.",
+      _ThrowVkTickError(
+        "VK tick synchronization ended with an unexpected cached buffer count.",
         out_error_message);
     }
 
@@ -748,7 +565,7 @@ class GpuJobRuntimeSystem {
     VkCommandBuffer command_buffer{VK_NULL_HANDLE};
   };
 
-  void _DestroyBuffer(GpuBufferResource& buffer) {
+  void _DestroyBuffer(VkBufferResource& buffer) {
     if (buffer.buffer != VK_NULL_HANDLE) {
       vmaDestroyBuffer(context_.allocator, buffer.buffer, buffer.allocation);
       buffer.buffer = VK_NULL_HANDLE;
@@ -758,15 +575,15 @@ class GpuJobRuntimeSystem {
     }
   }
 
-  void _DestroyExecutionState(GpuExecutionState& execution_state) {
-    for (GpuBufferPairResource& buffer_pair : execution_state.buffers) {
+  void _DestroyExecutionState(VkExecutionState& execution_state) {
+    for (VkBufferPairResource& buffer_pair : execution_state.buffers) {
       _DestroyBuffer(buffer_pair.input);
       _DestroyBuffer(buffer_pair.output);
     }
     execution_state.buffers.clear();
   }
 
-  void _DestroyPipeline(GpuPipelineResource& pipeline) {
+  void _DestroyPipeline(VkPipelineResource& pipeline) {
     if (context_.device != VK_NULL_HANDLE) {
       if (pipeline.pipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(context_.device, pipeline.pipeline, nullptr);
@@ -813,7 +630,7 @@ class GpuJobRuntimeSystem {
     }
   }
 
-  void _EnsureContext(runtime_systems::RuntimeGpuExecutionContext context) {
+  void _EnsureContext(runtime_systems::RuntimeVkExecutionContext context) {
     const bool needs_reset =
       context_.device != context.device ||
       context_.allocator != context.allocator ||
@@ -936,9 +753,9 @@ class GpuJobRuntimeSystem {
     return true;
   }
 
-  bool _CreateStorageBuffer(VkDeviceSize size, GpuBufferResource* out_buffer) const {
+  bool _CreateStorageBuffer(VkDeviceSize size, VkBufferResource* out_buffer) const {
     if (!out_buffer || !context_.valid()) {
-      _AbortGpuTick("GPU tick storage buffer creation failed: invalid output buffer or execution context.");
+      _AbortVkTick("VK tick storage buffer creation failed: invalid output buffer or execution context.");
     }
 
     VkBufferCreateInfo buffer_info{};
@@ -966,7 +783,7 @@ class GpuJobRuntimeSystem {
 
   bool _AllocateDescriptorSet(VkDescriptorSetLayout descriptor_set_layout, VkDescriptorSet* out_descriptor_set) const {
     if (!out_descriptor_set || context_.descriptor_pool == VK_NULL_HANDLE) {
-      _AbortGpuTick("GPU tick descriptor set allocation failed: invalid output pointer or descriptor pool.");
+      _AbortVkTick("VK tick descriptor set allocation failed: invalid output pointer or descriptor pool.");
     }
 
     VkDescriptorSetAllocateInfo alloc_info{};
@@ -976,24 +793,34 @@ class GpuJobRuntimeSystem {
     alloc_info.pSetLayouts = &descriptor_set_layout;
     const VkResult result = vkAllocateDescriptorSets(context_.device, &alloc_info, out_descriptor_set);
     if (result != VK_SUCCESS) {
-      _AbortGpuTick(_MakeVkErrorMessage("vkAllocateDescriptorSets", result));
+      _AbortVkTick(_MakeVkErrorMessage("vkAllocateDescriptorSets", result));
     }
     return true;
   }
 
-  GpuPipelineResource* _GetOrCreatePipeline(
+  VkPipelineResource* _GetOrCreatePipeline(
     const std::string& shader_key,
-    const RuntimeGpuStageJob& job) {
+    const RuntimeVkStageJob& job) {
+    std::cerr
+      << "vk_pipeline.create.begin shader_key=" << shader_key
+      << " debug_name=" << job.debug_name
+      << " vertex=" << job.vertex_shader_path
+      << " fragment=" << job.fragment_shader_path
+      << '\n';
     const auto found = pipeline_cache_.find(shader_key);
     if (found != pipeline_cache_.end()) {
+      std::cerr
+        << "vk_pipeline.create.end shader_key=" << shader_key
+        << " cached=true"
+        << '\n';
       return &found->second;
     }
 
     if (context_.device == VK_NULL_HANDLE || offscreen_target_.render_pass == VK_NULL_HANDLE) {
-      _AbortGpuTick("GPU tick pipeline creation failed: Vulkan device or offscreen render pass is unavailable.");
+      _AbortVkTick("VK tick pipeline creation failed: Vulkan device or offscreen render pass is unavailable.");
     }
 
-    GpuPipelineResource pipeline{};
+    VkPipelineResource pipeline{};
     pipeline.shader_key = shader_key;
     pipeline.binding_count = static_cast<uint32_t>(job.buffer_bindings.size() * 2u);
 
@@ -1003,9 +830,16 @@ class GpuJobRuntimeSystem {
       _ResolveShaderBinaryPath(job.fragment_shader_path);
     const std::vector<std::byte> vertex_bytes = _ReadBinaryFile(vertex_path);
     const std::vector<std::byte> fragment_bytes = _ReadBinaryFile(fragment_path);
+    std::cerr
+      << "vk_pipeline.read.end shader_key=" << shader_key
+      << " vertex_path=" << vertex_path
+      << " fragment_path=" << fragment_path
+      << " vertex_bytes=" << vertex_bytes.size()
+      << " fragment_bytes=" << fragment_bytes.size()
+      << '\n';
     if (vertex_bytes.empty() || fragment_bytes.empty()) {
-      _AbortGpuTick(
-        "GPU tick pipeline creation failed: shader binaries could not be loaded for '" +
+      _AbortVkTick(
+        "VK tick pipeline creation failed: shader binaries could not be loaded for '" +
         job.debug_name + "'.");
     }
 
@@ -1058,7 +892,7 @@ class GpuJobRuntimeSystem {
     VkPushConstantRange push_constant_range{};
     push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
     push_constant_range.offset = 0u;
-    push_constant_range.size = sizeof(RuntimeGpuViewportPushConstants);
+    push_constant_range.size = sizeof(RuntimeVkViewportPushConstants);
     pipeline_layout_info.pushConstantRangeCount = 1;
     pipeline_layout_info.pPushConstantRanges = &push_constant_range;
     _CheckVkResult(vkCreatePipelineLayout(context_.device, &pipeline_layout_info, nullptr, &pipeline.pipeline_layout));
@@ -1153,10 +987,10 @@ class GpuJobRuntimeSystem {
   }
 
   void _RecordAndSubmit(
-    const GpuPipelineResource& pipeline,
+    const VkPipelineResource& pipeline,
     VkDescriptorSet descriptor_set,
     uint32_t instance_count,
-    const runtime_systems::RuntimeGpuExecutionContext& execution_context) {
+    const runtime_systems::RuntimeVkExecutionContext& execution_context) {
     _CheckVkResult(vkResetCommandPool(execution_context.device, command_resources_.command_pool, 0));
 
     VkCommandBufferBeginInfo begin_info{};
@@ -1201,7 +1035,7 @@ class GpuJobRuntimeSystem {
       &descriptor_set,
       0,
       nullptr);
-    const RuntimeGpuViewportPushConstants push_constants{
+    const RuntimeVkViewportPushConstants push_constants{
       static_cast<float>(offscreen_target_.extent.width),
       static_cast<float>(offscreen_target_.extent.height),
     };
@@ -1214,7 +1048,7 @@ class GpuJobRuntimeSystem {
       &push_constants);
     vkCmdSetViewport(command_resources_.command_buffer, 0, 1, &viewport);
     vkCmdSetScissor(command_resources_.command_buffer, 0, 1, &scissor);
-    // GPU tick uses the same quad-friendly triangle-strip path as the preview
+    // VK tick uses the same quad-friendly triangle-strip path as the preview
     // renderer so the vertex stage definitely runs on a real primitive.
     // The shader only writes back on vertex 0 of each instance.
     vkCmdDraw(command_resources_.command_buffer, 4, instance_count, 0, 0);
@@ -1237,84 +1071,32 @@ class GpuJobRuntimeSystem {
     _CheckVkResult(vkQueueWaitIdle(execution_context.queue));
   }
 
-  runtime_systems::RuntimeGpuExecutionContext context_{};
+  runtime_systems::RuntimeVkExecutionContext context_{};
   CommandResources command_resources_{};
-  GpuOffscreenTarget offscreen_target_{};
-  std::unordered_map<std::string, GpuPipelineResource> pipeline_cache_{};
-  std::unordered_map<std::string, GpuExecutionState> execution_state_cache_{};
+  VkOffscreenTarget offscreen_target_{};
+  std::unordered_map<std::string, VkPipelineResource> pipeline_cache_{};
+  std::unordered_map<std::string, VkExecutionState> execution_state_cache_{};
 };
 
-void ClearRuntimeGpuJobCaches() {
-  GpuJobRuntimeSystem::Instance().Clear();
+void ClearRuntimeVkJobCaches() {
+  VkJobRuntimeSystem::Instance().Clear();
 }
 
-bool ExecuteRuntimeGpuJob(
-  const RuntimeGpuStageJob& job,
+bool ExecuteRuntimeVkJob(
+  const RuntimeVkStageJob& job,
   std::string* out_error_message) {
-  return GpuJobRuntimeSystem::Instance().ExecuteRuntimeGpuJob(
+  return VkJobRuntimeSystem::Instance().ExecuteRuntimeVkJob(
     job,
     out_error_message);
 }
 
-bool SynchronizeRuntimeGpuJob(
-  const RuntimeGpuStageJob& job,
+bool SynchronizeRuntimeVkJob(
+  const RuntimeVkStageJob& job,
   std::string* out_error_message) {
-  return GpuJobRuntimeSystem::Instance().SynchronizeRuntimeGpuJob(
+  return VkJobRuntimeSystem::Instance().SynchronizeRuntimeVkJob(
     job,
     out_error_message);
-}
-
-bool HasExecutableRuntimeGpuAlgorithmStage(const ::agent::AlgorithmObject& object) {
-  return GpuJobRuntimeSystem::Instance().HasExecutableRuntimeGpuAlgorithmStage(object);
-}
-
-bool ExecuteRuntimeGpuAlgorithmObject(
-  const ::agent::AlgorithmObject& object,
-  ::algorithm::AlgorithmContainerSet* container_set,
-  const ::agent::AgentTickContext& context,
-  std::string* out_error_message) {
-  RuntimeGpuStageJob job{};
-  bool has_gpu_stage = false;
-  if (!GpuJobRuntimeSystem::Instance().BuildRuntimeGpuStageJob(
-        object,
-        container_set,
-        &job,
-        &has_gpu_stage,
-        out_error_message)) {
-    return false;
-  }
-  if (!has_gpu_stage) {
-    if (out_error_message) {
-      out_error_message->clear();
-    }
-    return true;
-  }
-  job.viewport_width = std::max(context.render_preview_extent.x, 1.0f);
-  job.viewport_height = std::max(context.render_preview_extent.y, 1.0f);
-  return GpuJobRuntimeSystem::Instance().ExecuteRuntimeGpuJob(job, out_error_message);
-}
-
-bool SynchronizeRuntimeGpuAlgorithmObject(
-  const ::agent::AlgorithmObject& object,
-  ::algorithm::AlgorithmContainerSet* container_set,
-  std::string* out_error_message) {
-  RuntimeGpuStageJob job{};
-  bool has_gpu_stage = false;
-  if (!GpuJobRuntimeSystem::Instance().BuildRuntimeGpuStageJob(
-        object,
-        container_set,
-        &job,
-        &has_gpu_stage,
-        out_error_message)) {
-    return false;
-  }
-  if (!has_gpu_stage) {
-    if (out_error_message) {
-      out_error_message->clear();
-    }
-    return true;
-  }
-  return GpuJobRuntimeSystem::Instance().SynchronizeRuntimeGpuJob(job, out_error_message);
 }
 
 }  // namespace runtime_systems
+

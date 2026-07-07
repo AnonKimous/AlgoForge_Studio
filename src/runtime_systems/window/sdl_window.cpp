@@ -2,11 +2,24 @@
 
 #include <imgui_impl_sdl3.h>
 
+#include <filesystem>
+#include <fstream>
 #include <stdexcept>
 
 namespace runtime_systems {
 
 namespace {
+
+void _AppendWindowProbe(const std::string& line) {
+  const std::filesystem::path path =
+    std::filesystem::current_path() / "algorithmLib/algorithmruntimeLib/norm/debugInfo/window_probe.log";
+  std::error_code ec;
+  std::filesystem::create_directories(path.parent_path(), ec);
+  std::ofstream file(path, std::ios::binary | std::ios::app);
+  if (file) {
+    file << line << '\n';
+  }
+}
 
 std::string SdlError(const char* prefix) {
   return std::string(prefix) + " failed: " + SDL_GetError();
@@ -16,12 +29,21 @@ std::string SdlError(const char* prefix) {
 
 SdlWindow::SdlWindow(const char* title, int width, int height)
     : width_(width), height_(height) {
-  window_ = SDL_CreateWindow(title, width_, height_, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN);
+  _AppendWindowProbe("sdl_window.begin");
+  _AppendWindowProbe("sdl_window.before_create");
+  window_ = SDL_CreateWindow(
+    title,
+    width_,
+    height_,
+    SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN);
+  _AppendWindowProbe("sdl_window.after_create");
   if (!window_) {
     throw std::runtime_error(SdlError("SDL_CreateWindow"));
   }
   window_id_ = SDL_GetWindowID(window_);
+  _AppendWindowProbe("sdl_window.before_show");
   SDL_ShowWindow(window_);
+  _AppendWindowProbe("sdl_window.after_show");
   SDL_GetWindowSizeInPixels(window_, &width_, &height_);
 }
 

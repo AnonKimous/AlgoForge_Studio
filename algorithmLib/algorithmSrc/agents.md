@@ -12,16 +12,16 @@ Use `v` for variables and `a` for arrays.
 
 ## Standard Container Alias
 
-- 标准容器的底层架构保持不变，运行时只认 `vN` 和 `aN`。
-- 开发者在声明完 `vXaY` 之后，可以在 `container` 里继续声明这些标准槽位的高层别名，供人和 agent 读取。
-- 推荐写法是：
+- 鏍囧噯瀹瑰櫒鐨勫簳灞傛灦鏋勪繚鎸佷笉鍙橈紝杩愯鏃跺彧璁?`vN` 鍜?`aN`銆?
+- 寮€鍙戣€呭湪澹版槑瀹?`vXaY` 涔嬪悗锛屽彲浠ュ湪 `container` 閲岀户缁０鏄庤繖浜涙爣鍑嗘Ы浣嶇殑楂樺眰鍒悕锛屼緵浜哄拰 agent 璇诲彇銆?
+- 鎺ㄨ崘鍐欐硶鏄細
   - `"aliases": ["a1:vertex", "v1,v2:pos"]`
-- `a1:vertex` 表示 `a1` 的可读别名是 `vertex`。
-- `v1,v2:pos` 表示 `v1` 和 `v2` 这一组标准变量共同组成一个高级变量 `pos`，按特殊变量规则理解。
-- 如果一个别名只映射到单个 `v` 或单个 `a`，它仍然分别遵循变量/数组自己的规则。
-- 这些别名是算法侧的声明信息，不改变底层容器布局。
-- agent 或开发工具可以直接使用这些高级名字进行设计、沟通和生成。
-- 一旦要写入当前主干可执行的 package 内容，必须把这些别名全部还原回 `vN/aN`，不要把别名直接写进依赖运行时解析的字段里。
+- `a1:vertex` 琛ㄧず `a1` 鐨勫彲璇诲埆鍚嶆槸 `vertex`銆?
+- `v1,v2:pos` 琛ㄧず `v1` 鍜?`v2` 杩欎竴缁勬爣鍑嗗彉閲忓叡鍚岀粍鎴愪竴涓珮绾у彉閲?`pos`锛屾寜鐗规畩鍙橀噺瑙勫垯鐞嗚В銆?
+- 濡傛灉涓€涓埆鍚嶅彧鏄犲皠鍒板崟涓?`v` 鎴栧崟涓?`a`锛屽畠浠嶇劧鍒嗗埆閬靛惊鍙橀噺/鏁扮粍鑷繁鐨勮鍒欍€?
+- 杩欎簺鍒悕鏄畻娉曚晶鐨勫０鏄庝俊鎭紝涓嶆敼鍙樺簳灞傚鍣ㄥ竷灞€銆?
+- agent 鎴栧紑鍙戝伐鍏峰彲浠ョ洿鎺ヤ娇鐢ㄨ繖浜涢珮绾у悕瀛楄繘琛岃璁°€佹矡閫氬拰鐢熸垚銆?
+- 涓€鏃﹁鍐欏叆褰撳墠涓诲共鍙墽琛岀殑 package 鍐呭锛屽繀椤绘妸杩欎簺鍒悕鍏ㄩ儴杩樺師鍥?`vN/aN`锛屼笉瑕佹妸鍒悕鐩存帴鍐欒繘渚濊禆杩愯鏃惰В鏋愮殑瀛楁閲屻€?
 
 ## Example
 
@@ -38,30 +38,32 @@ Use `v` for variables and `a` for arrays.
 
 ## devTask
 
-- 状态：in_progress
-- 最后更新：2026-06-22
-- 当前进度：
-  - 已完成：流水线按“一个 pipeline 作为一个算法单元”挂载与调度，目标表述统一为“增加吞吐”，不再使用“加速单次执行”。
-  - 已完成：runtime transfer map 已收紧为单向线性 `stage -> nextStage`，禁止 fan-out / fan-in。
-  - 已完成：原 `runtimeDecomposer/runtimeReflector` 的职责已经统一收口到 `PipelineStageBridge`。
-  - 已完成：GPU 侧继续把隐式 stageBuffer 绑定在 standard container 共享 `a` 前缀里；CPU 侧改为同一 lane 的 bridge 共享一份 `interStageBuffer`，不再依赖标准容器里的隐式 stageBuffer 作为真正运行时缓冲。
-  - 已完成：pipeline stall 会输出每个 stage 的耗时和原因，并在后端导出 `csv` / `mermaid` 时序文件到 `artifacts/pipeline_timing/`。
-  - 已完成：stage 支持声明 `runtime.pipeline.externalWriteResetContainers`，表示这些容器必须每帧从外部重写，stage 执行完成后立即清空。
-  - 已跳过：最初的“环形探针”方案已废弃，后续以 stall 日志和 fail-fast 为主。
+- 鐘舵€侊細in_progress
+- 鏈€鍚庢洿鏂帮細2026-06-22
+- 褰撳墠杩涘害锛?
+  - 宸插畬鎴愶細娴佹按绾挎寜鈥滀竴涓?pipeline 浣滀负涓€涓畻娉曞崟鍏冣€濇寕杞戒笌璋冨害锛岀洰鏍囪〃杩扮粺涓€涓衡€滃鍔犲悶鍚愨€濓紝涓嶅啀浣跨敤鈥滃姞閫熷崟娆℃墽琛屸€濄€?
+  - 宸插畬鎴愶細runtime transfer map 宸叉敹绱т负鍗曞悜绾挎€?`stage -> nextStage`锛岀姝?fan-out / fan-in銆?
+  - 宸插畬鎴愶細鍘?`runtimeDecomposer/runtimeReflector` 鐨勮亴璐ｅ凡缁忕粺涓€鏀跺彛鍒?`PipelineStageBridge`銆?
+  - 宸插畬鎴愶細VK 渚х户缁妸闅愬紡 stageBuffer 缁戝畾鍦?standard container 鍏变韩 `a` 鍓嶇紑閲岋紱JOBS 渚ф敼涓哄悓涓€ lane 鐨?bridge 鍏变韩涓€浠?`interStageBuffer`锛屼笉鍐嶄緷璧栨爣鍑嗗鍣ㄩ噷鐨勯殣寮?stageBuffer 浣滀负鐪熸杩愯鏃剁紦鍐层€?
+  - 宸插畬鎴愶細pipeline stall 浼氳緭鍑烘瘡涓?stage 鐨勮€楁椂鍜屽師鍥狅紝骞跺湪鍚庣瀵煎嚭 `csv` / `mermaid` 鏃跺簭鏂囦欢鍒?`artifacts/pipeline_timing/`銆?
+  - 宸插畬鎴愶細stage 鏀寔澹版槑 `runtime.pipeline.externalWriteResetContainers`锛岃〃绀鸿繖浜涘鍣ㄥ繀椤绘瘡甯т粠澶栭儴閲嶅啓锛宻tage 鎵ц瀹屾垚鍚庣珛鍗虫竻绌恒€?
+  - 宸茶烦杩囷細鏈€鍒濈殑鈥滅幆褰㈡帰閽堚€濇柟妗堝凡搴熷純锛屽悗缁互 stall 鏃ュ織鍜?fail-fast 涓轰富銆?
 
-- [x] 0. 流水线本质是一组算法被当成一个算法提交，由 agent 来梳理它们的流水关系，目标是增加吞吐，不是加速单次执行。
-- [x] 1. 流水线需要映射表，标准容器改写成映射表，并随算法本身提交到 runtime sys 这一层。
-- [x] 2. 映射表只保留线性 `stage->nextStage` 关系，不再支持一个 stage 映射到多个 stage，也不再支持一个 stage 接收多个 stage 的映射。
-- [skip] 3. 原始“环形探针”方案已废弃；按后续决策不再实现。
-- [x] 4. 原 `runtimeDecomposer/runtimeReflector` 方案已由统一的 `PipelineStageBridge` 取代。
-- [x] 5. debugTool 后端会保留 pipeline 总耗时和各 stage 耗时，并在 stall 时导出 `csv` / `mermaid` 图文件。
-- [x] 6. 已增加 `runtime.pipeline.externalWriteResetContainers`，用于声明每帧外部重写、stage 执行后立即清空的容器。
-- [x] 7. 如果流水线算法持续 tick 不动，直接输出每个 stage 的耗时和原因日志，然后断言报错；真正“弹出算法”的动作仍留待后续。
+- [x] 0. 娴佹按绾挎湰璐ㄦ槸涓€缁勭畻娉曡褰撴垚涓€涓畻娉曟彁浜わ紝鐢?agent 鏉ユ⒊鐞嗗畠浠殑娴佹按鍏崇郴锛岀洰鏍囨槸澧炲姞鍚炲悙锛屼笉鏄姞閫熷崟娆℃墽琛屻€?
+- [x] 1. 娴佹按绾块渶瑕佹槧灏勮〃锛屾爣鍑嗗鍣ㄦ敼鍐欐垚鏄犲皠琛紝骞堕殢绠楁硶鏈韩鎻愪氦鍒?runtime sys 杩欎竴灞傘€?
+- [x] 2. 鏄犲皠琛ㄥ彧淇濈暀绾挎€?`stage->nextStage` 鍏崇郴锛屼笉鍐嶆敮鎸佷竴涓?stage 鏄犲皠鍒板涓?stage锛屼篃涓嶅啀鏀寔涓€涓?stage 鎺ユ敹澶氫釜 stage 鐨勬槧灏勩€?
+- [skip] 3. 鍘熷鈥滅幆褰㈡帰閽堚€濇柟妗堝凡搴熷純锛涙寜鍚庣画鍐崇瓥涓嶅啀瀹炵幇銆?
+- [x] 4. 鍘?`runtimeDecomposer/runtimeReflector` 鏂规宸茬敱缁熶竴鐨?`PipelineStageBridge` 鍙栦唬銆?
+- [x] 5. debugTool 鍚庣浼氫繚鐣?pipeline 鎬昏€楁椂鍜屽悇 stage 鑰楁椂锛屽苟鍦?stall 鏃跺鍑?`csv` / `mermaid` 鍥炬枃浠躲€?
+- [x] 6. 宸插鍔?`runtime.pipeline.externalWriteResetContainers`锛岀敤浜庡０鏄庢瘡甯у閮ㄩ噸鍐欍€乻tage 鎵ц鍚庣珛鍗虫竻绌虹殑瀹瑰櫒銆?
+- [x] 7. 濡傛灉娴佹按绾跨畻娉曟寔缁?tick 涓嶅姩锛岀洿鎺ヨ緭鍑烘瘡涓?stage 鐨勮€楁椂鍜屽師鍥犳棩蹇楋紝鐒跺悗鏂█鎶ラ敊锛涚湡姝ｂ€滃脊鍑虹畻娉曗€濈殑鍔ㄤ綔浠嶇暀寰呭悗缁€?
+
+- If a run stalls, inspect the latest logs under `testData/` first, especially `progress_probe.log`, `last_run.log`, and the runner server/client logs.
 
 ## Pipeline Mapping Notes
 
-- pipeline 的 runtime transfer map 现在不只描述 `stage -> nextStage` 的边。
-- 它还要描述每个 stage 的标准容器布局摘要：
+- pipeline 鐨?runtime transfer map 鐜板湪涓嶅彧鎻忚堪 `stage -> nextStage` 鐨勮竟銆?
+- 瀹冭繕瑕佹弿杩版瘡涓?stage 鐨勬爣鍑嗗鍣ㄥ竷灞€鎽樿锛?
   - `declared_variable_count`
   - `declared_array_count`
   - `shared_variable_count`
@@ -70,31 +72,31 @@ Use `v` for variables and `a` for arrays.
   - `extra_array_count`
   - `extra_variable_offset`
   - `extra_array_offset`
-- 含义是：
-  - 所有 stage 共享一段结构兼容的 `v/a` 前缀
-  - 某个 stage 如果额外多声明了几个 `v` 或 `a`，这些额外槽不会混进共享前缀
-  - 它们会按照 stage 顺序累计偏移，再登记到映射表里
-- 当前主干先收紧成只允许额外 `v`。
-- 如果某个 stage 额外多出了共享前缀之外的 `a`，运行时直接断言报错。
-- 例子：
-  - stage0 额外多 1 个 `v`，偏移是 `0`
-  - stage1 额外多 2 个 `v`，偏移是 `1`
-  - stage3 额外多 1 个 `v`，偏移是 `3`
-- GPU pipeline 强制要求隐式 stageBuffer 落在所有 stage 共享的 `a` 前缀里，不能挂到某个 stage 私有多出来的 `a` 上。
-- CPU pipeline 的 bridge 运行时不再把这块隐式 stageBuffer 当成真正的跨 stage 缓冲；CPU 会为每条 lane 维护一份共享 `interStageBuffer`，所有 stage bridge 共同读写这份缓冲，并按映射表偏移解释额外 `v`。
-- 如果某个 stage 的某些容器必须每帧都从外部重写，可以在 package 的 `runtime.pipeline.externalWriteResetContainers` 里列出它们；该 stage 执行完成后，这些容器会被立即清零，避免旧值在流水线里滞留。
+- 鍚箟鏄細
+  - 鎵€鏈?stage 鍏变韩涓€娈电粨鏋勫吋瀹圭殑 `v/a` 鍓嶇紑
+  - 鏌愪釜 stage 濡傛灉棰濆澶氬０鏄庝簡鍑犱釜 `v` 鎴?`a`锛岃繖浜涢澶栨Ы涓嶄細娣疯繘鍏变韩鍓嶇紑
+  - 瀹冧滑浼氭寜鐓?stage 椤哄簭绱鍋忕Щ锛屽啀鐧昏鍒版槧灏勮〃閲?
+- 褰撳墠涓诲共鍏堟敹绱ф垚鍙厑璁搁澶?`v`銆?
+- 濡傛灉鏌愪釜 stage 棰濆澶氬嚭浜嗗叡浜墠缂€涔嬪鐨?`a`锛岃繍琛屾椂鐩存帴鏂█鎶ラ敊銆?
+- 渚嬪瓙锛?
+  - stage0 棰濆澶?1 涓?`v`锛屽亸绉绘槸 `0`
+  - stage1 棰濆澶?2 涓?`v`锛屽亸绉绘槸 `1`
+  - stage3 棰濆澶?1 涓?`v`锛屽亸绉绘槸 `3`
+- VK pipeline 寮哄埗瑕佹眰闅愬紡 stageBuffer 钀藉湪鎵€鏈?stage 鍏变韩鐨?`a` 鍓嶇紑閲岋紝涓嶈兘鎸傚埌鏌愪釜 stage 绉佹湁澶氬嚭鏉ョ殑 `a` 涓娿€?
+- JOBS pipeline 鐨?bridge 杩愯鏃朵笉鍐嶆妸杩欏潡闅愬紡 stageBuffer 褰撴垚鐪熸鐨勮法 stage 缂撳啿锛汣PU 浼氫负姣忔潯 lane 缁存姢涓€浠藉叡浜?`interStageBuffer`锛屾墍鏈?stage bridge 鍏卞悓璇诲啓杩欎唤缂撳啿锛屽苟鎸夋槧灏勮〃鍋忕Щ瑙ｉ噴棰濆 `v`銆?
+- 濡傛灉鏌愪釜 stage 鐨勬煇浜涘鍣ㄥ繀椤绘瘡甯ч兘浠庡閮ㄩ噸鍐欙紝鍙互鍦?package 鐨?`runtime.pipeline.externalWriteResetContainers` 閲屽垪鍑哄畠浠紱璇?stage 鎵ц瀹屾垚鍚庯紝杩欎簺瀹瑰櫒浼氳绔嬪嵆娓呴浂锛岄伩鍏嶆棫鍊煎湪娴佹按绾块噷婊炵暀銆?
 
 ## Package Format
 
 Use one unified package file per algorithm bundle:
 
-- `<algorithm_name>_package.json`
+- `<algorithm_name>_package.algoPrj`
 - The file contains `container`, `decomposer`, `reflector`, and `intervention` sections.
 - The same package file can be used by the host, SDK, and debug tool.
-- GPU tick shaders receive viewport width/height push constants and interpret algorithm-space positions as lower-left origin pixel coordinates before converting to clip space.
+- VK tick shaders receive viewport width/height push constants and interpret algorithm-space positions as lower-left origin pixel coordinates before converting to clip space.
 - `container` only describes storage layout such as count, shape, and scalar bit width. It does not declare whether payload bytes are `int`, `float`, or packed bits.
-- Descriptor encoding belongs to `decomposer.description`, and reflection decoding belongs to `reflector`.
-- If a `decomposer.description` item omits `codec`, runtime currently falls back to `float` for compatibility. Do not teach that `32` or `64` alone implies a semantic scalar type.
+- Descriptor interpretation belongs to the algorithm side. Do not add semantic type hints in new package descriptions.
+- Reflection decoding belongs to `reflector`.
 
 Use `cjson` style comments in the package file examples:
 
@@ -128,7 +130,6 @@ Use `cjson` style comments in the package file examples:
         "name": "point_position",
         "from": ["start_x", "start_y", "start_z"],
         "to": ["v1", "v2", "v3"]
-        // optional: add "codec": "float" / "int" / "uint" when the boundary must be explicit
       }
     ]
   },
@@ -162,8 +163,8 @@ Use `cjson` style comments in the package file examples:
         },
         "shader": {
           "pipeline": "graphics",
-          "vertex": "temporary_test_line_motion_gpu_tick.vert",
-          "fragment": "temporary_test_line_motion_gpu_tick.frag"
+          "vertex": "temporary_test_line_motion_vk_tick.vert",
+          "fragment": "temporary_test_line_motion_vk_tick.frag"
         }
       },
       "resultRender": {
@@ -189,4 +190,4 @@ Use `cjson` style comments in the package file examples:
 - Treat `[0,0,0]` as the lower-left near corner.
 - `+X` points right, `+Y` points up, and `+Z` points into the screen.
 - Render preview coordinates use the lower-left corner of the preview content region as `[0,0]`.
-- `resultRender` is the default place to attach GPU-side render work before the actual preview render pass.
+- `resultRender` is the default place to attach VK-side render work before the actual preview render pass.

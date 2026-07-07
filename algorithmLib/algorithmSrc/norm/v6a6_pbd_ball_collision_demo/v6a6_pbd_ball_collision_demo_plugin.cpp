@@ -803,9 +803,9 @@ void _StepCollisionDemo(
   }
 }
 
-class CollisionDemoCpuExecutor final : public agent::IAlgorithmCpuExecutor {
+class CollisionDemoJobsExecutor final : public agent::IAlgorithmJobsExecutor {
  public:
-  bool ExecuteCpuAlgorithm(
+  bool ExecuteJobsAlgorithm(
     const agent::AgentTickContext& context,
     const algorithm::AlgorithmProfile& algorithm_profile,
     const AgentToAlgorithmSignal& agent_to_algorithm_signal,
@@ -860,7 +860,7 @@ class CollisionDemoCpuExecutor final : public agent::IAlgorithmCpuExecutor {
     }
     if (debug_state) {
       debug_state->signals.push_back(algorithm_management::AdvancedAlgorithmDebugSignal{
-        .name = "v6a6_pbd_ball_collision_demo.cpu",
+        .name = "v6a6_pbd_ball_collision_demo.jobs",
         .payload = "collision_count=" + std::to_string(static_cast<int>(collision_count)),
       });
     }
@@ -868,7 +868,7 @@ class CollisionDemoCpuExecutor final : public agent::IAlgorithmCpuExecutor {
   }
 };
 
-void _DestroyCpuExecutor(agent::IAlgorithmCpuExecutor* executor) {
+void _DestroyJobsExecutor(agent::IAlgorithmJobsExecutor* executor) {
   delete executor;
 }
 
@@ -882,12 +882,12 @@ extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateBundle(
   }
 
   out_bundle->Clear();
-  out_bundle->cpu_symbol = true;
-  out_bundle->gpu_symbol = true;
+  out_bundle->jobs_symbol = true;
+  out_bundle->vk_symbol = true;
   out_bundle->reflector = true;
   out_bundle->intervention = true;
-  out_bundle->cpu_executor = new CollisionDemoCpuExecutor();
-  out_bundle->destroy_cpu_executor = &_DestroyCpuExecutor;
+  out_bundle->jobs_executor = new CollisionDemoJobsExecutor();
+  out_bundle->destroy_jobs_executor = &_DestroyJobsExecutor;
   return true;
 }
 

@@ -1,6 +1,6 @@
+#include "debug_tool/runner_control_socket.h"
 #include "debug_tool/debug_tool_backend_runtime.h"
 #include "debug_tool/debug_tool_frontend_panel.h"
-#include "algorithm_support/algorithm_library_paths.h"
 
 #include <SDL3/SDL_main.h>
 
@@ -23,15 +23,16 @@ namespace {
 
 struct PipelineRunnerOptions {
   bool enabled{false};
-  std::string algorithm_name{"v2a0_pipeline_square_vertex_demo"};
+  std::string algorithm_name{"v3a16_fireworks_pipeline_demo"};
   std::string pipeline_name{};
   uint32_t ticks{24u};
   uint32_t preview_width{640u};
   uint32_t preview_height{480u};
+  std::string runner_endpoint{"127.0.0.1:0"};
   std::string render_preview_output_path{
-    algorithm::library_paths::ResolvePipelineRunnerArtifactRoot().string() + "/render_preview.ppm"};
+    algorithmManager::ResolvePipelineRunnerArtifactRoot().string() + "/render_preview.ppm"};
   debug_tool::AlgorithmExecutionPreference execution_preference{
-    debug_tool::AlgorithmExecutionPreference::Gpu};
+    debug_tool::AlgorithmExecutionPreference::Vk};
 };
 
 struct AlgorithmRunnerOptions {
@@ -40,11 +41,18 @@ struct AlgorithmRunnerOptions {
   uint32_t ticks{24u};
   uint32_t preview_width{640u};
   uint32_t preview_height{480u};
+  std::string runner_endpoint{"127.0.0.1:0"};
   std::string render_preview_output_path{
-    algorithm::library_paths::ResolveAlgorithmLibraryRuntimeNormDebugInfoRoot().string() +
+    algorithmManager::ResolveAlgorithmLibraryRuntimeNormDebugInfoRoot().string() +
       "/render_preview.ppm"};
   debug_tool::AlgorithmExecutionPreference execution_preference{
-    debug_tool::AlgorithmExecutionPreference::Gpu};
+    debug_tool::AlgorithmExecutionPreference::Vk};
+};
+
+struct RunnerServerOptions {
+  bool enabled{false};
+  bool once{false};
+  std::string runner_endpoint{"127.0.0.1:0"};
 };
 
 struct PositionSample {
@@ -65,8 +73,9 @@ const char* _AssemblyStateName(debug_tool::AlgorithmAssemblyState state) {
 
 const char* _ExecutionPreferenceName(debug_tool::AlgorithmExecutionPreference preference) {
   switch (preference) {
-    case debug_tool::AlgorithmExecutionPreference::Cpu: return "cpu";
-    case debug_tool::AlgorithmExecutionPreference::Gpu: return "gpu";
+    case debug_tool::AlgorithmExecutionPreference::Jobs: return "jobs";
+    case debug_tool::AlgorithmExecutionPreference::Vk: return "vk";
+    case debug_tool::AlgorithmExecutionPreference::Cuda: return "cuda";
   }
   return "unknown";
 }
@@ -175,12 +184,16 @@ bool _ParseExecutionPreference(
     return false;
   }
   const std::string value(text);
-  if (value == "cpu") {
-    *out_preference = debug_tool::AlgorithmExecutionPreference::Cpu;
+  if (value == "jobs") {
+    *out_preference = debug_tool::AlgorithmExecutionPreference::Jobs;
     return true;
   }
-  if (value == "gpu") {
-    *out_preference = debug_tool::AlgorithmExecutionPreference::Gpu;
+  if (value == "vk") {
+    *out_preference = debug_tool::AlgorithmExecutionPreference::Vk;
+    return true;
+  }
+  if (value == "cuda") {
+    *out_preference = debug_tool::AlgorithmExecutionPreference::Cuda;
     return true;
   }
   return false;
@@ -198,6 +211,15 @@ bool _IsPipelineRunnerInvocation(int argc, char** argv) {
 bool _IsAlgorithmRunnerInvocation(int argc, char** argv) {
   for (int i = 1; i < argc; ++i) {
     if (argv[i] && std::string(argv[i]) == "--algorithm-runner") {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool _IsRunnerServerInvocation(int argc, char** argv) {
+  for (int i = 1; i < argc; ++i) {
+    if (argv[i] && (std::string(argv[i]) == "--runner-server" || std::string(argv[i]) == "--runner-server-once")) {
       return true;
     }
   }
@@ -333,11 +355,21 @@ bool _ParsePipelineRunnerOptions(
     if (argument == "--execution") {
       if (i + 1 >= argc || !_ParseExecutionPreference(argv[i + 1], &options.execution_preference)) {
         if (out_error_message) {
-          *out_error_message = "--execution requires 'cpu' or 'gpu'.";
+          *out_error_message = "--execution requires 'jobs', 'vk', or 'cuda'.";
         }
         return false;
       }
       ++i;
+      continue;
+    }
+    if (argument == "--runner-endpoint") {
+      if (i + 1 >= argc || !argv[i + 1] || !*argv[i + 1]) {
+        if (out_error_message) {
+          *out_error_message = "--runner-endpoint requires a non-empty value.";
+        }
+        return false;
+      }
+      options.runner_endpoint = argv[++i];
       continue;
     }
     if (argument == "--help" || argument == "-h") {
@@ -346,11 +378,12 @@ bool _ParsePipelineRunnerOptions(
         << "  debugTool.exe --algorithm-runner "
         << "[--algorithm <name>] [--ticks <count>] "
         << "[--preview-width <px>] [--preview-height <px>] [--preview-output <path>] "
-        << "[--execution cpu|gpu]\n"
+        << "[--execution jobs|vk|cuda] [--runner-endpoint <host:port>]\n"
         << "  debugTool.exe --pipeline-runner "
         << "[--algorithm <name>] [--pipeline-name <name>] [--ticks <count>] "
         << "[--preview-width <px>] [--preview-height <px>] [--preview-output <path>] "
-        << "[--execution cpu|gpu]\n";
+        << "[--execution jobs|vk|cuda] [--runner-endpoint <host:port>]\n"
+        << "  debugTool.exe --runner-server [--runner-endpoint <host:port>] [--runner-server-once]\n";
       return false;
     }
   }
@@ -434,11 +467,21 @@ bool _ParseAlgorithmRunnerOptions(
     if (argument == "--execution") {
       if (i + 1 >= argc || !_ParseExecutionPreference(argv[i + 1], &options.execution_preference)) {
         if (out_error_message) {
-          *out_error_message = "--execution requires 'cpu' or 'gpu'.";
+          *out_error_message = "--execution requires 'jobs', 'vk', or 'cuda'.";
         }
         return false;
       }
       ++i;
+      continue;
+    }
+    if (argument == "--runner-endpoint") {
+      if (i + 1 >= argc || !argv[i + 1] || !*argv[i + 1]) {
+        if (out_error_message) {
+          *out_error_message = "--runner-endpoint requires a non-empty value.";
+        }
+        return false;
+      }
+      options.runner_endpoint = argv[++i];
       continue;
     }
     if (argument == "--help" || argument == "-h") {
@@ -447,7 +490,55 @@ bool _ParseAlgorithmRunnerOptions(
         << "  debugTool.exe --algorithm-runner "
         << "[--algorithm <name>] [--ticks <count>] "
         << "[--preview-width <px>] [--preview-height <px>] [--preview-output <path>] "
-        << "[--execution cpu|gpu]\n";
+        << "[--execution jobs|vk|cuda] [--runner-endpoint <host:port>]\n";
+      return false;
+    }
+  }
+
+  *out_options = std::move(options);
+  if (out_error_message) {
+    out_error_message->clear();
+  }
+  return true;
+}
+
+bool _ParseRunnerServerOptions(
+  int argc,
+  char** argv,
+  RunnerServerOptions* out_options,
+  std::string* out_error_message) {
+  if (!out_options) {
+    if (out_error_message) {
+      *out_error_message = "Runner server option output pointer is null.";
+    }
+    return false;
+  }
+
+  RunnerServerOptions options{};
+  for (int i = 1; i < argc; ++i) {
+    const std::string argument = argv[i] ? argv[i] : "";
+    if (argument == "--runner-server") {
+      options.enabled = true;
+      continue;
+    }
+    if (argument == "--runner-server-once") {
+      options.once = true;
+      continue;
+    }
+    if (argument == "--runner-endpoint") {
+      if (i + 1 >= argc || !argv[i + 1] || !*argv[i + 1]) {
+        if (out_error_message) {
+          *out_error_message = "--runner-endpoint requires a non-empty value.";
+        }
+        return false;
+      }
+      options.runner_endpoint = argv[++i];
+      continue;
+    }
+    if (argument == "--help" || argument == "-h") {
+      std::cout
+        << "Usage:\n"
+        << "  debugTool.exe --runner-server [--runner-endpoint <host:port>] [--runner-server-once]\n";
       return false;
     }
   }
@@ -555,7 +646,7 @@ void _PrintBridgeDebugSummary(const debug_tool::PipelineStageBridgeDebugSummary&
 
 bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
   const std::filesystem::path log_directory =
-    algorithm::library_paths::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot();
+    algorithmManager::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot();
   std::error_code ec;
   std::filesystem::create_directories(log_directory, ec);
   if (ec) {
@@ -563,15 +654,12 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
       "Failed to create pipeline runner log directory: " + log_directory.string());
   }
   const std::filesystem::path package_loader_probe_path = log_directory / "package_loader_probe.log";
-  const std::filesystem::path backend_attach_probe_path = log_directory / "backend_attach_probe.log";
   const std::filesystem::path agent_mount_probe_path = log_directory / "agent_mount_probe.log";
   const std::filesystem::path progress_path = log_directory / "progress_probe.log";
   const std::filesystem::path reflection_probe_path = log_directory / "pipeline_reflection_probe.log";
   const std::filesystem::path log_path = log_directory / "last_run.log";
   const std::filesystem::path render_preview_output_path(options.render_preview_output_path);
   std::filesystem::remove(package_loader_probe_path, ec);
-  ec.clear();
-  std::filesystem::remove(backend_attach_probe_path, ec);
   ec.clear();
   std::filesystem::remove(agent_mount_probe_path, ec);
   ec.clear();
@@ -601,6 +689,7 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
     throw std::runtime_error("Failed to open pipeline runner log file: " + log_path.string());
   }
   std::streambuf* const original_cout_buffer = std::cout.rdbuf(log_file.rdbuf());
+  std::streambuf* const original_cerr_buffer = std::cerr.rdbuf(log_file.rdbuf());
 
   DebugToolBackendRuntime runtime;
   append_progress("runtime.created");
@@ -631,6 +720,7 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
   std::vector<debug_tool::AlgorithmResourceBinding> resource_bindings;
   std::vector<debug_tool::AlgorithmDescriptorValue> descriptor_values;
   bool has_default_file = false;
+  append_progress("default_bindings_begin");
   if (!runtime.LoadAlgorithmPackageDefaultBindings(
         options.algorithm_name,
         &resource_bindings,
@@ -642,6 +732,7 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
         ? ("Failed to load default bindings for '" + options.algorithm_name + "'.")
         : error_message);
   }
+  append_progress("default_bindings_end");
   append_progress("default_bindings_loaded");
 
   const std::string mounted_pipeline_name = _BuildRunnerPipelineName(options);
@@ -680,7 +771,9 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
   }
   append_progress("resource_batch_submitted");
 
+  append_progress("start_ticking_begin");
   runtime.StartTicking();
+  append_progress("start_ticking_end");
   append_progress("ticking_started");
   runtime.SetRenderPreviewExtent(
     ImVec2(static_cast<float>(options.preview_width), static_cast<float>(options.preview_height)));
@@ -753,8 +846,8 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
         << summary.algorithm_name
         << " state=" << _AssemblyStateName(summary.assembly_state)
         << " exec=" << _ExecutionPreferenceName(summary.execution_preference)
-        << " cpu_symbol=" << (summary.cpu_symbol ? "true" : "false")
-        << " gpu_symbol=" << (summary.gpu_symbol ? "true" : "false");
+        << " jobs_symbol=" << (summary.jobs_symbol ? "true" : "false")
+        << " vk_symbol=" << (summary.vk_symbol ? "true" : "false");
       if (summary.pipeline_active_stage_index_valid) {
         std::cout << " active_stage=" << summary.pipeline_active_stage_index;
       }
@@ -862,6 +955,7 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
   std::cout << '\n';
   std::cout.flush();
   std::cout.rdbuf(original_cout_buffer);
+  std::cerr.rdbuf(original_cerr_buffer);
   append_progress("runner.completed");
   std::cerr << "pipeline_runner.log=" << log_path.string() << '\n';
   runtime.Destroy();
@@ -871,7 +965,7 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
 
 bool _RunAlgorithmRunner(const AlgorithmRunnerOptions& options) {
   const std::filesystem::path log_directory =
-    algorithm::library_paths::ResolveAlgorithmLibraryRuntimeNormDebugInfoRoot();
+    algorithmManager::ResolveAlgorithmLibraryRuntimeNormDebugInfoRoot();
   std::error_code ec;
   std::filesystem::create_directories(log_directory, ec);
   if (ec) {
@@ -914,6 +1008,7 @@ bool _RunAlgorithmRunner(const AlgorithmRunnerOptions& options) {
     throw std::runtime_error("Failed to open algorithm runner log file: " + log_path.string());
   }
   std::streambuf* const original_cout_buffer = std::cout.rdbuf(log_file.rdbuf());
+  std::streambuf* const original_cerr_buffer = std::cerr.rdbuf(log_file.rdbuf());
 
   DebugToolBackendRuntime runtime;
   append_progress("runtime.created");
@@ -944,6 +1039,7 @@ bool _RunAlgorithmRunner(const AlgorithmRunnerOptions& options) {
   std::vector<debug_tool::AlgorithmResourceBinding> resource_bindings;
   std::vector<debug_tool::AlgorithmDescriptorValue> descriptor_values;
   bool has_default_file = false;
+  append_progress("default_bindings_begin");
   if (!runtime.LoadAlgorithmPackageDefaultBindings(
         options.algorithm_name,
         &resource_bindings,
@@ -955,6 +1051,7 @@ bool _RunAlgorithmRunner(const AlgorithmRunnerOptions& options) {
         ? ("Failed to load default bindings for '" + options.algorithm_name + "'.")
         : error_message);
   }
+  append_progress("default_bindings_end");
   append_progress("default_bindings_loaded");
 
   size_t mounted_algorithm_index = 0u;
@@ -974,7 +1071,9 @@ bool _RunAlgorithmRunner(const AlgorithmRunnerOptions& options) {
   }
   append_progress("algorithm_mounted");
 
+  append_progress("start_ticking_begin");
   runtime.StartTicking();
+  append_progress("start_ticking_end");
   append_progress("ticking_started");
   runtime.SetRenderPreviewExtent(
     ImVec2(static_cast<float>(options.preview_width), static_cast<float>(options.preview_height)));
@@ -1008,8 +1107,8 @@ bool _RunAlgorithmRunner(const AlgorithmRunnerOptions& options) {
         << "  algorithm " << summary.algorithm_name
         << " state=" << _AssemblyStateName(summary.assembly_state)
         << " exec=" << _ExecutionPreferenceName(summary.execution_preference)
-        << " cpu_symbol=" << (summary.cpu_symbol ? "true" : "false")
-        << " gpu_symbol=" << (summary.gpu_symbol ? "true" : "false")
+        << " jobs_symbol=" << (summary.jobs_symbol ? "true" : "false")
+        << " vk_symbol=" << (summary.vk_symbol ? "true" : "false")
         << " active_bundle_valid=" << (summary.pipeline_active_bundle_valid ? "true" : "false");
       if (summary.pipeline_active_bundle_valid) {
         std::cout
@@ -1019,6 +1118,8 @@ bool _RunAlgorithmRunner(const AlgorithmRunnerOptions& options) {
       }
       std::cout
         << '\n';
+      _PrintReflectionSnapshotPresence("reflection", summary.reflection_snapshot);
+      _PrintReflectionSnapshot(summary.reflection_snapshot);
     }
   }
 
@@ -1095,6 +1196,7 @@ bool _RunAlgorithmRunner(const AlgorithmRunnerOptions& options) {
   std::cout << '\n';
   std::cout.flush();
   std::cout.rdbuf(original_cout_buffer);
+  std::cerr.rdbuf(original_cerr_buffer);
   append_progress("runner.completed");
   std::cerr << "algorithm_runner.log=" << log_path.string() << '\n';
   runtime.Destroy();
@@ -1102,19 +1204,275 @@ bool _RunAlgorithmRunner(const AlgorithmRunnerOptions& options) {
   return true;
 }
 
+std::filesystem::path _RunnerControlEndpointFilePath() {
+  return algorithm::library_paths::ResolveTestDataRoot() / "runner_control" / "endpoint.txt";
+}
+
+std::filesystem::path _RunnerControlLogPath(const char* file_name) {
+  return algorithm::library_paths::ResolveTestDataRoot() / "runner_control" / file_name;
+}
+
+void _AppendRunnerControlLog(const char* file_name, const std::string& line) {
+  const std::filesystem::path path = _RunnerControlLogPath(file_name);
+  std::error_code ec;
+  std::filesystem::create_directories(path.parent_path(), ec);
+  std::ofstream file(path, std::ios::binary | std::ios::app);
+  if (file) {
+    file << line << '\n';
+  }
+}
+
+std::string _ReadRunnerEndpointFromFile() {
+  const std::filesystem::path endpoint_path = _RunnerControlEndpointFilePath();
+  std::ifstream file(endpoint_path, std::ios::binary);
+  if (!file) {
+    return {};
+  }
+  std::string endpoint{};
+  std::getline(file, endpoint);
+  return endpoint;
+}
+
+std::string _ResolveRunnerEndpointText(const std::string& requested_endpoint) {
+  if (!requested_endpoint.empty()) {
+    debug_tool_backend::runner_control::Endpoint requested{};
+    if (debug_tool_backend::runner_control::ParseEndpoint(requested_endpoint, &requested)) {
+      if (requested.port != 0u) {
+        return requested_endpoint;
+      }
+      const std::string file_endpoint = _ReadRunnerEndpointFromFile();
+      if (!file_endpoint.empty()) {
+        return file_endpoint;
+      }
+      const char* env_endpoint = std::getenv("DEBUGTOOL_RUNNER_ENDPOINT");
+      if (env_endpoint && *env_endpoint) {
+        return env_endpoint;
+      }
+      return requested_endpoint;
+    }
+  }
+  const char* env_endpoint = std::getenv("DEBUGTOOL_RUNNER_ENDPOINT");
+  if (env_endpoint && *env_endpoint) {
+    return env_endpoint;
+  }
+  const std::string file_endpoint = _ReadRunnerEndpointFromFile();
+  if (!file_endpoint.empty()) {
+    return file_endpoint;
+  }
+  return requested_endpoint.empty() ? std::string("127.0.0.1:0") : requested_endpoint;
+}
+
+std::string _BuildRunnerRequestLine(int argc, char** argv) {
+  std::ostringstream stream{};
+  bool first_token = true;
+  for (int i = 1; i < argc; ++i) {
+    const std::string argument = argv[i] ? argv[i] : "";
+    if (argument == "--runner-endpoint") {
+      ++i;
+      continue;
+    }
+    if (!first_token) {
+      stream << ' ';
+    }
+    first_token = false;
+    stream << debug_tool_backend::runner_control::QuoteToken(argument);
+  }
+  return stream.str();
+}
+
+std::string _ExecuteRunnerRequestLine(const std::string& request_line, bool* out_shutdown_requested) {
+  if (out_shutdown_requested) {
+    *out_shutdown_requested = false;
+  }
+
+  std::cout << "runner_server.request=" << request_line << '\n';
+  std::cout.flush();
+
+  if (request_line == "shutdown" || request_line == "--runner-shutdown") {
+    if (out_shutdown_requested) {
+      *out_shutdown_requested = true;
+    }
+    return "OK shutdown";
+  }
+
+  std::vector<std::string> tokens = debug_tool_backend::runner_control::TokenizeCommandLine(request_line);
+  if (tokens.empty()) {
+    return "ERR empty request";
+  }
+
+  std::vector<char*> argv{};
+  argv.reserve(tokens.size() + 1u);
+  std::string request_program_name = "runner-control";
+  argv.push_back(request_program_name.data());
+  for (std::string& token : tokens) {
+    argv.push_back(token.data());
+  }
+
+  PipelineRunnerOptions pipeline_options{};
+  std::string error_message;
+  if (_ParsePipelineRunnerOptions(
+        static_cast<int>(argv.size()),
+        argv.data(),
+        &pipeline_options,
+        &error_message) &&
+      pipeline_options.enabled) {
+    try {
+      const bool executed = _RunPipelineRunner(pipeline_options);
+      return executed ? "OK pipeline_runner" : "ERR pipeline_runner failed";
+    } catch (const std::exception& e) {
+      return std::string("ERR ") + e.what();
+    }
+  }
+
+  AlgorithmRunnerOptions algorithm_options{};
+  error_message.clear();
+  if (_ParseAlgorithmRunnerOptions(
+        static_cast<int>(argv.size()),
+        argv.data(),
+        &algorithm_options,
+        &error_message) &&
+      algorithm_options.enabled) {
+    try {
+      const bool executed = _RunAlgorithmRunner(algorithm_options);
+      return executed ? "OK algorithm_runner" : "ERR algorithm_runner failed";
+    } catch (const std::exception& e) {
+      return std::string("ERR ") + e.what();
+    }
+  }
+
+  if (!error_message.empty()) {
+    return "ERR " + error_message;
+  }
+  return "ERR runner request did not contain a recognized command.";
+}
+
+bool _RunRunnerControlServer(const RunnerServerOptions& options) {
+  const std::string endpoint_text = _ResolveRunnerEndpointText(options.runner_endpoint);
+  debug_tool_backend::runner_control::Endpoint endpoint{};
+  if (!debug_tool_backend::runner_control::ParseEndpoint(endpoint_text, &endpoint)) {
+    throw std::runtime_error("Invalid runner control endpoint: " + endpoint_text);
+  }
+
+  const std::filesystem::path endpoint_path = _RunnerControlEndpointFilePath();
+  std::error_code ec;
+  std::filesystem::create_directories(endpoint_path.parent_path(), ec);
+  ec.clear();
+  std::ofstream endpoint_file(endpoint_path, std::ios::binary | std::ios::trunc);
+  if (!endpoint_file) {
+    throw std::runtime_error("Failed to open runner control endpoint file: " + endpoint_path.string());
+  }
+
+  const auto handler = [&](const std::string& request, bool* out_shutdown_requested) -> std::string {
+    try {
+      _AppendRunnerControlLog("server.log", "request=" + request);
+      bool request_shutdown = false;
+      const std::string response = _ExecuteRunnerRequestLine(request, &request_shutdown);
+      if (out_shutdown_requested) {
+        *out_shutdown_requested = request_shutdown || options.once;
+      }
+      _AppendRunnerControlLog("server.log", "response=" + response);
+      return response;
+    } catch (const std::exception& e) {
+      const std::string response = std::string("ERR ") + e.what();
+      _AppendRunnerControlLog("server.log", "exception=" + response);
+      if (out_shutdown_requested) {
+        *out_shutdown_requested = options.once;
+      }
+      return response;
+    }
+  };
+
+  const auto on_bound_endpoint = [&](const debug_tool_backend::runner_control::Endpoint& bound_endpoint) {
+    endpoint_file << debug_tool_backend::runner_control::FormatEndpoint(bound_endpoint) << '\n';
+    endpoint_file.flush();
+    _AppendRunnerControlLog("server.log", "runner_server.begin endpoint=" + debug_tool_backend::runner_control::FormatEndpoint(bound_endpoint));
+    std::cout << "runner_server.begin endpoint=" << debug_tool_backend::runner_control::FormatEndpoint(bound_endpoint) << '\n';
+    std::cout.flush();
+  };
+
+  const bool served = debug_tool_backend::runner_control::RunServer(endpoint, handler, on_bound_endpoint);
+  if (!served) {
+    return false;
+  }
+
+  if (options.once) {
+    _AppendRunnerControlLog("server.log", "runner_server.once_completed");
+    std::cout << "runner_server.once_completed\n";
+    std::cout.flush();
+  }
+  return true;
+}
+
+bool _RunRunnerControlClient(
+  int argc,
+  char** argv,
+  const std::string& requested_endpoint,
+  std::string* out_error_message) {
+  const std::string endpoint_text = _ResolveRunnerEndpointText(requested_endpoint);
+  debug_tool_backend::runner_control::Endpoint endpoint{};
+  if (!debug_tool_backend::runner_control::ParseEndpoint(endpoint_text, &endpoint)) {
+    if (out_error_message) {
+      *out_error_message = "Invalid runner control endpoint: " + endpoint_text;
+    }
+    return false;
+  }
+
+  const std::string request = _BuildRunnerRequestLine(argc, argv);
+  _AppendRunnerControlLog("client.log", "request=" + request);
+  std::cout << "runner_client.begin endpoint=" << debug_tool_backend::runner_control::FormatEndpoint(endpoint) << '\n';
+  std::cout << "runner_client.request=" << request << '\n';
+  std::cout.flush();
+  std::string response{};
+  if (!debug_tool_backend::runner_control::SendCommand(endpoint, request, &response, out_error_message)) {
+    if (out_error_message && !out_error_message->empty()) {
+      _AppendRunnerControlLog("client.log", "error=" + *out_error_message);
+    }
+    return false;
+  }
+
+  _AppendRunnerControlLog("client.log", "response=" + response);
+  if (!response.empty()) {
+    std::cout << response;
+    if (response.back() != '\n') {
+      std::cout << '\n';
+    }
+  }
+  if (response.rfind("ERR", 0u) == 0u) {
+    if (out_error_message) {
+      *out_error_message = response;
+    }
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
   try {
+    if (_IsRunnerServerInvocation(argc, argv)) {
+      RunnerServerOptions runner_server_options{};
+      std::string runner_server_parse_error;
+      if (!_ParseRunnerServerOptions(argc, argv, &runner_server_options, &runner_server_parse_error)) {
+        if (!runner_server_parse_error.empty()) {
+          throw std::runtime_error(runner_server_parse_error);
+        }
+        return 0;
+      }
+      if (runner_server_options.enabled) {
+        return _RunRunnerControlServer(runner_server_options) ? 0 : 1;
+      }
+    }
+
     {
       std::filesystem::create_directories(
-        algorithm::library_paths::ResolveAlgorithmLibraryRuntimeNormDebugInfoRoot());
+        algorithmManager::ResolveAlgorithmLibraryRuntimeNormDebugInfoRoot());
       std::filesystem::create_directories(
-        algorithm::library_paths::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot());
+        algorithmManager::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot());
       const std::filesystem::path argv_probe_root =
         _IsPipelineRunnerInvocation(argc, argv)
-          ? algorithm::library_paths::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot()
-          : algorithm::library_paths::ResolveAlgorithmLibraryRuntimeNormDebugInfoRoot();
+          ? algorithmManager::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot()
+          : algorithmManager::ResolveAlgorithmLibraryRuntimeNormDebugInfoRoot();
       std::filesystem::create_directories(argv_probe_root);
       std::ofstream probe_file(
         (argv_probe_root / "argv_probe.log"),
@@ -1136,7 +1494,7 @@ int main(int argc, char** argv) {
       return 0;
     }
     if (runner_options.enabled) {
-      return _RunPipelineRunner(runner_options) ? 0 : 1;
+      return _RunRunnerControlClient(argc, argv, runner_options.runner_endpoint, &runner_parse_error) ? 0 : 1;
     }
 
     AlgorithmRunnerOptions algorithm_options{};
@@ -1148,7 +1506,7 @@ int main(int argc, char** argv) {
       return 0;
     }
     if (algorithm_options.enabled) {
-      return _RunAlgorithmRunner(algorithm_options) ? 0 : 1;
+      return _RunRunnerControlClient(argc, argv, algorithm_options.runner_endpoint, &algorithm_parse_error) ? 0 : 1;
     }
 
     DebugToolBackendRuntime runtime;

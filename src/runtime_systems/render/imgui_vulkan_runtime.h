@@ -31,7 +31,7 @@ class ImGuiVulkanRuntime {
   void SetDrawCallback(DrawCallback callback);
   void SetRenderPreviewRequest(RenderPreviewRequest request);
   void SetRenderPreviewExtent(ImVec2 extent);
-  void ClearGpuRuntimeCaches();
+  void ClearVkRuntimeCaches();
   bool HasRenderPreviewTexture() const;
   bool ReadbackRenderPreviewTexture(std::vector<std::byte>* out_rgba, ImVec2* out_size);
   std::string RenderPreviewDebugSummary() const;

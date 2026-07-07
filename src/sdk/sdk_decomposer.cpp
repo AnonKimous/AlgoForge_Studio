@@ -2,7 +2,7 @@
 #include "sdk_decomposer.h"
 #undef SDK_LAYER_INTERNAL_BUILD
 
-#include "agent/agent.h"
+#include "agent_management/agent_management.h"
 
 #include <utility>
 
@@ -19,9 +19,9 @@ bool CreateAlgorithmPackageDecomposerByName(
     return false;
   }
 
-  agent::AlgorithmRequestedResources requested_resources{};
-  agent::AlgorithmRequestedDescriptorBindings requested_descriptor_bindings{};
-  if (!agent::QueryAlgorithmRequestedBindingsByName(
+  agentmanager::agent::AlgorithmRequestedResources requested_resources{};
+  agentmanager::agent::AlgorithmRequestedDescriptorBindings requested_descriptor_bindings{};
+  if (!agentmanager::agent::QueryAlgorithmRequestedBindingsByName(
         algorithm_name,
         &requested_resources,
         &requested_descriptor_bindings,
@@ -31,7 +31,7 @@ bool CreateAlgorithmPackageDecomposerByName(
 
   std::vector<RequestedResource> sdk_requested_resources{};
   sdk_requested_resources.reserve(requested_resources.required_resources.size());
-  for (const agent::AlgorithmRequestedResources::RequiredResource& resource : requested_resources.required_resources) {
+  for (const agentmanager::agent::AlgorithmRequestedResources::RequiredResource& resource : requested_resources.required_resources) {
     sdk_requested_resources.push_back(RequestedResource{
       .resource_name = resource.resource_name,
       .resource_kind = resource.resource_kind,
@@ -41,7 +41,7 @@ bool CreateAlgorithmPackageDecomposerByName(
 
   std::vector<RequestedDescriptorBinding> sdk_requested_descriptor_bindings{};
   sdk_requested_descriptor_bindings.reserve(requested_descriptor_bindings.descriptor_slots.size());
-  for (const agent::AlgorithmRequestedDescriptorBindings::DescriptorSlot& slot :
+  for (const agentmanager::agent::AlgorithmRequestedDescriptorBindings::DescriptorSlot& slot :
        requested_descriptor_bindings.descriptor_slots) {
     sdk_requested_descriptor_bindings.push_back(RequestedDescriptorBinding{
       .descriptor_name = slot.descriptor_name,
@@ -62,3 +62,4 @@ bool CreateAlgorithmPackageDecomposerByName(
 }
 
 }  // namespace sdk
+

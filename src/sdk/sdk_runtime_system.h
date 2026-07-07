@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-namespace agent_management {
+namespace agentmanager {
 class AgentManager;
 }
 
@@ -86,7 +86,7 @@ class SdkRuntimeSystem {
     size_t submitted_algorithm_index{0u};
   };
 
-  std::unique_ptr<agent_management::AgentManager> agent_manager_{};
+  std::unique_ptr<agentmanager::AgentManager> agent_manager_{};
   std::vector<AgentRecord> agents_{};
   std::vector<AlgorithmDraft> drafts_{};
   AgentHandle next_agent_handle_{1};

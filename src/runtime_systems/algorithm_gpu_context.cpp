@@ -1,28 +1,28 @@
-#include "runtime_systems/runtime_gpu_context.h"
+#include "runtime_systems/runtime_vk_context.h"
 
 namespace runtime_systems {
 
-RuntimeGpuContextRegistry& RuntimeGpuContextRegistry::Instance() {
-  static RuntimeGpuContextRegistry instance{};
+RuntimeVkContextRegistry& RuntimeVkContextRegistry::Instance() {
+  static RuntimeVkContextRegistry instance{};
   return instance;
 }
 
-void RuntimeGpuContextRegistry::Set(RuntimeGpuExecutionContext context) {
+void RuntimeVkContextRegistry::Set(RuntimeVkExecutionContext context) {
   std::lock_guard<std::mutex> lock(mutex_);
   context_ = context;
 }
 
-RuntimeGpuExecutionContext RuntimeGpuContextRegistry::Snapshot() const {
+RuntimeVkExecutionContext RuntimeVkContextRegistry::Snapshot() const {
   std::lock_guard<std::mutex> lock(mutex_);
   return context_;
 }
 
-bool RuntimeGpuContextRegistry::HasContext() const {
+bool RuntimeVkContextRegistry::HasContext() const {
   std::lock_guard<std::mutex> lock(mutex_);
   return context_.valid();
 }
 
-void RuntimeGpuContextRegistry::Clear() {
+void RuntimeVkContextRegistry::Clear() {
   std::lock_guard<std::mutex> lock(mutex_);
   context_ = {};
 }

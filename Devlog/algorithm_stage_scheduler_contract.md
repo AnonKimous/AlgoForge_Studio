@@ -47,11 +47,11 @@ Each logical stage has its own execution preference.
 
 Current expected preferences:
 
-- `pretick`: CPU or GPU
-- `exec`: CPU or GPU
-- `aftertick`: CPU or GPU
-- `reflect`: CPU only
-- `renderresult`: GPU only
+- `pretick`: JOBS or VK
+- `exec`: JOBS or VK
+- `aftertick`: JOBS or VK
+- `reflect`: JOBS only
+- `renderresult`: VK only
 
 `pretick` and `aftertick` are not yet used in a fully detailed way today, but the interface must keep their preference fields.
 
@@ -67,7 +67,7 @@ The scheduler must:
 - group adjacent stages when their execution preference is compatible
 - split stage submission when the preference changes
 - wait for the previous batch to finish before submitting the next batch when synchronization is required
-- control synchronization between CPU and GPU execution paths
+- control synchronization between JOBS and VK execution paths
 - control synchronization between standard container mappings and lane-owned containers
 - perform packing inside the scheduler so the executor sees the smallest possible task bundle
 - only decide whether the current bundle changes; the scheduler does not need to reason about every isolated stage once a bundle is formed
@@ -80,23 +80,23 @@ If multiple consecutive stages share the same execution preference, the schedule
 
 Example:
 
-- `pretick` = GPU
-- `exec` = GPU
-- `aftertick` = GPU
-- `renderresult` = GPU
+- `pretick` = VK
+- `exec` = VK
+- `aftertick` = VK
+- `renderresult` = VK
 
-In this case, the scheduler must submit the consecutive GPU stages together.
+In this case, the scheduler must submit the consecutive VK stages together.
 
 The scheduler should always try to reduce the number of submitted tasks.
 
 Examples:
 
-- `cpu`, `cpu`, `null`, `null`, `cpu` must be packed into one CPU task
-- `gpu`, `gpu`, `gpu`, `gpu`, `null` must be packed into one GPU task
-- `null`, `cpu`, `gpu`, `null`, `cpu`, `cpu`, `cpu`, `cpu`, `null`, `cpu` should be packed as three bundles:
-  - one CPU bundle with synchronization
-  - one GPU bundle with synchronization
-  - one final CPU bundle that may be merged with the next algorithm when the next bundle is also CPU-side
+- `jobs`, `jobs`, `null`, `null`, `jobs` must be packed into one JOBS task
+- `vk`, `vk`, `vk`, `vk`, `null` must be packed into one VK task
+- `null`, `jobs`, `vk`, `null`, `jobs`, `jobs`, `jobs`, `jobs`, `null`, `jobs` should be packed as three bundles:
+  - one JOBS bundle with synchronization
+  - one VK bundle with synchronization
+  - one final JOBS bundle that may be merged with the next algorithm when the next bundle is also JOBS-side
 
 The scheduler only needs to check whether the bundle changes.
 
@@ -108,11 +108,11 @@ If the preference changes across stages, the scheduler must split the work and p
 
 Example:
 
-- `pretick` = CPU
-- `exec` = GPU
-- `aftertick` = CPU
-- `renderresult` = GPU
-- `reflect` = CPU
+- `pretick` = JOBS
+- `exec` = VK
+- `aftertick` = JOBS
+- `renderresult` = VK
+- `reflect` = JOBS
 
 In this case, the scheduler cannot push the whole object into one executor call.
 
@@ -125,7 +125,7 @@ It must:
 - submit `aftertick`
 - and so on
 
-The scheduler must treat a GPU batch boundary followed by a CPU batch boundary, or a CPU batch boundary followed by a GPU batch boundary, as a hard split point that requires synchronization.
+The scheduler must treat a VK batch boundary followed by a JOBS batch boundary, or a JOBS batch boundary followed by a VK batch boundary, as a hard split point that requires synchronization.
 
 The packer lives inside the scheduler.
 
@@ -138,11 +138,11 @@ Pipeline algorithms are a serial composition of multiple algorithms.
 
 They follow the same stage contract.
 
-If multiple consecutive pipeline stages have GPU preference, the scheduler must submit them as one GPU batch when that boundary is valid for the current sync mode.
+If multiple consecutive pipeline stages have VK preference, the scheduler must submit them as one VK batch when that boundary is valid for the current sync mode.
 
 If the pipeline has mixed preferences, the scheduler must split the pipeline into compatible batches and synchronize between them.
 
-In forced synchronization mode, if the wrapper, the body algorithms, and all of their stages are GPU-side, the scheduler may pack them into one large GPU bundle and submit that bundle as a whole.
+In forced synchronization mode, if the wrapper, the body algorithms, and all of their stages are VK-side, the scheduler may pack them into one large VK bundle and submit that bundle as a whole.
 
 In non-forced synchronization mode, the packing decision depends on the wrapper and the currently executing stage.
 The scheduler still only compares the current bundle against the next bundle boundary.
@@ -166,15 +166,15 @@ Report the conflict instead.
 
 `Lane` is the runtime execution form of pipeline algorithm data.
 
-On the CPU side, lane data appears as the algorithm object's containers.
+On the JOBS side, lane data appears as the algorithm object's containers.
 
-On the GPU side, lane data appears as the submitted standard container set.
+On the VK side, lane data appears as the submitted standard container set.
 
 `Bridge` is the same idea in another form.
 
-On the CPU side, bridge data appears as the buffer.
+On the JOBS side, bridge data appears as the buffer.
 
-On the GPU side, bridge data appears as the implicit container plus mapping table attached to the standard container set.
+On the VK side, bridge data appears as the implicit container plus mapping table attached to the standard container set.
 
 ## 10. Bridge And Container Synchronization
 
@@ -185,7 +185,7 @@ This means:
 - standard containers and lane containers are both owned by the lane side of the runtime
 - the scheduler must keep the implicit standard-container mapping in sync with the actual buffer contents
 - bridge copy and buffer propagation are scheduler concerns, not executor concerns
-- in execution paths that switch CPU and GPU ownership, the bridge must move together with the lane state
+- in execution paths that switch JOBS and VK ownership, the bridge must move together with the lane state
 
 Under ideal conditions, in forced synchronization mode, the pipeline must behave like:
 
@@ -198,7 +198,7 @@ This is forced synchronization mode.
 
 This is the ideal case.
 
-Real pipeline algorithms may still contain CPU and GPU stage switches inside the same forced-sync submission, such as `exec` followed by `reflect`.
+Real pipeline algorithms may still contain JOBS and VK stage switches inside the same forced-sync submission, such as `exec` followed by `reflect`.
 
 In that case, the scheduler must still block and wait for the current stage to finish before advancing.
 

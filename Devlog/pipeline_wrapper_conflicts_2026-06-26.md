@@ -19,11 +19,11 @@ Do not continue wrapper-stage implementation until these points are confirmed.
    `manifest.get("intervention", {}).get("stage", {})`
 
 2. Runtime-side JSON parser currently reads plural `intervention.stages`:
-   [src/algorithm_support/algorithm_intervention_support_detail.h](D:/gptsandbox/src/algorithm_support/algorithm_intervention_support_detail.h)
+   [src/algorithm_catalog/algorithm_intervention_support_detail.h](D:/gptsandbox/src/algorithm_catalog/algorithm_intervention_support_detail.h)
 
 3. Existing example packages in `algorithmLib` still mostly use plural
    `intervention.stages`, for example:
-   [algorithmLib/algorithmSrc/v2a0_pipeline_square_vertex_demo/v2a0_pipeline_square_vertex_demo_package.json](D:/gptsandbox/algorithmLib/algorithmSrc/v2a0_pipeline_square_vertex_demo/v2a0_pipeline_square_vertex_demo_package.json)
+   [algorithmLib/algorithmSrc/v2a0_pipeline_square_vertex_demo/v2a0_pipeline_square_vertex_demo_package.algoPrj](D:/gptsandbox/algorithmLib/algorithmSrc/v2a0_pipeline_square_vertex_demo/v2a0_pipeline_square_vertex_demo_package.algoPrj)
 
 ### Why this blocks wrapper work
 
@@ -45,17 +45,17 @@ Choose one of these:
 
 3. Transitional dual-read is temporarily allowed.
 
-## Conflict 2: GPU executable intervention stage kind is inconsistent
+## Conflict 2: VK executable intervention stage kind is inconsistent
 
 ### Observed facts
 
-1. Current runtime GPU bridge treats executable GPU stage as
+1. Current runtime VK bridge treats executable VK stage as
    `PostExecution + afterTick/aftertick`:
-   [src/algorithm_support/algorithm_runtime_bridge.cpp](D:/gptsandbox/src/algorithm_support/algorithm_runtime_bridge.cpp)
+   [src/algorithm_catalog/algorithm_runtime_bridge.cpp](D:/gptsandbox/src/algorithm_catalog/algorithm_runtime_bridge.cpp)
 
-2. Existing package examples still describe GPU shader stages mainly as
+2. Existing package examples still describe VK shader stages mainly as
    `resultRender`, for example:
-   [algorithmLib/algorithmSrc/v2a0_pipeline_square_vertex_demo/v2a0_pipeline_square_vertex_demo_package.json](D:/gptsandbox/algorithmLib/algorithmSrc/v2a0_pipeline_square_vertex_demo/v2a0_pipeline_square_vertex_demo_package.json)
+   [algorithmLib/algorithmSrc/v2a0_pipeline_square_vertex_demo/v2a0_pipeline_square_vertex_demo_package.algoPrj](D:/gptsandbox/algorithmLib/algorithmSrc/v2a0_pipeline_square_vertex_demo/v2a0_pipeline_square_vertex_demo_package.algoPrj)
 
 3. The wrapper design doc currently assumes:
    `stageBegin` is mainly `preTick`
@@ -64,23 +64,23 @@ Choose one of these:
 ### Why this blocks wrapper work
 
 If `stageEnd` is supposed to own afterTick/resultRender, I need to know whether
-runtime GPU execution is anchored to:
+runtime VK execution is anchored to:
 
 1. `afterTick`
 2. `resultRender`
 3. both, with different responsibilities
 
 Without this, `stageEnd` may mount successfully but never execute the expected
-GPU-side stage.
+VK-side stage.
 
 ### Decision needed
 
-Define the canonical executable GPU stage kind for runtime:
+Define the canonical executable VK stage kind for runtime:
 
 1. `afterTick`
 2. `resultRender`
 3. split rule:
-   `afterTick` for runtime compute-like GPU execution
+   `afterTick` for runtime compute-like VK execution
    `resultRender` only for preview/render path
 
 ## Conflict 3: Wrapper-stage package shape is not yet discoverable in repo
@@ -136,7 +136,7 @@ The cleanest route appears to be:
 
 3. Define `stageEnd` as the owner of `afterTick` and `resultRender`.
 
-4. Define runtime GPU executable stage ownership explicitly before wrapper code
+4. Define runtime VK executable stage ownership explicitly before wrapper code
    changes continue.
 
 5. After that, I can continue implementing:

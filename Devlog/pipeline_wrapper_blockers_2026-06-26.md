@@ -19,16 +19,16 @@ Build verification passed with:
 
 - `build_debugtool.bat`
 
-## Blocker 1: Runtime GPU execution is still anchored to intervention stages
+## Blocker 1: Runtime VK execution is still anchored to intervention stages
 
 ### What exists now
 
-Current runtime GPU execution path still discovers an executable GPU stage from
+Current runtime VK execution path still discovers an executable VK stage from
 intervention-stage metadata in:
 
-- [src/algorithm_support/algorithm_runtime_bridge.cpp](D:/gptsandbox/src/algorithm_support/algorithm_runtime_bridge.cpp)
+- [src/algorithm_catalog/algorithm_runtime_bridge.cpp](D:/gptsandbox/src/algorithm_catalog/algorithm_runtime_bridge.cpp)
 
-That means the current code path still effectively treats a GPU executable stage
+That means the current code path still effectively treats a VK executable stage
 as something attached through intervention-stage semantics.
 
 ### What the clarified rule now says
@@ -48,7 +48,7 @@ Per the latest clarification:
 
 ### Why this blocks completion
 
-As long as runtime GPU execution is still discovered through intervention-stage
+As long as runtime VK execution is still discovered through intervention-stage
 specs, the final behavior does not fully match the clarified execution model.
 
 This is larger than wrapper insertion alone.
@@ -58,9 +58,9 @@ It is a runtime execution-model correction.
 
 Please confirm whether I should:
 
-1. keep the current runtime GPU execution path temporarily, and finish wrapper
+1. keep the current runtime VK execution path temporarily, and finish wrapper
    work first
-2. stop wrapper work and first refactor runtime GPU execution so `exec` becomes
+2. stop wrapper work and first refactor runtime VK execution so `exec` becomes
    the true anchor
 
 ## Blocker 2: Circular pipeline semantics with wrapper begin/end are still underdefined
@@ -131,7 +131,7 @@ This is a scheduler-behavior rewrite, not just a mount-time insertion change.
 The cleanest next step is:
 
 1. confirm Blocker 1:
-   whether runtime GPU execution stays temporarily legacy or must be fixed now
+   whether runtime VK execution stays temporarily legacy or must be fixed now
 2. confirm Blocker 2:
    circular wrapper begin/end behavior
 3. confirm Blocker 3:

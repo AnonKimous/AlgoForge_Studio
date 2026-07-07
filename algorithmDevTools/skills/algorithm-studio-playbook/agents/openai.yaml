@@ -1,0 +1,3 @@
+display_name: "Algorithm Studio Playbook"
+short_description: "Operate Algorithm Studio end to end with build and preview"
+default_prompt: "Use $algorithm-studio-playbook to guide an internal agent through Algorithm Studio authoring, build, and render preview."

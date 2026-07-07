@@ -84,7 +84,9 @@ class DebugToolFrontendPanel {
       uint32_t array_index{0u};
       double scalar_value{0.0};
     };
-    debug_tool::AlgorithmExecutionPreference execution_preference{debug_tool::AlgorithmExecutionPreference::Gpu};
+    debug_tool::AlgorithmExecutionPreference execution_preference{debug_tool::AlgorithmExecutionPreference::Vk};
+    debug_tool::AlgorithmRuntimeBuildFlavor runtime_build_flavor{
+      debug_tool::AlgorithmRuntimeBuildFlavor::Debug};
     std::vector<debug_tool::AlgorithmCatalogEntry> algorithm_catalog_entries;
     int selected_algorithm_catalog_index{-1};
     int selected_agent_index{-1};
