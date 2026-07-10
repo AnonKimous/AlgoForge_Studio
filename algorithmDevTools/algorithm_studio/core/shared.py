@@ -41,12 +41,12 @@ def _resolve_codex_command(command: str) -> str:
 
 
 def _resolve_default_template_path() -> Path:
-    candidate = PROJECT_ROOT / "algorithm_studio" / "templates" / "default.algoPrj"
+    candidate = PROJECT_ROOT.parent / "algorithmLib" / "devAlgo" / "default.algoDevDoc"
     if candidate.exists():
         return candidate
-    legacy_candidate = PROJECT_ROOT.parent / "algorithmLib" / "algorithmSrc" / "algorithm_package_example.json"
-    if legacy_candidate.exists():
-        return legacy_candidate
+    fallback_candidate = PROJECT_ROOT.parent / "algorithmLib" / "devAlgo" / "algorithm_package_example.json"
+    if fallback_candidate.exists():
+        return fallback_candidate
     return candidate
 
 
@@ -86,10 +86,10 @@ COLORS = {
     "accent_2": "#f59e0b",
     "good": "#34d399",
     "bad": "#f87171",
-    "descriptor": "#60a5fa",
-    "resource": "#ef4444",
+    "descriptor": "#f4c542",
+    "resource": "#c0c0c0",
     "container": "#1d4ed8",
-    "container_array": "#7c3aed",
+    "container_array": "#2563eb",
     "stage": "#0f766e",
     "agent": "#b45309",
     "edge": "#9aa4b2",

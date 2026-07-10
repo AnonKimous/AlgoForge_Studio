@@ -10,7 +10,7 @@ set "PATH="
 set "Path=%ORIG_PATH%"
 
 pushd "%ROOT%"
-"%CMAKE%" -S "%ROOT%" -B "%ROOT%\build" --fresh
+"%CMAKE%" -S "%ROOT%" -B "%ROOT%\build" --fresh -G "Visual Studio 17 2022" -A x64
 if errorlevel 1 (
   set "EXITCODE=%ERRORLEVEL%"
   popd

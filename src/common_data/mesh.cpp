@@ -45,6 +45,7 @@ Mesh BuildDefaultTriangleMesh() {
   mesh.positions.push_back(Midpoint(base[1], base[2]));
   mesh.positions.push_back(Midpoint(base[2], base[0]));
   mesh.normals.assign(mesh.positions.size(), Vec3{0.0f, 0.0f, 1.0f});
+  mesh.uvs.assign(mesh.positions.size(), Vec2{0.0f, 0.0f});
   mesh.triangles = {
     {0, 3, 5},
     {3, 1, 4},

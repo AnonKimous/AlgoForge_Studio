@@ -331,8 +331,8 @@ class MockAgentClient:
                 "Use kind=container for that case.",
                 "Use kind=variable only when the user explicitly asks for a variable/v node such as v1 or 变量节点.",
                 "Use kind=array only when the user explicitly asks for an array/a node such as a1 or 数组节点.",
-                "Keep meshNode minimal and only represent [mesh].",
-                "Reuse singleton tool-like nodes instead of duplicating them when possible: container, decomposer, reflector, stage, meshNode, fun.",
+                "Keep resNode minimal and only represent [mesh] or [obj].",
+                "Reuse singleton tool-like nodes instead of duplicating them when possible: container, decomposer, reflector, stage, resNode, fun.",
                 "For script-writing tasks around fun, prefer using the fun node and its linked functiontext node instead of rewriting the whole document.",
                 "To call a tool, output a fenced code block labeled algorithm-studio-tool with a JSON object.",
                 "Examples:",
@@ -416,7 +416,7 @@ class MockAgentClient:
             prompt_sections.append(
                 "\n".join(
                     [
-                        "Current algoPrj:",
+                        "Current algoDevDoc:",
                         manifest_text,
                     ]
                 )
@@ -478,7 +478,7 @@ class MockAgentClient:
             prompt_blocks.append(
                 "\n".join(
                     [
-                        "Current algoPrj:",
+                        "Current algoDevDoc:",
                         manifest_text,
                     ]
                 )

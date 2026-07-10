@@ -1,0 +1,42 @@
+{
+  "algorithm_name": "new_algorithm",
+  "package_name": "new_algorithm",
+  "cpu_available": true,
+  "gpu_available": true,
+  "build_finished": false,
+  "doc": {
+    "symbol": "draft",
+    "build_finished": false
+  },
+  "container": {
+    "variable": {},
+    "variableArray": {}
+  },
+  "containerElement": {},
+  "decomposer": {
+    "res": {},
+    "description": []
+  },
+  "reflector": {
+    "name": "new_algorithm_reflector",
+    "functionName": "direct",
+    "items": []
+  },
+  "res": {
+    "items": []
+  },
+  "function": {
+    "items": []
+  },
+  "functionText": {
+    "items": []
+  },
+  "intervention": {
+    "stages": {}
+  },
+  "ui": {
+    "nodes": [],
+    "connections": []
+  },
+  "notes": ""
+}

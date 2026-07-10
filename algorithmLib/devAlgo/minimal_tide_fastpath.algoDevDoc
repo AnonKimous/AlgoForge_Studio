@@ -1,0 +1,96 @@
+{
+  "algorithm_name": "v2a0minimal_tide_fastpath",
+  "package_name": "v2a0minimal_tide_fastpath",
+  "cpu_available": true,
+  "gpu_available": true,
+  "container": {
+    "variable": {
+      "v1": {
+        "nodeName": "",
+        "originName": "v1",
+        "sceneScope": "container_overview",
+        "count": 1,
+        "stride": 4,
+        "value": "",
+        "values": [],
+        "structure": [],
+        "layoutFields": [],
+        "view_offset": 0,
+        "x": 120.0,
+        "y": 120.0,
+        "width": 360.0,
+        "height": 200.0,
+        "expand": true,
+        "reuseChainId": "",
+        "reuseChainIndex": 0
+      },
+      "v2": {
+        "nodeName": "",
+        "originName": "v2",
+        "sceneScope": "container_overview",
+        "count": 1,
+        "stride": 4,
+        "value": "",
+        "values": [],
+        "structure": [],
+        "layoutFields": [],
+        "view_offset": 0,
+        "x": 560.0,
+        "y": 120.0,
+        "width": 360.0,
+        "height": 200.0,
+        "expand": true,
+        "reuseChainId": "",
+        "reuseChainIndex": 0
+      }
+    },
+    "variableArray": {}
+  },
+  "containerElement": {
+    "container": {
+      "variables": [
+        "v1",
+        "v2"
+      ],
+      "arrays": [],
+      "groups": [],
+      "sceneScope": "container_overview",
+      "x": 96.0,
+      "y": 72.0,
+      "width": 642.0,
+      "height": 268.0,
+      "expand": true
+    },
+    "resourceRoot": {
+      "variables": [],
+      "arrays": [],
+      "groups": [],
+      "sceneScope": "decomposer_overview",
+      "x": 120.0,
+      "y": 80.0,
+      "width": 420.0,
+      "height": 260.0,
+      "expand": true
+    }
+  },
+  "decomposer": {
+    "res": {},
+    "description": []
+  },
+  "reflector": {
+    "name": "v2a0minimal_tide_fastpath_reflector",
+    "functionName": "direct",
+    "items": []
+  },
+  "res": {
+    "items": []
+  },
+  "intervention": {
+    "stages": {}
+  },
+  "build_finished": true,
+  "doc": {
+    "symbol": "build",
+    "build_finished": true
+  }
+}

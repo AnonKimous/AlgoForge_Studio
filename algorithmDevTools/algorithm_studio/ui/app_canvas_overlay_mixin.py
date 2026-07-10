@@ -281,6 +281,12 @@ class AlgorithmStudioCanvasOverlayMixin:
                 raise AssertionError(f"Missing function text {node_name}")
             self._open_function_text_editor(item)
             return
+        if kind == "resnode":
+            item = self._find_res_node(node_name)
+            if item is None:
+                raise AssertionError(f"Missing resnode {node_name}")
+            self._open_res_node_editor(item)
+            return
         self._open_canvas_detail_panel(kind, node_name)
 
     def _prompt_insert_container_before(self, target_name: str) -> None:

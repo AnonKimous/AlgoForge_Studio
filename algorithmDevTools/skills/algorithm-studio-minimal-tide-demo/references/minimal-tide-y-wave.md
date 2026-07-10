@@ -131,13 +131,13 @@ Do not insert extra arrangement, cleanup, merge, reflector, or decomposer steps.
 After the build step, summarize the output using these defaults:
 
 - checklist: `references/artifacts/minimal_tide_fastpath_checklist.md`
-- package algoPrj: `references/artifacts/minimal_tide_fastpath_package.algoPrj`
+- algoDevDoc: `references/artifacts/minimal_tide_fastpath_algoDevDoc.algoDevDoc`
 - plugin cpp: `references/artifacts/minimal_tide_fastpath_plugin.cpp`
 - function scripts: `references/artifacts/minimal_tide_fastpath_function_scripts.json`
 - shaders:
   - `references/artifacts/minimal_tide_fastpath_result_render.vert`
   - `references/artifacts/minimal_tide_fastpath_result_render.frag`
-- `.algo` package note: `references/artifacts/minimal_tide_fastpath_algo_package.md`
+- `.algo` note: `references/artifacts/minimal_tide_fastpath_algoDevDoc.md`
 
 ## Real Project Locations To Mention
 

@@ -16,7 +16,7 @@
 #include <unordered_set>
 
 // Keep the existing implementation readable while routing all backend-facing
-// hooker calls through the single unified fa莽ade.
+// hooker calls through the single unified facade.
 namespace hook = debug_tool_backend::hooker;
 using namespace hook;
 namespace agent_hooker = hook;
@@ -36,31 +36,6 @@ namespace {
 #else
 #define DEBUG_TOOL_ASSERT(condition, message) ((void)0)
 #endif
-
-std::string _AlgorithmCatalogPath() {
-  return hook::AlgorithmCatalogPath();
-}
-
-std::string _ReadTextFile(const std::string& path) {
-  std::ifstream file(path, std::ios::binary);
-  if (!file) {
-    return {};
-  }
-  std::ostringstream stream;
-  stream << file.rdbuf();
-  return stream.str();
-}
-
-std::string _GetJsonStringField(const cJSON* object, const char* key) {
-  if (!object || !key) {
-    return {};
-  }
-  const cJSON* item = cJSON_GetObjectItemCaseSensitive(object, key);
-  if (!item || !cJSON_IsString(item) || !item->valuestring) {
-    return {};
-  }
-  return item->valuestring;
-}
 
 std::string _HotReloadBuildCommand(const std::string& algorithm_name) {
   return hook::HotReloadBuildCommand(algorithm_name);
@@ -319,6 +294,17 @@ debug_tool::AlgorithmRuntimeSummary _ToDebugToolAlgorithmRuntimeSummary(
   }
 
   summary.algorithm_name = object->algorithm_profile.algorithm_name;
+  summary.runtime_package_root_path = object->runtime_package_root_path;
+  if (summary.runtime_package_root_path.empty()) {
+    ::algorithm::AlgorithmPackageLocation package_location{};
+    std::string location_error_message;
+    if (algorithm_manager_hooker::TryResolveAlgorithmPackageLocation(
+          summary.algorithm_name,
+          &package_location,
+          &location_error_message)) {
+      summary.runtime_package_root_path = package_location.runtime_package_root.generic_string();
+    }
+  }
   summary.assembly_state =
     _ToDebugToolAlgorithmAssemblyState(managed_agent.algorithm_assembly_state(algorithm_index));
   summary.pipeline_name = object->pipeline_name;
@@ -858,53 +844,43 @@ bool _IsPipelineAlgorithmByName(
     return false;
   }
 
-  const std::filesystem::path library_root = package_location.from_algo_file
-    ? algorithm_manager_hooker::ResolveAlgorithmLibraryRuntimeRoot()
-    : algorithm_manager_hooker::ResolveAlgorithmLibrarySourceRoot();
-  const std::filesystem::path package_root = package_location.from_algo_file
-    ? package_location.package_file_path.parent_path()
-    : package_location.manifest_path.parent_path();
-  if (library_root.empty() || package_root.empty()) {
+  const std::filesystem::path package_root = package_location.runtime_package_root;
+  if (package_root.empty()) {
     if (out_error_message) {
-      *out_error_message = "Failed to resolve algorithm package root.";
+      *out_error_message = "Failed to resolve algorithm runtime package root.";
     }
     return false;
   }
 
-  const std::filesystem::path relative_root = package_root.lexically_relative(library_root);
-  if (relative_root.empty() || relative_root == "." || relative_root.generic_string().rfind("..", 0u) == 0u) {
-    if (out_error_message) {
-      *out_error_message = "Algorithm package is not under the norm or pipeline folder: " +
-        package_root.generic_string();
+  std::filesystem::path cursor = package_root;
+  while (!cursor.empty()) {
+    const std::string folder_name = cursor.filename().string();
+    if (folder_name == "pipeline") {
+      *out_is_pipeline = true;
+      if (out_error_message) {
+        out_error_message->clear();
+      }
+      return true;
     }
-    return false;
-  }
-
-  const auto category_it = relative_root.begin();
-  if (category_it == relative_root.end()) {
-    if (out_error_message) {
-      *out_error_message = "Algorithm package is not under the norm or pipeline folder: " +
-        package_root.generic_string();
+    if (folder_name == "norm") {
+      *out_is_pipeline = false;
+      if (out_error_message) {
+        out_error_message->clear();
+      }
+      return true;
     }
-    return false;
-  }
-
-  const std::string category_name = category_it->string();
-  if (category_name == "pipeline") {
-    *out_is_pipeline = true;
-  } else if (category_name == "norm") {
-    *out_is_pipeline = false;
-  } else {
-    if (out_error_message) {
-      *out_error_message = "Unknown algorithm category folder: " + package_root.generic_string();
+    const std::filesystem::path parent = cursor.parent_path();
+    if (parent == cursor) {
+      break;
     }
-    return false;
+    cursor = parent;
   }
 
   if (out_error_message) {
-    out_error_message->clear();
+    *out_error_message = "Algorithm package is not under the norm or pipeline folder: " +
+      package_root.generic_string();
   }
-  return true;
+  return false;
 }
 
 }  // namespace
@@ -1439,68 +1415,56 @@ bool DebugToolBackendRuntime::LoadAlgorithmCatalog(
   std::string* out_error_message) const {
   if (!out_entries) {
     if (out_error_message) {
-      *out_error_message = "Algorithm catalog output pointer is null.";
+      *out_error_message = "Runtime algorithm entries output pointer is null.";
     }
     return false;
   }
 
   out_entries->clear();
+  const std::filesystem::path runtime_root = algorithm_manager_hooker::ResolveAlgorithmLibraryRuntimeRoot();
+  const std::filesystem::path category_roots[] = {
+    runtime_root / "norm",
+    runtime_root / "pipeline",
+  };
 
-  const std::string catalog_path = _AlgorithmCatalogPath();
-  const std::string json_text = _ReadTextFile(catalog_path);
-  if (json_text.empty()) {
-    if (out_error_message) {
-      *out_error_message = "Failed to read algorithm catalog: " + catalog_path;
-    }
-    return false;
-  }
-
-  cJSON* root = cJSON_Parse(json_text.c_str());
-  if (!root) {
-    if (out_error_message) {
-      *out_error_message = "Failed to parse algorithm catalog: " + catalog_path;
-    }
-    return false;
-  }
-
-  const cJSON* algorithms = cJSON_GetObjectItemCaseSensitive(root, "algorithms");
-  if (!algorithms || !cJSON_IsArray(algorithms)) {
-    cJSON_Delete(root);
-    if (out_error_message) {
-      *out_error_message = "Algorithm catalog is missing the algorithms array.";
-    }
-    return false;
-  }
-
-  const int count = cJSON_GetArraySize(algorithms);
-  out_entries->reserve(count > 0 ? static_cast<size_t>(count) : 0u);
-  for (int i = 0; i < count; ++i) {
-    const cJSON* item = cJSON_GetArrayItem(algorithms, i);
-    if (!item || !cJSON_IsObject(item)) {
+  std::error_code ec;
+  for (const std::filesystem::path& category_root : category_roots) {
+    if (category_root.empty() || !std::filesystem::exists(category_root, ec) || !std::filesystem::is_directory(category_root, ec)) {
       continue;
     }
 
-    debug_tool::AlgorithmCatalogEntry entry{};
-    entry.algorithm_name = _GetJsonStringField(item, "name");
-    entry.display_name = _GetJsonStringField(item, "display_name");
-    entry.folder_name = _GetJsonStringField(item, "folder");
-    entry.container_manifest_name = _GetJsonStringField(item, "container_manifest");
-    entry.decomposer_name = _GetJsonStringField(item, "decomposer");
-    entry.reflector_name = _GetJsonStringField(item, "reflector");
-    entry.intervention_name = _GetJsonStringField(item, "intervention");
+    for (const std::filesystem::directory_entry& category_entry : std::filesystem::directory_iterator(category_root, ec)) {
+      if (ec) {
+        break;
+      }
+      if (!category_entry.is_directory(ec)) {
+        continue;
+      }
 
-    if (entry.display_name.empty()) {
-      entry.display_name = entry.algorithm_name;
-    }
-    if (!entry.algorithm_name.empty()) {
+      const std::filesystem::path algorithm_folder_path = category_entry.path();
+      const std::string algorithm_name = algorithm_folder_path.filename().string();
+      if (algorithm_name.empty()) {
+        continue;
+      }
+
+      debug_tool::AlgorithmCatalogEntry entry{};
+      entry.algorithm_name = algorithm_name;
+      entry.display_name = algorithm_name;
+      entry.folder_name = algorithm_folder_path.lexically_relative(runtime_root).generic_string();
       out_entries->push_back(std::move(entry));
     }
   }
 
-  cJSON_Delete(root);
+  std::sort(out_entries->begin(), out_entries->end(), [](const debug_tool::AlgorithmCatalogEntry& lhs, const debug_tool::AlgorithmCatalogEntry& rhs) {
+    if (lhs.algorithm_name == rhs.algorithm_name) {
+      return lhs.folder_name < rhs.folder_name;
+    }
+    return lhs.algorithm_name < rhs.algorithm_name;
+  });
+
   if (out_entries->empty()) {
     if (out_error_message) {
-      *out_error_message = "Algorithm catalog does not contain any entries.";
+      *out_error_message = "No runtime algorithm folders were found under algorithmruntimeLib/norm or algorithmruntimeLib/pipeline.";
     }
     return false;
   }
@@ -1749,7 +1713,7 @@ bool DebugToolBackendRuntime::BuildRenderPreviewRequest(
   }
   if (!result_phase) {
     if (out_error_message) {
-      *out_error_message = "Algorithm intervention did not expose a result-render phase.";
+      *out_error_message = "Scheduler did not submit any valid renderresult phase.";
     }
     return false;
   }
@@ -1769,22 +1733,39 @@ bool DebugToolBackendRuntime::BuildRenderPreviewRequest(
     return false;
   }
 
-  const agentmanager::agent::AlgorithmReflectionSnapshot* reflection_snapshot = nullptr;
-  algorithmManager::JobsPipelineRuntimeState pipeline_runtime_state{};
-  if (preview_object->pipeline_stage &&
-      preview_object->pipeline_stage_index == 0u &&
-      !preview_object->pipeline_name.empty() &&
-      algorithm_manager_hooker::TryGetMountedPipelineRuntime(
-        preview_object->pipeline_name,
-        agent_hooker::AgentName(*managed_agent),
-        &pipeline_runtime_state) &&
-      pipeline_runtime_state.exit_reflection_snapshot_valid) {
-    reflection_snapshot = &pipeline_runtime_state.exit_reflection_snapshot;
-  } else {
-    const agentmanager::agent::AgentAlgorithmRuntimeState* preview_runtime_state =
-      agent_hooker::AlgorithmRuntimeStateAt(*managed_agent, preview_source_index);
-    if (preview_runtime_state && preview_runtime_state->reflection_snapshot.valid) {
-      reflection_snapshot = &preview_runtime_state->reflection_snapshot;
+  const agentmanager::agent::AgentAlgorithmRuntimeState* preview_runtime_state =
+    agent_hooker::AlgorithmRuntimeStateAt(*managed_agent, preview_source_index);
+  const algorithm::AlgorithmContainerSet* preview_data_container_set = container_set;
+  if (preview_object->pipeline_stage) {
+    if (preview_runtime_state && preview_runtime_state->bridge_debug_set.valid) {
+      if (preview_runtime_state->bridge_debug_set.has_stage_output_container_set) {
+        preview_data_container_set = &preview_runtime_state->bridge_debug_set.stage_output_container_set;
+      } else if (preview_runtime_state->bridge_debug_set.has_next_stage_input_container_set) {
+        preview_data_container_set = &preview_runtime_state->bridge_debug_set.next_stage_input_container_set;
+      } else if (preview_runtime_state->bridge_debug_set.has_stage_input_container_set) {
+        preview_data_container_set = &preview_runtime_state->bridge_debug_set.stage_input_container_set;
+      }
+    } else if (preview_source_index > 0u) {
+      const size_t previous_source_index = preview_source_index - 1u;
+      const agentmanager::agent::AlgorithmObject* previous_object =
+        agent_hooker::AlgorithmObjectAt(*managed_agent, previous_source_index);
+      const agentmanager::agent::AgentAlgorithmRuntimeState* previous_runtime_state =
+        agent_hooker::AlgorithmRuntimeStateAt(*managed_agent, previous_source_index);
+      if (previous_object &&
+          previous_object->pipeline_stage &&
+          previous_object->pipeline_name == preview_object->pipeline_name &&
+          previous_object->pipeline_stage_index + 1u == preview_object->pipeline_stage_index &&
+          previous_runtime_state &&
+          previous_runtime_state->bridge_debug_set.valid &&
+          previous_runtime_state->bridge_debug_set.has_stage_output_container_set) {
+        preview_data_container_set = &previous_runtime_state->bridge_debug_set.stage_output_container_set;
+      }
+    }
+  } else if (preview_runtime_state) {
+    if (preview_runtime_state->bridge_debug_set.has_stage_input_container_set) {
+      preview_data_container_set = &preview_runtime_state->bridge_debug_set.stage_input_container_set;
+    } else if (preview_runtime_state->bridge_debug_set.has_stage_output_container_set) {
+      preview_data_container_set = &preview_runtime_state->bridge_debug_set.stage_output_container_set;
     }
   }
 
@@ -1811,8 +1792,6 @@ bool DebugToolBackendRuntime::BuildRenderPreviewRequest(
   }
   out_request->storage_buffers.reserve(result_phase->used_algorithm_containers.size());
 
-  uint32_t instance_count = 0u;
-  bool have_instance_count = false;
   for (const agentmanager::agent::AlgorithmPhaseContainerBinding& binding : result_phase->used_algorithm_containers) {
     const algorithm::AlgorithmContainer* container = algorithm::FindAlgorithmContainer(*container_set, binding.container_name);
     if (!container) {
@@ -1827,13 +1806,7 @@ bool DebugToolBackendRuntime::BuildRenderPreviewRequest(
       continue;
     }
     const bool has_container_bytes = !container->bytes.empty();
-    const agentmanager::agent::AlgorithmReflectionValue* reflected_value = nullptr;
-    if (!has_container_bytes && reflection_snapshot) {
-      reflected_value = _FindReflectionValue(*reflection_snapshot, binding.container_name);
-    }
-
-    const bool has_reflected_bytes = reflected_value && !reflected_value->bytes.empty();
-    if (container->element_stride == 0u || (!has_container_bytes && !has_reflected_bytes)) {
+    if (container->element_stride == 0u || !has_container_bytes) {
       DEBUG_TOOL_ASSERT(false, "Preview container has no drawable data.");
       if (binding.required) {
         if (out_error_message) {
@@ -1848,51 +1821,51 @@ bool DebugToolBackendRuntime::BuildRenderPreviewRequest(
     RenderPreviewBuffer preview_buffer{};
     preview_buffer.binding_name = binding.container_name;
     preview_buffer.element_stride = container->element_stride;
-    if (has_container_bytes) {
-      preview_buffer.bytes.assign(container->bytes.begin(), container->bytes.end());
-    } else if (has_reflected_bytes && reflected_value->storage_kind == container->storage_kind) {
-      preview_buffer.bytes = reflected_value->bytes;
+    if (preview_data_container_set) {
+      const algorithm::AlgorithmContainer* preview_container =
+        algorithm::FindAlgorithmContainer(*preview_data_container_set, binding.container_name);
+      if (preview_container && !preview_container->bytes.empty()) {
+        preview_buffer.bytes.assign(preview_container->bytes.begin(), preview_container->bytes.end());
+      } else {
+        preview_buffer.bytes.assign(container->bytes.begin(), container->bytes.end());
+      }
     } else {
       preview_buffer.bytes.assign(container->bytes.begin(), container->bytes.end());
     }
     out_request->storage_buffers.push_back(std::move(preview_buffer));
-
-    const uint32_t buffer_instances = static_cast<uint32_t>(
-      out_request->storage_buffers.back().bytes.size() / out_request->storage_buffers.back().element_stride);
-    if (!have_instance_count) {
-      instance_count = buffer_instances;
-      have_instance_count = true;
-    } else {
-      instance_count = std::min(instance_count, buffer_instances);
-    }
   }
 
   if (out_request->storage_buffers.empty()) {
-    DEBUG_TOOL_ASSERT(false, "Result-render phase did not expose any usable array container.");
+    DEBUG_TOOL_ASSERT(false, "Scheduler did not submit any valid renderresult phase.");
     if (out_error_message) {
-      *out_error_message = "Result-render phase does not expose any usable array container.";
+      *out_error_message = "Scheduler did not submit any valid renderresult phase.";
     }
     out_request->Clear();
     return false;
   }
 
-  out_request->instance_count = instance_count;
-  out_request->valid = out_request->instance_count > 0u;
-  if (!out_request->valid) {
-    DEBUG_TOOL_ASSERT(false, "Preview request has no drawable instances.");
+  const algorithm::AlgorithmContainer* instance_count_container =
+    algorithm::FindAlgorithmContainer(*preview_data_container_set, "v4");
+  if (!instance_count_container || instance_count_container->bytes.size() < sizeof(float)) {
+    DEBUG_TOOL_ASSERT(false, "Preview instance count container is missing.");
     if (out_error_message) {
-      *out_error_message = "Preview request has no drawable instances.";
+      *out_error_message = "Preview instance count container is missing: v4";
     }
+    out_request->Clear();
+    return false;
   }
-  if (out_request->valid) {
-    DEBUG_TOOL_ASSERT(
-      !out_request->storage_buffers.empty(),
-      "Preview request must contain at least one storage buffer.");
-    DEBUG_TOOL_ASSERT(
-      !out_request->stage_name.empty(),
-      "Preview request must contain a phase name.");
-  }
-  return out_request->valid;
+  float instance_count_value = 0.0f;
+  std::memcpy(&instance_count_value, instance_count_container->bytes.data(), sizeof(instance_count_value));
+  out_request->instance_count = static_cast<uint32_t>(instance_count_value);
+
+  out_request->valid = true;
+  DEBUG_TOOL_ASSERT(
+    !out_request->storage_buffers.empty(),
+    "Preview request must contain at least one storage buffer.");
+  DEBUG_TOOL_ASSERT(
+    !out_request->stage_name.empty(),
+    "Preview request must contain a phase name.");
+  return true;
 }
 
 }  // namespace debug_tool_backend

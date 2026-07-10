@@ -63,6 +63,7 @@ class AgentManagementHooker {
     agentmanager::agent::AlgorithmPipelineSyncMode sync_mode = agentmanager::agent::AlgorithmPipelineSyncMode::Forced,
     bool load_reflector = true) {
     algorithm::library_paths::SetAlgorithmLibraryRuntimeBuildFlavor(algorithm_library_runtime_build_flavor_);
+    load_reflector = false;
     return agent_manager_.AttachPipelineAlgorithmToAgent(
       agent_index,
       pipeline_name,
@@ -81,9 +82,7 @@ class AgentManagementHooker {
     const std::vector<agentmanager::agent::AlgorithmResourceBinding>& resource_bindings,
     const std::vector<agentmanager::agent::AlgorithmDescriptorValue>& descriptor_values,
     std::string* out_error_message = nullptr) {
-    const bool load_reflector =
-      algorithm_library_runtime_build_flavor_ !=
-      algorithm::library_paths::AlgorithmLibraryRuntimeBuildFlavor::ReleaseWithDebugInfo;
+    const bool load_reflector = false;
     return agent_manager_.EnqueuePipelineStage0Submission(
       agent_index,
       pipeline_name,

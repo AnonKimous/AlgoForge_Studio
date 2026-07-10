@@ -2,13 +2,16 @@
 #include "algorithm_catalog/algorithm_abi.h"
 
 #include "algorithm_catalog/algorithm_container_manifest.h"
+#include "algorithm_catalog/algorithm_library_paths.h"
 #include "algorithm_catalog/algorithm_json_utils.h"
 #include "algorithm_catalog/algorithm_package_location.h"
 #include "algorithm_catalog/algorithm_package_paths.h"
+#include "capabilities/sidecar/mesh_io.h"
 
 #include "cJSON.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cctype>
 #include <cmath>
 #include <cstdint>
@@ -20,6 +23,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 
 namespace algorithmManager { namespace catalog {
@@ -110,6 +114,11 @@ struct PackageDecomposerMeshBinding {
   std::string container_name;
 };
 
+struct PackageDecomposerMeshFieldBinding {
+  std::string field_name;
+  std::string container_name;
+};
+
 struct PackageDecomposerContainerInfo {
   uint32_t scalar_bits{32u};
   algorithm::AlgorithmContainerStorageKind storage_kind{algorithm::AlgorithmContainerStorageKind::TemporaryRegister};
@@ -149,7 +158,9 @@ struct PackageDecomposerSchema {
   std::unordered_map<std::string, PackageDecomposerContainerInfo> container_infos;
   std::unordered_map<std::string, std::vector<std::string>> container_aliases_by_name;
   std::unordered_map<std::string, PackageDecomposerContainerViewInfo> container_view_aliases_by_name;
+  std::string semantic_resource_kind;
   std::vector<PackageDecomposerMeshBinding> mesh_bindings;
+  std::vector<PackageDecomposerMeshFieldBinding> mesh_field_bindings;
   std::vector<PackageDecomposerDescriptionEntry> description_entries;
   bool valid{false};
   std::string error_message;
@@ -635,8 +646,8 @@ bool _ParsePackedSplitPrecisions(
   }
   out_segment_bits->clear();
 
-  const cJSON* pricise_item = cJSON_GetObjectItemCaseSensitive(binding_item, "pricise");
-  if (!pricise_item) {
+  const cJSON* precise_item = cJSON_GetObjectItemCaseSensitive(binding_item, "precise");
+  if (!precise_item) {
     return true;
   }
   if (target_count == 0u) {
@@ -653,10 +664,10 @@ bool _ParsePackedSplitPrecisions(
     return true;
   };
 
-  if (cJSON_IsArray(pricise_item)) {
-    const int item_count = cJSON_GetArraySize(pricise_item);
+  if (cJSON_IsArray(precise_item)) {
+    const int item_count = cJSON_GetArraySize(precise_item);
     for (int i = 0; i < item_count; ++i) {
-      const cJSON* item = cJSON_GetArrayItem(pricise_item, i);
+      const cJSON* item = cJSON_GetArrayItem(precise_item, i);
       uint32_t bits = 0u;
       std::string replacement{};
       if (item && cJSON_IsNumber(item) &&
@@ -666,7 +677,7 @@ bool _ParsePackedSplitPrecisions(
           item->valuedouble <= static_cast<double>(UINT32_MAX)) {
         bits = static_cast<uint32_t>(item->valuedouble);
       } else if (item && cJSON_IsString(item) && item->valuestring &&
-                 (json_utils::TryEvaluatePriciseArrayToken(
+                 (json_utils::TryEvaluatePreciseArrayToken(
                     _TrimText(item->valuestring),
                     schema.default_scalar_bits,
                     &replacement)
@@ -680,8 +691,8 @@ bool _ParsePackedSplitPrecisions(
         return false;
       }
     }
-  } else if (cJSON_IsString(pricise_item) && pricise_item->valuestring) {
-    const std::string text = _TrimText(pricise_item->valuestring);
+  } else if (cJSON_IsString(precise_item) && precise_item->valuestring) {
+    const std::string text = _TrimText(precise_item->valuestring);
     const std::string::size_type slash = text.rfind('/');
     if (slash != std::string::npos) {
       const std::string prefix = _TrimText(text.substr(0, slash));
@@ -692,7 +703,7 @@ bool _ParsePackedSplitPrecisions(
         normalized_prefix.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
       }
       if (!prefix.empty() &&
-          normalized_prefix != "pricise" &&
+          normalized_prefix != "precise" &&
           normalized_prefix != "precision") {
         _SetErrorMessage(out_error_message, "Packed descriptor split shorthand is invalid: " + text + " (" + package_path + ")");
         return false;
@@ -1202,6 +1213,12 @@ bool _ParsePackageDecomposerResourceGroup(
   return true;
 }
 
+bool _ParsePackageDecomposerMeshGroup(
+  const cJSON* group_item,
+  const std::string& package_path,
+  PackageDecomposerSchema* out_schema,
+  std::string* out_error_message);
+
 PackageDecomposerSchema _LoadPackageDecomposerSchema(
   const algorithm::AlgorithmPackageLocation& package_location) {
   PackageDecomposerSchema schema{};
@@ -1258,14 +1275,29 @@ PackageDecomposerSchema _LoadPackageDecomposerSchema(
       cJSON_Delete(root);
       return schema;
     }
-    if (!_ParsePackageDecomposerResourceGroup(
-          kind_item,
-          kind_item->string,
-          package_json_path.generic_string(),
-          &schema,
-          &schema.error_message)) {
-      cJSON_Delete(root);
-      return schema;
+    const std::string kind_name = kind_item->string;
+    if (kind_name == "mesh" || kind_name == "obj" || kind_name == "gltf" || kind_name == "glft") {
+      if (schema.semantic_resource_kind.empty()) {
+        schema.semantic_resource_kind = kind_name;
+      }
+      if (!_ParsePackageDecomposerMeshGroup(
+            kind_item,
+            package_json_path.generic_string(),
+            &schema,
+            &schema.error_message)) {
+        cJSON_Delete(root);
+        return schema;
+      }
+    } else {
+      if (!_ParsePackageDecomposerResourceGroup(
+            kind_item,
+            kind_item->string,
+            package_json_path.generic_string(),
+            &schema,
+            &schema.error_message)) {
+        cJSON_Delete(root);
+        return schema;
+      }
     }
   }
 
@@ -1287,6 +1319,13 @@ PackageDecomposerSchema _LoadPackageDecomposerSchema(
       }
       schema.description_entries.push_back(std::move(entry));
     }
+  }
+
+  assert((schema.mesh_field_bindings.empty() || !schema.semantic_resource_kind.empty()) &&
+    "Package decomposer mesh field bindings require a semantic resource kind.");
+  for (const PackageDecomposerMeshFieldBinding& binding : schema.mesh_field_bindings) {
+    assert(!binding.field_name.empty());
+    assert(!binding.container_name.empty());
   }
 
   cJSON_Delete(root);
@@ -1320,6 +1359,84 @@ bool _WriteFloatValueAtIndex(
   }
   std::memcpy(container->bytes.data() + byte_offset, &value, sizeof(float));
   return true;
+}
+
+template <typename T>
+bool _WriteMeshFieldToContainer(
+  const std::vector<T>& values,
+  algorithm::AlgorithmContainer* container,
+  const std::string& algorithm_name,
+  const std::string& field_name,
+  const std::string& container_name,
+  std::string* out_error_message) {
+  static_assert(std::is_trivially_copyable_v<T>, "Mesh field data must be trivially copyable.");
+  if (!container) {
+    _SetErrorMessage(out_error_message, "Mesh field target container pointer is null.");
+    return false;
+  }
+
+  const size_t byte_size = values.size() * sizeof(T);
+  container->bytes.resize(byte_size);
+  if (byte_size > 0u) {
+    std::memcpy(container->bytes.data(), values.data(), byte_size);
+  }
+  return true;
+}
+
+bool _ParsePackageDecomposerMeshGroup(
+  const cJSON* group_item,
+  const std::string& package_path,
+  PackageDecomposerSchema* out_schema,
+  std::string* out_error_message) {
+  if (!group_item || !cJSON_IsObject(group_item) || !out_schema) {
+    _SetErrorMessage(out_error_message, "Invalid mesh group in package JSON: " + package_path);
+    return false;
+  }
+
+  for (const cJSON* child = group_item->child; child; child = child->next) {
+    if (!child->string || !*child->string || !cJSON_IsString(child) || !child->valuestring) {
+      _SetErrorMessage(out_error_message, "Invalid mesh field binding in package JSON: " + package_path);
+      return false;
+    }
+    out_schema->mesh_field_bindings.push_back(PackageDecomposerMeshFieldBinding{
+      .field_name = child->string,
+      .container_name = child->valuestring,
+    });
+  }
+  return true;
+}
+
+bool _WriteMeshResourceField(
+  const common_data::Mesh& mesh,
+  std::string_view resource_name,
+  algorithm::AlgorithmContainer* container,
+  const std::string& algorithm_name,
+  const std::string& container_name,
+  std::string* out_error_message) {
+  if (resource_name == "vertex" || resource_name == "position" || resource_name == "positions") {
+    return _WriteMeshFieldToContainer(mesh.positions, container, algorithm_name, std::string(resource_name), container_name, out_error_message);
+  }
+  if (resource_name == "normal" || resource_name == "normals") {
+    return _WriteMeshFieldToContainer(mesh.normals, container, algorithm_name, std::string(resource_name), container_name, out_error_message);
+  }
+  if (resource_name == "uv" || resource_name == "uvs" || resource_name == "texcoord" || resource_name == "texcoords") {
+    return _WriteMeshFieldToContainer(mesh.uvs, container, algorithm_name, std::string(resource_name), container_name, out_error_message);
+  }
+  if (resource_name == "edge" || resource_name == "edges") {
+    return _WriteMeshFieldToContainer(mesh.edges, container, algorithm_name, std::string(resource_name), container_name, out_error_message);
+  }
+  if (resource_name == "triangle" || resource_name == "triangles") {
+    return _WriteMeshFieldToContainer(mesh.triangles, container, algorithm_name, std::string(resource_name), container_name, out_error_message);
+  }
+  if (resource_name == "material" || resource_name == "materials" || resource_name == "triangle_material_gpa") {
+    return _WriteMeshFieldToContainer(mesh.triangle_material_gpa, container, algorithm_name, std::string(resource_name), container_name, out_error_message);
+  }
+
+  _SetErrorMessage(
+    out_error_message,
+    "Unknown mesh field '" + std::string(resource_name) + "' for '" + algorithm_name +
+      "' on container '" + container_name + "'.");
+  return false;
 }
 
 const agentmanager::agent::AlgorithmDescriptorValue* _FindDescriptorValue(
@@ -1421,6 +1538,28 @@ const agentmanager::agent::AlgorithmResourceBinding* _FindResourceBinding(
   return nullptr;
 }
 
+const agentmanager::agent::AlgorithmResourceBinding* _FindResourceBindingByKind(
+  const std::vector<agentmanager::agent::AlgorithmResourceBinding>& resource_bindings,
+  std::string_view resource_kind) {
+  for (const agentmanager::agent::AlgorithmResourceBinding& binding : resource_bindings) {
+    if (binding.resource_kind == resource_kind) {
+      return &binding;
+    }
+  }
+  return nullptr;
+}
+
+bool _IsMeshLikeResourceKind(std::string_view resource_kind) {
+  return resource_kind == "mesh" ||
+    resource_kind == "obj" ||
+    resource_kind == "gltf" ||
+    resource_kind == "glft" ||
+    resource_kind == "fbx" ||
+    resource_kind == "dae" ||
+    resource_kind == "ply" ||
+    resource_kind == "stl";
+}
+
 class PackageResourceDecomposer final {
  public:
   explicit PackageResourceDecomposer(const PackageDecomposerSchema& schema)
@@ -1434,11 +1573,19 @@ class PackageResourceDecomposer final {
     }
     *out_requested_resources = {};
     out_requested_resources->algorithm_name = algorithm_profile.algorithm_name;
-    out_requested_resources->required_resources.reserve(schema_.mesh_bindings.size());
+    out_requested_resources->required_resources.reserve(schema_.mesh_bindings.size() + (schema_.mesh_field_bindings.empty() ? 0u : 1u));
     for (const PackageDecomposerMeshBinding& binding : schema_.mesh_bindings) {
       out_requested_resources->required_resources.push_back(agentmanager::agent::AlgorithmRequestedResources::RequiredResource{
         .resource_name = binding.resource_name,
         .resource_kind = binding.resource_kind,
+        .required = true,
+      });
+    }
+    if (!schema_.mesh_field_bindings.empty()) {
+      const std::string requested_kind = schema_.semantic_resource_kind.empty() ? "mesh" : schema_.semantic_resource_kind;
+      out_requested_resources->required_resources.push_back(agentmanager::agent::AlgorithmRequestedResources::RequiredResource{
+        .resource_name = requested_kind,
+        .resource_kind = requested_kind,
         .required = true,
       });
     }
@@ -1454,6 +1601,72 @@ class PackageResourceDecomposer final {
     if (!container_set) {
       _SetErrorMessage(out_error_message, "AlgorithmContainerSet output pointer is null.");
       return false;
+    }
+
+    const agentmanager::agent::AlgorithmResourceBinding* mesh_resource_binding = nullptr;
+    if (!schema_.mesh_field_bindings.empty()) {
+      if (!schema_.semantic_resource_kind.empty()) {
+        mesh_resource_binding = _FindResourceBindingByKind(resource_bindings, schema_.semantic_resource_kind);
+        if (!mesh_resource_binding) {
+          mesh_resource_binding = _FindResourceBinding(resource_bindings, schema_.semantic_resource_kind);
+        }
+      }
+      if (!mesh_resource_binding) {
+        for (const agentmanager::agent::AlgorithmResourceBinding& binding : resource_bindings) {
+          if (_IsMeshLikeResourceKind(binding.resource_kind)) {
+            mesh_resource_binding = &binding;
+            break;
+          }
+        }
+      }
+      if (!mesh_resource_binding) {
+        mesh_resource_binding = _FindResourceBindingByKind(resource_bindings, "mesh");
+      }
+      if (!mesh_resource_binding) {
+        mesh_resource_binding = _FindResourceBinding(resource_bindings, "mesh");
+      }
+      if (!mesh_resource_binding) {
+        _SetErrorMessage(
+          out_error_message,
+          "Missing required mesh resource binding for '" + algorithm_profile.algorithm_name + "'.");
+        return false;
+      }
+      if (mesh_resource_binding->source_path.empty()) {
+        _SetErrorMessage(
+          out_error_message,
+          "Required mesh resource has no source path for '" + algorithm_profile.algorithm_name + "'.");
+        return false;
+      }
+
+      const fs::path mesh_source_path(mesh_resource_binding->source_path);
+      const fs::path resolved_mesh_source_path = mesh_source_path.is_absolute()
+        ? mesh_source_path
+        : algorithm::library_paths::ResolveAlgorithmRelativePath(
+            algorithm::library_paths::ResolveProjectRootFromAlgorithmLibraryRoot(
+              algorithm::library_paths::ResolveAlgorithmLibrarySourceRoot()),
+            {},
+            mesh_resource_binding->source_path);
+      const common_data::Mesh mesh = mesh_io::LoadMeshFile(resolved_mesh_source_path.generic_string());
+
+      for (const PackageDecomposerMeshFieldBinding& mesh_field_binding : schema_.mesh_field_bindings) {
+        algorithm::AlgorithmContainer* mesh_container = FindAlgorithmContainer(container_set, mesh_field_binding.container_name);
+        if (!mesh_container) {
+          _SetErrorMessage(
+            out_error_message,
+            "Missing target container '" + mesh_field_binding.container_name + "' for '" +
+              algorithm_profile.algorithm_name + "'.");
+          return false;
+        }
+        if (!_WriteMeshResourceField(
+              mesh,
+              mesh_field_binding.field_name,
+              mesh_container,
+              algorithm_profile.algorithm_name,
+              mesh_field_binding.container_name,
+              out_error_message)) {
+          return false;
+        }
+      }
     }
 
     for (const PackageDecomposerMeshBinding& binding : schema_.mesh_bindings) {
@@ -1474,11 +1687,22 @@ class PackageResourceDecomposer final {
         return false;
       }
 
-      std::ifstream file(resource_binding->source_path, std::ios::binary);
+      const fs::path source_path(resource_binding->source_path);
+      const fs::path resolved_source_path = source_path.is_absolute()
+        ? source_path
+        : algorithm::library_paths::ResolveAlgorithmRelativePath(
+            algorithm::library_paths::ResolveProjectRootFromAlgorithmLibraryRoot(
+              algorithm::library_paths::ResolveAlgorithmLibrarySourceRoot()),
+            {},
+            resource_binding->source_path);
+      std::ifstream file(source_path, std::ios::binary);
+      if (!file && !resolved_source_path.empty() && resolved_source_path != source_path) {
+        file.open(resolved_source_path, std::ios::binary);
+      }
       if (!file) {
         _SetErrorMessage(
           out_error_message,
-          "Required resource file '" + resource_binding->source_path + "' could not be opened for '" +
+          "Required resource file '" + resolved_source_path.generic_string() + "' could not be opened for '" +
             algorithm_profile.algorithm_name + "'.");
         return false;
       }
@@ -1491,6 +1715,21 @@ class PackageResourceDecomposer final {
             algorithm_profile.algorithm_name + "'.");
         return false;
       }
+
+      if (binding.resource_kind == "mesh") {
+        const common_data::Mesh mesh = mesh_io::LoadMeshFile(resolved_source_path.generic_string());
+        if (!_WriteMeshResourceField(
+              mesh,
+              binding.resource_name,
+              container,
+              algorithm_profile.algorithm_name,
+              binding.container_name,
+              out_error_message)) {
+          return false;
+        }
+        continue;
+      }
+
       std::string file_text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
       const size_t copy_size = std::min(container->bytes.size(), file_text.size());
       if (copy_size > 0u) {

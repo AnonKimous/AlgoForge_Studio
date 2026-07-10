@@ -57,6 +57,7 @@ class PreviewRenderer {
     VmaAllocation allocation{VK_NULL_HANDLE};
     VmaAllocationInfo allocation_info{};
     VkDeviceSize size_bytes{0u};
+    std::vector<std::byte> last_uploaded_bytes{};
   };
 
   struct PreviewReadbackResource {
@@ -74,7 +75,6 @@ class PreviewRenderer {
     std::vector<PreviewBufferResource> buffers;
     std::string shader_key;
     uint32_t buffer_binding_count{0u};
-    uint32_t instance_count{0u};
     bool valid{false};
   };
 

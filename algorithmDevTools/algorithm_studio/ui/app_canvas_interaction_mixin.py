@@ -687,6 +687,10 @@ class AlgorithmStudioCanvasInteractionMixin:
         node_name = resolved_node_name
         tags = resolved_tags
         self._select_item_on_canvas(kind, node_name)
+        if kind == "resnode":
+            self._handle_canvas_node_body_double_click(kind, node_name, tags)
+            self.canvas_double_click_suppress_until = time.monotonic() + 0.25
+            return "break"
         if kind == "container":
             container = self._find_container(node_name)
             if container is None:
@@ -927,7 +931,8 @@ class AlgorithmStudioCanvasInteractionMixin:
             menu.add_separator()
             menu.add_command(label="Delete", command=self._delete_selected_reflector)
         elif kind == "resnode":
-            menu.add_command(label="Rename...", command=lambda: self._prompt_rename_canvas_node(kind, node_name))
+            menu.add_command(label="Edit...", command=lambda: self._open_res_node_editor(self._find_res_node(node_name)))
+            menu.add_command(label="Rename alias...", command=lambda: self._prompt_rename_canvas_node(kind, node_name))
             menu.add_command(label="Duplicate", command=lambda: self._duplicate_canvas_node_and_refresh("resnode", node_name))
             menu.add_separator()
             menu.add_command(label="Delete", command=self._delete_selected_res_node)

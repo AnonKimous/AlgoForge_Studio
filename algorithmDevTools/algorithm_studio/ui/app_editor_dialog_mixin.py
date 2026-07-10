@@ -4,10 +4,10 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 try:
-    from ..core.backend import ContainerFieldItem, ContainerItem, FunctionFrameItem, FunctionTextItem
+    from ..core.backend import ContainerFieldItem, ContainerItem, FunctionFrameItem, FunctionTextItem, ResourceNodeItem
     from ..core.shared import COLORS
 except ImportError:
-    from core.backend import ContainerFieldItem, ContainerItem, FunctionFrameItem, FunctionTextItem
+    from core.backend import ContainerFieldItem, ContainerItem, FunctionFrameItem, FunctionTextItem, ResourceNodeItem
     from core.shared import COLORS
 
 
@@ -393,8 +393,11 @@ class AlgorithmStudioEditorDialogMixin:
             )
             return "\n".join(lines)
         if kind == "resnode":
+            self._ensure_res_node_naming_state(node)
             lines.extend(
                 [
+                    f"origin name: {node.origin_name or node.name}",
+                    f"alias name: {node.node_name or '-'}",
                     f"resource kind: {node.resource_kind or '-'}",
                     f"outputs: {', '.join(node.outputs) or '-'}",
                 ]
@@ -471,6 +474,10 @@ class AlgorithmStudioEditorDialogMixin:
         if normalized_kind == "reflector":
             return COLORS["accent_2"]
         if normalized_kind == "resnode":
+            item = self._find_res_node(str(name).strip())
+            source = str(getattr(item, "resource_source", "resource") or "resource").strip().lower() if item is not None else "resource"
+            if source == "descriptor":
+                return COLORS["descriptor"]
             return COLORS["resource"]
         if normalized_kind in {"interventioner", "stage"}:
             return COLORS["stage"]
@@ -1137,3 +1144,57 @@ class AlgorithmStudioEditorDialogMixin:
         save_button.grid(row=0, column=1, sticky="ew", padx=6)
         close_button = ttk.Button(button_row, text="Close", command=dialog.destroy)
         close_button.grid(row=0, column=2, sticky="ew", padx=(6, 0))
+
+    def _open_res_node_editor(self, item: ResourceNodeItem) -> None:
+        self._ensure_res_node_naming_state(item)
+        dialog = tk.Toplevel(self.root)
+        dialog.title(f"resNode {item.name}")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.geometry("720x360")
+        dialog.minsize(640, 300)
+
+        body = ttk.Frame(dialog, padding=12)
+        body.grid(row=0, column=0, sticky="nsew")
+        dialog.columnconfigure(0, weight=1)
+        dialog.rowconfigure(0, weight=1)
+        body.columnconfigure(1, weight=1)
+
+        ttk.Label(body, text="Internal ID").grid(row=0, column=0, sticky="w")
+        ttk.Label(body, text=item.name, foreground=COLORS["accent"]).grid(row=0, column=1, sticky="w", padx=(8, 0))
+
+        ttk.Label(body, text="Origin Name").grid(row=1, column=0, sticky="w", pady=(10, 0))
+        ttk.Label(body, text=item.origin_name or item.name, foreground=COLORS["muted"]).grid(row=1, column=1, sticky="w", padx=(8, 0), pady=(10, 0))
+
+        ttk.Label(body, text="Alias Name").grid(row=2, column=0, sticky="w", pady=(10, 0))
+        alias_entry = ttk.Entry(body)
+        alias_entry.grid(row=2, column=1, sticky="ew", padx=(8, 0), pady=(10, 0))
+        alias_entry.insert(0, item.node_name or "")
+
+        ttk.Label(body, text="Resource Type").grid(row=3, column=0, sticky="w", pady=(10, 0))
+        resource_types = list(dict.fromkeys([str(entry).strip() for entry in item.resource_types if str(entry).strip()] + ["mesh", "obj"]))
+        type_entry = ttk.Combobox(body, values=resource_types, state="normal")
+        type_entry.grid(row=3, column=1, sticky="ew", padx=(8, 0), pady=(10, 0))
+        type_entry.insert(0, item.resource_kind or (resource_types[0] if resource_types else "mesh"))
+
+        ttk.Label(body, text="Resource Source").grid(row=4, column=0, sticky="w", pady=(10, 0))
+        ttk.Label(body, text=item.resource_source or "resource", foreground=COLORS["muted"]).grid(row=4, column=1, sticky="w", padx=(8, 0), pady=(10, 0))
+
+        button_row = ttk.Frame(body)
+        button_row.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(18, 0))
+        button_row.columnconfigure(0, weight=1)
+        button_row.columnconfigure(1, weight=1)
+
+        def save() -> None:
+            item.node_name = alias_entry.get().strip()
+            resource_kind = type_entry.get().strip() or item.resource_kind
+            item.resource_kind = resource_kind
+            item.resource_types = [resource_kind]
+            item.outputs = [resource_kind]
+            self.selected_res_node_name = item.name
+            self.selection_name_var.set(self._selection_name_value_for_node("resnode", item.name))
+            self._refresh_all()
+            dialog.destroy()
+
+        ttk.Button(button_row, text="Save", command=save).grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        ttk.Button(button_row, text="Close", command=dialog.destroy).grid(row=0, column=1, sticky="ew", padx=(6, 0))

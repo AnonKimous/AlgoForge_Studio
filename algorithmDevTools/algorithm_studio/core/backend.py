@@ -109,6 +109,9 @@ class ResourceNodeItem:
     resource_types: list[str] = field(default_factory=lambda: ["mesh"])
     outputs: list[str] = field(default_factory=lambda: ["mesh"])
     resource_kind: str = "mesh"
+    resource_source: str = "resource"
+    origin_name: str = ""
+    node_name: str = ""
     x: float = 0.0
     y: float = 0.0
     scene_positions: dict[str, dict[str, float]] = field(default_factory=dict)
@@ -986,10 +989,15 @@ class ProjectState:
             resource_kind = str(item.resource_kind or (item.resource_types[0] if item.resource_types else "mesh"))
             resource_types = [resource_kind]
             outputs = [resource_kind]
+            node_name = str(getattr(item, "node_name", "") or "").strip()
             res_items.append(
                 {
                     "name": item.name,
+                    "nodeName": node_name,
+                    "aliasName": node_name,
+                    "originName": str(getattr(item, "origin_name", "") or item.name),
                     "resource_kind": resource_kind,
+                    "resource_source": item.resource_source or "resource",
                     "resourceTypes": resource_types,
                     "outputs": outputs,
                     "x": item.x,
@@ -1056,12 +1064,11 @@ class ProjectState:
                 },
             }
 
-        return {
+        payload = {
             "algorithm_name": self.algorithm_name,
             "package_name": self.package_name,
             "cpu_available": self.cpu_available,
             "gpu_available": self.gpu_available,
-            **({"build_finished": self.build_finished} if include_build_state else {}),
             "container": {
                 "variable": variable_section,
                 "variableArray": variable_array_section,
@@ -1094,6 +1101,13 @@ class ProjectState:
             },
             "notes": self.notes,
         }
+        if include_build_state:
+            payload["build_finished"] = self.build_finished
+            payload["doc"] = {
+                "symbol": "build" if self.build_finished else "draft",
+                "build_finished": self.build_finished,
+            }
+        return payload
 
     def rebuild_manifest_text(self) -> str:
         self.manifest_text = json.dumps(self.to_package_json(), indent=2, ensure_ascii=False)
@@ -1114,7 +1128,8 @@ class ProjectState:
         doc_section = payload.get("doc", {})
         if not isinstance(doc_section, dict):
             doc_section = {}
-        project.build_finished = bool(doc_section.get("build_finished", payload.get("build_finished", False)))
+        doc_symbol = str(doc_section.get("symbol") or "").strip().lower()
+        project.build_finished = bool(doc_section.get("build_finished", payload.get("build_finished", False))) or doc_symbol == "build"
         project.notes = str(payload.get("notes") or "")
 
         container_section = payload.get("container", {})
@@ -1306,6 +1321,7 @@ class ProjectState:
                 if not isinstance(resource_types, list):
                     resource_types = [resource_types] if resource_types else []
                 resource_kind = str(item.get("resource_kind") or item.get("kind") or (resource_types[0] if resource_types else "mesh"))
+                resource_source = str(item.get("resource_source") or item.get("resourceSource") or "resource")
                 resource_types = [resource_kind]
                 project.res_nodes.append(
                     ResourceNodeItem(
@@ -1313,6 +1329,9 @@ class ProjectState:
                         resource_types=resource_types,
                         outputs=[resource_kind],
                         resource_kind=resource_kind,
+                        resource_source=resource_source,
+                        origin_name=str(item.get("originName") or item.get("origin_name") or item.get("name") or f"resNode_{index}"),
+                        node_name=str(item.get("nodeName") or item.get("aliasName") or item.get("displayName") or ""),
                         x=float(item.get("x", 0.0)),
                         y=float(item.get("y", 0.0)),
                         scene_positions=copy.deepcopy(item.get("scene_positions", item.get("scenePositions", {})))

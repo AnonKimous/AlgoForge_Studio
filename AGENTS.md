@@ -11,6 +11,8 @@
 - Do not modify `CMakeLists.txt` unless the user has explicitly and personally approved that change in this turn.
 - Keep the call chain aligned with `sdk -> agent_management -> agent -> algorithm_management -> runtime_systems`.
 - Redirect all test outputs and transient test artifacts into `testData/`; do not write test files at the repository root.
+- Put any new temporary test data under `testData/` and keep the repository root clean.
+- When launching `debugTool` from Visual Studio, keep the debugger working directory at the repo root, for example `$(SolutionDir)..\`; otherwise relative resource paths like `data/teapot.obj` will not resolve.
 
 ## Coordinate Convention
 

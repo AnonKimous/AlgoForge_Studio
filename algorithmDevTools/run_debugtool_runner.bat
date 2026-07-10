@@ -28,8 +28,8 @@ if exist "%RUNNER_ENDPOINT_FILE%" del /q "%RUNNER_ENDPOINT_FILE%"
 if exist "%TEST_DATA_ROOT%\runner_control\server.log" del /q "%TEST_DATA_ROOT%\runner_control\server.log"
 if exist "%TEST_DATA_ROOT%\runner_control\client.log" del /q "%TEST_DATA_ROOT%\runner_control\client.log"
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Copy-Item -LiteralPath '%ALGO_SRC_ROOT%\pipeline' -Destination '%TEMP_SRC_ROOT%' -Recurse -Force; Copy-Item -LiteralPath '%ALGO_SRC_ROOT%\algorithm_catalog.json' -Destination '%TEMP_SRC_ROOT%' -Force; Copy-Item -LiteralPath '%ALGO_SRC_ROOT%\algorithm_plugin_api.h' -Destination '%TEMP_SRC_ROOT%' -Force"
-powershell -NoProfile -ExecutionPolicy Bypass -File "%ALGO_ROOT%\package_algorithm_runtime.ps1" -AlgorithmSourceRoot "%TEMP_SRC_ROOT%" -AlgorithmRuntimeRoot "%ALGO_RUNTIME_ROOT%"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Copy-Item -LiteralPath '%ALGO_SRC_ROOT%\pipeline' -Destination '%TEMP_SRC_ROOT%' -Recurse -Force; Copy-Item -LiteralPath '%ALGO_SRC_ROOT%\algorithm_plugin_api.h' -Destination '%TEMP_SRC_ROOT%' -Force"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%ALGO_ROOT%\cache_algorithm_runtime.ps1" -AlgorithmSourceRoot "%TEMP_SRC_ROOT%" -AlgorithmRuntimeRoot "%ALGO_RUNTIME_ROOT%"
 set "PACKAGE_EXIT=%ERRORLEVEL%"
 
 if exist "%TEMP_SRC_ROOT%" rmdir /s /q "%TEMP_SRC_ROOT%"

@@ -1,0 +1,104 @@
+{
+  "algorithm_name": "v2a0_precision_grid_mask_demo",
+  "globalCfg": {
+    "solvePrecision": "32",
+    "defaultPrecision": "32"
+  },
+  "container": {
+    "variable": 2,
+    "variableArray": 0,
+    "aliases": [
+      "v1:grid1/16,grid2/16",
+      "v2:tick_counter"
+    ]
+  },
+  "decomposer": {
+    "res": {},
+    "description": [
+      {
+        "name": "grid_mask_state",
+        "from": ["grid_mask_seed"],
+        "to": ["grid1", "grid2"],
+        "precise": [16, 16]
+      },
+      {
+        "name": "tick_counter",
+        "from": ["tick_count_seed"],
+        "to": ["tick_counter"]
+      }
+    ]
+  },
+  "reflector": {
+    "name": "grid_mask_state",
+    "functionName": "direct",
+    "items": [
+      {
+        "name": "grid_mask_state",
+        "from": ["v1"],
+        "to": ["grid_mask_state"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "tick_counter",
+        "from": ["v2"],
+        "to": ["tick_counter"],
+        "reflectFun": "direct"
+      }
+    ]
+  },
+  "exec": {
+    "stage_name": "exec",
+    "used_algorithm_containers": {
+      "arrays": [
+        {
+          "name": "v1",
+          "kind": "variable",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "v2",
+          "kind": "variable",
+          "tuple_width": 1,
+          "required": true
+        }
+      ],
+      "variables": []
+    },
+    "shader": {
+      "pipeline": "graphics",
+      "vertex": "v2a0_precision_grid_mask_demo_result_render.vert",
+      "fragment": "v2a0_precision_grid_mask_demo_result_render.frag"
+    }
+  },
+  "intervention": {
+    "stages": {
+      "resultRender": {
+        "stage_name": "resultRender",
+        "stage_kind": "resultRender",
+        "used_algorithm_containers": {
+          "arrays": [
+            {
+              "name": "v1",
+              "kind": "variable",
+              "tuple_width": 1,
+              "required": true
+            },
+            {
+              "name": "v2",
+              "kind": "variable",
+              "tuple_width": 1,
+              "required": true
+            }
+          ],
+          "variables": []
+        },
+        "shader": {
+          "pipeline": "graphics",
+          "vertex": "v2a0_precision_grid_mask_demo_result_render.vert",
+          "fragment": "v2a0_precision_grid_mask_demo_result_render.frag"
+        }
+      }
+    }
+  }
+}

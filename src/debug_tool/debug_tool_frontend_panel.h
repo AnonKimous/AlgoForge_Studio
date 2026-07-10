@@ -88,10 +88,8 @@ class DebugToolFrontendPanel {
     debug_tool::AlgorithmRuntimeBuildFlavor runtime_build_flavor{
       debug_tool::AlgorithmRuntimeBuildFlavor::Debug};
     std::vector<debug_tool::AlgorithmCatalogEntry> algorithm_catalog_entries;
-    int selected_algorithm_catalog_index{-1};
     int selected_agent_index{-1};
     int selected_algorithm_index{-1};
-    bool algorithm_catalog_loaded{false};
     std::string algorithm_catalog_error;
     std::array<char, 512> algorithm_library_root_path{};
     std::array<char, 512> algorithm_library_current_path{};

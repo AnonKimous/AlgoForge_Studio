@@ -11,31 +11,21 @@
 
 #include "common_data/common_data.h"
 
-#include <tinyobjloader/tiny_obj_loader.h>
+#include <assimp/Importer.hpp>
+#include <assimp/postprocess.h>
+#include <assimp/scene.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <fstream>
 #include <limits>
-#include <map>
 #include <stdexcept>
 #include <string>
 
 namespace mesh_io {
 
 namespace {
-
-struct VertexKey {
-  int vertex_index{-1};
-  int normal_index{-1};
-
-  bool operator<(const VertexKey& other) const {
-    if (vertex_index != other.vertex_index) {
-      return vertex_index < other.vertex_index;
-    }
-    return normal_index < other.normal_index;
-  }
-};
 
 Vec3 MakeVec3(float x, float y, float z) {
   return Vec3{x, y, z};
@@ -78,8 +68,15 @@ Vec3 NormalizeOrFallback(const Vec3& v, const Vec3& fallback = Vec3{0.0f, 0.0f, 
   return Vec3{v.x * inv_len, v.y * inv_len, v.z * inv_len};
 }
 
+Vec2 ReadVertexUv(const aiMesh& mesh, unsigned int vertex_index) {
+  if (mesh.HasTextureCoords(0) && mesh.mTextureCoords[0]) {
+    const aiVector3D& uv = mesh.mTextureCoords[0][vertex_index];
+    return Vec2{uv.x, uv.y};
+  }
+  return Vec2{0.0f, 0.0f};
+}
+
 void ComputeVertexNormals(Mesh* mesh) {
-  if (!mesh) return;
   mesh->normals.assign(mesh->positions.size(), Vec3{0.0f, 0.0f, 0.0f});
   if (mesh->positions.empty() || mesh->triangles.empty()) {
     for (Vec3& normal : mesh->normals) {
@@ -89,9 +86,6 @@ void ComputeVertexNormals(Mesh* mesh) {
   }
 
   for (const auto& tri : mesh->triangles) {
-    if (tri[0] >= mesh->positions.size() || tri[1] >= mesh->positions.size() || tri[2] >= mesh->positions.size()) {
-      continue;
-    }
     const Vec3& a = mesh->positions[tri[0]];
     const Vec3& b = mesh->positions[tri[1]];
     const Vec3& c = mesh->positions[tri[2]];
@@ -106,80 +100,59 @@ void ComputeVertexNormals(Mesh* mesh) {
   }
 }
 
-Vec3 ReadVertexPosition(const tinyobj::attrib_t& attrib, int vertex_index) {
-  if (vertex_index < 0) {
-    throw std::runtime_error("OBJ vertex index is missing");
-  }
-  const size_t base = static_cast<size_t>(vertex_index) * 3u;
-  if (base + 2u >= attrib.vertices.size()) {
-    throw std::runtime_error("OBJ vertex index out of range");
-  }
-  return MakeVec3(
-    attrib.vertices[base + 0u],
-    attrib.vertices[base + 1u],
-    attrib.vertices[base + 2u]);
-}
-
-Vec3 ReadVertexNormal(const tinyobj::attrib_t& attrib, int normal_index, bool* missing_normal) {
-  if (normal_index < 0) {
-    if (missing_normal) {
-      *missing_normal = true;
-    }
-    return Vec3{0.0f, 0.0f, 1.0f};
-  }
-  const size_t base = static_cast<size_t>(normal_index) * 3u;
-  if (base + 2u >= attrib.normals.size()) {
-    if (missing_normal) {
-      *missing_normal = true;
-    }
-    return Vec3{0.0f, 0.0f, 1.0f};
-  }
-  return NormalizeOrFallback(MakeVec3(
-    attrib.normals[base + 0u],
-    attrib.normals[base + 1u],
-    attrib.normals[base + 2u]));
-}
-
-Mesh BuildMeshFromObjReader(const tinyobj::ObjReader& reader) {
-  const tinyobj::attrib_t& attrib = reader.GetAttrib();
-  const std::vector<tinyobj::shape_t>& shapes = reader.GetShapes();
-
+Mesh BuildMeshFromAssimpScene(const aiScene& scene) {
   Mesh mesh{};
-  std::map<VertexKey, uint32_t> vertex_remap;
-  bool missing_normals = attrib.normals.empty();
+  bool missing_normals = false;
 
-  for (const tinyobj::shape_t& shape : shapes) {
-    size_t index_offset = 0;
-    for (size_t face_index = 0; face_index < shape.mesh.num_face_vertices.size(); ++face_index) {
-      const int face_vertex_count = shape.mesh.num_face_vertices[face_index];
-      if (face_vertex_count != 3) {
-        throw std::runtime_error("OBJ face is not triangulated");
+  mesh.positions.reserve(scene.mNumMeshes * 3u);
+  mesh.normals.reserve(scene.mNumMeshes * 3u);
+  mesh.triangles.reserve(scene.mNumMeshes);
+  mesh.triangle_material_gpa.reserve(scene.mNumMeshes);
+
+  for (unsigned int mesh_index = 0; mesh_index < scene.mNumMeshes; ++mesh_index) {
+    const aiMesh* assimp_mesh = scene.mMeshes[mesh_index];
+    if (!assimp_mesh) {
+      throw std::runtime_error("Assimp scene mesh pointer is null");
+    }
+
+    const uint32_t vertex_base = static_cast<uint32_t>(mesh.positions.size());
+    if (!assimp_mesh->HasNormals()) {
+      missing_normals = true;
+    }
+
+    for (unsigned int i = 0; i < assimp_mesh->mNumVertices; ++i) {
+      const aiVector3D& position = assimp_mesh->mVertices[i];
+      mesh.positions.push_back(MakeVec3(position.x, position.y, position.z));
+      if (assimp_mesh->HasNormals()) {
+        const aiVector3D& normal = assimp_mesh->mNormals[i];
+        mesh.normals.push_back(NormalizeOrFallback(MakeVec3(normal.x, normal.y, normal.z)));
+      } else {
+        mesh.normals.push_back(Vec3{0.0f, 0.0f, 1.0f});
+      }
+      mesh.uvs.push_back(ReadVertexUv(*assimp_mesh, i));
+    }
+
+    for (unsigned int i = 0; i < assimp_mesh->mNumFaces; ++i) {
+      const aiFace& face = assimp_mesh->mFaces[i];
+      if (face.mNumIndices != 3u) {
+        throw std::runtime_error("Imported mesh face is not triangulated");
       }
 
-      std::array<uint32_t, 3> triangle{};
-      for (int corner = 0; corner < 3; ++corner) {
-        const tinyobj::index_t& index = shape.mesh.indices[index_offset + static_cast<size_t>(corner)];
-        const VertexKey key{index.vertex_index, index.normal_index};
-        const auto found = vertex_remap.find(key);
-        if (found != vertex_remap.end()) {
-          triangle[static_cast<size_t>(corner)] = found->second;
-          continue;
-        }
-
-        const uint32_t new_index = static_cast<uint32_t>(mesh.positions.size());
-        mesh.positions.push_back(ReadVertexPosition(attrib, index.vertex_index));
-        mesh.normals.push_back(ReadVertexNormal(attrib, index.normal_index, &missing_normals));
-        vertex_remap.emplace(key, new_index);
-        triangle[static_cast<size_t>(corner)] = new_index;
-      }
-      mesh.triangles.push_back(triangle);
+      mesh.triangles.push_back(std::array<uint32_t, 3>{
+        vertex_base + static_cast<uint32_t>(face.mIndices[0]),
+        vertex_base + static_cast<uint32_t>(face.mIndices[1]),
+        vertex_base + static_cast<uint32_t>(face.mIndices[2]),
+      });
       mesh.triangle_material_gpa.push_back(std::numeric_limits<float>::quiet_NaN());
-      index_offset += static_cast<size_t>(face_vertex_count);
     }
   }
 
   if (missing_normals || mesh.normals.size() != mesh.positions.size()) {
     ComputeVertexNormals(&mesh);
+  } else {
+    for (Vec3& normal : mesh.normals) {
+      normal = NormalizeOrFallback(normal);
+    }
   }
 
   RebuildEdges(mesh);
@@ -202,6 +175,9 @@ Mesh PrepareMeshForObjExport(const Mesh& input_mesh) {
   if (mesh.triangle_material_gpa.size() != mesh.triangles.size()) {
     NormalizeTriangleMaterials(mesh);
   }
+  if (mesh.uvs.size() != mesh.positions.size()) {
+    mesh.uvs.assign(mesh.positions.size(), Vec2{0.0f, 0.0f});
+  }
   RebuildEdges(mesh);
   return mesh;
 }
@@ -218,37 +194,52 @@ void WriteObjNormals(const Mesh& mesh, std::ofstream& file) {
   }
 }
 
+void WriteObjUvs(const Mesh& mesh, std::ofstream& file) {
+  for (const Vec2& uv : mesh.uvs) {
+    file << "vt " << uv.x << ' ' << uv.y << '\n';
+  }
+}
+
 void WriteObjFaces(const Mesh& mesh, std::ofstream& file) {
+  const bool has_uvs = mesh.uvs.size() == mesh.positions.size();
   for (const auto& triangle : mesh.triangles) {
-    file << "f "
-         << (triangle[0] + 1u) << "//" << (triangle[0] + 1u) << ' '
-         << (triangle[1] + 1u) << "//" << (triangle[1] + 1u) << ' '
-         << (triangle[2] + 1u) << "//" << (triangle[2] + 1u) << '\n';
+    file << "f ";
+    for (size_t i = 0; i < 3u; ++i) {
+      const uint32_t index = triangle[i] + 1u;
+      file << index << '/';
+      if (has_uvs) {
+        file << index;
+      }
+      file << '/' << index;
+      if (i + 1u < 3u) {
+        file << ' ';
+      }
+    }
+    file << '\n';
   }
 }
 
 }  // namespace
 
-Mesh LoadMeshObjFile(const std::string& path) {
-  tinyobj::ObjReaderConfig config{};
-  config.triangulate = true;
-  config.vertex_color = false;
-
-  tinyobj::ObjReader reader;
-  if (!reader.ParseFromFile(path, config)) {
-    const std::string warning = reader.Warning();
-    const std::string error = reader.Error();
-    std::string message = "Failed to read OBJ file: " + path;
-    if (!error.empty()) {
-      message += "\nError: " + error;
-    }
-    if (!warning.empty()) {
-      message += "\nWarning: " + warning;
-    }
-    throw std::runtime_error(message);
+Mesh LoadMeshFile(const std::string& path) {
+  Assimp::Importer importer;
+  const aiScene* scene = importer.ReadFile(
+    path,
+    aiProcess_Triangulate |
+      aiProcess_PreTransformVertices |
+      aiProcess_JoinIdenticalVertices);
+  if (!scene) {
+    throw std::runtime_error("Failed to read mesh file: " + path + "\nError: " + importer.GetErrorString());
+  }
+  if (!scene->HasMeshes()) {
+    throw std::runtime_error("Mesh file does not contain any mesh data: " + path);
   }
 
-  return BuildMeshFromObjReader(reader);
+  return BuildMeshFromAssimpScene(*scene);
+}
+
+Mesh LoadMeshObjFile(const std::string& path) {
+  return LoadMeshFile(path);
 }
 
 void SaveMeshObjFile(const Mesh& input_mesh, const std::string& path) {
@@ -262,6 +253,9 @@ void SaveMeshObjFile(const Mesh& input_mesh, const std::string& path) {
   file << "# generated mesh\n";
   file << "o mesh\n";
   WriteObjVertex(mesh, file);
+  if (mesh.uvs.size() == mesh.positions.size()) {
+    WriteObjUvs(mesh, file);
+  }
   WriteObjNormals(mesh, file);
   WriteObjFaces(mesh, file);
 }

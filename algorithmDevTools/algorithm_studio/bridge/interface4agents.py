@@ -42,7 +42,7 @@ COMMAND_SPECS: tuple[AgentCommandSpec, ...] = (
     ),
     AgentCommandSpec(
         name="createNode",
-        usage="createNode vnode | anode | reflector | function | phaseNode | meshNode",
+        usage="createNode vnode | anode | reflector | function | phaseNode | resNode(mesh|obj)",
         location="Left palette > Drag Palette",
         summary="Preview dragging a blueprint node into the canvas.",
         highlight_target="canvas",
@@ -70,6 +70,22 @@ COMMAND_SPECS: tuple[AgentCommandSpec, ...] = (
         location="Selection panel > Merge",
         summary="Create a nested containerElement node.",
         highlight_target="createcosnode",
+    ),
+    AgentCommandSpec(
+        name="resNode",
+        usage="resNode add <name> [resource_kind] [resource_source] [alias_name] [x=<x> y=<y>] | resNode update <name> [resource_kind] [resource_source] [alias_name] [x=<x> y=<y>] | resNode select <name> | resNode delete <name>",
+        location="Canvas > resource nodes",
+        summary="Resource node commands.",
+        highlight_target="resnode",
+        aliases=("resnode", "meshnode"),
+    ),
+    AgentCommandSpec(
+        name="resType",
+        usage="resType <name> <resource_kind> [x=<x> y=<y>]",
+        location="Canvas > resource nodes",
+        summary="Change a resource node type.",
+        highlight_target="resnode",
+        aliases=("restype",),
     ),
     AgentCommandSpec(
         name="hang",
@@ -364,6 +380,90 @@ def _execute_create_cos_node_command(app: Any, args: list[str]) -> str:
     if tail:
         raise RuntimeError(f"Unsupported createCosNode arguments: {' '.join(tail)}")
     return _call(app, "_apply_agent_ui_add_node", payload)
+
+
+def _execute_resnode_command(app: Any, args: list[str]) -> str:
+    if not args:
+        raise RuntimeError("resNode requires a subcommand.")
+    subcommand = args[0].strip().lower()
+    tail = args[1:]
+    if subcommand == "add":
+        if not tail:
+            raise RuntimeError("resNode add requires a name.")
+        payload: dict[str, Any] = {
+            "tool": "ui_add_node",
+            "kind": "resnode",
+            "name": tail[0],
+        }
+        if len(tail) > 1:
+            payload["resource_kind"] = tail[1]
+        if len(tail) > 2:
+            payload["resource_source"] = tail[2]
+        if len(tail) > 3:
+            payload["node_name"] = tail[3]
+        extra_args, x_value, y_value = _extract_xy_suffix(tail[4:])
+        if x_value is not None:
+            payload["x"] = x_value
+        if y_value is not None:
+            payload["y"] = y_value
+        if extra_args:
+            raise RuntimeError(f"Unsupported resNode add arguments: {' '.join(extra_args)}")
+        return _call(app, "_apply_agent_ui_add_node", payload)
+    if subcommand == "update":
+        if not tail:
+            raise RuntimeError("resNode update requires a name.")
+        payload = {
+            "tool": "ui_update_node",
+            "kind": "resnode",
+            "name": tail[0],
+        }
+        if len(tail) > 1:
+            payload["resource_kind"] = tail[1]
+        if len(tail) > 2:
+            payload["resource_source"] = tail[2]
+        if len(tail) > 3:
+            payload["node_name"] = tail[3]
+        extra_args, x_value, y_value = _extract_xy_suffix(tail[4:])
+        if x_value is not None:
+            payload["x"] = x_value
+        if y_value is not None:
+            payload["y"] = y_value
+        if extra_args:
+            raise RuntimeError(f"Unsupported resNode update arguments: {' '.join(extra_args)}")
+        return _call(app, "_apply_agent_ui_update_node", payload)
+    if subcommand == "select":
+        if not tail:
+            raise RuntimeError("resNode select requires a name.")
+        return _call(app, "_interface4agents_highlight_node", "resnode", tail[0].strip())
+    if subcommand == "delete":
+        if not tail:
+            raise RuntimeError("resNode delete requires a name.")
+        payload = {
+            "tool": "ui_delete_node",
+            "kind": "resnode",
+            "name": tail[0],
+        }
+        return _call(app, "_apply_agent_ui_delete_node", payload)
+    raise RuntimeError(f"Unsupported resNode command: {subcommand}")
+
+
+def _execute_restype_command(app: Any, args: list[str]) -> str:
+    if len(args) < 2:
+        raise RuntimeError("resType requires <name> and <resource_kind>.")
+    payload = {
+        "tool": "ui_update_node",
+        "kind": "resnode",
+        "name": args[0].strip(),
+        "resource_kind": args[1].strip(),
+    }
+    extra_args, x_value, y_value = _extract_xy_suffix(args[2:])
+    if x_value is not None:
+        payload["x"] = x_value
+    if y_value is not None:
+        payload["y"] = y_value
+    if extra_args:
+        raise RuntimeError(f"Unsupported resType arguments: {' '.join(extra_args)}")
+    return _call(app, "_apply_agent_ui_update_node", payload)
 
 
 def _execute_function_command(app: Any, args: list[str]) -> str:
@@ -738,6 +838,10 @@ def execute_interface4agents_command(app: Any, tokens: list[str]) -> str:
         return _execute_field_command(app, args)
     if command == "createcosnode":
         return _execute_create_cos_node_command(app, args)
+    if command in {"resnode", "meshnode"}:
+        return _execute_resnode_command(app, args)
+    if command in {"restype", "restype()"}:
+        return _execute_restype_command(app, args)
     if command == "function":
         return _execute_function_command(app, args)
     if command == "phase":

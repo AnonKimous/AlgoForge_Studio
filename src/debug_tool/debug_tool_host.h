@@ -212,6 +212,7 @@ struct PipelineStageBridgeDebugSummary {
 struct AlgorithmRuntimeSummary {
   std::string algorithm_name;
   AlgorithmAssemblyState assembly_state{AlgorithmAssemblyState::Failed};
+  std::string runtime_package_root_path;
   std::string pipeline_name;
   std::string pipeline_root_stage_name;
   uint32_t pipeline_stage_index{0u};

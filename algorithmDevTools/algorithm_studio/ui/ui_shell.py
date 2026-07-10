@@ -40,23 +40,67 @@ def build_ui(app: object) -> None:
 def build_toolbar(app: object) -> None:
     toolbar = ttk.Frame(app.root, padding=(12, 10))
     toolbar.grid(row=0, column=0, sticky="ew")
-    buttons = [
-        ("New", app._new_project),
-        ("Load Package", app._load_package),
-        ("Save Package", app._save_package),
-        ("Build", app._build_current_algorithm),
-        ("Helper", lambda: app._activate_scene_group("helperScene")),
-        ("DebugTool", app._launch_debugtool_gui),
-    ]
-    for index, (label, command) in enumerate(buttons):
-        button = ttk.Button(toolbar, text=label, command=command)
-        button.grid(row=0, column=index, padx=(0, 8))
-        if label == "Build":
-            app.build_button = button
+    toolbar.columnconfigure(2, weight=1)
 
-    toolbar.columnconfigure(len(buttons), weight=1)
+    file_button = tk.Menubutton(
+        toolbar,
+        text="File",
+        bg=COLORS["panel_alt"],
+        fg=COLORS["text"],
+        activebackground=COLORS["accent"],
+        activeforeground=COLORS["window"],
+        relief="raised",
+        bd=1,
+        padx=14,
+        pady=6,
+        cursor="hand2",
+    )
+    file_button.grid(row=0, column=0, sticky="w", padx=(0, 8))
+    file_menu = tk.Menu(file_button, tearoff=0)
+    file_menu.add_command(label="New", command=app._new_project)
+    file_menu.add_command(label="Load Package", command=app._load_package)
+    file_menu.add_command(label="Save Package", command=app._save_package)
+    file_menu.add_separator()
+    file_menu.add_command(label="Build", command=app._build_current_algorithm)
+    file_menu.add_command(label="Locate Algorithm", command=app._locate_current_algorithm_folder)
+    file_menu.add_command(label="Helper Scene", command=lambda: app._activate_scene_group("helperScene"))
+    file_menu.add_command(label="DebugTool", command=app._launch_debugtool_gui)
+    file_button.configure(menu=file_menu)
+
+    view_button = tk.Menubutton(
+        toolbar,
+        text="View",
+        bg=COLORS["panel_alt"],
+        fg=COLORS["text"],
+        activebackground=COLORS["accent"],
+        activeforeground=COLORS["window"],
+        relief="raised",
+        bd=1,
+        padx=14,
+        pady=6,
+        cursor="hand2",
+    )
+    view_button.grid(row=0, column=1, sticky="w", padx=(0, 12))
+    view_menu = tk.Menu(view_button, tearoff=0)
+    view_menu.add_checkbutton(
+        label="Palette",
+        variable=app.workspace_palette_visible_var,
+        command=app._apply_workspace_panel_layout,
+    )
+    view_menu.add_checkbutton(
+        label="algoDevDoc Doc",
+        variable=app.workspace_document_visible_var,
+        command=app._apply_workspace_panel_layout,
+    )
+    view_menu.add_checkbutton(
+        label="ChatBox",
+        variable=app.workspace_sidebar_visible_var,
+        command=app._apply_workspace_panel_layout,
+    )
+    view_button.configure(menu=view_menu)
+
     algorithm_shell = ttk.Frame(toolbar)
-    algorithm_shell.grid(row=0, column=len(buttons), sticky="ew", padx=(12, 0))
+    algorithm_shell.grid(row=0, column=2, sticky="ew", padx=(12, 0))
     algorithm_shell.columnconfigure(1, weight=1)
     ttk.Label(algorithm_shell, text="Algorithm").grid(row=0, column=0, sticky="w", padx=(0, 8))
 

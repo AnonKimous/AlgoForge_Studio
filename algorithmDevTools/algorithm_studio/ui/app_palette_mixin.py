@@ -295,7 +295,7 @@ class AlgorithmStudioPaletteMixin:
             ],
         )
 
-        self.drag_palette_mode_var.set("blueprint" if self.canvas_view_mode == "container_overview" else "container_tree")
+        self.drag_palette_mode_var.set("blueprint" if self.canvas_view_mode in {"container_overview", "decomposer2container_overview"} else "container_tree")
         self._refresh_container_tree_palette()
         self._refresh_operation_stack_panel()
         _sync_palette_scrollregion()
@@ -428,9 +428,10 @@ class AlgorithmStudioPaletteMixin:
         self._create_palette_group(
             self.palette_tree_frame,
             1,
-            "MeshNode",
+            "ResourceNode",
             [
-                ("resnode", "M", "meshNode", "drag to canvas"),
+                ("resnode", "M", "mesh", "drag to canvas"),
+                ("resnode", "O", "obj", "drag to canvas"),
             ],
         )
         row = 2
@@ -764,7 +765,7 @@ class AlgorithmStudioPaletteMixin:
                     self.scene_banner_text.configure(bg="#10131a")
             else:
                 self.scene_banner_badge.configure(text="helperScene", bg=COLORS["good"], fg=COLORS["window"])
-                self.scene_banner_text.configure(text="container / decomposer / d2c")
+                self.scene_banner_text.configure(text="d2c")
                 if getattr(self, "scene_banner_frame", None) is not None:
                     self.scene_banner_frame.configure(
                         bg="#0f1b17",
@@ -790,6 +791,12 @@ class AlgorithmStudioPaletteMixin:
         for _tab_key, widget in ordered_tabs:
             if widget.winfo_manager():
                 widget.pack_forget()
+        if active_group in {"helperScene", "renderPreviewScene"}:
+            if self.scene_tab_phase_row is not None and self.scene_tab_phase_row.winfo_manager():
+                self.scene_tab_phase_row.pack_forget()
+            return
+        if self.scene_tab_phase_row is not None and not self.scene_tab_phase_row.winfo_manager():
+            self.scene_tab_phase_row.pack(fill="x", anchor="w", pady=(6, 0))
         for tab_key, widget in ordered_tabs:
             tab_group = str(self.scene_tab_group_names.get(tab_key) or "").strip()
             if tab_group != active_group:
@@ -837,7 +844,7 @@ class AlgorithmStudioPaletteMixin:
             self._set_canvas_view_mode("graph", log_message="Switched to algorithmDevScene.")
             return
         if normalized == "helperscene":
-            self._set_canvas_view_mode("container_overview", log_message="Switched to helperScene.")
+            self._set_canvas_view_mode("decomposer2container_overview", log_message="Switched to helperScene.")
             return
         if normalized == "renderpreviewscene":
             self._set_canvas_view_mode("renderpreview", log_message="Switched to renderPreviewScene.")
@@ -912,7 +919,7 @@ class AlgorithmStudioPaletteMixin:
         self._ensure_singleton_container_group(self.project)
         self._ensure_singleton_resource_group(self.project)
         if normalized == self.canvas_view_mode:
-            self.drag_palette_mode_var.set("blueprint" if normalized == "container_overview" else "container_tree")
+            self.drag_palette_mode_var.set("blueprint" if normalized in {"container_overview", "decomposer2container_overview"} else "container_tree")
             self._apply_drag_palette_mode_layout()
             self._refresh_scene_tabs()
             return
@@ -936,8 +943,9 @@ class AlgorithmStudioPaletteMixin:
             self.selected_container_group_name = None
             if preserve_selected_stage_name and self._find_stage(preserve_selected_stage_name):
                 self.selected_stage_name = preserve_selected_stage_name
-        self.drag_palette_mode_var.set("blueprint" if normalized == "container_overview" else "container_tree")
+        self.drag_palette_mode_var.set("blueprint" if normalized in {"container_overview", "decomposer2container_overview"} else "container_tree")
         self._apply_drag_palette_mode_layout()
+        self._apply_workspace_panel_layout()
         self._refresh_scene_tabs()
         resolved_log_message = log_message or f"Switched to {self._canvas_view_mode_scene_label(normalized)}."
         self._log(resolved_log_message)
@@ -1127,19 +1135,20 @@ class AlgorithmStudioPaletteMixin:
         if self.canvas_view_mode == "all_in_one":
             self._log("all_in_one scene is read-only.")
             return
-        container_related_drag = kind in {"container", "containerelement", "variable", "array", "microcontainer", "micronode"} or normalized_source_kind in {"container", "containerelement"}
-        if self.canvas_view_mode == "decomposer2container_overview" and not container_related_drag:
-            self._set_canvas_view_mode("graph", log_message="Switched back to algorithmDevScene for node placement.")
-        if self.canvas_view_mode == "container_overview" and kind not in {"variable", "array"} and not container_related_drag:
-            self._set_canvas_view_mode("graph", log_message="Switched back to algorithmDevScene for tool-node placement.")
-        if self.canvas_view_mode == "reflector_overview" and kind not in {"variable", "array", "reflector"} and not container_related_drag:
+        d2c_only_kind = kind in {"container", "containerelement", "variable", "array", "microcontainer", "micronode", "resnode"}
+        d2c_only_source = normalized_source_kind in {"container", "containerelement", "resnode"}
+        if d2c_only_kind or d2c_only_source:
+            if self.canvas_view_mode != "decomposer2container_overview":
+                self._log("This node can only be placed in d2c.")
+                return
+        if self.canvas_view_mode == "reflector_overview" and kind not in {"reflector"}:
             self._set_canvas_view_mode("graph", log_message="Switched back to algorithmDevScene for tool-node placement.")
         if self.canvas_view_mode in {"interventioner_pretick", "interventioner_aftertick", "interventioner_render"} and kind in {"interventioner", "stage"}:
             self._set_canvas_view_mode("interventioner_overview", log_message="Switched to exec for phase placement.")
-        if self._is_interventioner_view_mode() and kind not in {"variable", "array", "function", "interventioner", "stage"} and not container_related_drag:
+        if self._is_interventioner_view_mode() and kind not in {"function", "interventioner", "stage"}:
             self._set_canvas_view_mode("graph", log_message="Switched back to algorithmDevScene for tool-node placement.")
-        if kind == "resnode" and self.canvas_view_mode not in {"decomposer_overview", "all_in_one"}:
-            self._log("meshNode can only be placed in decomposer.")
+        if kind == "resnode" and self.canvas_view_mode not in {"decomposer2container_overview", "all_in_one"}:
+            self._log("resnode can only be placed in d2c.")
             return
         layout_target = self._container_layout_drop_target(x, y)
         if layout_target is not None:
@@ -1380,24 +1389,29 @@ class AlgorithmStudioPaletteMixin:
             name = self._singleton_ui_node_name(kind) or self.project.next_res_name()
             existing_res = self._find_res_node(name)
             resource_kind = variant or "mesh"
+            resource_source = "resource"
             if existing_res is not None:
                 self._set_project_node_position(existing_res, x, y)
                 existing_res.resource_kind = resource_kind
                 existing_res.resource_types = [resource_kind]
                 existing_res.outputs = [resource_kind]
+                existing_res.resource_source = resource_source
                 self.selected_res_node_name = name
                 self.selected_container_name = None
                 self.selected_rule_name = None
                 self.selected_reflector_name = None
                 self.selected_stage_name = None
                 self._refresh_all()
-                self._log(f"Moved meshNode {name}.")
+                self._log(f"Moved resNode {name}.")
                 return
             res_node = ResourceNodeItem(
                 name=name,
                 resource_types=[resource_kind],
                 outputs=[resource_kind],
                 resource_kind=resource_kind,
+                resource_source=resource_source,
+                origin_name=name,
+                node_name="",
                 x=x,
                 y=y,
             )
@@ -1409,7 +1423,7 @@ class AlgorithmStudioPaletteMixin:
             self.selected_reflector_name = None
             self.selected_stage_name = None
             self._refresh_all()
-            self._log(f"Added meshNode {name}.")
+            self._log(f"Added resNode {name}.")
             return
         if kind == "function":
             name = self._singleton_ui_node_name(kind) or self.project.next_function_name()

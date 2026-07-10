@@ -11,8 +11,8 @@ namespace algorithm {
 struct AlgorithmContainerManifestItem {
   std::string name;
   std::string kind{"scalar"};
-  std::string precision;
-  std::vector<uint32_t> shape;
+  std::string precise;
+  uint32_t tuple_width{1u};
   uint32_t count{1};
   bool count_specified{false};
   std::string count_from;

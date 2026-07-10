@@ -12,6 +12,7 @@ namespace common_data {
 struct Mesh {
   std::vector<Vec3> positions;
   std::vector<Vec3> normals;
+  std::vector<Vec2> uvs;
   std::vector<std::array<uint32_t, 3>> triangles;
   std::vector<std::array<uint32_t, 2>> edges;
   std::vector<float> triangle_material_gpa;

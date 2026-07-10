@@ -29,14 +29,7 @@ class AlgorithmStudioContainerGroupMixin:
         return (left + right) / 2, (top + bottom) / 2
 
     def _container_domain_display_offset(self, kind: str, name: str) -> tuple[float, float]:
-        if self.canvas_view_mode != "decomposer2container_overview":
-            return 0.0, 0.0
-        if self._sync_zone_for_node(kind, name) == "resource":
-            return 0.0, 0.0
-        scene_width = 1440.0
-        if self.canvas:
-            scene_width = max(float(self.canvas.winfo_width()) / self._canvas_zoom_factor(), scene_width)
-        return max(scene_width * 0.48, 620.0), 0.0
+        return 0.0, 0.0
 
     def _container_display_origin(self, kind: str, name: str, x: float, y: float) -> tuple[float, float]:
         dx, dy = self._container_domain_display_offset(kind, name)
@@ -235,6 +228,18 @@ class AlgorithmStudioContainerGroupMixin:
         if self.canvas_view_mode == "graph":
             if kind == "resnode":
                 return False
+        if self.canvas_view_mode == "decomposer2container_overview":
+            if kind == "decomposer":
+                return self._find_rule(name) is not None
+            if kind == "reflector":
+                return False
+            if kind == "resnode":
+                return self._find_res_node(name) is not None
+            if kind == "container":
+                return self._find_container(name) is not None
+            if kind == "containerelement":
+                return self._find_container_group(name) is not None
+            return False
         if kind == "containerelement":
             return self._find_container_group(name) is not None and self._scene_consumes_node_zone(kind, name)
         if kind == "container":
@@ -276,10 +281,6 @@ class AlgorithmStudioContainerGroupMixin:
             if kind == "functiontext":
                 item = self._find_function_text_item(name)
                 return item is not None and self._is_function_visible_in_current_view(item.function_name)
-            return False
-        if self.canvas_view_mode == "decomposer2container_overview":
-            if kind == "resnode":
-                return self._find_res_node(name) is not None
             return False
         if self.canvas_view_mode == "graph":
             if kind == "reflector":

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(algorithm_packages LANGUAGES C CXX)
+project(algorithm_algos LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -90,12 +90,11 @@ endif()
 
 endif()
 
-set(ALGORITHM_LIBRARY_SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/algorithmSrc" CACHE PATH "Root directory containing algorithm package source files")
+set(ALGORITHM_LIBRARY_SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/algorithmSrc" CACHE PATH "Root directory containing algorithm algo source files")
 set(ALGORITHM_LIBRARY_RUNTIME_OUTPUT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/algorithmruntimeLib" CACHE PATH "Root directory for built algorithm runtime artifacts")
 file(TO_CMAKE_PATH "${ALGORITHM_LIBRARY_SOURCE_ROOT}" ALGORITHM_LIBRARY_SOURCE_ROOT)
 file(TO_CMAKE_PATH "${ALGORITHM_LIBRARY_RUNTIME_OUTPUT_ROOT}" ALGORITHM_LIBRARY_RUNTIME_OUTPUT_ROOT)
 
-require_file("${ALGORITHM_LIBRARY_SOURCE_ROOT}/algorithm_catalog.json" "Set ALGORITHM_LIBRARY_SOURCE_ROOT to the mirrored algorithm source root.")
 require_file("${ALGORITHM_LIBRARY_SOURCE_ROOT}/algorithm_plugin_api.h" "Set ALGORITHM_LIBRARY_SOURCE_ROOT to the mirrored algorithm source root.")
 
 set(PROJECT_INCLUDE_DIRS
@@ -111,7 +110,7 @@ set(PROJECT_INCLUDE_DIRS
 )
 
 option(BUILD_ALGORITHM_SAMPLE_PLUGIN "Build the temporary sample algorithm plugin." OFF)
-option(BUILD_ALGORITHM_CUDA_SAMPLE_PLUGIN_PACKAGES "Build algorithm plugin packages that require CUDA sources." OFF)
+option(BUILD_ALGORITHM_CUDA_SAMPLE_PLUGIN_ALGOS "Build algorithm plugin algos that require CUDA sources." OFF)
 set(CORE_BUILD_DIR "${REPO_ROOT}/build" CACHE PATH "Core build directory containing the base libraries for algorithm plugins")
 
 function(import_core_static_library target_name library_name)
@@ -159,15 +158,15 @@ if(BUILD_ALGORITHM_SAMPLE_PLUGIN)
   )
 endif()
 
-add_custom_target(algorithm_packages)
-set_property(GLOBAL PROPERTY ALGORITHM_PACKAGE_TARGETS "")
+add_custom_target(algorithm_algos)
+set_property(GLOBAL PROPERTY ALGORITHM_ALGO_TARGETS "")
 
-function(register_algorithm_package package_manifest)
-  get_filename_component(algorithm_dir "${package_manifest}" DIRECTORY)
+function(register_algorithm_algo algo_manifest)
+  get_filename_component(algorithm_dir "${algo_manifest}" DIRECTORY)
   get_filename_component(algorithm_name "${algorithm_dir}" NAME)
   file(RELATIVE_PATH algorithm_relative_dir "${ALGORITHM_LIBRARY_SOURCE_ROOT}" "${algorithm_dir}")
   if(algorithm_relative_dir STREQUAL "" OR algorithm_relative_dir MATCHES "^\\.\\.")
-    message(FATAL_ERROR "Algorithm package directory ${algorithm_dir} is outside ${ALGORITHM_LIBRARY_SOURCE_ROOT}")
+    message(FATAL_ERROR "Algorithm algo directory ${algorithm_dir} is outside ${ALGORITHM_LIBRARY_SOURCE_ROOT}")
   endif()
   string(REPLACE "\\" "/" algorithm_relative_dir "${algorithm_relative_dir}")
   string(MAKE_C_IDENTIFIER "${algorithm_relative_dir}" algorithm_target_name)
@@ -203,7 +202,7 @@ function(register_algorithm_package package_manifest)
       set(plugin_has_cuda_source ON)
     endif()
   endforeach()
-  if(plugin_has_cuda_source AND NOT BUILD_ALGORITHM_CUDA_SAMPLE_PLUGIN_PACKAGES)
+  if(plugin_has_cuda_source AND NOT BUILD_ALGORITHM_CUDA_SAMPLE_PLUGIN_ALGOS)
     list(FILTER plugin_sources_for_build EXCLUDE REGEX "\\.cu$")
   endif()
   list(SORT plugin_sources_for_build)
@@ -245,7 +244,7 @@ function(register_algorithm_package package_manifest)
       ALGORITHM_LIBRARY_PLUGIN_BUILD=1
       ALGORITHM_LIBRARY_RESOURCE_ROOT="${ALGORITHM_LIBRARY_SOURCE_ROOT}"
     )
-    if(plugin_has_cuda_source AND BUILD_ALGORITHM_CUDA_SAMPLE_PLUGIN_PACKAGES)
+    if(plugin_has_cuda_source AND BUILD_ALGORITHM_CUDA_SAMPLE_PLUGIN_ALGOS)
       target_compile_definitions("${algorithm_target_name}_plugin" PRIVATE
         ALGORITHM_LIBRARY_PLUGIN_HAS_CUDA=1
       )
@@ -253,7 +252,7 @@ function(register_algorithm_package package_manifest)
     target_link_libraries("${algorithm_target_name}_plugin" PRIVATE
       algorithm_plugin_support_mirror
     )
-    if(plugin_has_cuda_source AND BUILD_ALGORITHM_CUDA_SAMPLE_PLUGIN_PACKAGES)
+    if(plugin_has_cuda_source AND BUILD_ALGORITHM_CUDA_SAMPLE_PLUGIN_ALGOS)
       target_link_libraries("${algorithm_target_name}_plugin" PRIVATE CUDA::cudart)
     endif()
     set_target_properties("${algorithm_target_name}_plugin" PROPERTIES
@@ -267,10 +266,10 @@ function(register_algorithm_package package_manifest)
     add_dependencies("${algorithm_target_name}_plugin" "${shader_target}")
   endif()
 
-  set(package_target "${algorithm_target_name}_package")
-  add_custom_target("${package_target}" DEPENDS "${shader_target}")
+  set(algo_target "${algorithm_target_name}_algo")
+  add_custom_target("${algo_target}" DEPENDS "${shader_target}")
   if(TARGET "${algorithm_target_name}_plugin")
-    add_dependencies("${package_target}" "${algorithm_target_name}_plugin")
+    add_dependencies("${algo_target}" "${algorithm_target_name}_plugin")
   endif()
 
   set(algorithm_bundle_root "${algorithm_relative_dir}")
@@ -280,29 +279,29 @@ function(register_algorithm_package package_manifest)
   endif()
   string(MAKE_C_IDENTIFIER "${algorithm_bundle_root}" algorithm_bundle_key)
   append_unique_global_property_value(ALGORITHM_BUNDLE_KEYS "${algorithm_bundle_key}")
-  set_property(GLOBAL APPEND PROPERTY "ALGORITHM_BUNDLE_TARGETS_${algorithm_bundle_key}" "${package_target}")
+  set_property(GLOBAL APPEND PROPERTY "ALGORITHM_BUNDLE_TARGETS_${algorithm_bundle_key}" "${algo_target}")
   if(algorithm_relative_dir STREQUAL algorithm_bundle_root)
-    set_property(GLOBAL PROPERTY "ALGORITHM_BUNDLE_ROOT_TARGET_${algorithm_bundle_key}" "${package_target}")
+    set_property(GLOBAL PROPERTY "ALGORITHM_BUNDLE_ROOT_TARGET_${algorithm_bundle_key}" "${algo_target}")
   endif()
 
-  set_property(GLOBAL APPEND PROPERTY ALGORITHM_PACKAGE_TARGETS "${package_target}")
+  set_property(GLOBAL APPEND PROPERTY ALGORITHM_ALGO_TARGETS "${algo_target}")
 endfunction()
 
 file(GLOB_RECURSE ALGORITHM_PACKAGE_MANIFESTS
-  "${ALGORITHM_LIBRARY_SOURCE_ROOT}/*_package.json"
+  "${ALGORITHM_LIBRARY_SOURCE_ROOT}/manifest.json"
 )
 list(SORT ALGORITHM_PACKAGE_MANIFESTS)
-set(ALGORITHM_PACKAGE_COUNT 0)
-foreach(package_manifest IN LISTS ALGORITHM_PACKAGE_MANIFESTS)
-  if(NOT EXISTS "${package_manifest}")
+set(ALGORITHM_ALGO_COUNT 0)
+foreach(algo_manifest IN LISTS ALGORITHM_PACKAGE_MANIFESTS)
+  if(NOT EXISTS "${algo_manifest}")
     continue()
   endif()
-  register_algorithm_package("${package_manifest}")
-  math(EXPR ALGORITHM_PACKAGE_COUNT "${ALGORITHM_PACKAGE_COUNT} + 1")
+  register_algorithm_algo("${algo_manifest}")
+  math(EXPR ALGORITHM_ALGO_COUNT "${ALGORITHM_ALGO_COUNT} + 1")
 endforeach()
 
-if(ALGORITHM_PACKAGE_COUNT EQUAL 0)
-  message(FATAL_ERROR "No algorithm package manifests found in ${ALGORITHM_LIBRARY_SOURCE_ROOT}")
+if(ALGORITHM_ALGO_COUNT EQUAL 0)
+  message(FATAL_ERROR "No algorithm manifests found in ${ALGORITHM_LIBRARY_SOURCE_ROOT}")
 endif()
 
 get_property(ALGORITHM_BUNDLE_KEYS GLOBAL PROPERTY ALGORITHM_BUNDLE_KEYS)
@@ -318,7 +317,7 @@ foreach(bundle_key IN LISTS ALGORITHM_BUNDLE_KEYS)
   endif()
 endforeach()
 
-get_property(ALGORITHM_PACKAGE_TARGETS GLOBAL PROPERTY ALGORITHM_PACKAGE_TARGETS)
-if(ALGORITHM_PACKAGE_TARGETS)
-  add_dependencies(algorithm_packages ${ALGORITHM_PACKAGE_TARGETS})
+get_property(ALGORITHM_ALGO_TARGETS GLOBAL PROPERTY ALGORITHM_ALGO_TARGETS)
+if(ALGORITHM_ALGO_TARGETS)
+  add_dependencies(algorithm_algos ${ALGORITHM_ALGO_TARGETS})
 endif()

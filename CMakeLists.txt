@@ -12,7 +12,6 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 if(WIN32)
   if(MSVC)
     message(STATUS "Windows: MSVC is the recommended toolchain for this project.")
-    add_compile_options("/utf-8")
   else()
     message(WARNING "Windows: MSVC is the recommended toolchain for this project, but continuing with the current compiler.")
   endif()
@@ -29,6 +28,11 @@ resolve_vma_dependency("${CMAKE_CURRENT_SOURCE_DIR}")
 resolve_spirv_reflect_dependency("${CMAKE_CURRENT_SOURCE_DIR}")
 resolve_cjson_dependency("${CMAKE_CURRENT_SOURCE_DIR}")
 resolve_mimalloc_dependency("${CMAKE_CURRENT_SOURCE_DIR}")
+resolve_assimp_dependency("${CMAKE_CURRENT_SOURCE_DIR}")
+
+if(WIN32 AND MSVC)
+  add_compile_options("/utf-8")
+endif()
 
 if(0)
 
@@ -305,6 +309,12 @@ add_library(common_data STATIC
 target_include_directories(common_data PUBLIC ${PROJECT_INCLUDE_DIRS})
 target_compile_definitions(common_data PRIVATE PROJECT_ROOT_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
+add_library(capabilities_sidecar STATIC
+  src/capabilities/sidecar/mesh_io.cpp
+)
+target_include_directories(capabilities_sidecar PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_link_libraries(capabilities_sidecar PUBLIC common_data ${ASSIMP_LINK_LIBS})
+
 add_library(debug_tool_hooks INTERFACE)
 target_sources(debug_tool_hooks INTERFACE
   src/debug_tool/debug_tool_hooker.h
@@ -326,7 +336,7 @@ target_include_directories(algorithm_management PUBLIC ${PROJECT_INCLUDE_DIRS})
 target_compile_definitions(algorithm_management PRIVATE
   ALGORITHM_MANAGEMENT_LAYER_INTERNAL_BUILD=1
 )
-target_link_libraries(algorithm_management PUBLIC common_data runtime_systems)
+target_link_libraries(algorithm_management PUBLIC common_data runtime_systems capabilities_sidecar)
 
 add_library(runtime_systems STATIC
   src/runtime_systems/window/sdl_window.cpp

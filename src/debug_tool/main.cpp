@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstring>
 #include <cstdlib>
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -23,7 +24,7 @@ namespace {
 
 struct PipelineRunnerOptions {
   bool enabled{false};
-  std::string algorithm_name{"v3a16_fireworks_pipeline_demo"};
+  std::string algorithm_name{"v4a16_fireworks_pipeline_demo"};
   std::string pipeline_name{};
   uint32_t ticks{24u};
   uint32_t preview_width{640u};
@@ -36,6 +37,20 @@ struct PipelineRunnerOptions {
 };
 
 struct AlgorithmRunnerOptions {
+  bool enabled{false};
+  std::string algorithm_name{"v6a6_pbd_ball_collision_demo"};
+  uint32_t ticks{24u};
+  uint32_t preview_width{640u};
+  uint32_t preview_height{480u};
+  std::string runner_endpoint{"127.0.0.1:0"};
+  std::string render_preview_output_path{
+    algorithmManager::ResolveAlgorithmLibraryRuntimeNormDebugInfoRoot().string() +
+      "/render_preview.ppm"};
+  debug_tool::AlgorithmExecutionPreference execution_preference{
+    debug_tool::AlgorithmExecutionPreference::Vk};
+};
+
+struct PreviewRenderServerOptions {
   bool enabled{false};
   std::string algorithm_name{"v6a6_pbd_ball_collision_demo"};
   uint32_t ticks{24u};
@@ -80,12 +95,215 @@ const char* _ExecutionPreferenceName(debug_tool::AlgorithmExecutionPreference pr
   return "unknown";
 }
 
+const char* _ExecutionPreferenceName(algorithmManager::AlgorithmExecutionPreference preference) {
+  switch (preference) {
+    case algorithmManager::AlgorithmExecutionPreference::Jobs: return "jobs";
+    case algorithmManager::AlgorithmExecutionPreference::Vk: return "vk";
+    case algorithmManager::AlgorithmExecutionPreference::Cuda: return "cuda";
+  }
+  return "unknown";
+}
+
+const char* _PhaseKindName(algorithmManager::AlgorithmPhaseKind phase_kind) {
+  switch (phase_kind) {
+    case algorithmManager::AlgorithmPhaseKind::Pretick: return "pretick";
+    case algorithmManager::AlgorithmPhaseKind::Exec: return "exec";
+    case algorithmManager::AlgorithmPhaseKind::AfterTick: return "aftertick";
+    case algorithmManager::AlgorithmPhaseKind::RenderResult: return "renderresult";
+    case algorithmManager::AlgorithmPhaseKind::Reflect: return "reflect";
+    case algorithmManager::AlgorithmPhaseKind::Custom: return "custom";
+  }
+  return "custom";
+}
+
 bool _ReadFloatBytes(const std::vector<std::byte>& bytes, float* out_value) {
   if (!out_value || bytes.size() < sizeof(float)) {
     return false;
   }
   std::memcpy(out_value, bytes.data(), sizeof(float));
   return true;
+}
+
+const debug_tool::AlgorithmReflectionValue* _FindReflectionValue(
+  const debug_tool::AlgorithmReflectionSnapshot& snapshot,
+  const char* container_name);
+
+std::optional<float> _ReadArrayFloatValue(
+  const debug_tool::AlgorithmReflectionSnapshot& snapshot,
+  const char* container_name,
+  size_t index);
+
+bool _ReadUint32Bytes(const std::vector<std::byte>& bytes, uint32_t* out_value) {
+  if (!out_value || bytes.size() < sizeof(uint32_t)) {
+    return false;
+  }
+  std::memcpy(out_value, bytes.data(), sizeof(uint32_t));
+  return true;
+}
+
+bool _ReadFloatBytes(const std::vector<std::byte>& bytes, size_t offset, float* out_value) {
+  if (!out_value || bytes.size() < offset + sizeof(float)) {
+    return false;
+  }
+  std::memcpy(out_value, bytes.data() + offset, sizeof(float));
+  return true;
+}
+
+void _PrintVec3(const char* label, const std::vector<std::byte>& bytes, size_t offset) {
+  float x = 0.0f;
+  float y = 0.0f;
+  float z = 0.0f;
+  if (!_ReadFloatBytes(bytes, offset + 0u, &x) ||
+      !_ReadFloatBytes(bytes, offset + sizeof(float), &y) ||
+      !_ReadFloatBytes(bytes, offset + sizeof(float) * 2u, &z)) {
+    return;
+  }
+  std::cout << label << "=(" << x << ", " << y << ", " << z << ')';
+}
+
+void _PrintVec4(const char* label, const std::vector<std::byte>& bytes, size_t offset) {
+  float x = 0.0f;
+  float y = 0.0f;
+  float z = 0.0f;
+  float w = 0.0f;
+  if (!_ReadFloatBytes(bytes, offset + 0u, &x) ||
+      !_ReadFloatBytes(bytes, offset + sizeof(float), &y) ||
+      !_ReadFloatBytes(bytes, offset + sizeof(float) * 2u, &z) ||
+      !_ReadFloatBytes(bytes, offset + sizeof(float) * 3u, &w)) {
+    return;
+  }
+  std::cout << label << "=(" << x << ", " << y << ", " << z << ", " << w << ')';
+}
+
+uint64_t _HashBytes(const std::vector<std::byte>& bytes) {
+  uint64_t hash = 1469598103934665603ull;
+  for (const std::byte value : bytes) {
+    hash ^= static_cast<uint64_t>(std::to_integer<unsigned int>(value));
+    hash *= 1099511628211ull;
+  }
+  return hash;
+}
+
+std::string _FormatBytePreview(const std::vector<std::byte>& bytes, size_t max_count) {
+  static constexpr char kHexDigits[] = "0123456789abcdef";
+  const size_t count = std::min(max_count, bytes.size());
+  std::string result;
+  result.reserve(count * 2u + (bytes.size() > count ? 3u : 0u));
+  for (size_t i = 0u; i < count; ++i) {
+    const unsigned int value = std::to_integer<unsigned int>(bytes[i]);
+    result.push_back(kHexDigits[(value >> 4u) & 0x0fu]);
+    result.push_back(kHexDigits[value & 0x0fu]);
+  }
+  if (bytes.size() > count) {
+    result += "...";
+  }
+  return result;
+}
+
+void _PrintReflectionValueHeader(
+  const char* value_kind,
+  const debug_tool::AlgorithmReflectionValue& value) {
+  std::cout << "      " << value_kind << ' ';
+  if (!value.reflection_object_name.empty()) {
+    std::cout << "object=" << value.reflection_object_name << ' ';
+  }
+  std::cout
+    << "container=" << value.container_name
+    << " filter=" << value.filter_name
+    << " storage=" << value.storage_kind
+    << " bytes=" << value.bytes.size();
+  if (!value.bytes.empty()) {
+    uint64_t hash = _HashBytes(value.bytes);
+    static constexpr char kHexDigits[] = "0123456789abcdef";
+    char hex_buffer[17]{};
+    for (int i = 15; i >= 0; --i) {
+      hex_buffer[static_cast<size_t>(i)] = kHexDigits[static_cast<size_t>(hash & 0x0fu)];
+      hash >>= 4u;
+    }
+    std::cout
+      << " hash=0x" << hex_buffer
+      << " preview=" << _FormatBytePreview(value.bytes, value.bytes.size() <= 64u ? value.bytes.size() : 32u);
+  }
+}
+
+void _PrintReflectionValueDetails(
+  const char* value_kind,
+  const debug_tool::AlgorithmReflectionValue& value) {
+  _PrintReflectionValueHeader(value_kind, value);
+  if (value.bytes.size() == sizeof(uint32_t)) {
+    uint32_t scalar_u32 = 0u;
+    float scalar_f32 = 0.0f;
+    if (_ReadUint32Bytes(value.bytes, &scalar_u32) && _ReadFloatBytes(value.bytes, &scalar_f32)) {
+      std::cout << " u32=" << scalar_u32 << " f32=" << scalar_f32;
+    }
+  }
+  std::cout << '\n';
+}
+
+void _PrintTeapotArrayReflection(const debug_tool::AlgorithmReflectionSnapshot& snapshot) {
+  const debug_tool::AlgorithmReflectionValue* scene_info = _FindReflectionValue(snapshot, "scene_info");
+  if (scene_info && scene_info->bytes.size() >= sizeof(float) * 4u) {
+    std::cout << "      scene_info ";
+    _PrintVec3("center", scene_info->bytes, 0u);
+    float radius = 0.0f;
+    if (_ReadFloatBytes(scene_info->bytes, sizeof(float) * 3u, &radius)) {
+      std::cout << " radius=" << radius;
+    }
+    std::cout << '\n';
+  }
+
+  const debug_tool::AlgorithmReflectionValue* material_buffer =
+    _FindReflectionValue(snapshot, "material_buffer");
+  if (material_buffer && material_buffer->bytes.size() >= sizeof(float) * 12u) {
+    std::cout << "      material_buffer ";
+    _PrintVec3("Ka", material_buffer->bytes, 0u);
+    float roughness = 0.0f;
+    if (_ReadFloatBytes(material_buffer->bytes, sizeof(float) * 3u, &roughness)) {
+      std::cout << " roughness=" << roughness;
+    }
+    std::cout << ' ';
+    _PrintVec3("Kd", material_buffer->bytes, sizeof(float) * 4u);
+    float metallic = 0.0f;
+    if (_ReadFloatBytes(material_buffer->bytes, sizeof(float) * 7u, &metallic)) {
+      std::cout << " metallic=" << metallic;
+    }
+    std::cout << ' ';
+    _PrintVec3("Ks", material_buffer->bytes, sizeof(float) * 8u);
+    float opacity = 0.0f;
+    if (_ReadFloatBytes(material_buffer->bytes, sizeof(float) * 11u, &opacity)) {
+      std::cout << " opacity=" << opacity;
+    }
+    std::cout << '\n';
+  }
+
+  const debug_tool::AlgorithmReflectionValue* triangle_buffer =
+    _FindReflectionValue(snapshot, "triangle_buffer");
+  if (triangle_buffer && triangle_buffer->bytes.size() >= sizeof(float) * 24u) {
+    std::cout << "      triangle_buffer[0] ";
+    _PrintVec4("p0", triangle_buffer->bytes, 0u);
+    std::cout << ' ';
+    _PrintVec4("p1", triangle_buffer->bytes, sizeof(float) * 4u);
+    std::cout << ' ';
+    _PrintVec4("p2", triangle_buffer->bytes, sizeof(float) * 8u);
+    std::cout << '\n';
+    std::cout << "      triangle_buffer[0] ";
+    _PrintVec4("n0", triangle_buffer->bytes, sizeof(float) * 12u);
+    std::cout << ' ';
+    _PrintVec4("n1", triangle_buffer->bytes, sizeof(float) * 16u);
+    std::cout << ' ';
+    _PrintVec4("n2", triangle_buffer->bytes, sizeof(float) * 20u);
+    std::cout << '\n';
+  }
+
+  const debug_tool::AlgorithmReflectionValue* bvh_buffer =
+    _FindReflectionValue(snapshot, "bvh_buffer");
+  if (bvh_buffer && bvh_buffer->bytes.size() >= sizeof(float) * 8u) {
+    std::cout << "      bvh_buffer[0] ";
+    _PrintVec4("min", bvh_buffer->bytes, 0u);
+    std::cout << ' ';
+    _PrintVec4("max", bvh_buffer->bytes, sizeof(float) * 4u);
+    std::cout << '\n';
+  }
 }
 
 std::optional<float> _FindScalarValue(
@@ -107,6 +325,10 @@ std::optional<float> _FindScalarValue(
   }
   return std::nullopt;
 }
+
+const debug_tool::AlgorithmReflectionValue* _FindReflectionValue(
+  const debug_tool::AlgorithmReflectionSnapshot& snapshot,
+  const char* container_name);
 
 const debug_tool::AlgorithmReflectionValue* _FindReflectionValue(
   const debug_tool::AlgorithmReflectionSnapshot& snapshot,
@@ -217,6 +439,15 @@ bool _IsAlgorithmRunnerInvocation(int argc, char** argv) {
   return false;
 }
 
+bool _IsPreviewRenderServerInvocation(int argc, char** argv) {
+  for (int i = 1; i < argc; ++i) {
+    if (argv[i] && std::string(argv[i]) == "--preview-render-server") {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool _IsRunnerServerInvocation(int argc, char** argv) {
   for (int i = 1; i < argc; ++i) {
     if (argv[i] && (std::string(argv[i]) == "--runner-server" || std::string(argv[i]) == "--runner-server-once")) {
@@ -271,6 +502,26 @@ bool _WritePpmImage(
   }
 
   return true;
+}
+
+std::vector<std::byte> _ReadBinaryFile(const std::filesystem::path& path) {
+  std::ifstream file(path, std::ios::binary | std::ios::ate);
+  if (!file) {
+    return {};
+  }
+
+  const std::streamsize size = file.tellg();
+  if (size <= 0) {
+    return {};
+  }
+
+  std::vector<std::byte> bytes(static_cast<size_t>(size));
+  file.seekg(0, std::ios::beg);
+  file.read(reinterpret_cast<char*>(bytes.data()), size);
+  if (!file) {
+    return {};
+  }
+  return bytes;
 }
 
 bool _ParsePipelineRunnerOptions(
@@ -502,6 +753,113 @@ bool _ParseAlgorithmRunnerOptions(
   return true;
 }
 
+bool _ParsePreviewRenderServerOptions(
+  int argc,
+  char** argv,
+  PreviewRenderServerOptions* out_options,
+  std::string* out_error_message) {
+  if (!out_options) {
+    if (out_error_message) {
+      *out_error_message = "Preview render server option output pointer is null.";
+    }
+    return false;
+  }
+
+  PreviewRenderServerOptions options{};
+  for (int i = 1; i < argc; ++i) {
+    const std::string argument = argv[i] ? argv[i] : "";
+    if (argument == "--preview-render-server") {
+      options.enabled = true;
+      continue;
+    }
+    if (argument == "--algorithm") {
+      if (i + 1 >= argc || !argv[i + 1] || !*argv[i + 1]) {
+        if (out_error_message) {
+          *out_error_message = "--algorithm requires a non-empty value.";
+        }
+        return false;
+      }
+      options.algorithm_name = argv[++i];
+      continue;
+    }
+    if (argument == "--ticks") {
+      if (i + 1 >= argc || !_ParseUInt32(argv[i + 1], &options.ticks) || options.ticks == 0u) {
+        if (out_error_message) {
+          *out_error_message = "--ticks requires a positive integer value.";
+        }
+        return false;
+      }
+      ++i;
+      continue;
+    }
+    if (argument == "--preview-width") {
+      if (i + 1 >= argc || !_ParseUInt32(argv[i + 1], &options.preview_width) || options.preview_width == 0u) {
+        if (out_error_message) {
+          *out_error_message = "--preview-width requires a positive integer value.";
+        }
+        return false;
+      }
+      ++i;
+      continue;
+    }
+    if (argument == "--preview-height") {
+      if (i + 1 >= argc || !_ParseUInt32(argv[i + 1], &options.preview_height) || options.preview_height == 0u) {
+        if (out_error_message) {
+          *out_error_message = "--preview-height requires a positive integer value.";
+        }
+        return false;
+      }
+      ++i;
+      continue;
+    }
+    if (argument == "--preview-output") {
+      if (i + 1 >= argc || !argv[i + 1] || !*argv[i + 1]) {
+        if (out_error_message) {
+          *out_error_message = "--preview-output requires a non-empty value.";
+        }
+        return false;
+      }
+      options.render_preview_output_path = argv[++i];
+      continue;
+    }
+    if (argument == "--execution") {
+      if (i + 1 >= argc || !_ParseExecutionPreference(argv[i + 1], &options.execution_preference)) {
+        if (out_error_message) {
+          *out_error_message = "--execution requires 'jobs', 'vk', or 'cuda'.";
+        }
+        return false;
+      }
+      ++i;
+      continue;
+    }
+    if (argument == "--runner-endpoint") {
+      if (i + 1 >= argc || !argv[i + 1] || !*argv[i + 1]) {
+        if (out_error_message) {
+          *out_error_message = "--runner-endpoint requires a non-empty value.";
+        }
+        return false;
+      }
+      options.runner_endpoint = argv[++i];
+      continue;
+    }
+    if (argument == "--help" || argument == "-h") {
+      std::cout
+        << "Usage:\n"
+        << "  debugTool.exe --preview-render-server "
+        << "[--algorithm <name>] [--ticks <count>] "
+        << "[--preview-width <px>] [--preview-height <px>] [--preview-output <path>] "
+        << "[--execution jobs|vk|cuda] [--runner-endpoint <host:port>]\n";
+      return false;
+    }
+  }
+
+  *out_options = std::move(options);
+  if (out_error_message) {
+    out_error_message->clear();
+  }
+  return true;
+}
+
 bool _ParseRunnerServerOptions(
   int argc,
   char** argv,
@@ -522,6 +880,7 @@ bool _ParseRunnerServerOptions(
       continue;
     }
     if (argument == "--runner-server-once") {
+      options.enabled = true;
       options.once = true;
       continue;
     }
@@ -551,20 +910,15 @@ bool _ParseRunnerServerOptions(
 }
 
 void _PrintReflectionSnapshot(const debug_tool::AlgorithmReflectionSnapshot& snapshot) {
+  std::cout << "    reflection.algorithm=" << snapshot.algorithm_name << '\n';
   std::cout << "    reflection.valid=" << (snapshot.valid ? "true" : "false") << '\n';
   for (const debug_tool::AlgorithmReflectionValue& value : snapshot.variables) {
-    std::cout << "      var " << value.container_name;
-    float scalar = 0.0f;
-    if (_ReadFloatBytes(value.bytes, &scalar)) {
-      std::cout << '=' << scalar;
-    } else {
-      std::cout << " bytes=" << value.bytes.size();
-    }
-    std::cout << '\n';
+    _PrintReflectionValueDetails("var", value);
   }
   for (const debug_tool::AlgorithmReflectionValue& value : snapshot.variable_arrays) {
-    std::cout << "      array " << value.container_name << " bytes=" << value.bytes.size() << '\n';
+    _PrintReflectionValueDetails("array", value);
   }
+  _PrintTeapotArrayReflection(snapshot);
   for (size_t index = 0u; index < 8u; ++index) {
     const std::optional<float> spark_state = _ReadArrayFloatValue(snapshot, "spark_state", index);
     if (!spark_state.has_value() || *spark_state <= 0.5f) {
@@ -653,13 +1007,13 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
     throw std::runtime_error(
       "Failed to create pipeline runner log directory: " + log_directory.string());
   }
-  const std::filesystem::path package_loader_probe_path = log_directory / "package_loader_probe.log";
+  const std::filesystem::path cache_loader_probe_path = log_directory / "cache_loader_probe.log";
   const std::filesystem::path agent_mount_probe_path = log_directory / "agent_mount_probe.log";
   const std::filesystem::path progress_path = log_directory / "progress_probe.log";
   const std::filesystem::path reflection_probe_path = log_directory / "pipeline_reflection_probe.log";
   const std::filesystem::path log_path = log_directory / "last_run.log";
   const std::filesystem::path render_preview_output_path(options.render_preview_output_path);
-  std::filesystem::remove(package_loader_probe_path, ec);
+  std::filesystem::remove(cache_loader_probe_path, ec);
   ec.clear();
   std::filesystem::remove(agent_mount_probe_path, ec);
   ec.clear();
@@ -927,10 +1281,6 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
       ++non_empty_pixel_count;
     }
   }
-  if (non_empty_pixel_count == 0u) {
-    throw std::runtime_error(
-      "Render preview frame is empty. summary=" + runtime.render_preview_debug_summary());
-  }
   if (!_WritePpmImage(render_preview_output_path, preview_rgba, preview_width, preview_height)) {
     throw std::runtime_error(
       "Failed to write render preview image: " + render_preview_output_path.string());
@@ -972,13 +1322,13 @@ bool _RunAlgorithmRunner(const AlgorithmRunnerOptions& options) {
     throw std::runtime_error(
       "Failed to create algorithm runner log directory: " + log_directory.string());
   }
-  const std::filesystem::path package_loader_probe_path = log_directory / "package_loader_probe.log";
+  const std::filesystem::path cache_loader_probe_path = log_directory / "cache_loader_probe.log";
   const std::filesystem::path attach_probe_path = log_directory / "attach_probe.log";
   const std::filesystem::path progress_path = log_directory / "progress_probe.log";
   const std::filesystem::path reflection_probe_path = log_directory / "algorithm_reflection_probe.log";
   const std::filesystem::path log_path = log_directory / "last_run.log";
   const std::filesystem::path render_preview_output_path(options.render_preview_output_path);
-  std::filesystem::remove(package_loader_probe_path, ec);
+  std::filesystem::remove(cache_loader_probe_path, ec);
   ec.clear();
   std::filesystem::remove(attach_probe_path, ec);
   ec.clear();
@@ -1120,6 +1470,45 @@ bool _RunAlgorithmRunner(const AlgorithmRunnerOptions& options) {
         << '\n';
       _PrintReflectionSnapshotPresence("reflection", summary.reflection_snapshot);
       _PrintReflectionSnapshot(summary.reflection_snapshot);
+      if (!summary.intervention_phase_summaries.empty()) {
+        std::cout << "    phase_count=" << summary.intervention_phase_summaries.size() << '\n';
+        for (const debug_tool::AlgorithmPhaseSummary& phase_summary : summary.intervention_phase_summaries) {
+          std::cout
+            << "      phase " << (phase_summary.phase_name.empty() ? "<phase>" : phase_summary.phase_name)
+            << " kind=" << _PhaseKindName(phase_summary.phase_kind)
+            << " exec=" << _ExecutionPreferenceName(phase_summary.execution_preference)
+            << '\n';
+          if (!phase_summary.functions.empty()) {
+            std::cout << "        functions=";
+            for (size_t i = 0u; i < phase_summary.functions.size(); ++i) {
+              if (i > 0u) {
+                std::cout << ',';
+              }
+              std::cout << phase_summary.functions[i];
+            }
+            std::cout << '\n';
+          }
+          if (!phase_summary.used_algorithm_containers.empty()) {
+            std::cout << "        containers=" << phase_summary.used_algorithm_containers.size() << '\n';
+            for (const algorithmManager::AlgorithmPhaseContainerBinding& binding :
+                 phase_summary.used_algorithm_containers) {
+              std::cout
+                << "          " << binding.container_name
+                << " kind=" << binding.container_kind
+                << " required=" << (binding.required ? "true" : "false")
+                << '\n';
+            }
+          }
+          if (!phase_summary.vertex_shader_path.empty() || !phase_summary.fragment_shader_path.empty()) {
+            std::cout
+              << "        shaders vertex="
+              << (phase_summary.vertex_shader_path.empty() ? "<none>" : phase_summary.vertex_shader_path)
+              << " fragment="
+              << (phase_summary.fragment_shader_path.empty() ? "<none>" : phase_summary.fragment_shader_path)
+              << '\n';
+          }
+        }
+      }
     }
   }
 
@@ -1177,10 +1566,6 @@ bool _RunAlgorithmRunner(const AlgorithmRunnerOptions& options) {
         preview_rgba[byte_index + 3u] != std::byte{0}) {
       ++non_empty_pixel_count;
     }
-  }
-  if (non_empty_pixel_count == 0u) {
-    throw std::runtime_error(
-      "Render preview frame is empty. summary=" + runtime.render_preview_debug_summary());
   }
   if (!_WritePpmImage(render_preview_output_path, preview_rgba, preview_width, preview_height)) {
     throw std::runtime_error(
@@ -1446,6 +1831,116 @@ bool _RunRunnerControlClient(
   return true;
 }
 
+std::filesystem::path _PreviewRenderEndpointFilePath() {
+  return algorithm::library_paths::ResolveTestDataRoot() / "runner_control" / "preview_render_endpoint.txt";
+}
+
+bool _RunPreviewRenderServer(const PreviewRenderServerOptions& options) {
+  bool is_pipeline = false;
+  std::string query_error_message;
+  DebugToolBackendRuntime type_probe_runtime;
+  if (!type_probe_runtime.IsPipelineAlgorithm(
+        options.algorithm_name,
+        &is_pipeline,
+        &query_error_message)) {
+    throw std::runtime_error(
+      query_error_message.empty()
+        ? ("Failed to query algorithm type for '" + options.algorithm_name + "'.")
+        : query_error_message);
+  }
+
+  const bool rendered = is_pipeline
+    ? _RunPipelineRunner(
+        PipelineRunnerOptions{
+          .enabled = true,
+          .algorithm_name = options.algorithm_name,
+          .ticks = options.ticks,
+          .preview_width = options.preview_width,
+          .preview_height = options.preview_height,
+          .runner_endpoint = options.runner_endpoint,
+          .render_preview_output_path = options.render_preview_output_path,
+          .execution_preference = options.execution_preference,
+        })
+    : _RunAlgorithmRunner(
+        AlgorithmRunnerOptions{
+          .enabled = true,
+          .algorithm_name = options.algorithm_name,
+          .ticks = options.ticks,
+          .preview_width = options.preview_width,
+          .preview_height = options.preview_height,
+          .runner_endpoint = options.runner_endpoint,
+          .render_preview_output_path = options.render_preview_output_path,
+          .execution_preference = options.execution_preference,
+        });
+  if (!rendered) {
+    return false;
+  }
+
+  const std::filesystem::path render_preview_path(options.render_preview_output_path);
+  const std::vector<std::byte> preview_bytes = _ReadBinaryFile(render_preview_path);
+  if (preview_bytes.empty()) {
+    throw std::runtime_error("Preview render output is empty: " + render_preview_path.string());
+  }
+
+  const std::filesystem::path endpoint_path = _PreviewRenderEndpointFilePath();
+  std::error_code ec;
+  std::filesystem::create_directories(endpoint_path.parent_path(), ec);
+  ec.clear();
+  std::ofstream endpoint_file(endpoint_path, std::ios::binary | std::ios::trunc);
+  if (!endpoint_file) {
+    throw std::runtime_error("Failed to open preview render endpoint file: " + endpoint_path.string());
+  }
+
+  debug_tool_backend::runner_control::Endpoint endpoint{};
+  if (!debug_tool_backend::runner_control::ParseEndpoint(options.runner_endpoint, &endpoint)) {
+    throw std::runtime_error("Invalid preview render endpoint: " + options.runner_endpoint);
+  }
+
+  const auto handler =
+    [preview_bytes](const std::string& request, bool* out_shutdown_requested) -> debug_tool_backend::runner_control::BinaryResponse {
+      if (request == "shutdown" || request == "--runner-shutdown") {
+        if (out_shutdown_requested) {
+          *out_shutdown_requested = true;
+        }
+        return {"OK shutdown", {}};
+      }
+      if (request != "frame" && request != "preview-frame" && request != "render-preview") {
+        return {"ERR unsupported request", {}};
+      }
+      return {
+        "OK frame bytes=" + std::to_string(preview_bytes.size()),
+        preview_bytes,
+      };
+    };
+
+  const auto on_bound_endpoint = [&](const debug_tool_backend::runner_control::Endpoint& bound_endpoint) {
+    endpoint_file << debug_tool_backend::runner_control::FormatEndpoint(bound_endpoint) << '\n';
+    endpoint_file.flush();
+    _AppendRunnerControlLog(
+      "preview_render_server.log",
+      "preview_render_server.begin endpoint=" +
+        debug_tool_backend::runner_control::FormatEndpoint(bound_endpoint));
+    std::cout
+      << "preview_render_server.begin endpoint="
+      << debug_tool_backend::runner_control::FormatEndpoint(bound_endpoint)
+      << '\n';
+    std::cout.flush();
+  };
+
+  const bool served = debug_tool_backend::runner_control::RunBinaryServer(
+    endpoint,
+    handler,
+    on_bound_endpoint);
+  if (!served) {
+    return false;
+  }
+
+  _AppendRunnerControlLog("preview_render_server.log", "preview_render_server.stopped");
+  std::cout << "preview_render_server.stopped\n";
+  std::cout.flush();
+  return true;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -1461,6 +1956,24 @@ int main(int argc, char** argv) {
       }
       if (runner_server_options.enabled) {
         return _RunRunnerControlServer(runner_server_options) ? 0 : 1;
+      }
+    }
+
+    if (_IsPreviewRenderServerInvocation(argc, argv)) {
+      PreviewRenderServerOptions preview_render_server_options{};
+      std::string preview_render_server_parse_error;
+      if (!_ParsePreviewRenderServerOptions(
+            argc,
+            argv,
+            &preview_render_server_options,
+            &preview_render_server_parse_error)) {
+        if (!preview_render_server_parse_error.empty()) {
+          throw std::runtime_error(preview_render_server_parse_error);
+        }
+        return 0;
+      }
+      if (preview_render_server_options.enabled) {
+        return _RunPreviewRenderServer(preview_render_server_options) ? 0 : 1;
       }
     }
 

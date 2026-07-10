@@ -86,7 +86,7 @@ inline uint32_t ExtractPackagePrecisionBitsFromText(
   return parsed;
 }
 
-inline bool TryEvaluatePriciseArrayToken(
+inline bool TryEvaluatePreciseArrayToken(
   const std::string& token,
   uint32_t default_precision_bits,
   std::string* out_replacement) {
@@ -161,7 +161,11 @@ inline std::string NormalizeAlgorithmPackageJsonText(std::string text) {
     while (back > 0u && std::isspace(static_cast<unsigned char>(output[back - 1u])) != 0) {
       --back;
     }
-    if (back < 9u || output.substr(back - 9u, 9u) != "\"pricise\"") {
+    if (back < 9u) {
+      continue;
+    }
+    const std::string key_token = output.substr(back - 9u, 9u);
+    if (key_token != "\"precise\"") {
       continue;
     }
 
@@ -204,7 +208,7 @@ inline std::string NormalizeAlgorithmPackageJsonText(std::string text) {
         std::string replacement{};
         const std::string trimmed_token = TrimText(token);
         if (!trimmed_token.empty() &&
-            TryEvaluatePriciseArrayToken(trimmed_token, default_precision_bits, &replacement)) {
+            TryEvaluatePreciseArrayToken(trimmed_token, default_precision_bits, &replacement)) {
           output.append(replacement);
         } else {
           output.append(token);
@@ -355,27 +359,16 @@ inline std::vector<uint32_t> GetUintList(const cJSON* item) {
   return values;
 }
 
-inline std::vector<uint32_t> GetShapeField(const cJSON* object) {
-  std::vector<uint32_t> shape{};
+inline uint32_t GetTupleWidthField(const cJSON* object, uint32_t fallback = 1u) {
   if (!object || !cJSON_IsObject(object)) {
-    return shape;
+    return fallback;
   }
 
-  const cJSON* shape_item = cJSON_GetObjectItemCaseSensitive(object, "shape");
-  if (!shape_item || !cJSON_IsArray(shape_item)) {
-    return shape;
+  const cJSON* tuple_width_item = cJSON_GetObjectItemCaseSensitive(object, "tuple_width");
+  if (tuple_width_item && cJSON_IsNumber(tuple_width_item) && tuple_width_item->valuedouble > 0.0) {
+    return static_cast<uint32_t>(tuple_width_item->valuedouble);
   }
-
-  const int count = cJSON_GetArraySize(shape_item);
-  shape.reserve(count > 0 ? static_cast<size_t>(count) : 0u);
-  for (int i = 0; i < count; ++i) {
-    const cJSON* dim = cJSON_GetArrayItem(shape_item, i);
-    if (!dim || !cJSON_IsNumber(dim) || dim->valuedouble < 0.0) {
-      continue;
-    }
-    shape.push_back(static_cast<uint32_t>(dim->valuedouble));
-  }
-  return shape;
+  return fallback;
 }
 
 }  // namespace json_utils

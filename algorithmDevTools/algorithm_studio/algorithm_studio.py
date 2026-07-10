@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import ctypes
+import io
 import json
 import math
 import mimetypes
@@ -13,6 +14,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+import socket
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
@@ -22,6 +24,7 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 from typing import Any
 from ctypes import wintypes
 from urllib.parse import unquote, urlparse
+from PIL import Image, ImageTk
 
 LRESULT_TYPE = getattr(ctypes, "c_ssize_t", ctypes.c_longlong if ctypes.sizeof(ctypes.c_void_p) == ctypes.sizeof(ctypes.c_longlong) else ctypes.c_long)
 CHAT_HISTORY_FULL_TURN_LIMIT = 12
@@ -177,6 +180,8 @@ class AlgorithmStudioApp(
 
         self.project = ProjectState()
         self.project_file_path: Path | None = None
+        self.project_manifest_loaded_text_cache = ""
+        self.project_manifest_source_mode = "generated"
         self.algorithm_name_prefix = ""
         self._normalize_project_algorithm_identity(self.project)
         self.project_manifest_text_cache = self.project.rebuild_manifest_text()
@@ -224,6 +229,7 @@ class AlgorithmStudioApp(
         self.canvas_last_click_info: dict[str, Any] | None = None
         self.message_center_handlers: dict[str, Any] = {}
         self.palette_shell: ttk.Frame | None = None
+        self.scene_canvas_frame: ttk.LabelFrame | None = None
         self.palette_canvas: tk.Canvas | None = None
         self.palette_inner_frame: ttk.Frame | None = None
         self.palette_blueprint_frame: ttk.Frame | None = None
@@ -324,21 +330,24 @@ class AlgorithmStudioApp(
         self.execution_runs: list[dict[str, Any]] = []
         self.execution_current_run: dict[str, Any] | None = None
         self.preview_text: tk.Text | None = None
-        self.render_preview_photo: tk.PhotoImage | None = None
-        self.render_preview_output_path = (
-            PROJECT_ROOT.parent / "testData" / "norm" / "debugInfo" / "render_preview.ppm"
+        self.render_preview_photo: ImageTk.PhotoImage | None = None
+        self.render_preview_endpoint_path = (
+            PROJECT_ROOT.parent / "testData" / "runner_control" / "preview_render_endpoint.txt"
         )
         self.render_preview_status_var = tk.StringVar(value="renderpreview is idle.")
         self.render_preview_mount_inflight = False
+        self.render_preview_retry_after_id: int | None = None
         self.document_panel: ttk.Frame | None = None
         self.document_content_frame: ttk.Frame | None = None
-        self.document_panel_title_var = tk.StringVar(value="algoPrj")
+        self.document_panel_title_var = tk.StringVar(value="algoDevDoc")
         self.document_back_button: ttk.Button | None = None
         self.document_view_graph_button: ttk.Button | None = None
         self.document_view_text_button: ttk.Button | None = None
         self.document_text_scrollbar: ttk.Scrollbar | None = None
         self.document_graph_canvas: tk.Canvas | None = None
         self.scene_document_pane: tk.PanedWindow | None = None
+        self.scene_document_split_drag_state: dict[str, int] | None = None
+        self.scene_document_split_handle_button: ttk.Button | None = None
         self.log_text: tk.Text | None = None
         self.canvas: tk.Canvas | None = None
         self.container_list: tk.Listbox | None = None
@@ -386,6 +395,9 @@ class AlgorithmStudioApp(
         self._chat_drop_hwnd: int | None = None
         self.sidebar_toggle_button: ttk.Button | None = None
         self.connection_panel_visible_var = tk.BooleanVar(value=False)
+        self.workspace_palette_visible_var = tk.BooleanVar(value=True)
+        self.workspace_document_visible_var = tk.BooleanVar(value=True)
+        self.workspace_sidebar_visible_var = tk.BooleanVar(value=True)
         self.welcome_frame: ttk.Frame | None = None
         self.welcome_result: str | None = None
         self.execution_body_frame: ttk.Frame | None = None
@@ -402,6 +414,7 @@ class AlgorithmStudioApp(
         self._apply_drag_palette_panel_layout()
         self._apply_selection_panel_layout()
         self._apply_execution_panel_layout()
+        self._apply_workspace_panel_layout()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._sync_project_to_vars()
         self._refresh_all()
@@ -606,17 +619,19 @@ class AlgorithmStudioApp(
         split = tk.PanedWindow(
             frame,
             orient="vertical",
-            sashwidth=10,
+            sashwidth=16,
             sashrelief="raised",
             bg=COLORS["window"],
             bd=0,
             relief="flat",
+            cursor="sb_v_double_arrow",
             opaqueresize=True,
         )
         split.grid(row=0, column=0, sticky="nsew")
         self.scene_document_pane = split
 
         canvas_frame = ttk.LabelFrame(split, text="Scene", padding=8)
+        self.scene_canvas_frame = canvas_frame
         canvas_frame.rowconfigure(2, weight=1)
         canvas_frame.columnconfigure(0, weight=1)
 
@@ -747,8 +762,6 @@ class AlgorithmStudioApp(
             ("renderresult", "renderresult", "interventioner_render", "algorithmDevScene"),
             ("reflect", "reflect", "reflector_overview", "algorithmDevScene"),
             ("allinone", "allinone", "all_in_one", "algorithmDevScene"),
-            ("container", "container", "container_overview", "helperScene"),
-            ("decomposer", "decomposer", "decomposer_overview", "helperScene"),
             ("d2c", "d2c", "decomposer2container_overview", "helperScene"),
             ("renderpreview", "renderpreview", "renderpreview", "renderPreviewScene"),
         )
@@ -836,13 +849,20 @@ class AlgorithmStudioApp(
         self.canvas.bind("<Button-5>", self._on_canvas_mouse_wheel)
         self.canvas.bind("<Configure>", lambda _event: self._redraw_canvas())
 
-        document_frame = ttk.LabelFrame(split, text="algoPrj", padding=8)
-        document_frame.rowconfigure(1, weight=1)
+        document_frame = ttk.LabelFrame(split, text="algoDevDoc", padding=8)
+        document_frame.rowconfigure(2, weight=1)
         document_frame.columnconfigure(0, weight=1)
         self.document_panel = document_frame
 
+        split_handle = ttk.Button(document_frame, text="Drag Split")
+        split_handle.grid(row=0, column=0, sticky="e", pady=(0, 8))
+        split_handle.bind("<ButtonPress-1>", self._start_scene_document_split_drag)
+        split_handle.bind("<B1-Motion>", self._drag_scene_document_split)
+        split_handle.bind("<ButtonRelease-1>", self._finish_scene_document_split_drag)
+        self.scene_document_split_handle_button = split_handle
+
         document_header = ttk.Frame(document_frame)
-        document_header.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        document_header.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 8))
         document_header.columnconfigure(0, weight=1)
         ttk.Label(document_header, textvariable=self.document_panel_title_var).grid(row=0, column=0, sticky="w")
         graph_button = ttk.Button(document_header, text="Graphic", command=lambda: self._set_document_panel_view_mode("graphic"))
@@ -856,7 +876,7 @@ class AlgorithmStudioApp(
         self.document_back_button = back_button
 
         document_content = ttk.Frame(document_frame)
-        document_content.grid(row=1, column=0, columnspan=2, sticky="nsew")
+        document_content.grid(row=2, column=0, columnspan=2, sticky="nsew")
         document_content.columnconfigure(0, weight=1)
         document_content.rowconfigure(0, weight=1)
         self.document_content_frame = document_content
@@ -894,8 +914,8 @@ class AlgorithmStudioApp(
         )
         document_graph_canvas.bind("<Configure>", lambda _event: self._refresh_document_graph_view())
         self.document_graph_canvas = document_graph_canvas
-        split.add(canvas_frame, minsize=260)
-        split.add(document_frame, minsize=140)
+        split.add(canvas_frame, minsize=220)
+        split.add(document_frame, minsize=120)
 
         def _set_initial_document_split() -> None:
             if not self.scene_document_pane:
@@ -906,6 +926,7 @@ class AlgorithmStudioApp(
         self.root.after(0, _set_initial_document_split)
         self._refresh_document_panel_header()
         self._apply_document_panel_view_mode()
+        self._apply_workspace_panel_layout()
 
     def _build_sidebar_panel(self, parent: ttk.Frame) -> None:
         shell = ttk.Frame(parent, width=SIDEBAR_EXPANDED_WIDTH, padding=(0, 0, 0, 0))
@@ -1140,6 +1161,47 @@ class AlgorithmStudioApp(
                 self.sidebar_body.grid()
             self.sidebar_toggle_button.configure(text="<")
 
+    def _set_workspace_panel_visibility(self, panel_name: str, visible: bool) -> None:
+        normalized = str(panel_name).strip().lower()
+        if normalized == "palette":
+            self.workspace_palette_visible_var.set(bool(visible))
+        elif normalized == "document":
+            self.workspace_document_visible_var.set(bool(visible))
+        elif normalized == "sidebar":
+            self.workspace_sidebar_visible_var.set(bool(visible))
+        else:
+            raise AssertionError(f"Unsupported workspace panel: {panel_name}")
+        self._apply_workspace_panel_layout()
+
+    def _apply_workspace_panel_layout(self) -> None:
+        force_compact = self.canvas_view_mode == "renderpreview"
+
+        if self.palette_shell is not None:
+            palette_visible = self.workspace_palette_visible_var.get() and not force_compact
+            if palette_visible:
+                if not self.palette_shell.winfo_ismapped():
+                    self.palette_shell.grid()
+            else:
+                self.palette_shell.grid_remove()
+
+        if self.sidebar_shell is not None:
+            sidebar_visible = self.workspace_sidebar_visible_var.get()
+            if sidebar_visible:
+                if not self.sidebar_shell.winfo_ismapped():
+                    self.sidebar_shell.grid()
+            else:
+                self.sidebar_shell.grid_remove()
+
+        if self.scene_document_pane is not None and self.document_panel is not None:
+            document_visible = self.workspace_document_visible_var.get() and not force_compact
+            document_managed = self.document_panel.winfo_manager() == "panedwindow"
+            if document_visible:
+                if not document_managed:
+                    self.scene_document_pane.add(self.document_panel, minsize=120)
+            else:
+                if document_managed:
+                    self.scene_document_pane.forget(self.document_panel)
+
     def _apply_connection_panel_layout(self) -> None:
         if not self.connection_row or not self.connection_toggle_button:
             return
@@ -1373,9 +1435,18 @@ class AlgorithmStudioApp(
         self.root.title(title)
 
     def _open_project_from_path(self, path: Path, *, source: str, reset_chat: bool = False) -> None:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        raw_text = path.read_text(encoding="utf-8")
+        payload = json.loads(raw_text)
         self.project_file_path = path
+        self.project_manifest_loaded_text_cache = raw_text
+        self.project_manifest_source_mode = "loaded"
         self._replace_project_state(ProjectState.from_package_json(payload), source=source, reset_chat=reset_chat)
+        self.document_editor_mode = "manifest"
+        self.document_panel_view_mode = "text"
+        self.document_editor_target_kind = None
+        self.document_editor_target_name = None
+        self._open_manifest_in_document_panel()
+        self._set_canvas_view_mode("graph", log_message=f"Loaded {path.name}.")
         self._refresh_window_title()
 
     def _apply_project_vars(self) -> None:
@@ -1388,6 +1459,8 @@ class AlgorithmStudioApp(
         self._refresh_all()
 
     def _reset_scene(self) -> None:
+        self.project_manifest_source_mode = "generated"
+        self.project_manifest_loaded_text_cache = ""
         self._replace_project_state(self._new_skeleton_project(), source="Scene reset.", reset_chat=True)
         self.project_file_path = None
         self._refresh_window_title()
@@ -1397,8 +1470,9 @@ class AlgorithmStudioApp(
         template_path = DEFAULT_TEMPLATE_PATH
         if not template_path.exists():
             raise RuntimeError(f"Default project template is missing: {template_path}")
-        temp_dir = Path(tempfile.mkdtemp(prefix="algorithmDevTools_project_"))
-        project_path = temp_dir / "new_project.algoPrj"
+        dev_algo_dir = PROJECT_ROOT.parent / "algorithmLib" / "devAlgo"
+        dev_algo_dir.mkdir(parents=True, exist_ok=True)
+        project_path = dev_algo_dir / "current.algoDevDoc"
         shutil.copyfile(template_path, project_path)
         self._open_project_from_path(project_path, source=f"Created new project from {template_path.name}.", reset_chat=True)
         self._log(f"Created new project from template {template_path} at {project_path}.")
@@ -1408,8 +1482,9 @@ class AlgorithmStudioApp(
 
     def _load_package(self) -> None:
         path = filedialog.askopenfilename(
-            title="Load algoPrj project",
-            filetypes=[("algoPrj files", "*.algoPrj"), ("JSON files", "*.json"), ("All files", "*.*")],
+            title="Load algoDevDoc project",
+            initialdir=str(PROJECT_ROOT.parent / "algorithmLib" / "devAlgo"),
+            filetypes=[("algoDevDoc files", "*.algoDevDoc"), ("JSON files", "*.json"), ("All files", "*.*")],
         )
         if not path:
             return
@@ -1418,15 +1493,16 @@ class AlgorithmStudioApp(
         except Exception as exc:  # noqa: BLE001
             messagebox.showerror("Load failed", f"{path}\n\n{exc}")
             return
-        self._log(f"Loaded algoPrj {path}.")
+        self._log(f"Loaded algoDevDoc {path}.")
 
     def _save_package(self) -> None:
         if not self._commit_document_editor_or_report():
             return
         path = filedialog.asksaveasfilename(
-            title="Save algoPrj project",
-            defaultextension=".algoPrj",
-            filetypes=[("algoPrj files", "*.algoPrj"), ("JSON files", "*.json"), ("All files", "*.*")],
+            title="Save algoDevDoc project",
+            initialdir=str(PROJECT_ROOT.parent / "algorithmLib" / "devAlgo"),
+            defaultextension=".algoDevDoc",
+            filetypes=[("algoDevDoc files", "*.algoDevDoc"), ("JSON files", "*.json"), ("All files", "*.*")],
         )
         if not path:
             return
@@ -1435,12 +1511,13 @@ class AlgorithmStudioApp(
         Path(path).write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
         self.project_file_path = Path(path)
         self._refresh_window_title()
-        self._log(f"Saved algoPrj to {path}.")
+        self._log(f"Saved algoDevDoc to {path}.")
         self.status_var.set(f"Saved {Path(path).name}.")
 
     def _export_cpp_stub(self) -> None:
         path = filedialog.asksaveasfilename(
             title="Save C++ skeleton",
+            initialdir=str(PROJECT_ROOT.parent / "algorithmLib" / "devAlgo"),
             defaultextension=".cpp",
             filetypes=[("C++ files", "*.cpp"), ("All files", "*.*")],
         )
@@ -1481,8 +1558,32 @@ class AlgorithmStudioApp(
     def _existing_algorithm_folder(self, algorithm_name: str) -> Path:
         return PROJECT_ROOT.parent / "algorithmLib" / "algorithmSrc" / algorithm_name
 
-    def _existing_algorithm_catalog_path(self) -> Path:
-        return PROJECT_ROOT.parent / "algorithmLib" / "algorithmSrc" / "algorithm_catalog.json"
+    def _existing_algorithm_runtime_folder(self, algorithm_name: str) -> Path:
+        root = PROJECT_ROOT.parent / "algorithmLib" / "algorithmruntimeLib"
+        norm_path = root / "norm" / algorithm_name
+        if norm_path.exists():
+            return norm_path
+        return root / algorithm_name
+
+    def _current_algorithm_name_for_preview(self) -> str:
+        algorithm_name = self.project.algorithm_name.strip() or self.project.package_name.strip()
+        if not algorithm_name:
+            raise RuntimeError("Algorithm name is required before preview.")
+        return algorithm_name
+
+    def _locate_current_algorithm_folder(self) -> None:
+        algorithm_name = self.project.algorithm_name.strip() or self.project.package_name.strip() or "new_algorithm"
+        path = self._existing_algorithm_folder(algorithm_name)
+        os.startfile(str(path))
+        self.status_var.set(f"Opened {path}.")
+        self._log(f"Located algorithm folder {path}.")
+
+    def _locate_current_algorithm_runtime_folder(self) -> None:
+        algorithm_name = self._current_algorithm_name_for_preview()
+        path = self._existing_algorithm_runtime_folder(algorithm_name)
+        os.startfile(str(path))
+        self.status_var.set(f"Opened {path}.")
+        self._log(f"Located runtime algorithm folder {path}.")
 
     def _materialize_stage_shader(
         self,
@@ -1533,51 +1634,15 @@ class AlgorithmStudioApp(
             )
         return scripts
 
-    def _update_algorithm_catalog_entry(self, algorithm_name: str, manifest_name: str) -> None:
-        catalog_path = self._existing_algorithm_catalog_path()
-        payload: dict[str, Any]
-        if catalog_path.exists():
-            payload = json.loads(catalog_path.read_text(encoding="utf-8"))
-            if not isinstance(payload, dict):
-                raise RuntimeError("algorithm_catalog.json root must be an object.")
-        else:
-            payload = {}
-        raw_algorithms = payload.get("algorithms", [])
-        if raw_algorithms is None:
-            raw_algorithms = []
-        if not isinstance(raw_algorithms, list):
-            raise RuntimeError("algorithm_catalog.json algorithms must be a list.")
-        algorithms: list[dict[str, Any]] = []
-        for entry in raw_algorithms:
-            if not isinstance(entry, dict):
-                raise RuntimeError("algorithm_catalog.json contains a non-object algorithm entry.")
-            if str(entry.get("name") or "").strip() == algorithm_name:
-                continue
-            algorithms.append(entry)
-        algorithms.append(
-            {
-                "name": algorithm_name,
-                "display_name": algorithm_name,
-                "folder": algorithm_name,
-                "container_manifest": manifest_name,
-                "decomposer": manifest_name,
-                "reflector": manifest_name,
-                "intervention": manifest_name,
-            }
-        )
-        algorithms.sort(key=lambda entry: str(entry.get("name") or ""))
-        payload["algorithms"] = algorithms
-        catalog_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-
     def _materialize_algorithm_bundle(self) -> tuple[str, Path]:
         if not self._commit_document_editor_or_report():
-            raise RuntimeError("algoPrj is invalid.")
+            raise RuntimeError("algoDevDoc is invalid.")
         algorithm_name = self._canonical_build_algorithm_name()
         bundle_dir = self._existing_algorithm_folder(algorithm_name)
         bundle_dir.mkdir(parents=True, exist_ok=True)
 
-        expected_manifest_name = f"{algorithm_name}_package.algoPrj"
-        conflicting_manifests = [path.name for path in bundle_dir.glob("*_package.algoPrj") if path.name != expected_manifest_name]
+        expected_manifest_name = "manifest.json"
+        conflicting_manifests = [path.name for path in bundle_dir.glob("*_package.algoDevDoc")]
         if conflicting_manifests:
             raise RuntimeError(f"Remove old package manifests from {bundle_dir.name}: {', '.join(conflicting_manifests)}")
 
@@ -1589,6 +1654,13 @@ class AlgorithmStudioApp(
         manifest = copy.deepcopy(self.project.to_package_json())
         manifest["algorithm_name"] = algorithm_name
         manifest["package_name"] = algorithm_name
+        manifest["build_finished"] = True
+        doc_section = manifest.get("doc")
+        if not isinstance(doc_section, dict):
+            doc_section = {}
+        doc_section["symbol"] = "build"
+        doc_section["build_finished"] = True
+        manifest["doc"] = doc_section
         manifest.pop("ui", None)
         manifest.pop("notes", None)
         manifest.pop("function", None)
@@ -1640,7 +1712,6 @@ class AlgorithmStudioApp(
         }
         scripts_path.write_text(json.dumps(scripts_payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
-        self._update_algorithm_catalog_entry(algorithm_name, expected_manifest_name)
         return algorithm_name, bundle_dir
 
     def _summarize_build_output(self, stdout_text: str, stderr_text: str) -> str:
@@ -1687,18 +1758,19 @@ class AlgorithmStudioApp(
         if self.render_preview_mount_inflight:
             return
 
-        algorithm_name = self.project.algorithm_name.strip()
-        if not algorithm_name:
-            algorithm_name = self._canonical_build_algorithm_name()
+        algorithm_name = self._current_algorithm_name_for_preview()
         if not self.project.build_finished:
-            self.render_preview_status_var.set(f"{algorithm_name} is not built yet.")
+            self.render_preview_status_var.set(f"Build {algorithm_name} first before renderpreview.")
             self._log(f"Refused debugTool preview mount for {algorithm_name}: build is not finished.")
-            messagebox.showerror("Preview mount error", "Algorithm must be built before it can be mounted.")
-            self._refresh_all()
             return
 
-        self.render_preview_status_var.set(f"Mounting {algorithm_name} into debug agent...")
-        self._log(f"Requested debugTool preview mount for {algorithm_name}.")
+        runtime_path = self._existing_algorithm_runtime_folder(algorithm_name)
+        if not runtime_path.exists():
+            raise RuntimeError(f"Built algorithm runtime folder is missing: {runtime_path}")
+
+        self._locate_current_algorithm_runtime_folder()
+        self.render_preview_status_var.set(f"Mounting built algorithm {algorithm_name} from {runtime_path}...")
+        self._log(f"Requested debugTool preview mount for built algorithm {algorithm_name} at {runtime_path}.")
         self.render_preview_mount_inflight = True
 
         process = subprocess.Popen(
@@ -1708,6 +1780,18 @@ class AlgorithmStudioApp(
         )
 
         import threading
+
+        def bootstrap() -> None:
+            while not self.render_preview_endpoint_path.exists():
+                if process.poll() is not None:
+                    return
+                time.sleep(0.1)
+
+            def finalize_preview() -> None:
+                self.render_preview_status_var.set(f"Linked {algorithm_name} to preview render server.")
+                self._refresh_all()
+
+            self.root.after(0, finalize_preview)
 
         def watcher() -> None:
             returncode = process.wait()
@@ -1724,14 +1808,65 @@ class AlgorithmStudioApp(
 
             self.root.after(0, finalize)
 
+        threading.Thread(target=bootstrap, daemon=True).start()
         threading.Thread(target=watcher, daemon=True).start()
 
-    def _load_render_preview_photo(self) -> None:
-        path = self.render_preview_output_path
-        if not path.exists():
-            self.render_preview_photo = None
+    def _cancel_render_preview_retry(self) -> None:
+        after_id = self.render_preview_retry_after_id
+        if after_id is None:
             return
-        self.render_preview_photo = tk.PhotoImage(file=str(path))
+        self.root.after_cancel(after_id)
+        self.render_preview_retry_after_id = None
+
+    def _schedule_render_preview_retry(self, delay_ms: int = 250) -> None:
+        if self.render_preview_retry_after_id is not None:
+            return
+
+        def retry() -> None:
+            self.render_preview_retry_after_id = None
+            if self.canvas_view_mode == "renderpreview":
+                self._refresh_all()
+
+        self.render_preview_retry_after_id = self.root.after(delay_ms, retry)
+
+    def _fetch_render_preview_frame(self) -> bytes:
+        endpoint_text = self.render_preview_endpoint_path.read_text(encoding="utf-8").strip()
+        host, port_text = endpoint_text.rsplit(":", 1)
+        with socket.create_connection((host, int(port_text)), timeout=10.0) as connection:
+            connection.sendall(b"frame\n")
+            connection.shutdown(socket.SHUT_WR)
+            response = bytearray()
+            while True:
+                chunk = connection.recv(65536)
+                if not chunk:
+                    break
+                response.extend(chunk)
+        _, _, payload = bytes(response).partition(b"\n")
+        return payload or bytes(response)
+
+    def _load_render_preview_photo(self) -> None:
+        if self.canvas_view_mode != "renderpreview":
+            self.render_preview_photo = None
+            self._cancel_render_preview_retry()
+            return
+        if self.render_preview_endpoint_path.exists():
+            try:
+                payload = self._fetch_render_preview_frame()
+            except (ConnectionRefusedError, TimeoutError, OSError):
+                self.render_preview_photo = None
+                self._schedule_render_preview_retry()
+                return
+        else:
+            self.render_preview_photo = None
+            self._schedule_render_preview_retry()
+            return
+        if not payload:
+            self.render_preview_photo = None
+            self._schedule_render_preview_retry()
+            return
+        image = Image.open(io.BytesIO(payload))
+        self.render_preview_photo = ImageTk.PhotoImage(image)
+        self._cancel_render_preview_retry()
 
     def _build_current_algorithm(self) -> None:
         try:
@@ -1810,9 +1945,14 @@ class AlgorithmStudioApp(
     def _sync_project_manifest_cache(self) -> None:
         content_signature = self._project_content_signature()
         content_changed = content_signature != self.project_content_signature_cache
+        if content_changed:
+            self.project_manifest_source_mode = "generated"
         if content_changed and self.project.build_finished:
             self.project.build_finished = False
-        manifest_text = self.project.rebuild_manifest_text()
+        if self.project_manifest_source_mode == "loaded" and not content_changed:
+            manifest_text = self.project_manifest_loaded_text_cache
+        else:
+            manifest_text = self.project.rebuild_manifest_text()
         if manifest_text != self.project_manifest_text_cache:
             self.project_manifest_revision += 1
             self.project_doc_dirty = True
@@ -1831,13 +1971,13 @@ class AlgorithmStudioApp(
                 return text
         cached = self._project_manifest_text().strip()
         if not cached:
-            raise AssertionError("algoPrj text is unavailable.")
+            raise AssertionError("algoDevDoc text is unavailable.")
         return cached
 
     def _agent_document_context(self) -> str:
         return "\n".join(
             [
-                "Current algoPrj:",
+                "Current algoDevDoc:",
                 self._current_document_text_for_agent(),
             ]
         )
@@ -1891,6 +2031,8 @@ class AlgorithmStudioApp(
         self._cancel_document_apply()
         self.document_editor_dirty = False
         self.document_last_error = None
+        self.project_manifest_source_mode = "generated"
+        self.project_manifest_loaded_text_cache = ""
         self._replace_project_state(project, source="Agent updated document.")
         self._set_document_text(self._project_manifest_text())
         message = self._compact_activity_text(str(payload.get("message") or payload.get("summary") or ""), limit=120)
@@ -2176,12 +2318,18 @@ class AlgorithmStudioApp(
                 raise RuntimeError("ui_add_node requires a non-empty resnode name.")
             x_default, y_default = self._agent_ui_default_position(len(self.project.res_nodes), lane="tool")
             resource_kind = str(payload.get("resource_kind") or "mesh").strip() or "mesh"
+            resource_source = str(payload.get("resource_source") or "resource").strip() or "resource"
+            origin_name = str(payload.get("origin_name") or payload.get("originName") or name).strip() or name
+            node_name = str(payload.get("node_name") or payload.get("nodeName") or payload.get("alias_name") or payload.get("aliasName") or "").strip()
             outputs = self._agent_tool_list_of_str(payload, "outputs") or [resource_kind]
             existing_res = self._find_res_node(name)
             if existing_res is not None:
                 existing_res.resource_kind = resource_kind
                 existing_res.resource_types = [resource_kind]
                 existing_res.outputs = outputs
+                existing_res.resource_source = resource_source
+                existing_res.origin_name = origin_name
+                existing_res.node_name = node_name
                 next_x = self._agent_tool_float(payload, "x", existing_res.x if "x" in payload else x_default)
                 next_y = self._agent_tool_float(payload, "y", existing_res.y if "y" in payload else y_default)
                 self._set_project_node_position(existing_res, next_x, next_y)
@@ -2193,6 +2341,9 @@ class AlgorithmStudioApp(
                 resource_types=[resource_kind],
                 outputs=outputs,
                 resource_kind=resource_kind,
+                resource_source=resource_source,
+                origin_name=origin_name,
+                node_name=node_name,
                 x=self._agent_tool_float(payload, "x", x_default),
                 y=self._agent_tool_float(payload, "y", y_default),
             )
@@ -2332,6 +2483,41 @@ class AlgorithmStudioApp(
             self.selected_container_name = name
             self._refresh_all()
             return f"Updated {kind} node {name}."
+        if kind == "resnode":
+            item = self._find_res_node(name)
+            if item is None:
+                raise RuntimeError(f"resNode not found: {name}")
+            if "resource_kind" in payload:
+                item.resource_kind = str(payload.get("resource_kind") or item.resource_kind).strip() or item.resource_kind
+                item.resource_types = [item.resource_kind]
+                item.outputs = [item.resource_kind]
+            if "resource_source" in payload:
+                item.resource_source = str(payload.get("resource_source") or item.resource_source).strip() or item.resource_source
+            if "origin_name" in payload or "originName" in payload:
+                item.origin_name = str(payload.get("origin_name") or payload.get("originName") or item.origin_name).strip() or item.origin_name
+            if "node_name" in payload or "nodeName" in payload or "alias_name" in payload or "aliasName" in payload:
+                item.node_name = str(
+                    payload.get("node_name")
+                    or payload.get("nodeName")
+                    or payload.get("alias_name")
+                    or payload.get("aliasName")
+                    or ""
+                ).strip()
+            if "resource_types" in payload:
+                item.resource_types = [str(entry).strip() for entry in payload.get("resource_types", item.resource_types)]
+            if "outputs" in payload:
+                item.outputs = self._agent_tool_list_of_str(payload, "outputs")
+            if "x" in payload:
+                self._set_project_node_position(item, self._agent_tool_float(payload, "x", item.x), item.y)
+            if "y" in payload:
+                self._set_project_node_position(item, item.x, self._agent_tool_float(payload, "y", item.y))
+            if "width" in payload:
+                item.width = self._agent_tool_float(payload, "width", item.width)
+            if "height" in payload:
+                item.height = self._agent_tool_float(payload, "height", item.height)
+            self.selected_res_node_name = name
+            self._refresh_all()
+            return f"Updated resNode {name}."
         if kind in {"stage", "interventioner"}:
             item = self._find_stage(name)
             if item is None:
@@ -2523,6 +2709,27 @@ class AlgorithmStudioApp(
         finally:
             self.document_editor_applying = False
 
+    def _start_scene_document_split_drag(self, event: tk.Event) -> str:
+        if self.scene_document_pane is None:
+            return "break"
+        self.scene_document_split_drag_state = {
+            "root_y": int(event.y_root),
+            "sash_y": int(self.scene_document_pane.sash_coord(0)[1]),
+        }
+        return "break"
+
+    def _drag_scene_document_split(self, event: tk.Event) -> str:
+        if not self.scene_document_split_drag_state or self.scene_document_pane is None:
+            return "break"
+        start_root_y = int(self.scene_document_split_drag_state["root_y"])
+        start_sash_y = int(self.scene_document_split_drag_state["sash_y"])
+        self.scene_document_pane.sash_place(0, 0, start_sash_y + int(event.y_root) - start_root_y)
+        return "break"
+
+    def _finish_scene_document_split_drag(self, _event: tk.Event) -> str:
+        self.scene_document_split_drag_state = None
+        return "break"
+
     def _refresh_document_panel_header(self) -> None:
         if self.document_editor_mode == "manifest":
             status_bits: list[str] = []
@@ -2531,7 +2738,7 @@ class AlgorithmStudioApp(
             if self.project_doc_dirty:
                 status_bits.append("doc dirty")
             status_bits.append("built" if self.project.build_finished else "not built")
-            title = "algoPrj"
+            title = "algoDevDoc"
             if status_bits:
                 title = f"{title} [{' / '.join(status_bits)}]"
             self.document_panel_title_var.set(title)
@@ -2544,7 +2751,7 @@ class AlgorithmStudioApp(
             if self.project_doc_dirty:
                 status_bits.append("doc dirty")
             status_bits.append("built" if self.project.build_finished else "not built")
-            title = f"algoPrj Editor: {kind} {name}".strip()
+            title = f"algoDevDoc Editor: {kind} {name}".strip()
             if status_bits:
                 title = f"{title} [{' / '.join(status_bits)}]"
             self.document_panel_title_var.set(title)
@@ -2560,7 +2767,7 @@ class AlgorithmStudioApp(
     def _set_document_panel_view_mode(self, mode: str) -> None:
         normalized = str(mode or "").strip().lower()
         if normalized not in {"graphic", "text"}:
-            raise AssertionError(f"Unsupported algoPrj panel view mode: {mode}")
+            raise AssertionError(f"Unsupported algoDevDoc panel view mode: {mode}")
         if normalized == "graphic" and self.document_editor_mode != "node":
             normalized = "text"
         self.document_panel_view_mode = normalized
@@ -2644,7 +2851,7 @@ class AlgorithmStudioApp(
         canvas = self.document_graph_canvas
         canvas.delete("all")
         if self.document_editor_mode != "node" or not self.document_editor_target_kind or not self.document_editor_target_name:
-            canvas.create_text(24, 24, anchor="nw", fill=COLORS["muted"], text="Graphic node view is available after a node is opened in the algoPrj panel.", font=("Segoe UI", 11))
+            canvas.create_text(24, 24, anchor="nw", fill=COLORS["muted"], text="Graphic node view is available after a node is opened in the algoDevDoc panel.", font=("Segoe UI", 11))
             return
         kind = self.document_editor_target_kind
         name = self.document_editor_target_name
@@ -2729,7 +2936,7 @@ class AlgorithmStudioApp(
         self._refresh_document_panel_header()
         self._set_document_text(self._node_document_text(kind, name))
         self._apply_document_panel_view_mode()
-        self.status_var.set(f"Opened {kind} {name} in the algoPrj panel.")
+        self.status_var.set(f"Opened {kind} {name} in the algoDevDoc panel.")
 
     def _apply_node_document_payload(self, payload: dict[str, Any]) -> None:
         normalized_kind = str(payload.get("kind") or "").strip().lower()
@@ -2741,7 +2948,7 @@ class AlgorithmStudioApp(
         if not isinstance(data, dict):
             raise ValueError("Node document payload.data must be a JSON object.")
         if target_name != original_name:
-            raise ValueError("Node document rename is not supported in the algoPrj panel yet.")
+            raise ValueError("Node document rename is not supported in the algoDevDoc panel yet.")
         if normalized_kind == "container":
             item = self._find_container(original_name)
             if item is None:
@@ -2903,8 +3110,10 @@ class AlgorithmStudioApp(
         self._ensure_singleton_container_group(project)
         self._normalize_project_algorithm_identity(project)
         self.project = project
-        self.project_manifest_text_cache = self.project.current_manifest_text()
-        self.project_content_signature_cache = self._project_content_signature()
+        if self.project_manifest_source_mode == "loaded" and self.project_manifest_loaded_text_cache:
+            self.project_manifest_text_cache = self.project_manifest_loaded_text_cache
+        else:
+            self.project_manifest_text_cache = self.project.current_manifest_text()
         self.project_manifest_revision += 1
         self.project_doc_dirty = False
         if reset_chat:
@@ -2927,6 +3136,9 @@ class AlgorithmStudioApp(
         self.selected_stage_name = None
         self.selected_container_group_name = None
         self._sync_project_to_vars()
+        self.project_content_signature_cache = self._project_content_signature()
+        if self.project_manifest_source_mode == "loaded" and self.project_manifest_loaded_text_cache:
+            self.project_manifest_text_cache = self.project_manifest_loaded_text_cache
         self._restore_scene_positions_for_view(self.canvas_view_mode)
         self._refresh_all()
         self.status_var.set(source)
@@ -2934,16 +3146,16 @@ class AlgorithmStudioApp(
     def _apply_document_editor_to_project(self) -> None:
         self.document_apply_after_id = None
         if not self.preview_text:
-            raise AssertionError("algoPrj editor is not initialized.")
+            raise AssertionError("algoDevDoc editor is not initialized.")
         raw_text = self.preview_text.get("1.0", tk.END).strip()
         if not raw_text:
-            self.document_last_error = "algoPrj is empty."
-            self.status_var.set("algoPrj is empty.")
+            self.document_last_error = "algoDevDoc is empty."
+            self.status_var.set("algoDevDoc is empty.")
             return
         try:
             payload = json.loads(raw_text)
             if not isinstance(payload, dict):
-                raise ValueError("algoPrj root must be a JSON object.")
+                raise ValueError("algoDevDoc root must be a JSON object.")
             if self.document_editor_mode == "node":
                 self._apply_node_document_payload(payload)
                 self.document_editor_dirty = False
@@ -2952,28 +3164,30 @@ class AlgorithmStudioApp(
                 if self.document_editor_target_kind and self.document_editor_target_name:
                     self._set_document_text(self._node_document_text(self.document_editor_target_kind, self.document_editor_target_name))
                 self._apply_document_panel_view_mode()
-                self._log(f"Applied algoPrj-pane changes to {self.document_editor_target_kind}:{self.document_editor_target_name}.")
+                self._log(f"Applied algoDevDoc-pane changes to {self.document_editor_target_kind}:{self.document_editor_target_name}.")
                 return
             project = ProjectState.from_package_json(payload)
             project.build_finished = False
         except Exception as exc:  # noqa: BLE001
             self.document_last_error = str(exc)
-            self.status_var.set(f"algoPrj invalid: {self._compact_activity_text(str(exc), limit=96)}")
+            self.status_var.set(f"algoDevDoc invalid: {self._compact_activity_text(str(exc), limit=96)}")
             return
         self.document_editor_dirty = False
         self.document_last_error = None
-        self._replace_project_state(project, source="algoPrj applied.")
+        self.project_manifest_source_mode = "generated"
+        self.project_manifest_loaded_text_cache = ""
+        self._replace_project_state(project, source="algoDevDoc applied.")
         self._set_document_text(self._project_manifest_text())
         self._apply_document_panel_view_mode()
-        self._log("Applied algoPrj changes to the scene.")
+        self._log("Applied algoDevDoc changes to the scene.")
 
     def _commit_document_editor_or_report(self) -> bool:
         if not self.document_editor_dirty:
             return True
         self._apply_document_editor_to_project()
         if self.document_editor_dirty:
-            message = self.document_last_error or "algoPrj is invalid."
-            messagebox.showerror("algoPrj error", message)
+            message = self.document_last_error or "algoDevDoc is invalid."
+            messagebox.showerror("algoDevDoc error", message)
             return False
         return True
 
@@ -3281,20 +3495,19 @@ class AlgorithmStudioApp(
         return target_name
 
     def _rename_res_node(self, item: ResourceNodeItem, new_name: str) -> str:
-        target_name = str(new_name).strip() or item.name
-        if target_name == item.name:
+        self._ensure_res_node_naming_state(item)
+        target_name = str(new_name).strip()
+        current_name = str(item.node_name or "").strip()
+        if target_name == current_name:
             return target_name
-        existing = self._find_res_node(target_name)
-        if existing is not None and existing is not item:
-            raise RuntimeError(f"resNode name already exists: {target_name}")
-        old_name = item.name
-        item.name = target_name
-        self._rename_connections_for_kind("resnode", old_name, target_name)
-        if self.selected_res_node_name == old_name:
-            self.selected_res_node_name = target_name
-        if self.selection_state:
-            self.selection_state["resnodes"] = self._replace_name_in_list(list(self.selection_state.get("resnodes", [])), old_name, target_name)
-        self._sync_document_target_after_node_rename("resnode", old_name, target_name)
+        if target_name:
+            existing = self._find_res_node_by_alias(target_name)
+            if existing is not None and existing is not item:
+                raise RuntimeError(f"resNode alias already exists: {target_name}")
+        item.node_name = target_name
+        if self.selected_res_node_name == item.name:
+            self.selected_res_node_name = item.name
+        self._sync_document_target_after_node_rename("resnode", item.name, item.name)
         return target_name
 
     def _rename_function_text_node(self, item: FunctionTextItem, new_name: str) -> str:
@@ -3333,7 +3546,7 @@ class AlgorithmStudioApp(
         target_name = str(new_name).strip()
         if not source_name:
             raise RuntimeError("Node rename requires the original node name.")
-        if not target_name:
+        if not target_name and normalized_kind != "resnode":
             raise RuntimeError("Node rename requires the new node name.")
         if normalized_kind == "container":
             item = self._find_container(source_name)
@@ -3407,6 +3620,11 @@ class AlgorithmStudioApp(
             if name == normalized_name:
                 matches.append((normalized_kind, name))
                 continue
+            if normalized_kind == "resnode" and isinstance(item, ResourceNodeItem):
+                self._ensure_res_node_naming_state(item)
+                if str(item.node_name or "").strip() == normalized_name:
+                    matches.append((normalized_kind, name))
+                    continue
             if normalized_kind == "container" and isinstance(item, ContainerItem):
                 if self._is_standard_container_node(item) and self._container_node_name(item) == normalized_name:
                     matches.append((normalized_kind, name))
@@ -3434,6 +3652,12 @@ class AlgorithmStudioApp(
             if self._is_standard_container_node(container):
                 prompt = f"Set nodeName for {self._container_origin_name(container)}:"
                 selection_name = node_name
+        elif normalized_kind == "resnode":
+            item = self._find_res_node(node_name)
+            if item is None:
+                raise AssertionError(f"Missing resnode {node_name}")
+            prompt = f"Set alias for {item.name}:"
+            selection_name = node_name
         target_value = simpledialog.askstring("Rename node", prompt, initialvalue=current_value)
         if target_value is None:
             return
@@ -3629,12 +3853,15 @@ class AlgorithmStudioApp(
         if self.selected_res_node_name:
             res_node = self._find_res_node(self.selected_res_node_name)
             if res_node:
+                self._ensure_res_node_naming_state(res_node)
                 return "\n".join(
                     [
                         "Selected resNode",
                         f"name: {res_node.name}",
                         f"size: {int(getattr(res_node, 'width', 0))} x {int(getattr(res_node, 'height', 0))}",
                         f"primary: {res_node.resource_kind or 'mesh'}",
+                        f"origin: {res_node.origin_name or res_node.name}",
+                        f"alias: {res_node.node_name or '-'}",
                         f"canvas: ({int(res_node.x)}, {int(res_node.y)})",
                     ]
                 )
@@ -3903,6 +4130,16 @@ class AlgorithmStudioApp(
                 return item
         return None
 
+    def _find_res_node_by_alias(self, alias: str) -> ResourceNodeItem | None:
+        normalized_alias = str(alias).strip()
+        if not normalized_alias:
+            return None
+        for item in self.project.res_nodes:
+            self._ensure_res_node_naming_state(item)
+            if str(item.node_name or "").strip() == normalized_alias:
+                return item
+        return None
+
     def _find_function_frame(self, name: str) -> Any | None:
         for item in self.project.function_frames:
             if item.name == name:
@@ -3933,6 +4170,14 @@ class AlgorithmStudioApp(
             node_name = str(getattr(item, "node_name", "") or "").strip()
             if node_name:
                 return node_name
+        if isinstance(item, ResourceNodeItem):
+            self._ensure_res_node_naming_state(item)
+            node_name = str(getattr(item, "node_name", "") or "").strip()
+            if node_name:
+                return node_name
+            origin_name = str(getattr(item, "origin_name", "") or "").strip()
+            if origin_name:
+                return origin_name
         display_name = str(getattr(item, "display_name", "") or "").strip()
         if display_name:
             return display_name
@@ -3944,6 +4189,13 @@ class AlgorithmStudioApp(
         if not hasattr(container, "node_name"):
             legacy_alias_name = str(getattr(container, "alias_name", "") or "").strip()
             container.node_name = legacy_alias_name
+
+    def _ensure_res_node_naming_state(self, item: ResourceNodeItem) -> None:
+        if not str(getattr(item, "origin_name", "") or "").strip():
+            item.origin_name = item.name
+        if not hasattr(item, "node_name"):
+            legacy_alias_name = str(getattr(item, "alias_name", "") or "").strip()
+            item.node_name = legacy_alias_name
 
     def _is_standard_container_node(self, container: ContainerItem) -> bool:
         return self._parse_standard_container_name(container.name) is not None
@@ -3964,9 +4216,26 @@ class AlgorithmStudioApp(
             if self._is_standard_container_node(container):
                 return self._container_node_name(container)
             return container.name
+        if kind == "resnode":
+            node = self._find_res_node(name)
+            if node is None:
+                raise AssertionError(f"Missing resnode {name}")
+            self._ensure_res_node_naming_state(node)
+            node_name = str(node.node_name or "").strip()
+            if node_name:
+                return node_name
+            origin_name = str(node.origin_name or "").strip()
+            if origin_name:
+                return origin_name
+            return node.name
         return name
 
     def _preserve_duplicate_display_name(self, source: Any, duplicate: Any) -> None:
+        if isinstance(source, ResourceNodeItem) and isinstance(duplicate, ResourceNodeItem):
+            self._ensure_res_node_naming_state(source)
+            duplicate.origin_name = str(source.origin_name or source.name)
+            duplicate.node_name = str(source.node_name or "")
+            return
         display_name = self._canvas_node_display_name(source, str(getattr(source, "name", "") or "").strip())
         setattr(duplicate, "display_name", display_name)
 
@@ -7168,6 +7437,9 @@ class AlgorithmStudioApp(
 
         width = max(canvas.winfo_width(), 1)
         height = max(canvas.winfo_height(), 1)
+        if self.canvas_view_mode == "renderpreview":
+            self._draw_render_preview_scene(canvas, width, height)
+            return
         self._draw_grid(canvas, width, height)
         self._draw_container_reuse_links(canvas)
         self._draw_highlighted_container_chain_path(canvas)
@@ -7179,8 +7451,6 @@ class AlgorithmStudioApp(
         self.canvas_connection_item_to_index.clear()
         if self.canvas_view_mode == "renderpreview":
             self._draw_render_preview_scene(canvas, width, height)
-        elif self.canvas_view_mode == "decomposer2container_overview":
-            self._draw_d2c_story_scene(canvas, width, height)
         else:
             for group in sorted(self.project.container_groups, key=lambda item: item.width * item.height, reverse=True):
                 if not self._is_node_visible_in_current_view("containerelement", group.name):
@@ -7235,8 +7505,9 @@ class AlgorithmStudioApp(
             self._draw_connections(canvas)
             if self.connection_drag_state:
                 self._draw_connection_drag_preview(canvas)
-            self._draw_child_clip_masks(canvas)
-            self._draw_group_clip_overlays(canvas)
+            if self.canvas_view_mode != "decomposer2container_overview":
+                self._draw_child_clip_masks(canvas)
+                self._draw_group_clip_overlays(canvas)
             canvas.tag_raise("clip_mask")
             canvas.tag_raise("group_clip_overlay")
             canvas.tag_raise("group_resize_handle")
@@ -7257,135 +7528,40 @@ class AlgorithmStudioApp(
         self._draw_drag_delete_warning(canvas)
 
     def _draw_render_preview_scene(self, canvas: tk.Canvas, width: int, height: int) -> None:
-        zoom = self._canvas_zoom_factor()
-        viewport_left = (-self.canvas_camera_x) / zoom
-        viewport_top = (-self.canvas_camera_y) / zoom
-        scene_width = max(float(width) / zoom, 1320.0)
-        origin_x = viewport_left + 72.0
-        origin_y = viewport_top + 72.0
-
-        banner_width = 520.0
+        frame_left = 16.0
+        frame_top = 16.0
+        frame_right = max(float(width) - 16.0, frame_left + 1.0)
+        frame_bottom = max(float(height) - 16.0, frame_top + 1.0)
         self._create_rounded_rect(
             canvas,
-            origin_x,
-            origin_y,
-            origin_x + banner_width,
-            origin_y + 44.0,
-            14.0,
-            fill="#111827",
+            frame_left,
+            frame_top,
+            frame_right,
+            frame_bottom,
+            18.0,
+            fill="#0b1017",
             outline=COLORS["accent"],
             width=2,
-            tags=("renderpreview_banner",),
-        )
-        canvas.create_text(
-            origin_x + 14.0,
-            origin_y + 10.0,
-            anchor="nw",
-            fill=COLORS["window"],
-            text="renderPreviewScene | debugTool observation",
-            font=("Segoe UI", 13, "bold"),
-            tags=("renderpreview_banner",),
-        )
-
-        left_x = origin_x
-        left_y = origin_y + 72.0
-        card_height = max(460.0, float(height) / zoom - 180.0)
-        self._create_rounded_rect(
-            canvas,
-            left_x,
-            left_y,
-            left_x + 420.0,
-            left_y + card_height,
-            16.0,
-            fill="#0b1017",
-            outline=COLORS["grid"],
-            width=2,
-            tags=("renderpreview_card",),
-        )
-        canvas.create_text(
-            left_x + 18.0,
-            left_y + 18.0,
-            anchor="nw",
-            fill=COLORS["text"],
-            text="Observation Flow",
-            font=("Segoe UI", 14, "bold"),
-            tags=("renderpreview_card",),
-        )
-        note_lines = [
-            "1. Entering this scene mounts the current algorithm into the debug agent.",
-            "2. The hidden runner submits the default algorithm settings.",
-            "3. Inspect the latest render preview output after the runner finishes.",
-            f"status: {self.render_preview_status_var.get()}",
-            f"preview file: {self.render_preview_output_path}",
-            "launch script: algorithmDevTools/run_debugtool_preview_mount.bat",
-        ]
-        current_y = left_y + 62.0
-        for line in note_lines:
-            canvas.create_text(
-                left_x + 18.0,
-                current_y,
-                anchor="nw",
-                fill=COLORS["muted"] if line.startswith(("1.", "2.", "3.")) else COLORS["text"],
-                text=line,
-                font=("Segoe UI", 10),
-                width=370.0,
-                justify="left",
-                tags=("renderpreview_card",),
-            )
-            current_y += 34.0
-
-        right_x = origin_x + 460.0
-        right_y = left_y
-        preview_width = max(scene_width - (right_x - viewport_left) - 72.0, 500.0)
-        preview_height = card_height
-        self._create_rounded_rect(
-            canvas,
-            right_x,
-            right_y,
-            right_x + preview_width,
-            right_y + preview_height,
-            16.0,
-            fill="#090d13",
-            outline=COLORS["accent_2"],
-            width=2,
-            tags=("renderpreview_preview_card",),
-        )
-        canvas.create_text(
-            right_x + 18.0,
-            right_y + 18.0,
-            anchor="nw",
-            fill=COLORS["text"],
-            text="render_preview.ppm",
-            font=("Segoe UI", 14, "bold"),
-            tags=("renderpreview_preview_card",),
+            tags=("renderpreview_preview_frame",),
         )
         if self.render_preview_photo is not None:
+            image_width = float(self.render_preview_photo.width())
+            image_height = float(self.render_preview_photo.height())
+            image_x = frame_left + max((frame_right - frame_left - image_width) / 2.0, 12.0)
+            image_y = frame_top + max((frame_bottom - frame_top - image_height) / 2.0, 12.0)
             canvas.create_image(
-                right_x + 18.0,
-                right_y + 58.0,
+                image_x,
+                image_y,
                 anchor="nw",
                 image=self.render_preview_photo,
-                tags=("renderpreview_preview_card",),
+                tags=("renderpreview_preview_frame",),
             )
-        else:
-            placeholder_lines = [
-                "No preview image is loaded yet.",
-                "Build first, then launch debugTool to create the preview artifact.",
-            ]
-            placeholder_y = right_y + 96.0
-            for line in placeholder_lines:
-                canvas.create_text(
-                    right_x + 18.0,
-                    placeholder_y,
-                    anchor="nw",
-                    fill=COLORS["muted"],
-                    text=line,
-                    font=("Segoe UI", 11),
-                    width=preview_width - 36.0,
-                    justify="left",
-                    tags=("renderpreview_preview_card",),
-                )
-                placeholder_y += 26.0
+
+    def _resource_node_fill_color(self, item: ResourceNodeItem) -> str:
+        source = str(getattr(item, "resource_source", "resource") or "resource").strip().lower()
+        if source == "descriptor":
+            return COLORS["descriptor"]
+        return COLORS["resource"]
 
     def _draw_selected_node_highlights(self, canvas: tk.Canvas) -> None:
         if not self.selected:
@@ -7481,6 +7657,7 @@ class AlgorithmStudioApp(
         raw_y = group.y or CANVAS_PADDING + 20
         x, y = self._container_display_origin("containerelement", group.name, raw_x, raw_y)
         title = "container" if group.name == "container" else f"micronode {group.name}"
+        fill_color = COLORS["container"] if self.canvas_view_mode == "decomposer2container_overview" else COLORS["good"]
         if not self._is_node_expanded(group):
             width, _height = self._container_group_render_size(group)
             return self._draw_collapsed_port_node(
@@ -7495,7 +7672,7 @@ class AlgorithmStudioApp(
                 ],
                 ["in"],
                 ["out"],
-                COLORS["good"],
+                fill_color,
                 self.selected_container_group_name == group.name,
                 x,
                 y,
@@ -7503,7 +7680,7 @@ class AlgorithmStudioApp(
             )
         width, height = self._container_group_render_size(group)
         node_tag = f"node:containerelement:{group.name}"
-        outline = COLORS["accent"] if self.selected_container_group_name == group.name else COLORS["good"]
+        outline = COLORS["accent"] if self.selected_container_group_name == group.name else fill_color
         radius = 14.0
 
         item_id = self._create_rounded_rect(
@@ -7526,7 +7703,7 @@ class AlgorithmStudioApp(
             x + width - 2,
             y + header_height,
             max(radius - 2.0, 4.0),
-            fill=COLORS["good"],
+            fill=fill_color,
             tags=(node_tag, "group_node", "group_header", "draggable"),
         )
         canvas.create_line(
@@ -7574,8 +7751,8 @@ class AlgorithmStudioApp(
             body_top + 34,
             x + 22,
             body_top + 46,
-            fill=COLORS["good"],
-            outline=COLORS["good"],
+            fill=fill_color,
+            outline=fill_color,
             tags=(node_tag, "group_body", f"port:containerelement:{group.name}:in:in"),
         )
         canvas.create_oval(
@@ -7583,8 +7760,8 @@ class AlgorithmStudioApp(
             body_top + 34,
             x + width - 10,
             body_top + 46,
-            fill=COLORS["good"],
-            outline=COLORS["good"],
+            fill=fill_color,
+            outline=fill_color,
             tags=(node_tag, "group_body", f"port:containerelement:{group.name}:out:out"),
         )
         self._register_port("containerelement", group.name, "in", "in", x + 16, body_top + 40)
@@ -7622,329 +7799,42 @@ class AlgorithmStudioApp(
         for y in range(int(grid_top), int(grid_bottom) + step, step):
             canvas.create_line(grid_left, y, grid_right, y, fill=COLORS["grid"], width=1, tags=("grid",))
 
-        scene_group = self._scene_group_label_for_view_mode(self.canvas_view_mode)
-        scene_phase = self._scene_phase_label_for_view_mode(self.canvas_view_mode)
-        if scene_group == "algorithmDevScene":
-            banner_fill = "#111827"
-            banner_outline = COLORS["accent_2"]
-            banner_text = f"{scene_group} | phase preference: {scene_phase}"
-        else:
-            banner_fill = "#0f1b17"
-            banner_outline = COLORS["good"]
-            banner_text = "helperScene | container / decomposer / d2c"
-        banner_left = viewport_left + 20 / zoom
-        banner_top = viewport_top + 10 / zoom
-        banner_right = banner_left + 420 / zoom
-        banner_bottom = banner_top + 34 / zoom
-        canvas.create_rectangle(
-            banner_left,
-            banner_top,
-            banner_right,
-            banner_bottom,
-            fill=banner_fill,
-            outline=banner_outline,
-            width=2,
-            tags=("grid_overlay_label",),
-        )
-        canvas.create_text(
-            banner_left + 12 / zoom,
-            banner_top + 8 / zoom,
-            anchor="nw",
-            fill=COLORS["text"],
-            text=banner_text,
-            font=("Segoe UI", 12, "bold"),
-            tags=("grid_overlay_label",),
-        )
-        canvas.create_text(viewport_left + 24 / zoom, viewport_top + 54 / zoom, anchor="w", fill=COLORS["muted"], text=scene_group, font=("Segoe UI", 10), tags=("grid_overlay_label",))
-        canvas.create_text(viewport_right - 24 / zoom, viewport_top + 18 / zoom, anchor="e", fill=COLORS["muted"], text="right click: delete / duplicate", font=("Segoe UI", 10), tags=("grid_overlay_label",))
-
-    def _d2c_focus_container(self) -> ContainerItem | None:
-        if self.selected_container_name:
-            container = self._find_container(self.selected_container_name)
-            if container is not None:
-                return container
-        if self.project.containers:
-            return self.project.containers[0]
-        return None
-
-    def _d2c_focus_rule(self) -> DecomposerRule | None:
-        if self.selected_rule_name:
-            rule = self._find_rule(self.selected_rule_name)
-            if rule is not None:
-                return rule
-        if self.project.decomposer_rules:
-            return self.project.decomposer_rules[0]
-        return None
-
-    def _d2c_focus_res_node(self) -> ResourceNodeItem | None:
-        if self.selected_res_node_name:
-            res_node = self._find_res_node(self.selected_res_node_name)
-            if res_node is not None:
-                return res_node
-        if self.project.res_nodes:
-            return self.project.res_nodes[0]
-        return None
-
-    def _d2c_descriptor_story_lines(self, rule: DecomposerRule | None) -> list[str]:
-        if rule is None:
-            return [
-                "packingPlan: -",
-                "sourceShape: -",
-                "targetSlots: -",
-                "packingScript: add a decomposer rule to describe how bytes are packed into container slots",
-            ]
-        lines = [
-            f"packingPlan: {rule.map_kind or 'v2v'}",
-            f"sourceShape: {rule.source or '-'}",
-            f"targetSlots: {rule.target or '-'}",
-        ]
-        script_lines = [line.strip() for line in rule.descriptor_script.splitlines() if line.strip()]
-        if script_lines:
-            lines.append("packingScript:")
-            lines.extend([f"  {line}" for line in script_lines[:5]])
-        else:
-            lines.append("packingScript: -")
-        return lines
-
-    def _d2c_resource_story_lines(self, rule: DecomposerRule | None, res_node: ResourceNodeItem | None) -> list[str]:
-        resource_kind = "mesh"
-        outputs: list[str] = []
-        if res_node is not None:
-            resource_kind = res_node.resource_kind or "mesh"
-            outputs = self._resource_output_ports(resource_kind, res_node.outputs)
-        lines = [
-            f"payloadKind: {resource_kind}",
-            f"payloadMode: {(rule.resource_mode if rule is not None else '') or 'default'}",
-            f"payloadPorts: {', '.join(outputs) if outputs else '-'}",
-        ]
-        resource_script = "" if rule is None else rule.resource_script
-        script_lines = [line.strip() for line in resource_script.splitlines() if line.strip()]
-        if script_lines:
-            lines.append("payloadScript:")
-            lines.extend([f"  {line}" for line in script_lines[:5]])
-        else:
-            lines.append("payloadScript: -")
-        schema_lines = self._schema_detail_lines(self.project.decomposer_res)
-        if schema_lines:
-            lines.append("payloadSchema:")
-            lines.extend([f"  {line}" for line in schema_lines[:4]])
-        else:
-            lines.append("payloadSchema: {}")
-        return lines
-
-    def _d2c_container_story_lines(self, container: ContainerItem | None) -> list[str]:
-        if container is None:
-            return [
-                "container: -",
-                "packing: add a variable or array container to reveal internal slots",
-                "payloadPreview: -",
-            ]
-        lines = [
-            f"container: {self._canvas_node_display_name(container, container.name)}",
-            f"packingTarget: {container.kind} x{max(int(container.count), 1)} stride {max(int(container.stride), 1)}",
-        ]
-        layout_lines = self._container_layout_field_summary_lines(container, limit=4)
-        if layout_lines:
-            lines.append("slotLayout:")
-            lines.extend([f"  {line}" for line in layout_lines[:4]])
-        else:
-            lines.append("slotLayout: -")
-        value_lines = self._container_value_preview(container, 3)
-        lines.append("payloadPreview:")
-        lines.extend([f"  {line}" for line in value_lines[:3]])
-        return lines
-
-    def _draw_d2c_story_node(
-        self,
-        canvas: tk.Canvas,
-        x: float,
-        y: float,
-        title: str,
-        body_title: str,
-        body_lines: list[str],
-        header_fill: str,
-        *,
-        inputs: list[str] | None = None,
-        outputs: list[str] | None = None,
-        width: float = 420.0,
-    ) -> dict[str, Any]:
-        input_ports = inputs or []
-        output_ports = outputs or []
-        radius = 14.0
-        width = max(width, 360.0)
-        text_rows = max(len(body_lines), 1)
-        port_rows = max(len(input_ports), len(output_ports), 1)
-        height = max(220.0, 112.0 + max(text_rows, port_rows) * 24.0)
-        outline = header_fill
-        header_height = 36.0
-        item_tag = "d2c_story_node"
-
-        self._create_rounded_rect(
-            canvas,
-            x,
-            y,
-            x + width,
-            y + height,
-            radius,
-            fill="#05070c",
-            outline=outline,
-            width=2,
-            tags=(item_tag,),
-        )
-        self._draw_top_rounded_header(
-            canvas,
-            x + 2,
-            y + 2,
-            x + width - 2,
-            y + header_height,
-            max(radius - 2.0, 4.0),
-            fill=header_fill,
-            tags=(item_tag,),
-        )
-        canvas.create_line(x + 3, y + header_height, x + width - 3, y + header_height, fill="#d5def3", width=1, tags=(item_tag,))
-        canvas.create_text(x + 14, y + 10, anchor="nw", fill="#ffffff", text=title, font=("Segoe UI", 13, "bold"), tags=(item_tag,))
-
-        body_top = y + header_height
-        body_bottom = y + height
-        left_w = 118.0 if input_ports else 26.0
-        right_w = 136.0 if output_ports else 26.0
-        content_left = x + left_w
-        content_right = x + width - right_w
-
-        canvas.create_text(x + 10, body_top + 10, anchor="nw", fill="#dbe6ff", text="IN", font=("Segoe UI", 10, "bold"), tags=(item_tag,))
-        canvas.create_text(content_left + 10, body_top + 10, anchor="nw", fill="#dbe6ff", text=body_title, font=("Segoe UI", 10, "bold"), tags=(item_tag,))
-        canvas.create_text(x + width - 10, body_top + 10, anchor="ne", fill="#dbe6ff", text="OUT", font=("Segoe UI", 10, "bold"), tags=(item_tag,))
-        canvas.create_rectangle(content_left, body_top + 34, content_right, body_bottom - 10, fill=COLORS["canvas"], outline=COLORS["grid"], width=1, tags=(item_tag,))
-
-        for grid_x in range(int(content_left + 12), int(content_right - 8), 18):
-            canvas.create_line(grid_x, body_top + 38, grid_x, body_bottom - 14, fill="#18202a", width=1, tags=(item_tag,))
-        for grid_y in range(int(body_top + 42), int(body_bottom - 12), 18):
-            canvas.create_line(content_left + 4, grid_y, content_right - 4, grid_y, fill="#18202a", width=1, tags=(item_tag,))
-
-        for index, port_name in enumerate(input_ports):
-            port_y = body_top + 42 + index * 26
-            canvas.create_oval(x + 10, port_y, x + 24, port_y + 14, fill=header_fill, outline=header_fill, tags=(item_tag,))
-            canvas.create_text(x + 30, port_y - 1, anchor="nw", fill="#ffffff", text=port_name, font=("Segoe UI", 10), width=max(left_w - 36.0, 24.0), justify="left", tags=(item_tag,))
-
-        for index, port_name in enumerate(output_ports):
-            port_y = body_top + 42 + index * 26
-            port_x = x + width - 24
-            canvas.create_oval(port_x, port_y, port_x + 14, port_y + 14, fill=header_fill, outline=header_fill, tags=(item_tag,))
-            canvas.create_text(port_x - 6, port_y - 1, anchor="ne", fill="#ffffff", text=port_name, font=("Segoe UI", 10), width=max(right_w - 36.0, 24.0), justify="right", tags=(item_tag,))
-
-        canvas.create_text(
-            content_left + 10,
-            body_top + 44,
-            anchor="nw",
-            fill="#ffffff",
-            text="\n".join(body_lines) if body_lines else "-",
-            font=("Segoe UI", 10),
-            width=max(content_right - content_left - 20.0, 120.0),
-            justify="left",
-            tags=(item_tag,),
-        )
-        return {
-            "bounds": (x, y, x + width, y + height),
-            "input_centers": {name: (x + 17.0, body_top + 49 + index * 26) for index, name in enumerate(input_ports)},
-            "output_centers": {name: (x + width - 17.0, body_top + 49 + index * 26) for index, name in enumerate(output_ports)},
-        }
-
-    def _draw_d2c_story_connection(
-        self,
-        canvas: tk.Canvas,
-        start: tuple[float, float],
-        end: tuple[float, float],
-        *,
-        color: str,
-        label: str,
-        bend: float = 120.0,
-    ) -> None:
-        sx, sy = start
-        tx, ty = end
-        control_x0 = sx + bend
-        control_x1 = tx - bend
-        canvas.create_line(
-            sx,
-            sy,
-            control_x0,
-            sy,
-            control_x1,
-            ty,
-            tx,
-            ty,
-            fill=color,
-            width=3,
-            smooth=True,
-            splinesteps=24,
-            arrow=tk.LAST,
-            tags=("d2c_story_connection",),
-        )
-        canvas.create_text(
-            (sx + tx) * 0.5,
-            (sy + ty) * 0.5 - 12.0,
-            anchor="s",
-            fill=color,
-            text=label,
-            font=("Segoe UI", 10, "bold"),
-            tags=("d2c_story_connection",),
-        )
-
-    def _draw_d2c_story_scene(self, canvas: tk.Canvas, width: int, height: int) -> None:
-        zoom = self._canvas_zoom_factor()
-        viewport_left = (-self.canvas_camera_x) / zoom
-        viewport_top = (-self.canvas_camera_y) / zoom
-        scene_width = max(float(width) / zoom, 1320.0)
-        origin_x = viewport_left + 72.0
-        origin_y = viewport_top + 88.0
-
-        rule = self._d2c_focus_rule()
-        res_node = self._d2c_focus_res_node()
-        container = self._d2c_focus_container()
-
-        descriptor_node = self._draw_d2c_story_node(
-            canvas,
-            origin_x,
-            origin_y,
-            "Packing Descriptor",
-            "PACKING PLAN",
-            self._d2c_descriptor_story_lines(rule),
-            COLORS["descriptor"],
-            outputs=["layout"],
-            width=440.0,
-        )
-        resource_node = self._draw_d2c_story_node(
-            canvas,
-            origin_x,
-            origin_y + 300.0,
-            "Payload Source",
-            "PAYLOAD STREAM",
-            self._d2c_resource_story_lines(rule, res_node),
-            COLORS["resource"],
-            outputs=["payload"],
-            width=440.0,
-        )
-        container_x = max(origin_x + 560.0, viewport_left + scene_width * 0.56)
-        container_node = self._draw_d2c_story_node(
-            canvas,
-            container_x,
-            origin_y + 142.0,
-            "Packed Container",
-            "CONTAINER INTERIOR",
-            self._d2c_container_story_lines(container),
-            COLORS["container"],
-            inputs=["layout", "payload"],
-            outputs=["slots"],
-            width=500.0,
-        )
-
-        descriptor_out = descriptor_node["output_centers"].get("layout")
-        resource_out = resource_node["output_centers"].get("payload")
-        layout_in = container_node["input_centers"].get("layout")
-        payload_in = container_node["input_centers"].get("payload")
-        if descriptor_out is not None and layout_in is not None:
-            self._draw_d2c_story_connection(canvas, descriptor_out, layout_in, color=COLORS["descriptor"], label="packing rules")
-        if resource_out is not None and payload_in is not None:
-            self._draw_d2c_story_connection(canvas, resource_out, payload_in, color=COLORS["resource"], label="payload bytes")
+        if self.canvas_view_mode != "renderpreview":
+            scene_group = self._scene_group_label_for_view_mode(self.canvas_view_mode)
+            scene_phase = self._scene_phase_label_for_view_mode(self.canvas_view_mode)
+            if scene_group == "algorithmDevScene":
+                banner_fill = "#111827"
+                banner_outline = COLORS["accent_2"]
+                banner_text = f"{scene_group} | phase preference: {scene_phase}"
+            else:
+                banner_fill = "#0f1b17"
+                banner_outline = COLORS["good"]
+                banner_text = "helperScene | d2c"
+            banner_left = viewport_left + 20 / zoom
+            banner_top = viewport_top + 10 / zoom
+            banner_right = banner_left + 420 / zoom
+            banner_bottom = banner_top + 34 / zoom
+            canvas.create_rectangle(
+                banner_left,
+                banner_top,
+                banner_right,
+                banner_bottom,
+                fill=banner_fill,
+                outline=banner_outline,
+                width=2,
+                tags=("grid_overlay_label",),
+            )
+            canvas.create_text(
+                banner_left + 12 / zoom,
+                banner_top + 8 / zoom,
+                anchor="nw",
+                fill=COLORS["text"],
+                text=banner_text,
+                font=("Segoe UI", 12, "bold"),
+                tags=("grid_overlay_label",),
+            )
+            canvas.create_text(viewport_left + 24 / zoom, viewport_top + 54 / zoom, anchor="w", fill=COLORS["muted"], text=scene_group, font=("Segoe UI", 10), tags=("grid_overlay_label",))
+            canvas.create_text(viewport_right - 24 / zoom, viewport_top + 18 / zoom, anchor="e", fill=COLORS["muted"], text="right click: delete / duplicate", font=("Segoe UI", 10), tags=("grid_overlay_label",))
 
     def _draw_node_card(
         self,
@@ -8128,7 +8018,7 @@ class AlgorithmStudioApp(
         raw_x = container.x or CANVAS_PADDING + 40
         raw_y = container.y or CANVAS_PADDING + 40
         x, y = self._container_display_origin("container", container.name, raw_x, raw_y)
-        fill = COLORS["container"] if container.kind == "variable" else COLORS["container_array"]
+        fill = COLORS["container"] if self.canvas_view_mode == "decomposer2container_overview" else (COLORS["container"] if container.kind == "variable" else COLORS["container_array"])
         if not self._is_node_expanded(container, default=False):
             width, _height = self._container_render_size(container)
             return self._draw_collapsed_port_node(
@@ -8337,6 +8227,7 @@ class AlgorithmStudioApp(
         display_name = self._canvas_node_display_name(rule, rule.name)
         inputs = ["in"]
         outputs = self.project.output_ports_for("decomposer", rule.name)
+        descriptor_fill = COLORS["descriptor"] if self.canvas_view_mode == "decomposer2container_overview" else COLORS["accent"]
         if not self._is_node_expanded(rule):
             return self._draw_collapsed_port_node(
                 canvas,
@@ -8349,7 +8240,7 @@ class AlgorithmStudioApp(
                 ],
                 inputs,
                 outputs,
-                COLORS["accent"],
+                descriptor_fill,
                 self.selected_rule_name == rule.name,
                 x,
                 y,
@@ -8425,7 +8316,8 @@ class AlgorithmStudioApp(
         resource_line_count = max(len(resource_lines), 1)
         output_count = max(len(outputs), 1)
         height = max(float(height), 260.0, 160.0 + max(descriptor_line_count, resource_line_count, output_count) * 18)
-        outline = COLORS["accent"] if selected else COLORS["good"]
+        header_fill = COLORS["descriptor"] if self.canvas_view_mode == "decomposer2container_overview" else COLORS["accent"]
+        outline = COLORS["accent"] if selected else header_fill
         node_tag = f"node:decomposer:{name}"
         item_id = canvas.create_rectangle(
             x,
@@ -8444,7 +8336,7 @@ class AlgorithmStudioApp(
             y,
             x + width,
             y + header_height,
-            fill=COLORS["accent"],
+            fill=header_fill,
             outline=outline,
             width=2,
             tags=(node_tag, "node_header", "draggable"),
@@ -8662,154 +8554,47 @@ class AlgorithmStudioApp(
         x = item.x or CANVAS_PADDING + 40
         y = item.y or CANVAS_PADDING + 420
         display_name = self._canvas_node_display_name(item, item.name)
+        fill_color = self._resource_node_fill_color(item)
+        outputs = self._resource_output_ports(item.resource_kind or "mesh", item.outputs)
+        title = "meshNode" if display_name == "meshNode" else f"meshNode {display_name}"
+        summary_lines = [
+            f"origin: {getattr(item, 'origin_name', '') or item.name}",
+            f"alias: {getattr(item, 'node_name', '') or '-'}",
+            f"kind: {item.resource_kind or 'mesh'}",
+            f"source: {getattr(item, 'resource_source', 'resource') or 'resource'}",
+        ]
+        if outputs:
+            summary_lines.append(f"outputs: {', '.join(outputs)}")
         if not self._is_node_expanded(item):
             return self._draw_collapsed_port_node(
                 canvas,
                 "resnode",
                 item.name,
-                "meshNode" if display_name == "meshNode" else f"meshNode {display_name}",
-                [f"[{item.resource_kind or 'mesh'}]"],
+                title,
+                summary_lines,
                 ["in"],
-                self._resource_output_ports(item.resource_kind or "mesh", item.outputs),
-                COLORS["agent"],
+                outputs,
+                fill_color,
                 self.selected_res_node_name == item.name,
                 x,
                 y,
                 float(getattr(item, "width", BLUEPRINT_NODE_WIDTH)),
             )
-        width = max(float(getattr(item, "width", BLUEPRINT_NODE_WIDTH)), 220.0)
-        height = max(float(getattr(item, "height", BLUEPRINT_NODE_MIN_HEIGHT)), 104.0)
-        outline = COLORS["accent"] if self.selected_res_node_name == item.name else COLORS["agent"]
-        node_tag = f"node:resnode:{item.name}"
-        item_id = canvas.create_rectangle(
+        return self._draw_blueprint_node(
+            canvas,
+            "resnode",
+            item.name,
             x,
             y,
-            x + width,
-            y + height,
-            fill=COLORS["panel_alt"],
-            outline=outline,
-            width=2,
-            tags=(node_tag, "node_body"),
+            title,
+            ["in"],
+            outputs,
+            summary_lines,
+            max(float(getattr(item, "width", BLUEPRINT_NODE_WIDTH)), 380.0),
+            float(getattr(item, "height", BLUEPRINT_NODE_MIN_HEIGHT)),
+            fill_color,
+            self.selected_res_node_name == item.name,
         )
-
-        header_height = 30
-        canvas.create_rectangle(
-            x,
-            y,
-            x + width,
-            y + header_height,
-            fill=COLORS["agent"],
-            outline=outline,
-            width=2,
-            tags=(node_tag, "node_header", "draggable"),
-        )
-        canvas.create_text(
-            x + 12,
-            y + 7,
-            anchor="nw",
-            fill=COLORS["window"],
-            text="meshNode" if display_name == "meshNode" else f"meshNode {display_name}",
-            font=("Segoe UI", 12, "bold"),
-            tags=(f"text_of_{item_id}", node_tag, "node_header", "draggable"),
-        )
-
-        body_top = y + header_height
-        body_bottom = y + height
-        canvas.create_rectangle(
-            x + 1,
-            body_top + 1,
-            x + width - 1,
-            body_bottom - 1,
-            fill="#141a22",
-            outline=COLORS["grid"],
-            width=1,
-            tags=(node_tag, "node_body"),
-        )
-
-        mesh_x0 = x + 18
-        mesh_x1 = x + width - 18
-        mesh_y0 = body_top + 30
-        mesh_y1 = body_top + 72
-        canvas.create_rectangle(
-            mesh_x0,
-            mesh_y0,
-            mesh_x1,
-            mesh_y1,
-            fill=COLORS["agent"],
-            outline=COLORS["agent"],
-            width=1,
-            tags=(node_tag, "node_body"),
-        )
-        canvas.create_text(
-            (mesh_x0 + mesh_x1) / 2,
-            (mesh_y0 + mesh_y1) / 2 - 1,
-            anchor="center",
-            fill=COLORS["window"],
-            text="[mesh]",
-            font=("Segoe UI", 12, "bold"),
-            tags=(f"text_of_{item_id}", node_tag, "node_body"),
-        )
-
-        input_y = body_top + 86
-        input_tag = f"port:resnode:{item.name}:in:in"
-        canvas.create_oval(
-            x + 10,
-            input_y,
-            x + 22,
-            input_y + 12,
-            fill=COLORS["agent"],
-            outline=COLORS["agent"],
-            tags=(node_tag, input_tag),
-        )
-        canvas.create_text(
-            x + 28,
-            input_y - 1,
-            anchor="nw",
-            fill=COLORS["text"],
-            text="",
-            font=("Segoe UI", 10),
-            width=80,
-            justify="left",
-            tags=(f"text_of_{item_id}", node_tag, input_tag),
-        )
-        self._register_port("resnode", item.name, "in", "in", x + 16, input_y + 6)
-
-        output_tag = f"port:resnode:{item.name}:out:mesh"
-        out_x = x + width - 16
-        canvas.create_oval(
-            out_x - 12,
-            input_y,
-            out_x,
-            input_y + 12,
-            fill=COLORS["agent"],
-            outline=COLORS["agent"],
-            tags=(node_tag, output_tag),
-        )
-        canvas.create_text(
-            out_x - 16,
-            input_y - 1,
-            anchor="e",
-            fill=COLORS["text"],
-            text="",
-            font=("Segoe UI", 10),
-            width=80,
-            justify="right",
-            tags=(f"text_of_{item_id}", node_tag, output_tag),
-        )
-        self._register_port("resnode", item.name, "out", "mesh", out_x - 6, input_y + 6)
-
-        handle_size = 10
-        handle_id = canvas.create_rectangle(
-            x + width - handle_size - 4,
-            y + height - handle_size - 4,
-            x + width - 4,
-            y + height - 4,
-            fill=COLORS["accent"],
-            outline=COLORS["accent"],
-            tags=(node_tag, "node_resize_handle", f"resize_handle:resnode:{item.name}"),
-        )
-        canvas.tag_raise(handle_id)
-        return item_id
 
     def _draw_function_frame_node(self, canvas: tk.Canvas, item: FunctionFrameItem) -> int:
         x = item.x or CANVAS_PADDING + 40

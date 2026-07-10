@@ -1,0 +1,24 @@
+{
+  "algorithm_name": "v4a10_teapot_pbr_demo_stage1",
+  "resource_bindings": [
+    {
+      "resource_name": "teapot_mesh",
+      "resource_kind": "mesh",
+      "source_path": "data/teapot.obj",
+      "required": true
+    },
+    {
+      "resource_name": "teapot_mtl",
+      "resource_kind": "mtl",
+      "source_path": "data/teapot.mtl",
+      "required": true
+    },
+    {
+      "resource_name": "teapot_gold_tile",
+      "resource_kind": "png",
+      "source_path": "data/teapot_gold_tile.png",
+      "required": true
+    }
+  ],
+  "descriptor_values": []
+}

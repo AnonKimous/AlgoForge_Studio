@@ -202,7 +202,6 @@ std::string PreviewRenderer::DebugSummary() const {
     << "request=" << (request_.valid ? "valid" : "none")
     << " stage=" << (request_.stage_name.empty() ? "<empty>" : request_.stage_name)
     << " buffers=" << request_.storage_buffers.size()
-    << " instances=" << request_.instance_count
     << " pipeline=" << (pipeline_.valid ? "ready" : "not_ready")
     << " target=" << (HasTexture() ? "ready" : "not_ready")
     << " extent=" << target_.extent.width << "x" << target_.extent.height;
@@ -239,6 +238,7 @@ bool PreviewRenderer::UploadBuffer(
       buffer_resource->allocation = VK_NULL_HANDLE;
       buffer_resource->allocation_info = {};
       buffer_resource->size_bytes = 0u;
+      buffer_resource->last_uploaded_bytes.clear();
     }
 
     VkBufferCreateInfo buffer_info{};
@@ -263,6 +263,15 @@ bool PreviewRenderer::UploadBuffer(
     buffer_resource->size_bytes = buffer_info.size;
   }
 
+  if (required_size == buffer_resource->last_uploaded_bytes.size() &&
+      required_size > 0u &&
+      std::memcmp(
+        buffer_resource->last_uploaded_bytes.data(),
+        source_buffer.bytes.data(),
+        source_buffer.bytes.size()) == 0) {
+    return true;
+  }
+
   if (required_size > 0u && !source_buffer.bytes.empty()) {
     std::memcpy(
       buffer_resource->allocation_info.pMappedData,
@@ -273,6 +282,9 @@ bool PreviewRenderer::UploadBuffer(
       buffer_resource->allocation,
       0u,
       buffer_resource->size_bytes));
+    buffer_resource->last_uploaded_bytes.assign(source_buffer.bytes.begin(), source_buffer.bytes.end());
+  } else {
+    buffer_resource->last_uploaded_bytes.clear();
   }
 
   return true;
@@ -745,17 +757,6 @@ bool PreviewRenderer::Record(VkCommandBuffer command_buffer) {
     return false;
   }
 
-  uint32_t instance_count = request_.instance_count;
-  if (instance_count == 0u && !request_.storage_buffers.empty()) {
-    const RenderPreviewBuffer& first_buffer = request_.storage_buffers.front();
-    if (first_buffer.element_stride > 0u) {
-      instance_count = static_cast<uint32_t>(first_buffer.bytes.size() / first_buffer.element_stride);
-    }
-  }
-  if (instance_count == 0u) {
-    return false;
-  }
-
   VkDescriptorSetAllocateInfo alloc_info{};
   alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
   alloc_info.descriptorPool = descriptor_pool_;
@@ -845,7 +846,7 @@ bool PreviewRenderer::Record(VkCommandBuffer command_buffer) {
     &push_constants);
   vkCmdSetViewport(command_buffer, 0, 1, &viewport);
   vkCmdSetScissor(command_buffer, 0, 1, &scissor);
-  vkCmdDraw(command_buffer, 4, instance_count, 0, 0);
+  vkCmdDraw(command_buffer, 4, request_.instance_count, 0, 0);
   vkCmdEndRenderPass(command_buffer);
 
   VkImageMemoryBarrier to_transfer_barrier{};
@@ -942,7 +943,6 @@ void PreviewRenderer::DestroyPipeline() {
   pipeline_.valid = false;
   pipeline_.shader_key.clear();
   pipeline_.buffer_binding_count = 0u;
-  pipeline_.instance_count = 0u;
 }
 
 void PreviewRenderer::Destroy() {

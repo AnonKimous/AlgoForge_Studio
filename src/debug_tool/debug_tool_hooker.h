@@ -32,10 +32,6 @@ using agent_hooker::AgentName;
 using agent_hooker::BeginAlgorithmAssembly;
 using agent_hooker::ContainerSet;
 
-inline std::string AlgorithmCatalogPath() {
-  return algorithm_manager_hooker::AlgorithmCatalogPath();
-}
-
 inline std::string ProjectRootPath() {
   return algorithm_manager_hooker::ProjectRootPath();
 }

@@ -25,12 +25,19 @@ inline fs::path ResolvePackageJsonPath(
     return {};
   }
 
+  if (!manifest_path.empty()) {
+    std::error_code ec;
+    if (fs::exists(manifest_path, ec) && fs::is_regular_file(manifest_path, ec)) {
+      return manifest_path;
+    }
+  }
+
   const fs::path resolved_root = ResolvePackageRoot(package_root, manifest_path);
   if (resolved_root.empty()) {
     return {};
   }
 
-  return resolved_root / (algorithm_name + "_package.json");
+  return resolved_root / "manifest.json";
 }
 
 inline fs::path ResolvePackageDefaultJsonPath(

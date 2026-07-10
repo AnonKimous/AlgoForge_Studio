@@ -10,6 +10,7 @@
 #include "cJSON.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cctype>
 #include <cstdint>
 #include <filesystem>
@@ -76,8 +77,18 @@ bool _LoadPackageRuntimeTransferMap(
   bool* out_has_transfer_map,
   std::string* out_error_message);
 
+bool _HasDeclaredContainerNameConflict(
+  const algorithm::AlgorithmContainerSet& container_set,
+  const std::string& container_name);
+
 bool _ShouldEmitPipelineRunnerProbe(const std::string& algorithm_name) {
   return false;
+}
+
+bool _HasDeclaredContainerNameConflict(
+  const algorithm::AlgorithmContainerSet& container_set,
+  const std::string& container_name) {
+  return algorithm::FindAlgorithmContainer(container_set, container_name) != nullptr;
 }
 
 void _AppendPipelineRunnerProbe(const std::string& file_name, const std::string& line) {
@@ -277,11 +288,14 @@ bool _ResolveContainerScalarBits(
 
   const cJSON* precision_item = cJSON_GetObjectItemCaseSensitive(container_item, "precision");
   if (!precision_item) {
+    precision_item = cJSON_GetObjectItemCaseSensitive(container_item, "precise");
+  }
+  if (!precision_item) {
     return true;
   }
   if (!cJSON_IsString(precision_item) || !precision_item->valuestring) {
     if (out_error_message) {
-      *out_error_message = "Container precision must be a string: " + package_path;
+      *out_error_message = "Container precise must be a string: " + package_path;
     }
     return false;
   }
@@ -1483,8 +1497,18 @@ bool _LoadContainerSetFromPackageJson(
     }
     const uint32_t scalar_bytes = scalar_bits / 8u;
     for (uint32_t i = 0; i < variable_count; ++i) {
+      const std::string container_name = "v" + std::to_string(i + 1u);
+      if (_HasDeclaredContainerNameConflict(*container_set, container_name)) {
+        cJSON_Delete(root);
+        if (out_error_message) {
+          *out_error_message =
+            "Package variable container name conflicts with an existing container: " +
+            container_name + " (" + package_json_path.generic_string() + ")";
+        }
+        return false;
+      }
       if (!_AppendContainer(
-            "v" + std::to_string(i + 1u),
+            container_name,
             algorithm::AlgorithmContainerStorageKind::TemporaryRegister,
             1u,
             scalar_bytes,
@@ -1509,10 +1533,17 @@ bool _LoadContainerSetFromPackageJson(
       }
       const uint32_t scalar_bytes = scalar_bits / 8u;
       const uint32_t element_count = cJSON_IsObject(child) ? std::max<uint32_t>(1u, json_utils::GetUintField(child, "count", 1u)) : 1u;
-      const std::vector<uint32_t> shape = json_utils::GetShapeField(child);
-      const uint32_t element_stride = shape.empty()
-        ? scalar_bytes
-        : static_cast<uint32_t>(shape.size()) * scalar_bytes;
+      const uint32_t tuple_width = json_utils::GetTupleWidthField(child);
+      const uint32_t element_stride = tuple_width * scalar_bytes;
+      if (_HasDeclaredContainerNameConflict(*container_set, child->string)) {
+        cJSON_Delete(root);
+        if (out_error_message) {
+          *out_error_message =
+            "Package variable container name conflicts with an existing container: " +
+            std::string(child->string) + " (" + package_json_path.generic_string() + ")";
+        }
+        return false;
+      }
       if (!_AppendContainer(child->string, algorithm::AlgorithmContainerStorageKind::TemporaryRegister, element_count, element_stride, container_set.get())) {
         cJSON_Delete(root);
         return false;
@@ -1530,8 +1561,18 @@ bool _LoadContainerSetFromPackageJson(
     }
     const uint32_t scalar_bytes = scalar_bits / 8u;
     for (uint32_t i = 0; i < variable_array_count; ++i) {
+      const std::string container_name = "a" + std::to_string(i + 1u);
+      if (_HasDeclaredContainerNameConflict(*container_set, container_name)) {
+        cJSON_Delete(root);
+        if (out_error_message) {
+          *out_error_message =
+            "Package array container name conflicts with an existing container: " +
+            container_name + " (" + package_json_path.generic_string() + ")";
+        }
+        return false;
+      }
       if (!_AppendContainer(
-            "a" + std::to_string(i + 1u),
+            container_name,
             algorithm::AlgorithmContainerStorageKind::Array,
             1u,
             scalar_bytes,
@@ -1556,10 +1597,17 @@ bool _LoadContainerSetFromPackageJson(
       }
       const uint32_t scalar_bytes = scalar_bits / 8u;
       const uint32_t element_count = cJSON_IsObject(child) ? std::max<uint32_t>(1u, json_utils::GetUintField(child, "count", 1u)) : 1u;
-      const std::vector<uint32_t> shape = json_utils::GetShapeField(child);
-      const uint32_t element_stride = shape.empty()
-        ? scalar_bytes
-        : static_cast<uint32_t>(shape.size()) * scalar_bytes;
+      const uint32_t tuple_width = json_utils::GetTupleWidthField(child);
+      const uint32_t element_stride = tuple_width * scalar_bytes;
+      if (_HasDeclaredContainerNameConflict(*container_set, child->string)) {
+        cJSON_Delete(root);
+        if (out_error_message) {
+          *out_error_message =
+            "Package array container name conflicts with an existing container: " +
+            std::string(child->string) + " (" + package_json_path.generic_string() + ")";
+        }
+        return false;
+      }
       if (!_AppendContainer(child->string, algorithm::AlgorithmContainerStorageKind::Array, element_count, element_stride, container_set.get())) {
         cJSON_Delete(root);
         return false;
@@ -2049,6 +2097,14 @@ PackageDefaultSchema _LoadPackageDefaultSchema(
 
   cJSON_Delete(root);
   schema.valid = true;
+  assert(schema.valid);
+  for (const PackageDefaultResourceBinding& binding : schema.resource_bindings) {
+    assert(!binding.resource_name.empty());
+    assert(!binding.resource_kind.empty());
+  }
+  for (const PackageDefaultDescriptorValue& value : schema.descriptor_values) {
+    assert(!value.descriptor_name.empty());
+  }
   return schema;
 }
 
@@ -2267,7 +2323,7 @@ bool CreateAlgorithmObjectFromLocation(
 
   if (emit_runner_probe) {
     _AppendPipelineRunnerProbe(
-      "package_loader_probe.log",
+      "cache_loader_probe.log",
       "create_from_location.mount_metadata.begin algorithm=" + probe_algorithm_name);
   }
   AlgorithmObjectMountMetadataCacheEntry mount_metadata{};
@@ -2290,7 +2346,7 @@ bool CreateAlgorithmObjectFromLocation(
     mount_metadata.pipeline_external_write_reset_container_names;
   if (emit_runner_probe) {
     _AppendPipelineRunnerProbe(
-      "package_loader_probe.log",
+      "cache_loader_probe.log",
       "create_from_location.mount_metadata.end has_map=" +
         std::string(mount_metadata.has_runtime_transfer_map ? "true" : "false"));
   }
@@ -2318,7 +2374,7 @@ bool CreateAlgorithmObjectFromLocation(
     algorithm::library_paths::AlgorithmLibraryRuntimeBuildFlavor::ReleaseWithDebugInfo;
   if (emit_runner_probe) {
     _AppendPipelineRunnerProbe(
-      "package_loader_probe.log",
+      "cache_loader_probe.log",
       "create_from_location.intervention_load.end present=" +
         std::string(group.intervention ? "true" : "false") +
         " vk_exec=" + std::string(group.vk_executor ? "true" : "false"));
@@ -2333,7 +2389,7 @@ bool CreateAlgorithmObjectFromLocation(
   };
   if (emit_runner_probe) {
     _AppendPipelineRunnerProbe(
-      "package_loader_probe.log",
+      "cache_loader_probe.log",
       "create_from_location.plugin_check.begin has_plugin=" +
         std::string(package_location.has_plugin_module ? "true" : "false") +
         " path=" + package_location.plugin_module_path.string());
@@ -2349,13 +2405,13 @@ bool CreateAlgorithmObjectFromLocation(
   AlgorithmPluginComponents plugin_components{};
   std::string plugin_error_message;
   if (emit_runner_probe) {
-    _AppendPipelineRunnerProbe("package_loader_probe.log", "create_from_location.plugin_load.begin");
+    _AppendPipelineRunnerProbe("cache_loader_probe.log", "create_from_location.plugin_load.begin");
   }
   if (package_location.has_plugin_module &&
       TryLoadAlgorithmPluginComponents(package_location, &plugin_components, &plugin_error_message)) {
     if (emit_runner_probe) {
       _AppendPipelineRunnerProbe(
-        "package_loader_probe.log",
+        "cache_loader_probe.log",
         "create_from_location.plugin_load.end success jobs=" + std::string(plugin_components.jobs_symbol ? "true" : "false") +
            " vk=" + std::string(plugin_components.vk_symbol ? "true" : "false") +
           " cuda=" + std::string(plugin_components.cuda_symbol ? "true" : "false") +
@@ -2388,6 +2444,15 @@ bool CreateAlgorithmObjectFromLocation(
     }
     _ApplyLaunchOnceReflectionPolicy();
     if (group.intervention) {
+      if (_HasDeclaredContainerNameConflict(*group.shared_container_set, "__algorithm_intervention_signal")) {
+        if (out_error_message) {
+          *out_error_message =
+            "Hidden intervention signal container conflicts with an existing container: " +
+            std::string("__algorithm_intervention_signal") + " (" +
+            package_location.package_file_path.generic_string() + ")";
+        }
+        return false;
+      }
       _AppendHiddenInterventionSignalContainer(group.shared_container_set.get());
     }
     *out_group = std::move(group);
@@ -2447,6 +2512,15 @@ bool LoadAlgorithmPackageDefaultBindingsFromLocation(
       out_error_message->clear();
     }
     return true;
+  }
+
+  assert(schema.valid);
+  for (const PackageDefaultResourceBinding& binding : schema.resource_bindings) {
+    assert(!binding.resource_name.empty());
+    assert(!binding.resource_kind.empty());
+  }
+  for (const PackageDefaultDescriptorValue& value : schema.descriptor_values) {
+    assert(!value.descriptor_name.empty());
   }
 
   out_resource_bindings->reserve(schema.resource_bindings.size());

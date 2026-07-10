@@ -1,0 +1,313 @@
+{
+  "algorithm_name": "v4a10_teapot_pbr_demo",
+  "container": {
+    "variable": {
+      "v1": {
+        "count": 1
+      },
+      "v2": {
+        "count": 1
+      },
+      "v3": {
+        "count": 1
+      },
+      "v4": {
+        "count": 1
+      }
+    },
+    "variableArray": {
+      "a1": {
+        "count": 1,
+        "tuple_width": 4
+      },
+      "a2": {
+        "count": 1,
+        "tuple_width": 12
+      },
+      "a3": {
+        "count": 10000,
+        "tuple_width": 24
+      },
+      "a4": {
+        "count": 20000,
+        "tuple_width": 8
+      },
+      "a5": {
+        "count": 10000,
+        "tuple_width": 3
+      },
+      "a6": {
+        "count": 10000,
+        "tuple_width": 3
+      },
+      "a7": {
+        "count": 10000,
+        "tuple_width": 2
+      },
+      "a8": {
+        "count": 10000,
+        "tuple_width": 3
+      },
+      "a9": {
+        "count": 229,
+        "precise": "8"
+      },
+      "a10": {
+        "count": 144198,
+        "precise": "8"
+      }
+    },
+    "aliases": [
+      "v1:frame_tick",
+      "v2:mesh_triangle_count",
+      "v3:mesh_bvh_node_count",
+      "v4:texture_seed",
+      "a1:scene_info",
+      "a2:material_buffer",
+      "a3:triangle_buffer",
+      "a4:bvh_buffer",
+      "a5:mesh_positions,vertex_mesh_0",
+      "a6:mesh_normals,normal_mesh_0",
+      "a7:mesh_uvs,uv_mesh_0",
+      "a8:mesh_triangles,triangle_mesh_0",
+      "a9:teapot_mtl_bytes,mtl_bytes_0",
+      "a10:teapot_gold_tile_bytes,gold_tile_bytes_0"
+    ]
+  },
+  "decomposer": {
+    "res": {
+      "mesh": {
+        "vertex": "vertex_mesh_0",
+        "normal": "normal_mesh_0",
+        "uv": "uv_mesh_0",
+        "triangle": "triangle_mesh_0"
+      },
+      "mtl": {
+        "teapot_mtl": "mtl_bytes_0"
+      },
+      "png": {
+        "teapot_gold_tile": "gold_tile_bytes_0"
+      }
+    },
+    "description": []
+  },
+  "reflector": {
+    "name": "teapot_debug_state",
+    "functionName": "direct",
+    "items": [
+      {
+        "name": "frame_tick",
+        "from": ["frame_tick"],
+        "to": ["frame_tick"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "mesh_triangle_count",
+        "from": ["mesh_triangle_count"],
+        "to": ["mesh_triangle_count"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "mesh_bvh_node_count",
+        "from": ["mesh_bvh_node_count"],
+        "to": ["mesh_bvh_node_count"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "texture_seed",
+        "from": ["texture_seed"],
+        "to": ["texture_seed"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "scene_info",
+        "from": ["scene_info"],
+        "to": ["scene_info"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "material_buffer",
+        "from": ["material_buffer"],
+        "to": ["material_buffer"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "triangle_buffer",
+        "from": ["triangle_buffer"],
+        "to": ["triangle_buffer"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "bvh_buffer",
+        "from": ["bvh_buffer"],
+        "to": ["bvh_buffer"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "mesh_positions",
+        "from": ["mesh_positions"],
+        "to": ["mesh_positions"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "mesh_normals",
+        "from": ["mesh_normals"],
+        "to": ["mesh_normals"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "mesh_uvs",
+        "from": ["mesh_uvs"],
+        "to": ["mesh_uvs"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "mesh_triangles",
+        "from": ["mesh_triangles"],
+        "to": ["mesh_triangles"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "teapot_mtl_bytes",
+        "from": ["teapot_mtl_bytes"],
+        "to": ["teapot_mtl_bytes"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "teapot_gold_tile_bytes",
+        "from": ["teapot_gold_tile_bytes"],
+        "to": ["teapot_gold_tile_bytes"],
+        "reflectFun": "direct"
+      }
+    ]
+  },
+  "exec": {
+    "stage_name": "exec",
+    "used_algorithm_containers": {
+      "arrays": [
+        {
+          "name": "scene_info",
+          "kind": "array",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "material_buffer",
+          "kind": "array",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "triangle_buffer",
+          "kind": "array",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "bvh_buffer",
+          "kind": "array",
+          "tuple_width": 1,
+          "required": true
+        }
+      ],
+      "variables": [
+        {
+          "name": "frame_tick",
+          "kind": "variable",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "mesh_triangle_count",
+          "kind": "variable",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "mesh_bvh_node_count",
+          "kind": "variable",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "texture_seed",
+          "kind": "variable",
+          "tuple_width": 1,
+          "required": true
+        }
+      ]
+    },
+    "shader": {
+      "pipeline": "graphics",
+      "vertex": "v4a10_teapot_pbr_demo_result_render.vert",
+      "fragment": "v4a10_teapot_pbr_demo_result_render.frag"
+    }
+  },
+  "intervention": {
+    "stage": {
+      "resultRender": {
+        "stage_name": "resultRender",
+        "stage_kind": "resultRender",
+        "used_algorithm_containers": {
+          "arrays": [
+            {
+              "name": "scene_info",
+              "kind": "array",
+              "tuple_width": 1,
+              "required": true
+            },
+            {
+              "name": "material_buffer",
+              "kind": "array",
+              "tuple_width": 1,
+              "required": true
+            },
+            {
+              "name": "triangle_buffer",
+              "kind": "array",
+              "tuple_width": 1,
+              "required": true
+            },
+            {
+              "name": "bvh_buffer",
+              "kind": "array",
+              "tuple_width": 1,
+              "required": true
+            }
+          ],
+          "variables": [
+            {
+              "name": "frame_tick",
+              "kind": "variable",
+              "tuple_width": 1,
+              "required": true
+            },
+            {
+              "name": "mesh_triangle_count",
+              "kind": "variable",
+              "tuple_width": 1,
+              "required": true
+            },
+            {
+              "name": "mesh_bvh_node_count",
+              "kind": "variable",
+              "tuple_width": 1,
+              "required": true
+            },
+            {
+              "name": "texture_seed",
+              "kind": "variable",
+              "tuple_width": 1,
+              "required": true
+            }
+          ]
+        },
+        "shader": {
+          "pipeline": "graphics",
+          "vertex": "v4a10_teapot_pbr_demo_result_render.vert",
+          "fragment": "v4a10_teapot_pbr_demo_result_render.frag"
+        }
+      }
+    }
+  }
+}

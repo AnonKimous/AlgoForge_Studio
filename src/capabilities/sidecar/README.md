@@ -12,4 +12,4 @@ This capability group hosts governed sidecar modules.
 
 ## Current Modules
 
-- `mesh_io`: OBJ mesh import/export built on top of `common_data::Mesh`.
+- `mesh_io`: mesh import/export built on top of `common_data::Mesh` and Assimp; the decomposer uses it for semantic mesh fields, and OBJ remains the default export path.

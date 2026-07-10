@@ -283,6 +283,49 @@ _PhaseSchema _LoadPhaseSchema(const algorithm::AlgorithmPackageLocation& package
           phase_spec.used_algorithm_containers.push_back(std::move(binding));
         }
       }
+
+      const cJSON* variables = cJSON_GetObjectItemCaseSensitive(used_containers, "variables");
+      if (variables && cJSON_IsArray(variables)) {
+        const int container_count = cJSON_GetArraySize(variables);
+        phase_spec.used_algorithm_containers.reserve(
+          phase_spec.used_algorithm_containers.size() +
+          (container_count > 0 ? static_cast<size_t>(container_count) : 0u));
+        for (int i = 0; i < container_count; ++i) {
+          const cJSON* item = cJSON_GetArrayItem(variables, i);
+          if (!item) {
+            continue;
+          }
+
+          agentmanager::agent::AlgorithmPhaseContainerBinding binding{};
+          if (cJSON_IsString(item) && item->valuestring) {
+            binding.container_name = item->valuestring;
+            binding.container_kind = "variable";
+            binding.tuple_width = 1u;
+            binding.required = true;
+          } else if (cJSON_IsObject(item)) {
+            binding.container_name = json_utils::GetStringField(item, "name");
+            if (binding.container_name.empty()) {
+              binding.container_name = json_utils::GetStringField(item, "container");
+            }
+            binding.container_kind = json_utils::GetStringField(item, "kind");
+            if (binding.container_kind.empty()) {
+              binding.container_kind = "variable";
+            }
+            binding.tuple_width = json_utils::GetUintField(item, "tuple_width", 1u);
+            if (binding.tuple_width == 0u) {
+              binding.tuple_width = 1u;
+            }
+            binding.required = json_utils::GetBoolField(item, "required", true);
+          }
+
+          if (binding.container_name.empty()) {
+            schema.error_message = "Invalid variable container binding in package JSON file: " + path.string();
+            cJSON_Delete(root);
+            return schema;
+          }
+          phase_spec.used_algorithm_containers.push_back(std::move(binding));
+        }
+      }
     }
 
     const cJSON* functions = cJSON_GetObjectItemCaseSensitive(stage_item, "functions");

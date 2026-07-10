@@ -9,10 +9,6 @@
 
 namespace debug_tool_backend::algorithm_manager_hooker {
 
-inline std::string AlgorithmCatalogPath() {
-  return (algorithmManager::ResolveAlgorithmLibrarySourceRoot() / "algorithm_catalog.json").string();
-}
-
 inline std::string ProjectRootPath() {
   const std::filesystem::path root = algorithmManager::ResolveProjectRootFromAlgorithmLibraryRoot(
     algorithmManager::ResolveAlgorithmLibrarySourceRoot());
