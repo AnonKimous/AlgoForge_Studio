@@ -20,6 +20,13 @@
 #include <utility>
 #include <vector>
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <dbghelp.h>
+#pragma comment(lib, "Dbghelp.lib")
+#endif
+
 namespace {
 
 struct PipelineRunnerOptions {
@@ -75,6 +82,67 @@ struct PositionSample {
   float x{0.0f};
   float y{0.0f};
 };
+
+#ifdef _WIN32
+LONG WINAPI _WriteCrashDump(EXCEPTION_POINTERS* exception_pointers) {
+  const std::filesystem::path dump_dir = std::filesystem::path("testData") / "dumps";
+  std::error_code ec;
+  std::filesystem::create_directories(dump_dir, ec);
+
+  const std::filesystem::path dump_path =
+    dump_dir /
+    (std::string("debugTool_") +
+      std::to_string(static_cast<unsigned long>(GetCurrentProcessId())) +
+      "_" +
+      std::to_string(static_cast<unsigned long long>(GetTickCount64())) +
+      ".dmp");
+
+  HANDLE dump_file = CreateFileW(
+    dump_path.wstring().c_str(),
+    GENERIC_WRITE,
+    0,
+    nullptr,
+    CREATE_ALWAYS,
+    FILE_ATTRIBUTE_NORMAL,
+    nullptr);
+  if (dump_file == INVALID_HANDLE_VALUE) {
+    return EXCEPTION_EXECUTE_HANDLER;
+  }
+
+  MINIDUMP_EXCEPTION_INFORMATION info{};
+  info.ThreadId = GetCurrentThreadId();
+  info.ExceptionPointers = exception_pointers;
+  info.ClientPointers = FALSE;
+
+  const BOOL dumped = MiniDumpWriteDump(
+    GetCurrentProcess(),
+    GetCurrentProcessId(),
+    dump_file,
+    static_cast<MINIDUMP_TYPE>(
+      MiniDumpNormal |
+      MiniDumpWithThreadInfo |
+      MiniDumpWithUnloadedModules |
+      MiniDumpWithIndirectlyReferencedMemory),
+    &info,
+    nullptr,
+    nullptr);
+  CloseHandle(dump_file);
+
+  std::ofstream crash_log(dump_dir / "last_crash.txt", std::ios::binary | std::ios::trunc);
+  crash_log
+    << "dump_path=" << dump_path.string() << '\n'
+    << "dumped=" << (dumped ? "true" : "false") << '\n';
+  return EXCEPTION_EXECUTE_HANDLER;
+}
+
+void _InstallCrashDumpHandler() {
+  SetErrorMode(
+    SEM_FAILCRITICALERRORS |
+    SEM_NOGPFAULTERRORBOX |
+    SEM_NOOPENFILEERRORBOX);
+  SetUnhandledExceptionFilter(&_WriteCrashDump);
+}
+#endif
 
 const char* _AssemblyStateName(debug_tool::AlgorithmAssemblyState state) {
   switch (state) {
@@ -1670,10 +1738,12 @@ std::string _ExecuteRunnerRequestLine(const std::string& request_line, bool* out
     *out_shutdown_requested = false;
   }
 
+  _AppendRunnerControlLog("server.log", "execute.begin request=" + request_line);
   std::cout << "runner_server.request=" << request_line << '\n';
   std::cout.flush();
 
   if (request_line == "shutdown" || request_line == "--runner-shutdown") {
+    _AppendRunnerControlLog("server.log", "execute.shutdown");
     if (out_shutdown_requested) {
       *out_shutdown_requested = true;
     }
@@ -1682,6 +1752,7 @@ std::string _ExecuteRunnerRequestLine(const std::string& request_line, bool* out
 
   std::vector<std::string> tokens = debug_tool_backend::runner_control::TokenizeCommandLine(request_line);
   if (tokens.empty()) {
+    _AppendRunnerControlLog("server.log", "execute.empty_tokens");
     return "ERR empty request";
   }
 
@@ -1695,6 +1766,7 @@ std::string _ExecuteRunnerRequestLine(const std::string& request_line, bool* out
 
   PipelineRunnerOptions pipeline_options{};
   std::string error_message;
+  _AppendRunnerControlLog("server.log", "execute.pipeline_probe_begin");
   if (_ParsePipelineRunnerOptions(
         static_cast<int>(argv.size()),
         argv.data(),
@@ -1702,15 +1774,21 @@ std::string _ExecuteRunnerRequestLine(const std::string& request_line, bool* out
         &error_message) &&
       pipeline_options.enabled) {
     try {
+      _AppendRunnerControlLog("server.log", "execute.pipeline_run_begin");
       const bool executed = _RunPipelineRunner(pipeline_options);
+      _AppendRunnerControlLog(
+        "server.log",
+        std::string("execute.pipeline_run_end executed=") + (executed ? "true" : "false"));
       return executed ? "OK pipeline_runner" : "ERR pipeline_runner failed";
     } catch (const std::exception& e) {
+      _AppendRunnerControlLog("server.log", std::string("execute.pipeline_exception=") + e.what());
       return std::string("ERR ") + e.what();
     }
   }
 
   AlgorithmRunnerOptions algorithm_options{};
   error_message.clear();
+  _AppendRunnerControlLog("server.log", "execute.algorithm_probe_begin");
   if (_ParseAlgorithmRunnerOptions(
         static_cast<int>(argv.size()),
         argv.data(),
@@ -1718,16 +1796,23 @@ std::string _ExecuteRunnerRequestLine(const std::string& request_line, bool* out
         &error_message) &&
       algorithm_options.enabled) {
     try {
+      _AppendRunnerControlLog("server.log", "execute.algorithm_run_begin");
       const bool executed = _RunAlgorithmRunner(algorithm_options);
+      _AppendRunnerControlLog(
+        "server.log",
+        std::string("execute.algorithm_run_end executed=") + (executed ? "true" : "false"));
       return executed ? "OK algorithm_runner" : "ERR algorithm_runner failed";
     } catch (const std::exception& e) {
+      _AppendRunnerControlLog("server.log", std::string("execute.algorithm_exception=") + e.what());
       return std::string("ERR ") + e.what();
     }
   }
 
   if (!error_message.empty()) {
+    _AppendRunnerControlLog("server.log", "execute.parse_error=" + error_message);
     return "ERR " + error_message;
   }
+  _AppendRunnerControlLog("server.log", "execute.unrecognized");
   return "ERR runner request did not contain a recognized command.";
 }
 
@@ -1752,6 +1837,7 @@ bool _RunRunnerControlServer(const RunnerServerOptions& options) {
       _AppendRunnerControlLog("server.log", "request=" + request);
       bool request_shutdown = false;
       const std::string response = _ExecuteRunnerRequestLine(request, &request_shutdown);
+      _AppendRunnerControlLog("server.log", "handler.after_execute response=" + response);
       if (out_shutdown_requested) {
         *out_shutdown_requested = request_shutdown || options.once;
       }
@@ -1836,18 +1922,33 @@ std::filesystem::path _PreviewRenderEndpointFilePath() {
 }
 
 bool _RunPreviewRenderServer(const PreviewRenderServerOptions& options) {
+  const std::filesystem::path preview_render_probe_path =
+    algorithmManager::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot() / "preview_render_server_probe.log";
+  std::error_code probe_ec{};
+  std::filesystem::create_directories(preview_render_probe_path.parent_path(), probe_ec);
+  const auto append_preview_render_probe = [&](const std::string& line) {
+    std::ofstream file(preview_render_probe_path, std::ios::binary | std::ios::app);
+    if (file) {
+      file << line << '\n';
+    }
+  };
+  append_preview_render_probe("preview_render_server.begin");
   bool is_pipeline = false;
   std::string query_error_message;
   DebugToolBackendRuntime type_probe_runtime;
+  append_preview_render_probe("preview_render_server.type_probe.begin");
   if (!type_probe_runtime.IsPipelineAlgorithm(
         options.algorithm_name,
         &is_pipeline,
         &query_error_message)) {
+    append_preview_render_probe("preview_render_server.type_probe.failed");
     throw std::runtime_error(
       query_error_message.empty()
         ? ("Failed to query algorithm type for '" + options.algorithm_name + "'.")
         : query_error_message);
   }
+  append_preview_render_probe(
+    std::string("preview_render_server.type_probe.end pipeline=") + (is_pipeline ? "true" : "false"));
 
   const bool rendered = is_pipeline
     ? _RunPipelineRunner(
@@ -1872,6 +1973,8 @@ bool _RunPreviewRenderServer(const PreviewRenderServerOptions& options) {
           .render_preview_output_path = options.render_preview_output_path,
           .execution_preference = options.execution_preference,
         });
+  append_preview_render_probe(
+    std::string("preview_render_server.run.end rendered=") + (rendered ? "true" : "false"));
   if (!rendered) {
     return false;
   }
@@ -1879,6 +1982,7 @@ bool _RunPreviewRenderServer(const PreviewRenderServerOptions& options) {
   const std::filesystem::path render_preview_path(options.render_preview_output_path);
   const std::vector<std::byte> preview_bytes = _ReadBinaryFile(render_preview_path);
   if (preview_bytes.empty()) {
+    append_preview_render_probe("preview_render_server.preview_bytes.empty");
     throw std::runtime_error("Preview render output is empty: " + render_preview_path.string());
   }
 
@@ -1945,6 +2049,19 @@ bool _RunPreviewRenderServer(const PreviewRenderServerOptions& options) {
 
 int main(int argc, char** argv) {
   try {
+#ifdef _WIN32
+    _InstallCrashDumpHandler();
+#endif
+    {
+      const std::filesystem::path main_entry_probe_path =
+        algorithmManager::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot() / "main_entry_probe.log";
+      std::error_code ec;
+      std::filesystem::create_directories(main_entry_probe_path.parent_path(), ec);
+      std::ofstream probe_file(main_entry_probe_path, std::ios::binary | std::ios::app);
+      if (probe_file) {
+        probe_file << "main.begin argc=" << argc << '\n';
+      }
+    }
     if (_IsRunnerServerInvocation(argc, argv)) {
       RunnerServerOptions runner_server_options{};
       std::string runner_server_parse_error;

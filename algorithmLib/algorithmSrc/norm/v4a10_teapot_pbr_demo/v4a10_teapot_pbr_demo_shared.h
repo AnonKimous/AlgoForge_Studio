@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <limits>
 #include <memory>
+#include <iostream>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -79,8 +80,7 @@ template <size_t N>
 using FloatPack = std::array<float, N>;
 
 inline void AppendTeapotTrace(const char* message) {
-  std::ofstream out("algorithmLib/algorithmruntimeLib/norm/debugInfo/teapot_trace.log", std::ios::app);
-  out << message << '\n';
+  (void)message;
 }
 
 inline float Clamp(float value, float min_value, float max_value) {
@@ -608,16 +608,43 @@ inline bool BuildMeshCache(
     return false;
   }
   AppendTeapotTrace("BuildMeshCache.begin");
+  const std::string container_set_trace =
+    "BuildMeshCache.container_set algorithm=" + container_set->algorithm_name +
+    " arrays=" + std::to_string(container_set->arrays.size()) +
+    " regs=" + std::to_string(container_set->temporary_registers.size()) +
+    " caches=" + std::to_string(container_set->temporary_caches.size()) +
+    " hidden=" + std::to_string(container_set->hidden_containers.size()) +
+    " standard_enabled=" + std::string(container_set->standard_layout.enabled() ? "true" : "false");
+  AppendTeapotTrace(container_set_trace.c_str());
 
   const algorithm::AlgorithmContainer* positions_container = FindConstContainer(container_set, "vertex_mesh_0");
+  AppendTeapotTrace("BuildMeshCache.lookup.vertex_mesh_0");
   const algorithm::AlgorithmContainer* normals_container = FindConstContainer(container_set, "normal_mesh_0");
+  AppendTeapotTrace("BuildMeshCache.lookup.normal_mesh_0");
   const algorithm::AlgorithmContainer* uvs_container = FindConstContainer(container_set, "uv_mesh_0");
+  AppendTeapotTrace("BuildMeshCache.lookup.uv_mesh_0");
   const algorithm::AlgorithmContainer* triangles_container = FindConstContainer(container_set, "triangle_mesh_0");
+  AppendTeapotTrace("BuildMeshCache.lookup.triangle_mesh_0");
   const algorithm::AlgorithmContainer* mtl_container = FindConstContainer(container_set, "mtl_bytes_0");
+  AppendTeapotTrace("BuildMeshCache.lookup.mtl_bytes_0");
   const algorithm::AlgorithmContainer* texture_container = FindConstContainer(container_set, "gold_tile_bytes_0");
+  AppendTeapotTrace("BuildMeshCache.lookup.gold_tile_bytes_0");
   if (!positions_container || !normals_container || !uvs_container || !triangles_container || !mtl_container || !texture_container) {
     return false;
   }
+
+  const std::string container_trace =
+    "BuildMeshCache.containers sizes positions=" + std::to_string(positions_container->bytes.size()) +
+    " normals=" + std::to_string(normals_container->bytes.size()) +
+    " uvs=" + std::to_string(uvs_container->bytes.size()) +
+    " triangles=" + std::to_string(triangles_container->bytes.size()) +
+    " mtl=" + std::to_string(mtl_container->bytes.size()) +
+    " texture=" + std::to_string(texture_container->bytes.size()) +
+    " strides p=" + std::to_string(positions_container->element_stride) +
+    " n=" + std::to_string(normals_container->element_stride) +
+    " u=" + std::to_string(uvs_container->element_stride) +
+    " t=" + std::to_string(triangles_container->element_stride);
+  AppendTeapotTrace(container_trace.c_str());
 
   const uint64_t source_hash =
     HashBytes(positions_container->bytes.data(), positions_container->bytes.size()) ^
@@ -627,7 +654,7 @@ inline bool BuildMeshCache(
     (HashBytes(mtl_container->bytes.data(), mtl_container->bytes.size()) << 4u) ^
     (HashBytes(texture_container->bytes.data(), texture_container->bytes.size()) << 5u);
 
-  static ParsedMeshCache cache;
+  thread_local ParsedMeshCache cache;
   if (!cache.valid || cache.source_hash != source_hash) {
     AppendTeapotTrace("BuildMeshCache.parse.begin");
     const std::string mtl_text = ReadTextContainer(mtl_container);
@@ -701,17 +728,25 @@ inline void WriteMeshCacheToContainers(
   algorithm::AlgorithmContainer* triangle_count = FindMutableContainer(container_set, "mesh_triangle_count");
   algorithm::AlgorithmContainer* bvh_count = FindMutableContainer(container_set, "mesh_bvh_node_count");
   algorithm::AlgorithmContainer* texture_seed = FindMutableContainer(container_set, "texture_seed");
+  algorithm::AlgorithmContainer* instance_count = FindMutableContainer(container_set, "instance_count");
   algorithm::AlgorithmContainer* scene_info = FindMutableContainer(container_set, "scene_info");
   algorithm::AlgorithmContainer* material_buffer = FindMutableContainer(container_set, "material_buffer");
   algorithm::AlgorithmContainer* triangle_buffer = FindMutableContainer(container_set, "triangle_buffer");
   algorithm::AlgorithmContainer* bvh_buffer = FindMutableContainer(container_set, "bvh_buffer");
-  assert(frame_tick && triangle_count && bvh_count && texture_seed && scene_info && material_buffer && triangle_buffer && bvh_buffer);
+  assert(frame_tick && triangle_count && bvh_count && texture_seed && instance_count && scene_info && material_buffer && triangle_buffer && bvh_buffer);
 
   WriteUint32(triangle_count, static_cast<uint32_t>(cache->triangles.size()));
   WriteUint32(bvh_count, static_cast<uint32_t>(cache->bvh_nodes.size()));
   WriteUint32(texture_seed, cache->texture_seed);
+  WriteUint32(instance_count, 1u);
   WritePack(scene_info, 0u, cache->scene_info);
   WritePack(material_buffer, 0u, cache->material_info);
+  const std::string counts_trace =
+    "WriteMeshCacheToContainers.counts triangles=" + std::to_string(cache->triangles.size()) +
+    " bvh_nodes=" + std::to_string(cache->bvh_nodes.size()) +
+    " texture_seed=" + std::to_string(cache->texture_seed) +
+    " instance_count=1";
+  AppendTeapotTrace(counts_trace.c_str());
 
   std::vector<FloatPack<kTriangleFloats>> packed_triangles;
   packed_triangles.reserve(cache->triangles.size());
@@ -741,19 +776,37 @@ class TeapotJobsExecutor final : public agent::IAlgorithmJobsExecutor {
     (void)algorithm_profile;
     (void)agent_to_algorithm_signal;
     assert(algorithm_container_set);
-    AppendTeapotTrace("ExecuteJobsAlgorithm.begin");
+    std::cerr
+      << "teapot.jobs.begin algorithm=" << algorithm_profile.algorithm_name
+      << " ptr=" << algorithm_container_set
+      << std::endl;
 
     ParsedMeshCache cache{};
+    std::cerr
+      << "teapot.jobs.build_cache.begin algorithm=" << algorithm_profile.algorithm_name
+      << std::endl;
     if (!BuildMeshCache(algorithm_container_set, &cache)) {
+      std::cerr
+        << "teapot.jobs.build_cache.failed algorithm=" << algorithm_profile.algorithm_name
+        << std::endl;
       return false;
     }
-    AppendTeapotTrace("ExecuteJobsAlgorithm.cache_ready");
+    std::cerr
+      << "teapot.jobs.build_cache.end algorithm=" << algorithm_profile.algorithm_name
+      << " triangles=" << cache.triangles.size()
+      << " bvh_nodes=" << cache.bvh_nodes.size()
+      << std::endl;
 
     algorithm::AlgorithmContainer* frame_tick = FindMutableContainer(algorithm_container_set, "frame_tick");
     assert(frame_tick);
     WriteUint32(frame_tick, ReadUint32(frame_tick) + 1u);
+    std::cerr
+      << "teapot.jobs.write_back.begin algorithm=" << algorithm_profile.algorithm_name
+      << std::endl;
     WriteMeshCacheToContainers(&cache, algorithm_container_set);
-    AppendTeapotTrace("ExecuteJobsAlgorithm.wrote_containers");
+    std::cerr
+      << "teapot.jobs.write_back.end algorithm=" << algorithm_profile.algorithm_name
+      << std::endl;
 
     if (algorithm_to_agent_signal) {
       *algorithm_to_agent_signal = {};
@@ -766,7 +819,9 @@ class TeapotJobsExecutor final : public agent::IAlgorithmJobsExecutor {
           ", texture_seed=" + std::to_string(cache.texture_seed),
       });
     }
-    AppendTeapotTrace("ExecuteJobsAlgorithm.end");
+    std::cerr
+      << "teapot.jobs.end algorithm=" << algorithm_profile.algorithm_name
+      << std::endl;
     return true;
   }
 };

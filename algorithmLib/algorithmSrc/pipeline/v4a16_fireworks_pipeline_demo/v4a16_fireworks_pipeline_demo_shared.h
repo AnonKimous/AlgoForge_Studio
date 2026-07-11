@@ -4,6 +4,9 @@
 #include <cassert>
 #include <cmath>
 #include <cstring>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <string>
 
 #include "../algorithm_plugin_api.h"
@@ -11,6 +14,11 @@
 namespace v4a16_fireworks_pipeline_demo {
 
 namespace {
+
+inline void _AppendFireworksJobsProbe(const std::string& line) {
+  std::ofstream file("testData/pipeline/debugInfo/fireworks_jobs_probe.log", std::ios::binary | std::ios::app);
+  file << line << '\n';
+}
 
 inline algorithm::AlgorithmContainer* _FindMutableContainer(
   algorithm::AlgorithmContainerSet* container_set,
@@ -87,20 +95,11 @@ class FireworksJobsExecutor final : public agent::IAlgorithmJobsExecutor {
     agent::AlgorithmPackageDebugState* debug_state) override {
     (void)context;
     (void)agent_to_algorithm_signal;
-
-    if (algorithm_to_agent_signal) {
-      *algorithm_to_agent_signal = {};
-    }
-    if (debug_state) {
-      debug_state->signals.push_back(algorithm_management::AdvancedAlgorithmDebugSignal{
-        .name = algorithm_profile.algorithm_name + ".jobs",
-        .payload = "v3a16 jobs executor tick",
-      });
-    }
+    (void)algorithm_to_agent_signal;
+    (void)debug_state;
     if (!algorithm_container_set) {
       return false;
     }
-
     algorithm::AlgorithmContainer* v1 = _FindMutableContainer(algorithm_container_set, "v1");
     algorithm::AlgorithmContainer* v2 = _FindMutableContainer(algorithm_container_set, "v2");
     algorithm::AlgorithmContainer* v3 = _FindMutableContainer(algorithm_container_set, "v3");
@@ -122,13 +121,37 @@ class FireworksJobsExecutor final : public agent::IAlgorithmJobsExecutor {
     algorithm::AlgorithmContainer* spark_life = _FindMutableContainer(algorithm_container_set, "spark_life");
     algorithm::AlgorithmContainer* spark_seed = _FindMutableContainer(algorithm_container_set, "spark_seed");
 
+    _AppendFireworksJobsProbe(
+      std::string("jobs.container_lookup.resolved algorithm=") + algorithm_name_ +
+      " profile=" + algorithm_profile.algorithm_name +
+      " v1=" + std::to_string(reinterpret_cast<uintptr_t>(v1)) +
+      " v2=" + std::to_string(reinterpret_cast<uintptr_t>(v2)) +
+      " v3=" + std::to_string(reinterpret_cast<uintptr_t>(v3)) +
+      " v4=" + std::to_string(reinterpret_cast<uintptr_t>(v4)) +
+      " shell_state=" + std::to_string(reinterpret_cast<uintptr_t>(shell_state)) +
+      " spark_state=" + std::to_string(reinterpret_cast<uintptr_t>(spark_state)));
+    _AppendFireworksJobsProbe("jobs.scalar_read.begin algorithm=" + algorithm_name_);
     const float tick_value = _ReadScalar(v1);
+    _AppendFireworksJobsProbe("jobs.scalar_read.v1 algorithm=" + algorithm_name_);
     const float launch_budget_value = _ReadScalar(v2);
+    _AppendFireworksJobsProbe("jobs.scalar_read.v2 algorithm=" + algorithm_name_);
     const float live_spark_value = _ReadScalar(v3);
+    _AppendFireworksJobsProbe("jobs.scalar_read.v3 algorithm=" + algorithm_name_);
     const float render_instance_count_value = _ReadScalar(v4);
+    _AppendFireworksJobsProbe("jobs.scalar_read.v4 algorithm=" + algorithm_name_);
     const uint32_t tick_seed = static_cast<uint32_t>(tick_value) + 1u;
     const Vec2 preview_extent = context.render_preview_extent;
     assert(preview_extent.x > 0.0f && preview_extent.y > 0.0f && "Render preview extent must be positive.");
+    _AppendFireworksJobsProbe(
+      std::string("jobs.begin algorithm=") + algorithm_name_ +
+      " profile=" + algorithm_profile.algorithm_name +
+      " set=" + std::to_string(reinterpret_cast<uintptr_t>(algorithm_container_set)) +
+      " v1=" + std::to_string(reinterpret_cast<uintptr_t>(v1)) +
+      " v2=" + std::to_string(reinterpret_cast<uintptr_t>(v2)) +
+      " v3=" + std::to_string(reinterpret_cast<uintptr_t>(v3)) +
+      " v4=" + std::to_string(reinterpret_cast<uintptr_t>(v4)) +
+      " shell_state=" + std::to_string(reinterpret_cast<uintptr_t>(shell_state)) +
+      " spark_state=" + std::to_string(reinterpret_cast<uintptr_t>(spark_state)));
     if (preview_extent.x <= 0.0f || preview_extent.y <= 0.0f) {
       return false;
     }
@@ -240,6 +263,7 @@ class FireworksJobsExecutor final : public agent::IAlgorithmJobsExecutor {
     };
 
     if (algorithm_name_ == "v4a16_fireworks_pipeline_demo_stageBegin") {
+      _AppendFireworksJobsProbe("jobs.stageBegin.enter algorithm=" + algorithm_name_);
       float begin_launch_budget_value = launch_budget_value;
       float begin_live_spark_value = live_spark_value;
       if (tick_value < 1.5f) {
@@ -274,6 +298,11 @@ class FireworksJobsExecutor final : public agent::IAlgorithmJobsExecutor {
       _WriteScalar(v1, tick_value);
       _WriteScalar(v2, begin_launch_budget_value);
       _WriteScalar(v3, begin_live_spark_value);
+      _AppendFireworksJobsProbe(
+        "jobs.stageBegin.exit algorithm=" + algorithm_name_ +
+        " tick=" + std::to_string(tick_value) +
+        " launch_budget=" + std::to_string(begin_launch_budget_value) +
+        " live_spark=" + std::to_string(begin_live_spark_value));
     } else if (algorithm_name_ == "v4a16_fireworks_pipeline_demo") {
       const uint32_t window_frame = static_cast<uint32_t>(tick_value) % 30u;
       const bool window_reset = window_frame == 0u;
@@ -589,6 +618,7 @@ class FireworksJobsExecutor final : public agent::IAlgorithmJobsExecutor {
       _WriteScalar(v2, launch_budget_value);
       _WriteScalar(v4, render_instance_count_value);
     } else if (algorithm_name_ == "v4a16_fireworks_pipeline_demo_stageEnd") {
+      _AppendFireworksJobsProbe("jobs.stageEnd.enter algorithm=" + algorithm_name_);
       algorithm::AlgorithmContainer* v4 = _FindMutableContainer(algorithm_container_set, "v4");
       convert_shell_coordinates(false);
       convert_spark_coordinates(false);
@@ -596,6 +626,10 @@ class FireworksJobsExecutor final : public agent::IAlgorithmJobsExecutor {
       _WriteScalar(v2, launch_budget_value);
       _WriteScalar(v3, live_spark_value);
       _WriteScalar(v4, render_instance_count_value);
+      _AppendFireworksJobsProbe(
+        "jobs.stageEnd.exit algorithm=" + algorithm_name_ +
+        " tick=" + std::to_string(tick_value) +
+        " render_instance_count=" + std::to_string(render_instance_count_value));
     }
 
     return true;

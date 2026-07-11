@@ -63,6 +63,11 @@ uint64_t _HashBool(uint64_t hash, bool value) {
   return _HashBytes(hash, &byte_value, sizeof(byte_value));
 }
 
+bool _ShouldEmitAlgorithmMountProbe(const std::string& algorithm_name) {
+  return algorithm_name.find("v4a10_teapot_pbr_demo") != std::string::npos ||
+    algorithm_name.find("v4a16_fireworks_pipeline_demo") != std::string::npos;
+}
+
 AlgorithmExecutionPreference _NormalizeExecutionPreference(
   AlgorithmExecutionPreference requested_preference,
   bool jobs_symbol,
@@ -1353,7 +1358,7 @@ BuiltAlgorithmMount _BuildAlgorithmMount(
   bool load_reflector,
   std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>* standard_shared_container_sets) {
   BuiltAlgorithmMount result{};
-  const bool emit_runner_probe = _ShouldEmitPipelineRunnerProbe(algorithm_name);
+  const bool emit_runner_probe = _ShouldEmitAlgorithmMountProbe(algorithm_name);
 
   std::string error_message;
   AlgorithmObject object{};
@@ -1448,7 +1453,7 @@ bool CreateAlgorithmObjectByName(
   AlgorithmObject* out_group,
   std::string* out_error_message,
   bool load_reflector) {
-  const bool emit_runner_probe = false;
+  const bool emit_runner_probe = _ShouldEmitAlgorithmMountProbe(algorithm_name);
   if (!out_group) {
     if (out_error_message) {
       *out_error_message = "AlgorithmObject output pointer is null.";

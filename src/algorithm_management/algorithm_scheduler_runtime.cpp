@@ -81,8 +81,11 @@ inline bool ExecuteJobsAlgorithmObject(
     return false;
   }
 
+  std::shared_ptr<::algorithmManager::scheduler::IAlgorithmJobsExecutor> jobs_executor = object.jobs_executor;
+  algorithm::AlgorithmProfile algorithm_profile = object.algorithm_profile;
+  std::shared_ptr<algorithm::AlgorithmContainerSet> container_set_handle = object.shared_container_set;
   std::cerr
-    << "jobs_exec.submit_blocking.begin algorithm=" << object.algorithm_profile.algorithm_name
+    << "jobs_exec.submit_blocking.begin algorithm=" << algorithm_profile.algorithm_name
     << " phase=" << static_cast<int>(context.execution_phase)
     << '\n';
   const bool submit_ok = runtime_systems::SubmitBlockingJob(
@@ -92,25 +95,41 @@ inline bool ExecuteJobsAlgorithmObject(
         ? runtime_systems::RuntimeJobPriority::Normal
         : runtime_systems::RuntimeJobPriority::Low),
     [
-      &object,
+      jobs_executor,
+      algorithm_profile,
       &context,
       &agent_to_algorithm_signal,
-      container_set,
+      container_set_handle,
       out_algorithm_to_agent_signal,
       out_debug_state](std::string* out_job_error_message) {
       std::cerr
-        << "jobs_exec.lambda.begin algorithm=" << object.algorithm_profile.algorithm_name
+        << "jobs_exec.lambda.begin algorithm=" << algorithm_profile.algorithm_name
         << " phase=" << static_cast<int>(context.execution_phase)
         << '\n';
-      const bool ok = object.jobs_executor->ExecuteJobsAlgorithm(
+      if (container_set_handle) {
+        std::cerr
+          << "jobs_exec.lambda.container_set algorithm=" << algorithm_profile.algorithm_name
+          << " ptr=" << container_set_handle.get()
+          << " arrays=" << container_set_handle->arrays.size()
+          << " regs=" << container_set_handle->temporary_registers.size()
+          << " caches=" << container_set_handle->temporary_caches.size()
+          << " hidden=" << container_set_handle->hidden_containers.size()
+          << " standard_enabled=" << (container_set_handle->standard_layout.enabled() ? "true" : "false")
+          << '\n';
+      }
+      std::cerr
+        << "jobs_exec.lambda.executor algorithm=" << algorithm_profile.algorithm_name
+        << " ptr=" << jobs_executor.get()
+        << '\n';
+      const bool ok = jobs_executor->ExecuteJobsAlgorithm(
         context,
-        object.algorithm_profile,
+        algorithm_profile,
         agent_to_algorithm_signal,
-        container_set,
+        container_set_handle.get(),
         out_algorithm_to_agent_signal,
         out_debug_state);
       std::cerr
-        << "jobs_exec.lambda.end algorithm=" << object.algorithm_profile.algorithm_name
+        << "jobs_exec.lambda.end algorithm=" << algorithm_profile.algorithm_name
         << " phase=" << static_cast<int>(context.execution_phase)
         << " ok=" << (ok ? "true" : "false")
         << '\n';
@@ -120,7 +139,7 @@ inline bool ExecuteJobsAlgorithmObject(
     },
     out_error_message);
   std::cerr
-    << "jobs_exec.submit_blocking.end algorithm=" << object.algorithm_profile.algorithm_name
+    << "jobs_exec.submit_blocking.end algorithm=" << algorithm_profile.algorithm_name
     << " phase=" << static_cast<int>(context.execution_phase)
     << " ok=" << (submit_ok ? "true" : "false")
     << '\n';

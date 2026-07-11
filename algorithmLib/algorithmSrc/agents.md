@@ -33,6 +33,17 @@ For each algorithm, there are four file groups:
 Loader, decomposer, reflector, and execution code must only read `.algo` and `algocache`.
 They must not read source files or `algodevdoc`.
 `algodevdoc` is documentation only. It is not a build input, a mount input, or an execution input.
+At execution time, the algorithm contract only supports `.algo` and `algocache`.
+
+## Pipeline Bridge Contract
+
+- `wrapper` only provides the outer pipeline shell.
+- `wrapper` must not define bridge semantics.
+- Bridge semantics belong to the explicit manifest mapping between adjacent algorithms.
+- Use explicit remaps such as `v1 -> bridge0` on the upstream side and `bridge0 -> v2` on the downstream side.
+- `catalog` may normalize or materialize these explicit mappings during package creation.
+- `catalog` must not infer missing mappings.
+- `runtime_systems` must consume the finalized package only.
 
 ## Container Naming
 

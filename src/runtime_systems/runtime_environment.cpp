@@ -6,11 +6,14 @@
 
 #include "runtime_systems/render/imgui_vulkan_runtime.h"
 #include "runtime_systems/window/sdl_window.h"
+#include "algorithm_catalog/algorithm_library_paths.h"
 
 #include <cassert>
 #include <iostream>
 #include <string>
 #include <utility>
+#include <fstream>
+#include <filesystem>
 
 namespace runtime_systems {
 
@@ -18,6 +21,17 @@ namespace {
 
 RuntimeShutdownCallback g_runtime_shutdown_callback = nullptr;
 RuntimeVkCacheClearCallback g_runtime_vk_cache_clear_callback = nullptr;
+
+void AppendRuntimeInitProbe(const std::string& line) {
+  const std::filesystem::path probe_path =
+    algorithm::library_paths::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot() / "runtime_init_probe.log";
+  std::error_code ec;
+  std::filesystem::create_directories(probe_path.parent_path(), ec);
+  std::ofstream file(probe_path, std::ios::binary | std::ios::app);
+  if (file) {
+    file << line << '\n';
+  }
+}
 
 }  // namespace
 
@@ -54,33 +68,57 @@ bool RuntimeEnvironment::Init(
   int width,
   int height,
   RuntimeExecutionSymbols execution_symbols) {
+  AppendRuntimeInitProbe("runtime_environment.init.begin");
   if (!InitializeJobSystem()) {
+    AppendRuntimeInitProbe("runtime_environment.init.job_system_failed");
     return false;
   }
 
   if (window_ || imgui_runtime_) {
     execution_symbols_ = execution_symbols;
+    AppendRuntimeInitProbe("runtime_environment.init.reused");
     return true;
   }
 
-  if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
+  SDL_SetHint("SDL_VIDEODRIVER", "windows");
+  AppendRuntimeInitProbe("runtime_environment.init.sdl_hint_video_set");
+  AppendRuntimeInitProbe("runtime_environment.init.sdl_video_begin");
+  if (!SDL_Init(SDL_INIT_VIDEO)) {
+    AppendRuntimeInitProbe("runtime_environment.init.sdl_video_failed");
     ShutdownJobSystem();
     return false;
   }
+  AppendRuntimeInitProbe("runtime_environment.init.sdl_video_end");
+  AppendRuntimeInitProbe("runtime_environment.init.sdl_gamepad_begin");
+  if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD)) {
+    AppendRuntimeInitProbe("runtime_environment.init.sdl_gamepad_failed");
+    SDL_Quit();
+    ShutdownJobSystem();
+    return false;
+  }
+  AppendRuntimeInitProbe("runtime_environment.init.sdl_gamepad_end");
   sdl_initialized_ = true;
+  AppendRuntimeInitProbe("runtime_environment.init.sdl_end");
 
   try {
+    AppendRuntimeInitProbe("runtime_environment.init.window_begin");
     window_ = std::unique_ptr<SdlWindow, SdlWindowDeleter>(
       new SdlWindow(window_title ? window_title : "debugTool", width, height));
+    AppendRuntimeInitProbe("runtime_environment.init.window_end");
+    AppendRuntimeInitProbe("runtime_environment.init.imgui_begin");
     imgui_runtime_ = std::unique_ptr<ImGuiVulkanRuntime, ImGuiVulkanRuntimeDeleter>(
       new ImGuiVulkanRuntime());
     if (!imgui_runtime_->Init(window_->native_handle().window, window_title ? window_title : "debugTool")) {
+      AppendRuntimeInitProbe("runtime_environment.init.imgui_failed");
       Destroy();
       return false;
     }
+    AppendRuntimeInitProbe("runtime_environment.init.imgui_end");
     execution_symbols_ = execution_symbols;
+    AppendRuntimeInitProbe("runtime_environment.init.end");
     return true;
   } catch (...) {
+    AppendRuntimeInitProbe("runtime_environment.init.throw");
     Destroy();
     throw;
   }

@@ -82,7 +82,8 @@ bool _HasDeclaredContainerNameConflict(
   const std::string& container_name);
 
 bool _ShouldEmitPipelineRunnerProbe(const std::string& algorithm_name) {
-  return false;
+  return algorithm_name.find("v4a10_teapot_pbr_demo") != std::string::npos ||
+    algorithm_name.find("v4a16_fireworks_pipeline_demo") != std::string::npos;
 }
 
 bool _HasDeclaredContainerNameConflict(
@@ -2563,10 +2564,21 @@ void _SetErrorMessage(std::string* out_error_message, std::string message) {
   }
 }
 
-std::shared_ptr<void> _LoadModule(const std::filesystem::path& path) {
-  const std::wstring wide_path = path.wstring();
-  HMODULE module = LoadLibraryW(wide_path.c_str());
+std::shared_ptr<void> _LoadModule(
+  const std::filesystem::path& path,
+  std::string* out_error_message) {
+  const fs::path absolute_path = fs::absolute(path).lexically_normal();
+  const std::wstring wide_path = absolute_path.wstring();
+  HMODULE module = LoadLibraryExW(
+    wide_path.c_str(),
+    nullptr,
+    LOAD_WITH_ALTERED_SEARCH_PATH);
   if (!module) {
+    if (out_error_message) {
+      *out_error_message =
+        "LoadLibraryExW failed for " + absolute_path.string() +
+        " (GetLastError=" + std::to_string(static_cast<unsigned long>(GetLastError())) + ")";
+    }
     return {};
   }
 
@@ -2619,17 +2631,58 @@ bool TryLoadAlgorithmPluginComponents(
     return false;
   }
 
-  const std::shared_ptr<void> module_guard = _LoadModule(plugin_path);
+  std::string load_error_message{};
+  if (_ShouldEmitPipelineRunnerProbe(package_location.algorithm_name.empty()
+        ? package_location.manifest_name
+        : package_location.algorithm_name)) {
+    _AppendPipelineRunnerProbe(
+      "cache_loader_probe.log",
+      "create_from_location.plugin_load.module.begin path=" +
+        std::filesystem::absolute(plugin_path).lexically_normal().string());
+  }
+  const std::shared_ptr<void> module_guard = _LoadModule(plugin_path, &load_error_message);
   if (!module_guard) {
-    _SetErrorMessage(out_error_message, "Failed to load algorithm plugin module: " + plugin_path.string());
+    if (_ShouldEmitPipelineRunnerProbe(package_location.algorithm_name.empty()
+          ? package_location.manifest_name
+          : package_location.algorithm_name)) {
+      _AppendPipelineRunnerProbe(
+        "cache_loader_probe.log",
+        "create_from_location.plugin_load.module.end failed error=" + load_error_message);
+    }
+    _SetErrorMessage(
+      out_error_message,
+      load_error_message.empty()
+        ? "Failed to load algorithm plugin module: " +
+          std::filesystem::absolute(plugin_path).lexically_normal().string()
+        : load_error_message);
     return false;
   }
+  if (_ShouldEmitPipelineRunnerProbe(package_location.algorithm_name.empty()
+        ? package_location.manifest_name
+        : package_location.algorithm_name)) {
+    _AppendPipelineRunnerProbe("cache_loader_probe.log", "create_from_location.plugin_load.module.end success");
+  }
 
+  if (_ShouldEmitPipelineRunnerProbe(package_location.algorithm_name.empty()
+        ? package_location.manifest_name
+        : package_location.algorithm_name)) {
+    _AppendPipelineRunnerProbe("cache_loader_probe.log", "create_from_location.plugin_load.proc.begin");
+  }
   const auto create_bundle_fn = reinterpret_cast<CreateBundleFn>(
     GetProcAddress(static_cast<HMODULE>(module_guard.get()), "AlgorithmPlugin_CreateBundle"));
   if (!create_bundle_fn) {
+    if (_ShouldEmitPipelineRunnerProbe(package_location.algorithm_name.empty()
+          ? package_location.manifest_name
+          : package_location.algorithm_name)) {
+      _AppendPipelineRunnerProbe("cache_loader_probe.log", "create_from_location.plugin_load.proc.end missing");
+    }
     _SetErrorMessage(out_error_message, "Algorithm plugin is missing AlgorithmPlugin_CreateBundle: " + plugin_path.string());
     return false;
+  }
+  if (_ShouldEmitPipelineRunnerProbe(package_location.algorithm_name.empty()
+        ? package_location.manifest_name
+        : package_location.algorithm_name)) {
+    _AppendPipelineRunnerProbe("cache_loader_probe.log", "create_from_location.plugin_load.proc.end success");
   }
 
   algorithmManager::catalog::AlgorithmPluginRequest request{};
@@ -2646,9 +2699,24 @@ bool TryLoadAlgorithmPluginComponents(
   request.algorithm_folder = algorithm_folder.c_str();
 
   algorithmManager::catalog::AlgorithmPluginBundle bundle{};
+  if (_ShouldEmitPipelineRunnerProbe(package_location.algorithm_name.empty()
+        ? package_location.manifest_name
+        : package_location.algorithm_name)) {
+    _AppendPipelineRunnerProbe("cache_loader_probe.log", "create_from_location.plugin_bundle.begin");
+  }
   if (!create_bundle_fn(&request, &bundle)) {
+    if (_ShouldEmitPipelineRunnerProbe(package_location.algorithm_name.empty()
+          ? package_location.manifest_name
+          : package_location.algorithm_name)) {
+      _AppendPipelineRunnerProbe("cache_loader_probe.log", "create_from_location.plugin_bundle.end failed");
+    }
     _SetErrorMessage(out_error_message, "Algorithm plugin rejected bundle creation: " + plugin_path.string());
     return false;
+  }
+  if (_ShouldEmitPipelineRunnerProbe(package_location.algorithm_name.empty()
+        ? package_location.manifest_name
+        : package_location.algorithm_name)) {
+    _AppendPipelineRunnerProbe("cache_loader_probe.log", "create_from_location.plugin_bundle.end success");
   }
 
   if (request.api_version != algorithmManager::catalog::kAlgorithmPluginApiVersion) {
@@ -2689,15 +2757,11 @@ bool TryLoadAlgorithmPluginComponents(
       module_guard);
   }
 
-  const auto create_reflector_fn = reinterpret_cast<CreateRuntimeReflectorFn>(
-    GetProcAddress(static_cast<HMODULE>(module_guard.get()), "AlgorithmPlugin_CreateRuntimeReflector"));
-  if (bundle.reflector && create_reflector_fn) {
-    algorithm::AlgorithmReflector runtime_reflector{};
-    if (create_reflector_fn(&request, &runtime_reflector) &&
-        !runtime_reflector.empty()) {
-      out_components->runtime_reflector =
-        std::make_shared<algorithm::AlgorithmReflector>(std::move(runtime_reflector));
-    }
+  if (_ShouldEmitPipelineRunnerProbe(package_location.algorithm_name.empty()
+        ? package_location.manifest_name
+        : package_location.algorithm_name) &&
+      bundle.reflector) {
+    _AppendPipelineRunnerProbe("cache_loader_probe.log", "create_from_location.reflector.skipped");
   }
   _SetErrorMessage(out_error_message, {});
   return true;

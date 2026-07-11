@@ -1003,9 +1003,7 @@ bool DebugToolBackendRuntime::AttachAlgorithmToAgent(
     return false;
   }
 
-  const bool load_reflector =
-    algorithmManager::GetAlgorithmLibraryRuntimeBuildFlavor() !=
-    algorithm::library_paths::AlgorithmLibraryRuntimeBuildFlavor::ReleaseWithDebugInfo;
+  const bool load_reflector = false;
   const bool attached = agent_manager_.AttachAlgorithmToAgent(
     agent_index,
     algorithm_name,
@@ -1147,9 +1145,7 @@ bool DebugToolBackendRuntime::AttachPipelineAlgorithmToAgent(
   size_t* out_algorithm_index,
   std::string* out_error_message,
   debug_tool::AlgorithmExecutionPreference execution_preference) {
-  const bool load_reflector =
-    algorithmManager::GetAlgorithmLibraryRuntimeBuildFlavor() !=
-    algorithm::library_paths::AlgorithmLibraryRuntimeBuildFlavor::ReleaseWithDebugInfo;
+  const bool load_reflector = false;
   const bool attached = agent_manager_.AttachPipelineAlgorithmToAgent(
     agent_index,
     pipeline_name,
@@ -1845,18 +1841,18 @@ bool DebugToolBackendRuntime::BuildRenderPreviewRequest(
   }
 
   const algorithm::AlgorithmContainer* instance_count_container =
-    algorithm::FindAlgorithmContainer(*preview_data_container_set, "v4");
-  if (!instance_count_container || instance_count_container->bytes.size() < sizeof(float)) {
+    algorithm::FindAlgorithmContainer(*container_set, "instance_count");
+  if (!instance_count_container || instance_count_container->bytes.size() < sizeof(uint32_t)) {
     DEBUG_TOOL_ASSERT(false, "Preview instance count container is missing.");
     if (out_error_message) {
-      *out_error_message = "Preview instance count container is missing: v4";
+      *out_error_message = "Preview instance count container is missing: instance_count";
     }
     out_request->Clear();
     return false;
   }
-  float instance_count_value = 0.0f;
+  uint32_t instance_count_value = 0u;
   std::memcpy(&instance_count_value, instance_count_container->bytes.data(), sizeof(instance_count_value));
-  out_request->instance_count = static_cast<uint32_t>(instance_count_value);
+  out_request->instance_count = instance_count_value;
 
   out_request->valid = true;
   DEBUG_TOOL_ASSERT(

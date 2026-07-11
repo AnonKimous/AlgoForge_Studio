@@ -1,5 +1,6 @@
 #include "imgui_vulkan_runtime.h"
 
+#include "algorithm_catalog/algorithm_library_paths.h"
 #include "runtime_systems/runtime_vk_context.h"
 #include "runtime_systems/job_system.h"
 #include "runtime_systems/runtime_environment.h"
@@ -8,6 +9,8 @@
 #include <cassert>
 #include <cstring>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -38,6 +41,17 @@ std::string VkErrorMessage(const char* prefix, VkResult err) {
 
 bool IsExtensionPresent(const std::vector<const char*>& extensions, const char* extension) {
   return std::find(extensions.begin(), extensions.end(), extension) != extensions.end();
+}
+
+void AppendImguiVulkanProbe(const std::string& line) {
+  const std::filesystem::path probe_path =
+    algorithm::library_paths::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot() / "runtime_init_probe.log";
+  std::error_code ec;
+  std::filesystem::create_directories(probe_path.parent_path(), ec);
+  std::ofstream file(probe_path, std::ios::binary | std::ios::app);
+  if (file) {
+    file << line << '\n';
+  }
 }
 
 }  // namespace
@@ -333,6 +347,7 @@ bool ImGuiVulkanRuntime::Init(SDL_Window* window, const char* app_name) {
     return true;
   }
 
+  AppendImguiVulkanProbe("imgui_runtime.init.begin");
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
   imgui_context_created_ = true;
@@ -341,18 +356,25 @@ bool ImGuiVulkanRuntime::Init(SDL_Window* window, const char* app_name) {
   io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
   ImGui::StyleColorsDark();
 
+  AppendImguiVulkanProbe("imgui_runtime.init.setup_vulkan.begin");
   SetupVulkan(app_name, window);
+  AppendImguiVulkanProbe("imgui_runtime.init.setup_vulkan.end");
 
+  AppendImguiVulkanProbe("imgui_runtime.init.sdl_backend.begin");
   if (!ImGui_ImplSDL3_InitForVulkan(window)) {
+    AppendImguiVulkanProbe("imgui_runtime.init.sdl_backend.failed");
     Destroy();
     return false;
   }
   sdl_backend_initialized_ = true;
+  AppendImguiVulkanProbe("imgui_runtime.init.sdl_backend.end");
 
   int width = 0;
   int height = 0;
   SDL_GetWindowSizeInPixels(window, &width, &height);
+  AppendImguiVulkanProbe("imgui_runtime.init.setup_window.begin");
   SetupVulkanWindow(window, width, height);
+  AppendImguiVulkanProbe("imgui_runtime.init.setup_window.end");
 
   ImGui_ImplVulkan_InitInfo init_info{};
   init_info.ApiVersion = VK_API_VERSION_1_3;
@@ -369,19 +391,25 @@ bool ImGuiVulkanRuntime::Init(SDL_Window* window, const char* app_name) {
   init_info.PipelineInfoMain.Subpass = 0;
   init_info.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
   init_info.CheckVkResultFn = CheckVkResult;
+  AppendImguiVulkanProbe("imgui_runtime.init.vulkan_backend.begin");
   if (!ImGui_ImplVulkan_Init(&init_info)) {
+    AppendImguiVulkanProbe("imgui_runtime.init.vulkan_backend.failed");
     Destroy();
     return false;
   }
   vulkan_backend_initialized_ = true;
+  AppendImguiVulkanProbe("imgui_runtime.init.vulkan_backend.end");
 
   if (!preview_renderer_) {
     preview_renderer_ = std::make_unique<PreviewRenderer>();
   }
+  AppendImguiVulkanProbe("imgui_runtime.init.preview_renderer.begin");
   if (!preview_renderer_->Init(instance_, physical_device_, device_, descriptor_pool_, vma_allocator_)) {
+    AppendImguiVulkanProbe("imgui_runtime.init.preview_renderer.failed");
     Destroy();
     return false;
   }
+  AppendImguiVulkanProbe("imgui_runtime.init.preview_renderer.end");
   if (has_pending_render_preview_request_) {
     preview_renderer_->SetRequest(pending_render_preview_request_);
     DEBUG_TOOL_ASSERT(
@@ -393,6 +421,7 @@ bool ImGuiVulkanRuntime::Init(SDL_Window* window, const char* app_name) {
   }
 
   initialized_ = true;
+  AppendImguiVulkanProbe("imgui_runtime.init.end");
   return true;
 }
 

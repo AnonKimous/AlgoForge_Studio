@@ -180,6 +180,10 @@ Demo:
 
 ![Tempo algorithm render preview](demo/tempo/tempo.gif)
 
+#### Teapot
+
+![Teapot algorithm render preview](demo/teapot/teapot.gif)
+
 ### Demo 2: V6A6 collision algorithm
 
 Goal:

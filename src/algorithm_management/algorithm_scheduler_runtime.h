@@ -535,6 +535,18 @@ inline bool FinalizeAlgorithmObject(
     return false;
   }
 
+  const auto append_finalize_probe = [&](const std::string& line) {
+    const std::filesystem::path path =
+      ::algorithm::library_paths::ResolveAlgorithmLibraryRuntimeNormDebugInfoRoot() / "finalize_probe.log";
+    std::error_code ec;
+    std::filesystem::create_directories(path.parent_path(), ec);
+    std::ofstream file(path, std::ios::binary | std::ios::app);
+    if (file) {
+      file << line << '\n';
+    }
+  };
+  append_finalize_probe("finalize.begin algorithm=" + algorithm_object.algorithm_profile.algorithm_name);
+
   ::algorithm::AlgorithmPackageLocation package_location{};
   std::string location_error_message;
   if (!TryResolveAlgorithmPackageLocation(
@@ -555,6 +567,9 @@ inline bool FinalizeAlgorithmObject(
     algorithm_object.descriptor_values,
     container_set,
     out_error_message);
+  append_finalize_probe(
+    "finalize.end algorithm=" + algorithm_object.algorithm_profile.algorithm_name +
+    " ok=" + std::string(ok ? "true" : "false"));
   if (ok && out_error_message) {
     out_error_message->clear();
   }
@@ -1142,15 +1157,8 @@ class NoOpPipelineWrapperJobsExecutor final : public ::algorithmManager::IAlgori
     (void)algorithm_profile;
     (void)agent_to_algorithm_signal;
     (void)algorithm_container_set;
-    if (algorithm_to_agent_signal) {
-      *algorithm_to_agent_signal = {};
-    }
-    if (debug_state) {
-    debug_state->signals.push_back(AdvancedAlgorithmDebugSignal{
-        .name = "pipeline_wrapper.noop",
-        .payload = "Executed wrapper no-op executor.",
-      });
-    }
+    (void)algorithm_to_agent_signal;
+    (void)debug_state;
     return true;
   }
 };
@@ -1930,6 +1938,7 @@ inline bool TickAlgorithmObject(
     object.intervention->SupportsIntervention();
   runtime_state->algorithm_to_agent_signal.control_bits =
     runtime_state->agent_to_algorithm_signal.control_bits;
+  std::shared_ptr<algorithm::AlgorithmContainerSet> container_set_handle = object.shared_container_set;
   std::string submit_error_message;
   const auto exec_begin = std::chrono::steady_clock::now();
   std::cerr
@@ -1941,7 +1950,7 @@ inline bool TickAlgorithmObject(
         object,
         context,
         runtime_state->agent_to_algorithm_signal,
-        object.mutable_container_set(),
+        container_set_handle.get(),
         &runtime_state->algorithm_to_agent_signal,
         &runtime_state->debug_state,
         &submit_error_message);

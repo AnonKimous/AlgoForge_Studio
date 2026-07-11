@@ -13,6 +13,9 @@
       },
       "v4": {
         "count": 1
+      },
+      "v5": {
+        "count": 1
       }
     },
     "variableArray": {
@@ -62,6 +65,7 @@
       "v2:mesh_triangle_count",
       "v3:mesh_bvh_node_count",
       "v4:texture_seed",
+      "v5:instance_count",
       "a1:scene_info",
       "a2:material_buffer",
       "a3:triangle_buffer",
@@ -117,6 +121,12 @@
         "name": "texture_seed",
         "from": ["texture_seed"],
         "to": ["texture_seed"],
+        "reflectFun": "direct"
+      },
+      {
+        "name": "instance_count",
+        "from": ["instance_count"],
+        "to": ["instance_count"],
         "reflectFun": "direct"
       },
       {
@@ -234,6 +244,12 @@
           "kind": "variable",
           "tuple_width": 1,
           "required": true
+        },
+        {
+          "name": "instance_count",
+          "kind": "variable",
+          "tuple_width": 1,
+          "required": true
         }
       ]
     },
@@ -296,6 +312,12 @@
             },
             {
               "name": "texture_seed",
+              "kind": "variable",
+              "tuple_width": 1,
+              "required": true
+            },
+            {
+              "name": "instance_count",
               "kind": "variable",
               "tuple_width": 1,
               "required": true

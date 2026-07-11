@@ -1603,8 +1603,20 @@ class PackageResourceDecomposer final {
       return false;
     }
 
+    const auto append_probe = [&](const std::string& line) {
+      const std::filesystem::path path =
+        algorithm::library_paths::ResolveAlgorithmLibraryRuntimeNormDebugInfoRoot() / "decompose_probe.log";
+      std::error_code ec;
+      std::filesystem::create_directories(path.parent_path(), ec);
+      std::ofstream file(path, std::ios::binary | std::ios::app);
+      if (file) {
+        file << line << '\n';
+      }
+    };
+
     const agentmanager::agent::AlgorithmResourceBinding* mesh_resource_binding = nullptr;
     if (!schema_.mesh_field_bindings.empty()) {
+      append_probe("decompose.resources.mesh_field.begin algorithm=" + algorithm_profile.algorithm_name);
       if (!schema_.semantic_resource_kind.empty()) {
         mesh_resource_binding = _FindResourceBindingByKind(resource_bindings, schema_.semantic_resource_kind);
         if (!mesh_resource_binding) {
@@ -1639,6 +1651,9 @@ class PackageResourceDecomposer final {
       }
 
       const fs::path mesh_source_path(mesh_resource_binding->source_path);
+      append_probe(
+        "decompose.resources.mesh_field.source algorithm=" + algorithm_profile.algorithm_name +
+        " path=" + mesh_source_path.generic_string());
       const fs::path resolved_mesh_source_path = mesh_source_path.is_absolute()
         ? mesh_source_path
         : algorithm::library_paths::ResolveAlgorithmRelativePath(
@@ -1646,7 +1661,20 @@ class PackageResourceDecomposer final {
               algorithm::library_paths::ResolveAlgorithmLibrarySourceRoot()),
             {},
             mesh_resource_binding->source_path);
-      const common_data::Mesh mesh = mesh_io::LoadMeshFile(resolved_mesh_source_path.generic_string());
+      const fs::path absolute_mesh_source_path = fs::absolute(resolved_mesh_source_path).lexically_normal();
+      append_probe(
+        "decompose.resources.mesh_field.resolved algorithm=" + algorithm_profile.algorithm_name +
+        " path=" + absolute_mesh_source_path.generic_string());
+      common_data::Mesh mesh{};
+      try {
+        mesh = mesh_io::LoadMeshFile(absolute_mesh_source_path.generic_string());
+      } catch (const std::exception& e) {
+        _SetErrorMessage(
+          out_error_message,
+          std::string("Failed to load mesh resource file '") + absolute_mesh_source_path.generic_string() +
+            "' for '" + algorithm_profile.algorithm_name + "': " + e.what());
+        return false;
+      }
 
       for (const PackageDecomposerMeshFieldBinding& mesh_field_binding : schema_.mesh_field_bindings) {
         algorithm::AlgorithmContainer* mesh_container = FindAlgorithmContainer(container_set, mesh_field_binding.container_name);
@@ -1670,6 +1698,11 @@ class PackageResourceDecomposer final {
     }
 
     for (const PackageDecomposerMeshBinding& binding : schema_.mesh_bindings) {
+      append_probe(
+        "decompose.resources.binding.begin algorithm=" + algorithm_profile.algorithm_name +
+        " resource=" + binding.resource_name +
+        " kind=" + binding.resource_kind +
+        " container=" + binding.container_name);
       const agentmanager::agent::AlgorithmResourceBinding* resource_binding =
         _FindResourceBinding(resource_bindings, binding.resource_name);
       if (!resource_binding) {
@@ -1695,14 +1728,19 @@ class PackageResourceDecomposer final {
               algorithm::library_paths::ResolveAlgorithmLibrarySourceRoot()),
             {},
             resource_binding->source_path);
-      std::ifstream file(source_path, std::ios::binary);
-      if (!file && !resolved_source_path.empty() && resolved_source_path != source_path) {
-        file.open(resolved_source_path, std::ios::binary);
+      const fs::path absolute_source_path = fs::absolute(resolved_source_path).lexically_normal();
+      append_probe(
+        "decompose.resources.binding.resolved algorithm=" + algorithm_profile.algorithm_name +
+        " resource=" + binding.resource_name +
+        " path=" + absolute_source_path.generic_string());
+      std::ifstream file(absolute_source_path, std::ios::binary);
+      if (!file && !absolute_source_path.empty() && absolute_source_path != source_path) {
+        file.open(absolute_source_path, std::ios::binary);
       }
       if (!file) {
         _SetErrorMessage(
           out_error_message,
-          "Required resource file '" + resolved_source_path.generic_string() + "' could not be opened for '" +
+          "Required resource file '" + absolute_source_path.generic_string() + "' could not be opened for '" +
             algorithm_profile.algorithm_name + "'.");
         return false;
       }
@@ -1717,7 +1755,16 @@ class PackageResourceDecomposer final {
       }
 
       if (binding.resource_kind == "mesh") {
-        const common_data::Mesh mesh = mesh_io::LoadMeshFile(resolved_source_path.generic_string());
+        common_data::Mesh mesh{};
+        try {
+          mesh = mesh_io::LoadMeshFile(absolute_source_path.generic_string());
+        } catch (const std::exception& e) {
+          _SetErrorMessage(
+            out_error_message,
+            std::string("Failed to load mesh resource file '") + absolute_source_path.generic_string() +
+              "' for '" + algorithm_profile.algorithm_name + "': " + e.what());
+          return false;
+        }
         if (!_WriteMeshResourceField(
               mesh,
               binding.resource_name,
@@ -1727,6 +1774,9 @@ class PackageResourceDecomposer final {
               out_error_message)) {
           return false;
         }
+        append_probe(
+          "decompose.resources.binding.end algorithm=" + algorithm_profile.algorithm_name +
+          " resource=" + binding.resource_name + " mesh");
         continue;
       }
 
@@ -1735,6 +1785,9 @@ class PackageResourceDecomposer final {
       if (copy_size > 0u) {
         std::memcpy(container->bytes.data(), file_text.data(), copy_size);
       }
+      append_probe(
+        "decompose.resources.binding.end algorithm=" + algorithm_profile.algorithm_name +
+        " resource=" + binding.resource_name + " bytes=" + std::to_string(copy_size));
     }
 
     return true;
@@ -2243,16 +2296,30 @@ class PackageSchemaDecomposer final {
       _SetErrorMessage(out_error_message, schema_.error_message);
       return false;
     }
+    const auto append_probe = [&](const std::string& line) {
+      const std::filesystem::path path =
+        algorithm::library_paths::ResolveAlgorithmLibraryRuntimeNormDebugInfoRoot() / "decompose_probe.log";
+      std::error_code ec;
+      std::filesystem::create_directories(path.parent_path(), ec);
+      std::ofstream file(path, std::ios::binary | std::ios::app);
+      if (file) {
+        file << line << '\n';
+      }
+    };
+    append_probe("decompose.resources.begin algorithm=" + algorithm_profile.algorithm_name);
     return resource_decomposer_.DecomposeResources(
              algorithm_profile,
              resource_bindings,
              container_set,
              out_error_message) &&
+      (append_probe("decompose.resources.end algorithm=" + algorithm_profile.algorithm_name),
+      append_probe("decompose.descriptors.begin algorithm=" + algorithm_profile.algorithm_name),
       descriptor_decomposer_.DecomposeDescriptors(
         algorithm_profile,
         descriptor_values,
         container_set,
-        out_error_message);
+        out_error_message)) &&
+      (append_probe("decompose.descriptors.end algorithm=" + algorithm_profile.algorithm_name), true);
   }
 
  private:
@@ -3275,7 +3342,21 @@ bool DecomposeAlgorithmPackageFromLocation(
     _SetErrorMessage(out_error_message, "Algorithm package location is invalid.");
     return false;
   }
+  const auto append_probe = [&](const std::string& line) {
+    const std::filesystem::path path =
+      algorithm::library_paths::ResolveAlgorithmLibraryRuntimeNormDebugInfoRoot() / "decompose_probe.log";
+    std::error_code ec;
+    std::filesystem::create_directories(path.parent_path(), ec);
+    std::ofstream file(path, std::ios::binary | std::ios::app);
+    if (file) {
+      file << line << '\n';
+    }
+  };
+  append_probe("decompose.begin algorithm=" + package_location.algorithm_name);
   const PackageSchemaDecomposer decomposer(package_location);
+  append_probe(
+    "decompose.after_ctor algorithm=" + package_location.algorithm_name +
+    " valid=" + std::string(decomposer.valid() ? "true" : "false"));
   if (!decomposer.valid()) {
     _SetErrorMessage(out_error_message, decomposer.error_message());
     return false;
@@ -3290,6 +3371,9 @@ bool DecomposeAlgorithmPackageFromLocation(
     descriptor_values,
     container_set,
     out_error_message);
+  append_probe(
+    "decompose.end algorithm=" + package_location.algorithm_name +
+    " ok=" + std::string(ok ? "true" : "false"));
   return ok;
 }
 

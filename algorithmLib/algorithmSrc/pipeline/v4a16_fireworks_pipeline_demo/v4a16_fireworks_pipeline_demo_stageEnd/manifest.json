@@ -55,7 +55,10 @@
       "spark_seed": {
         "count": 512
       }
-    }
+    },
+    "aliases": [
+      "v4:instance_count"
+    ]
   },
   "decomposer": {
     "res": {},

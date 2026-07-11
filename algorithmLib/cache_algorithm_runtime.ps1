@@ -450,6 +450,7 @@ foreach ($entry in $packageEntries) {
     $runtimeFiles = Get-ChildItem -LiteralPath $runtimeDir -Recurse -File | Where-Object {
       $_.Extension -ne '.algo' -and
       $_.Extension -notin '.exp', '.lib', '.pdb', '.ilk', '.obj', '.manifest' -and
+      $_.FullName -notmatch '[\\/](algocache)[\\/]+' -and
       ($nestedRuntimePackageDirs.Count -eq 0 -or
         -not (Test-PathUnderAnyRoot -ChildPath $_.FullName -RootPaths $nestedRuntimePackageDirs)) -and
       (

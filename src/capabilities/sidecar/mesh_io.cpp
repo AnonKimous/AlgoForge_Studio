@@ -9,6 +9,7 @@
 
 #include "capabilities/sidecar/mesh_io.h"
 
+#include "algorithm_catalog/algorithm_library_paths.h"
 #include "common_data/common_data.h"
 
 #include <assimp/Importer.hpp>
@@ -18,6 +19,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <filesystem>
 #include <fstream>
 #include <limits>
 #include <stdexcept>
@@ -100,10 +102,14 @@ void ComputeVertexNormals(Mesh* mesh) {
   }
 }
 
-Mesh BuildMeshFromAssimpScene(const aiScene& scene) {
+template <typename ProbeFn>
+Mesh BuildMeshFromAssimpScene(const aiScene& scene, const ProbeFn& append_probe) {
   Mesh mesh{};
   bool missing_normals = false;
 
+  append_probe(
+    "build.begin meshes=" + std::to_string(scene.mNumMeshes) +
+    " materials=" + std::to_string(scene.mNumMaterials));
   mesh.positions.reserve(scene.mNumMeshes * 3u);
   mesh.normals.reserve(scene.mNumMeshes * 3u);
   mesh.triangles.reserve(scene.mNumMeshes);
@@ -115,6 +121,11 @@ Mesh BuildMeshFromAssimpScene(const aiScene& scene) {
       throw std::runtime_error("Assimp scene mesh pointer is null");
     }
 
+    append_probe(
+      "build.mesh.begin index=" + std::to_string(mesh_index) +
+      " vertices=" + std::to_string(assimp_mesh->mNumVertices) +
+      " faces=" + std::to_string(assimp_mesh->mNumFaces) +
+      " normals=" + std::string(assimp_mesh->HasNormals() ? "true" : "false"));
     const uint32_t vertex_base = static_cast<uint32_t>(mesh.positions.size());
     if (!assimp_mesh->HasNormals()) {
       missing_normals = true;
@@ -131,6 +142,11 @@ Mesh BuildMeshFromAssimpScene(const aiScene& scene) {
       }
       mesh.uvs.push_back(ReadVertexUv(*assimp_mesh, i));
     }
+    append_probe(
+      "build.mesh.vertices.end index=" + std::to_string(mesh_index) +
+      " positions=" + std::to_string(mesh.positions.size()) +
+      " normals=" + std::to_string(mesh.normals.size()) +
+      " uvs=" + std::to_string(mesh.uvs.size()));
 
     for (unsigned int i = 0; i < assimp_mesh->mNumFaces; ++i) {
       const aiFace& face = assimp_mesh->mFaces[i];
@@ -145,8 +161,17 @@ Mesh BuildMeshFromAssimpScene(const aiScene& scene) {
       });
       mesh.triangle_material_gpa.push_back(std::numeric_limits<float>::quiet_NaN());
     }
+    append_probe(
+      "build.mesh.faces.end index=" + std::to_string(mesh_index) +
+      " triangles=" + std::to_string(mesh.triangles.size()) +
+      " triangle_material_gpa=" + std::to_string(mesh.triangle_material_gpa.size()));
   }
 
+  append_probe(
+    "build.before_normals missing_normals=" + std::string(missing_normals ? "true" : "false") +
+    " positions=" + std::to_string(mesh.positions.size()) +
+    " normals=" + std::to_string(mesh.normals.size()) +
+    " triangles=" + std::to_string(mesh.triangles.size()));
   if (missing_normals || mesh.normals.size() != mesh.positions.size()) {
     ComputeVertexNormals(&mesh);
   } else {
@@ -154,9 +179,22 @@ Mesh BuildMeshFromAssimpScene(const aiScene& scene) {
       normal = NormalizeOrFallback(normal);
     }
   }
+  append_probe(
+    "build.after_normals positions=" + std::to_string(mesh.positions.size()) +
+    " normals=" + std::to_string(mesh.normals.size()));
 
+  append_probe("build.before_rebuild_edges");
   RebuildEdges(mesh);
+  append_probe(
+    "build.after_rebuild_edges edges=" + std::to_string(mesh.edges.size()) +
+    " positions=" + std::to_string(mesh.positions.size()) +
+    " triangles=" + std::to_string(mesh.triangles.size()));
+  append_probe("build.before_normalize_triangle_materials");
   NormalizeTriangleMaterials(mesh);
+  append_probe(
+    "build.after_normalize_triangle_materials triangle_material_gpa=" +
+    std::to_string(mesh.triangle_material_gpa.size()));
+  append_probe("build.end");
   return mesh;
 }
 
@@ -222,12 +260,23 @@ void WriteObjFaces(const Mesh& mesh, std::ofstream& file) {
 }  // namespace
 
 Mesh LoadMeshFile(const std::string& path) {
+  const auto append_probe = [&](const std::string& line) {
+    const std::filesystem::path probe_path =
+      algorithm::library_paths::ResolveAlgorithmLibraryRuntimeNormDebugInfoRoot() / "mesh_io_probe.log";
+    std::error_code ec;
+    std::filesystem::create_directories(probe_path.parent_path(), ec);
+    std::ofstream file(probe_path, std::ios::binary | std::ios::app);
+    if (file) {
+      file << line << '\n';
+    }
+  };
+  append_probe("load.begin path=" + path);
   Assimp::Importer importer;
   const aiScene* scene = importer.ReadFile(
     path,
     aiProcess_Triangulate |
-      aiProcess_PreTransformVertices |
       aiProcess_JoinIdenticalVertices);
+  append_probe("load.after_read_file path=" + path + " scene=" + std::string(scene ? "true" : "false"));
   if (!scene) {
     throw std::runtime_error("Failed to read mesh file: " + path + "\nError: " + importer.GetErrorString());
   }
@@ -235,7 +284,9 @@ Mesh LoadMeshFile(const std::string& path) {
     throw std::runtime_error("Mesh file does not contain any mesh data: " + path);
   }
 
-  return BuildMeshFromAssimpScene(*scene);
+  Mesh mesh = BuildMeshFromAssimpScene(*scene, append_probe);
+  append_probe("load.after_build path=" + path);
+  return mesh;
 }
 
 Mesh LoadMeshObjFile(const std::string& path) {
