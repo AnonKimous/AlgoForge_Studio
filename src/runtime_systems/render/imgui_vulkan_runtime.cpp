@@ -113,7 +113,7 @@ void ImGuiVulkanRuntime::SetupVulkan(const char* app_name, SDL_Window* window) {
       VkBool32 present_supported = VK_FALSE;
       vkGetPhysicalDeviceSurfaceSupportKHR(device, family, surface_, &present_supported);
       const bool graphics_supported = (queue_families[family].queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0;
-      if (graphics_supported && present_supported) {
+      if (graphics_supported && present_supported && queue_families[family].queueCount >= 2u) {
         physical_device_ = device;
         queue_family_ = family;
         break;
@@ -129,12 +129,26 @@ void ImGuiVulkanRuntime::SetupVulkan(const char* app_name, SDL_Window* window) {
     throw std::runtime_error("No suitable Vulkan device queue family found for ImGui");
   }
 
-  const float queue_priority = 1.0f;
+  uint32_t selected_queue_family_count = 0u;
+  vkGetPhysicalDeviceQueueFamilyProperties(
+    physical_device_,
+    &selected_queue_family_count,
+    nullptr);
+  std::vector<VkQueueFamilyProperties> selected_queue_families(selected_queue_family_count);
+  vkGetPhysicalDeviceQueueFamilyProperties(
+    physical_device_,
+    &selected_queue_family_count,
+    selected_queue_families.data());
+  const uint32_t queue_count = selected_queue_families[queue_family_].queueCount;
+  if (queue_count < 2u) {
+    throw std::runtime_error("The Vulkan present queue family must expose a second queue for algorithms");
+  }
+  const std::vector<float> queue_priorities(queue_count, 1.0f);
   VkDeviceQueueCreateInfo queue_create_info{};
   queue_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
   queue_create_info.queueFamilyIndex = queue_family_;
-  queue_create_info.queueCount = 1;
-  queue_create_info.pQueuePriorities = &queue_priority;
+  queue_create_info.queueCount = queue_count;
+  queue_create_info.pQueuePriorities = queue_priorities.data();
 
   VkPhysicalDeviceFeatures available_features{};
   vkGetPhysicalDeviceFeatures(physical_device_, &available_features);
@@ -157,6 +171,13 @@ void ImGuiVulkanRuntime::SetupVulkan(const char* app_name, SDL_Window* window) {
 
   CheckVkResult(vkCreateDevice(physical_device_, &device_create_info, allocator_, &device_));
   vkGetDeviceQueue(device_, queue_family_, 0, &queue_);
+  algorithm_queues_.clear();
+  algorithm_queues_.reserve(queue_count - 1u);
+  for (uint32_t queue_index = 1u; queue_index < queue_count; ++queue_index) {
+    VkQueue algorithm_queue = VK_NULL_HANDLE;
+    vkGetDeviceQueue(device_, queue_family_, queue_index, &algorithm_queue);
+    algorithm_queues_.push_back(algorithm_queue);
+  }
 
   VmaAllocatorCreateInfo vma_create_info{};
   vma_create_info.instance = instance_;
@@ -166,9 +187,9 @@ void ImGuiVulkanRuntime::SetupVulkan(const char* app_name, SDL_Window* window) {
   CheckVkResult(vmaCreateAllocator(&vma_create_info, &vma_allocator_));
 
   VkDescriptorPoolSize pool_sizes[] = {
-    {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 8},
-    {VK_DESCRIPTOR_TYPE_SAMPLER, 2},
-    {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 64},
+    {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 64},
+    {VK_DESCRIPTOR_TYPE_SAMPLER, 16},
+    {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 256},
   };
   VkDescriptorPoolCreateInfo pool_info{};
   pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -186,10 +207,12 @@ void ImGuiVulkanRuntime::SetupVulkan(const char* app_name, SDL_Window* window) {
     .physical_device = physical_device_,
     .device = device_,
     .queue = queue_,
+    .queue_index = 0u,
     .queue_family = queue_family_,
     .descriptor_pool = descriptor_pool_,
     .allocator = vma_allocator_,
   });
+  RuntimeVkContextRegistry::Instance().SetAlgorithmQueues(algorithm_queues_);
 }
 
 void ImGuiVulkanRuntime::SetupVulkanWindow(SDL_Window* window, int width, int height) {
@@ -261,6 +284,7 @@ void ImGuiVulkanRuntime::CleanupVulkan() {
     instance_ = VK_NULL_HANDLE;
   }
   queue_ = VK_NULL_HANDLE;
+  algorithm_queues_.clear();
   physical_device_ = VK_NULL_HANDLE;
   queue_family_ = UINT32_MAX;
 }
@@ -289,7 +313,7 @@ bool ImGuiVulkanRuntime::FrameRender(ImDrawData* draw_data) {
   begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   CheckVkResult(vkBeginCommandBuffer(fd->CommandBuffer, &begin_info));
 
-  if (preview_renderer_) {
+  if (preview_renderer_ && result_texture_descriptor_set_ == VK_NULL_HANDLE) {
     if (preview_renderer_->HasRequest()) {
       const bool preview_recorded = preview_renderer_->Record(fd->CommandBuffer);
       DEBUG_TOOL_ASSERT(preview_recorded, "Preview request was accepted but could not be rendered.");
@@ -426,7 +450,8 @@ bool ImGuiVulkanRuntime::Init(SDL_Window* window, const char* app_name) {
 }
 
 bool ImGuiVulkanRuntime::HasRenderPreviewTexture() const {
-  return preview_renderer_ ? preview_renderer_->HasTexture() : false;
+  return result_texture_descriptor_set_ != VK_NULL_HANDLE ||
+    (preview_renderer_ ? preview_renderer_->HasTexture() : false);
 }
 
 bool ImGuiVulkanRuntime::ReadbackRenderPreviewTexture(
@@ -435,10 +460,141 @@ bool ImGuiVulkanRuntime::ReadbackRenderPreviewTexture(
   if (!out_rgba) {
     return false;
   }
-  if (!preview_renderer_ || device_ == VK_NULL_HANDLE) {
+  if (device_ == VK_NULL_HANDLE) {
     return false;
   }
+
   CheckVkResult(vkDeviceWaitIdle(device_));
+
+  if (result_image_.valid() && result_image_.image != VK_NULL_HANDLE) {
+    const VkExtent2D extent = result_image_.extent;
+    const VkDeviceSize required_size =
+      static_cast<VkDeviceSize>(extent.width) *
+      static_cast<VkDeviceSize>(extent.height) * 4u;
+
+    VkBuffer staging_buffer = VK_NULL_HANDLE;
+    VmaAllocation staging_allocation = VK_NULL_HANDLE;
+    VmaAllocationInfo staging_allocation_info{};
+    VkBufferCreateInfo buffer_info{};
+    buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buffer_info.size = required_size;
+    buffer_info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    VmaAllocationCreateInfo allocation_info{};
+    allocation_info.usage = VMA_MEMORY_USAGE_AUTO;
+    allocation_info.flags =
+      VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT |
+      VMA_ALLOCATION_CREATE_MAPPED_BIT;
+    CheckVkResult(vmaCreateBuffer(
+      vma_allocator_,
+      &buffer_info,
+      &allocation_info,
+      &staging_buffer,
+      &staging_allocation,
+      &staging_allocation_info));
+
+    VkCommandPool command_pool = VK_NULL_HANDLE;
+    VkCommandPoolCreateInfo command_pool_info{};
+    command_pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    command_pool_info.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+    command_pool_info.queueFamilyIndex = queue_family_;
+    CheckVkResult(vkCreateCommandPool(device_, &command_pool_info, nullptr, &command_pool));
+
+    VkCommandBuffer command_buffer = VK_NULL_HANDLE;
+    VkCommandBufferAllocateInfo command_buffer_info{};
+    command_buffer_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    command_buffer_info.commandPool = command_pool;
+    command_buffer_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    command_buffer_info.commandBufferCount = 1u;
+    CheckVkResult(vkAllocateCommandBuffers(device_, &command_buffer_info, &command_buffer));
+
+    VkCommandBufferBeginInfo begin_info{};
+    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    CheckVkResult(vkBeginCommandBuffer(command_buffer, &begin_info));
+
+    VkImageMemoryBarrier to_transfer{};
+    to_transfer.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    to_transfer.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    to_transfer.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    to_transfer.oldLayout = result_image_.layout;
+    to_transfer.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    to_transfer.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_transfer.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_transfer.image = result_image_.image;
+    to_transfer.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    to_transfer.subresourceRange.levelCount = 1u;
+    to_transfer.subresourceRange.layerCount = 1u;
+    vkCmdPipelineBarrier(
+      command_buffer,
+      VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+      VK_PIPELINE_STAGE_TRANSFER_BIT,
+      0,
+      0,
+      nullptr,
+      0,
+      nullptr,
+      1,
+      &to_transfer);
+
+    VkBufferImageCopy copy_region{};
+    copy_region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copy_region.imageSubresource.layerCount = 1u;
+    copy_region.imageExtent = {extent.width, extent.height, 1u};
+    vkCmdCopyImageToBuffer(
+      command_buffer,
+      result_image_.image,
+      VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+      staging_buffer,
+      1u,
+      &copy_region);
+
+    VkImageMemoryBarrier to_shader_read = to_transfer;
+    to_shader_read.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    to_shader_read.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    to_shader_read.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    to_shader_read.newLayout = result_image_.layout;
+    vkCmdPipelineBarrier(
+      command_buffer,
+      VK_PIPELINE_STAGE_TRANSFER_BIT,
+      VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+      0,
+      0,
+      nullptr,
+      0,
+      nullptr,
+      1,
+      &to_shader_read);
+    CheckVkResult(vkEndCommandBuffer(command_buffer));
+
+    VkSubmitInfo submit_info{};
+    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info.commandBufferCount = 1u;
+    submit_info.pCommandBuffers = &command_buffer;
+    CheckVkResult(vkQueueSubmit(queue_, 1u, &submit_info, VK_NULL_HANDLE));
+    CheckVkResult(vkQueueWaitIdle(queue_));
+    CheckVkResult(vmaInvalidateAllocation(
+      vma_allocator_,
+      staging_allocation,
+      0u,
+      required_size));
+    const auto* mapped_bytes =
+      static_cast<const std::byte*>(staging_allocation_info.pMappedData);
+    out_rgba->assign(mapped_bytes, mapped_bytes + required_size);
+
+    vkDestroyCommandPool(device_, command_pool, nullptr);
+    vmaDestroyBuffer(vma_allocator_, staging_buffer, staging_allocation);
+    if (out_size) {
+      *out_size = ImVec2(
+        static_cast<float>(extent.width),
+        static_cast<float>(extent.height));
+    }
+    return true;
+  }
+
+  if (!preview_renderer_) {
+    return false;
+  }
   VkExtent2D extent{};
   if (!preview_renderer_->ReadbackTexture(out_rgba, &extent)) {
     return false;
@@ -457,12 +613,20 @@ std::string ImGuiVulkanRuntime::RenderPreviewDebugSummary() const {
 }
 
 ImTextureID ImGuiVulkanRuntime::RenderPreviewTextureId() const {
+  if (result_texture_descriptor_set_ != VK_NULL_HANDLE) {
+    return (ImTextureID)(intptr_t)result_texture_descriptor_set_;
+  }
   return preview_renderer_
     ? (ImTextureID)(intptr_t)preview_renderer_->PreviewTextureDescriptorSet()
     : ImTextureID{};
 }
 
 ImVec2 ImGuiVulkanRuntime::RenderPreviewTextureSize() const {
+  if (result_image_.valid()) {
+    return ImVec2(
+      static_cast<float>(result_image_.extent.width),
+      static_cast<float>(result_image_.extent.height));
+  }
   if (!preview_renderer_) {
     return ImVec2{};
   }
@@ -475,8 +639,12 @@ void ImGuiVulkanRuntime::SetDrawCallback(DrawCallback callback) {
 }
 
 void ImGuiVulkanRuntime::SetRenderPreviewRequest(RenderPreviewRequest request) {
+  const void* previous_execution_key = pending_render_preview_request_.execution_key;
   pending_render_preview_request_ = request;
   has_pending_render_preview_request_ = request.valid;
+  if (!request.valid || request.execution_key != previous_execution_key) {
+    RemoveResultTexture();
+  }
 
   if (!preview_renderer_) {
     DEBUG_TOOL_ASSERT(
@@ -492,6 +660,44 @@ void ImGuiVulkanRuntime::SetRenderPreviewRequest(RenderPreviewRequest request) {
   if (preview_renderer_->HasRequest()) {
     has_pending_render_preview_request_ = false;
   }
+  RefreshResultTexture();
+}
+
+void ImGuiVulkanRuntime::RemoveResultTexture() {
+  if (result_texture_descriptor_set_ != VK_NULL_HANDLE) {
+    ImGui_ImplVulkan_RemoveTexture(result_texture_descriptor_set_);
+    result_texture_descriptor_set_ = VK_NULL_HANDLE;
+  }
+  result_image_ = {};
+}
+
+void ImGuiVulkanRuntime::RefreshResultTexture() {
+  if (device_ == VK_NULL_HANDLE || !pending_render_preview_request_.valid ||
+      pending_render_preview_request_.execution_key == nullptr) {
+    return;
+  }
+
+  const RuntimeVkResultImage image =
+    RuntimeVkContextRegistry::Instance().SnapshotResultImage(
+      pending_render_preview_request_.execution_key);
+  if (!image.valid()) {
+    return;
+  }
+  if (image.view == result_image_.view &&
+      image.sampler == result_image_.sampler &&
+      image.layout == result_image_.layout) {
+    result_image_ = image;
+    return;
+  }
+  RemoveResultTexture();
+  result_texture_descriptor_set_ = ImGui_ImplVulkan_AddTexture(
+    image.sampler,
+    image.view,
+    image.layout);
+  if (result_texture_descriptor_set_ == VK_NULL_HANDLE) {
+    throw std::runtime_error("ImGui result texture descriptor allocation failed");
+  }
+  result_image_ = image;
 }
 
 void ImGuiVulkanRuntime::SetRenderPreviewExtent(ImVec2 extent) {
@@ -507,6 +713,8 @@ void ImGuiVulkanRuntime::ClearVkRuntimeCaches() {
   if (device_ != VK_NULL_HANDLE) {
     CheckVkResult(vkDeviceWaitIdle(device_));
   }
+  RemoveResultTexture();
+  RuntimeVkContextRegistry::Instance().ClearTransientState();
   InvokeRuntimeVkCacheClearCallback();
 }
 
@@ -545,6 +753,8 @@ bool ImGuiVulkanRuntime::Tick(SDL_Window* window) {
   if (preview_renderer_) {
     preview_renderer_->ApplyTargetExtent();
   }
+
+  RefreshResultTexture();
 
   ImGui_ImplVulkan_NewFrame();
   ImGui_ImplSDL3_NewFrame();
@@ -601,6 +811,7 @@ void ImGuiVulkanRuntime::Destroy() {
     preview_renderer_->Destroy();
     preview_renderer_.reset();
   }
+  RemoveResultTexture();
 
   CleanupVulkanWindow();
 

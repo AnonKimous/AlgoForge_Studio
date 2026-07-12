@@ -61,6 +61,12 @@ class DebugToolBackendRuntime : public IDebugToolHost {
     size_t* out_algorithm_index = nullptr,
     std::string* out_error_message = nullptr,
      debug_tool::AlgorithmExecutionPreference execution_preference = debug_tool::AlgorithmExecutionPreference::Vk) override;
+  bool EnqueuePipelineStage0Submission(
+    size_t agent_index,
+    const std::string& pipeline_name,
+    const std::vector<debug_tool::AlgorithmResourceBinding>& resource_bindings,
+    const std::vector<debug_tool::AlgorithmDescriptorValue>& descriptor_values,
+    std::string* out_error_message = nullptr) override;
   bool DetachAlgorithmFromAgent(
     size_t agent_index,
     size_t algorithm_index,
@@ -71,6 +77,15 @@ class DebugToolBackendRuntime : public IDebugToolHost {
     size_t agent_index,
     size_t algorithm_index,
     std::string* out_error_message = nullptr) override;
+  bool RequestAgentTimingLog(
+    size_t agent_index,
+    std::string* out_error_message = nullptr) override;
+  bool ExportPipelineTimingArtifacts(
+    size_t agent_index,
+    const std::string& pipeline_name,
+    std::string* out_csv_path,
+    std::string* out_mermaid_path,
+    std::string* out_error_message = nullptr) const override;
   bool HotReloadAlgorithmPackage(
     size_t agent_index,
     size_t algorithm_index,

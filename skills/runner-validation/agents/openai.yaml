@@ -1,0 +1,3 @@
+display_name: Runner Validation
+short_description: Validate algorithm and pipeline changes with the repository runner.
+default_prompt: Use the repository runner to validate the completed change and inspect the generated testData log and timing output.

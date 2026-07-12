@@ -92,6 +92,12 @@ class AgentManagementHooker {
       load_reflector);
   }
 
+  bool RequestAgentTimingLog(
+    size_t agent_index,
+    std::string* out_error_message = nullptr) {
+    return agent_manager_.RequestAgentTimingLog(agent_index, out_error_message);
+  }
+
   bool DetachAlgorithmFromAgent(
     size_t agent_index,
     size_t algorithm_index,

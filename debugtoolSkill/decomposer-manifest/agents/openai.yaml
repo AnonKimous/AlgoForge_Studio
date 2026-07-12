@@ -1,0 +1,3 @@
+display_name: Decomposer and Manifest
+short_description: Work with algorithm manifests, decomposition, mappings, and bridge transfers.
+default_prompt: Use the decomposer and manifest skill to inspect or change package schemas and runtime transfer behavior.

@@ -64,7 +64,11 @@ layout(set = 0, binding = 15) readonly buffer SparkSeed {
   float value[];
 } spark_seed;
 
-layout(set = 0, binding = 16) readonly buffer LaunchBudget {
+layout(set = 0, binding = 16) readonly buffer RenderDraw {
+  uint value[];
+} render_draw;
+
+layout(set = 0, binding = 17) readonly buffer LaunchBudget {
   float value[];
 } v2;
 
@@ -98,6 +102,13 @@ vec2 ToPreviewPixel(vec2 position) {
 }
 
 void main() {
+  if (render_draw.value[0] == 0u || render_draw.value[1] == 0u) {
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    v_uv = vec2(0.0);
+    v_tint = vec4(0.0);
+    return;
+  }
+
   const vec2 quad_offsets[4] = vec2[4](
     vec2(-1.0, -1.0),
     vec2(1.0, -1.0),

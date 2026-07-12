@@ -844,7 +844,10 @@ bool _IsPipelineAlgorithmByName(
     return false;
   }
 
-  const std::filesystem::path package_root = package_location.runtime_package_root;
+  const std::filesystem::path package_root =
+    package_location.source_package_root.empty()
+      ? package_location.runtime_package_root
+      : package_location.source_package_root;
   if (package_root.empty()) {
     if (out_error_message) {
       *out_error_message = "Failed to resolve algorithm runtime package root.";
@@ -923,6 +926,7 @@ bool DebugToolBackendRuntime::Tick() {
   const auto now = std::chrono::steady_clock::now();
   frame_dt_ = std::chrono::duration<float>(now - last_frame_time_).count();
   last_frame_time_ = now;
+  const auto tick_begin = std::chrono::steady_clock::now();
 
   std::cerr << "backend_tick.begin\n";
   if (!agent_manager_.Tick(
@@ -933,10 +937,24 @@ bool DebugToolBackendRuntime::Tick() {
     std::cerr << "backend_tick.agent_failed\n";
     return false;
   }
+  const auto agent_tick_end = std::chrono::steady_clock::now();
   std::cerr << "backend_tick.agent_done\n";
+  std::cerr
+    << "backend_tick.agent_elapsed_seconds="
+    << std::chrono::duration<float>(agent_tick_end - tick_begin).count()
+    << '\n';
   std::cerr << "backend_tick.env_begin\n";
   const bool runtime_tick_ok = runtime_environment_.Tick();
+  const auto tick_end = std::chrono::steady_clock::now();
   std::cerr << "backend_tick.env_done result=" << (runtime_tick_ok ? "true" : "false") << "\n";
+  std::cerr
+    << "backend_tick.env_elapsed_seconds="
+    << std::chrono::duration<float>(tick_end - agent_tick_end).count()
+    << '\n';
+  std::cerr
+    << "backend_tick.total_elapsed_seconds="
+    << std::chrono::duration<float>(tick_end - tick_begin).count()
+    << '\n';
   return runtime_tick_ok;
 }
 
@@ -1125,6 +1143,20 @@ bool DebugToolBackendRuntime::AttachPipelinePackageToAgent(
   return attached;
 }
 
+bool DebugToolBackendRuntime::EnqueuePipelineStage0Submission(
+  size_t agent_index,
+  const std::string& pipeline_name,
+  const std::vector<debug_tool::AlgorithmResourceBinding>& resource_bindings,
+  const std::vector<debug_tool::AlgorithmDescriptorValue>& descriptor_values,
+  std::string* out_error_message) {
+  return agent_manager_.EnqueuePipelineStage0Submission(
+    agent_index,
+    pipeline_name,
+    _ToAgentResourceBindings(resource_bindings),
+    _ToAgentDescriptorValues(descriptor_values),
+    out_error_message);
+}
+
 bool DebugToolBackendRuntime::IsPipelineAlgorithm(
   const std::string& algorithm_name,
   bool* out_is_pipeline,
@@ -1136,6 +1168,63 @@ void DebugToolBackendRuntime::SetAlgorithmRuntimeBuildFlavor(
   debug_tool::AlgorithmRuntimeBuildFlavor build_flavor) {
   agent_manager_.SetAlgorithmLibraryRuntimeBuildFlavor(
     static_cast<algorithm::library_paths::AlgorithmLibraryRuntimeBuildFlavor>(build_flavor));
+}
+
+bool DebugToolBackendRuntime::RequestAgentTimingLog(
+  size_t agent_index,
+  std::string* out_error_message) {
+  return agent_manager_.RequestAgentTimingLog(agent_index, out_error_message);
+}
+
+bool DebugToolBackendRuntime::ExportPipelineTimingArtifacts(
+  size_t agent_index,
+  const std::string& pipeline_name,
+  std::string* out_csv_path,
+  std::string* out_mermaid_path,
+  std::string* out_error_message) const {
+  debug_tool::AgentRuntimeSummary agent_summary{};
+  if (!GetAgentSummary(agent_index, &agent_summary)) {
+    if (out_error_message) {
+      *out_error_message = "Selected agent is unavailable.";
+    }
+    return false;
+  }
+
+  const debug_tool::AlgorithmRuntimeSummary* pipeline_summary = nullptr;
+  for (const debug_tool::AlgorithmRuntimeSummary& algorithm_summary : agent_summary.algorithms) {
+    if (!algorithm_summary.pipeline_stage || algorithm_summary.pipeline_stage_index != 0u) {
+      continue;
+    }
+    if (!pipeline_name.empty() && algorithm_summary.pipeline_name != pipeline_name) {
+      continue;
+    }
+    pipeline_summary = &algorithm_summary;
+    break;
+  }
+  if (!pipeline_summary) {
+    if (out_error_message) {
+      *out_error_message = "Pipeline timing source is unavailable.";
+    }
+    return false;
+  }
+  if (pipeline_summary->pipeline_stage_runtime_stats.empty()) {
+    if (out_error_message) {
+      *out_error_message = "Pipeline timing has not been collected for the selected frame.";
+    }
+    return false;
+  }
+
+  agentmanager::AlgorithmPipelineStallReport report{};
+  report.algorithm_name = pipeline_summary->pipeline_name.empty()
+    ? pipeline_summary->algorithm_name
+    : pipeline_summary->pipeline_name;
+  report.reason = "debug command one-frame pipeline timing";
+  report.stage_runtime_stats = pipeline_summary->pipeline_stage_runtime_stats;
+  return agentmanager::ExportAlgorithmPipelineTimingArtifacts(
+    report,
+    out_csv_path,
+    out_mermaid_path,
+    out_error_message);
 }
 
 bool DebugToolBackendRuntime::AttachPipelineAlgorithmToAgent(
@@ -1260,8 +1349,8 @@ bool DebugToolBackendRuntime::HotReloadAlgorithmPackage(
     return false;
   }
 
-  runtime_environment_.ClearVkRuntimeCaches();
   runtime_environment_.SetRenderPreviewRequest({});
+  runtime_environment_.ClearVkRuntimeCaches();
 
   const std::string build_command = _HotReloadBuildCommand(algorithm_summary.algorithm_name);
   const int build_result = std::system(build_command.c_str());
@@ -1308,8 +1397,8 @@ bool DebugToolBackendRuntime::HotReloadAlgorithmPackage(
       }
     }
 
-    runtime_environment_.ClearVkRuntimeCaches();
     runtime_environment_.SetRenderPreviewRequest({});
+    runtime_environment_.ClearVkRuntimeCaches();
 
     if (out_algorithm_index) {
       *out_algorithm_index = restored_algorithm_index;
@@ -1340,8 +1429,8 @@ bool DebugToolBackendRuntime::HotReloadAlgorithmPackage(
           algorithm_summary.algorithm_name + "'.")
         : std::move(attach_error_message);
     }
-    runtime_environment_.ClearVkRuntimeCaches();
     runtime_environment_.SetRenderPreviewRequest({});
+    runtime_environment_.ClearVkRuntimeCaches();
     if (was_ticking) {
       agent_manager_.StartTicking();
     }
@@ -1365,8 +1454,8 @@ bool DebugToolBackendRuntime::HotReloadAlgorithmPackage(
     }
   }
 
-  runtime_environment_.ClearVkRuntimeCaches();
   runtime_environment_.SetRenderPreviewRequest({});
+  runtime_environment_.ClearVkRuntimeCaches();
 
   if (out_algorithm_index) {
     *out_algorithm_index = rebuilt_algorithm_index;
@@ -1729,42 +1818,7 @@ bool DebugToolBackendRuntime::BuildRenderPreviewRequest(
     return false;
   }
 
-  const agentmanager::agent::AgentAlgorithmRuntimeState* preview_runtime_state =
-    agent_hooker::AlgorithmRuntimeStateAt(*managed_agent, preview_source_index);
-  const algorithm::AlgorithmContainerSet* preview_data_container_set = container_set;
-  if (preview_object->pipeline_stage) {
-    if (preview_runtime_state && preview_runtime_state->bridge_debug_set.valid) {
-      if (preview_runtime_state->bridge_debug_set.has_stage_output_container_set) {
-        preview_data_container_set = &preview_runtime_state->bridge_debug_set.stage_output_container_set;
-      } else if (preview_runtime_state->bridge_debug_set.has_next_stage_input_container_set) {
-        preview_data_container_set = &preview_runtime_state->bridge_debug_set.next_stage_input_container_set;
-      } else if (preview_runtime_state->bridge_debug_set.has_stage_input_container_set) {
-        preview_data_container_set = &preview_runtime_state->bridge_debug_set.stage_input_container_set;
-      }
-    } else if (preview_source_index > 0u) {
-      const size_t previous_source_index = preview_source_index - 1u;
-      const agentmanager::agent::AlgorithmObject* previous_object =
-        agent_hooker::AlgorithmObjectAt(*managed_agent, previous_source_index);
-      const agentmanager::agent::AgentAlgorithmRuntimeState* previous_runtime_state =
-        agent_hooker::AlgorithmRuntimeStateAt(*managed_agent, previous_source_index);
-      if (previous_object &&
-          previous_object->pipeline_stage &&
-          previous_object->pipeline_name == preview_object->pipeline_name &&
-          previous_object->pipeline_stage_index + 1u == preview_object->pipeline_stage_index &&
-          previous_runtime_state &&
-          previous_runtime_state->bridge_debug_set.valid &&
-          previous_runtime_state->bridge_debug_set.has_stage_output_container_set) {
-        preview_data_container_set = &previous_runtime_state->bridge_debug_set.stage_output_container_set;
-      }
-    }
-  } else if (preview_runtime_state) {
-    if (preview_runtime_state->bridge_debug_set.has_stage_input_container_set) {
-      preview_data_container_set = &preview_runtime_state->bridge_debug_set.stage_input_container_set;
-    } else if (preview_runtime_state->bridge_debug_set.has_stage_output_container_set) {
-      preview_data_container_set = &preview_runtime_state->bridge_debug_set.stage_output_container_set;
-    }
-  }
-
+  out_request->execution_key = container_set;
   out_request->stage_name = result_phase->stage_name;
   out_request->vertex_shader_path =
     _ResolveAlgorithmShaderPath(*preview_object, result_phase->shader.vertex_shader_path);
@@ -1817,17 +1871,7 @@ bool DebugToolBackendRuntime::BuildRenderPreviewRequest(
     RenderPreviewBuffer preview_buffer{};
     preview_buffer.binding_name = binding.container_name;
     preview_buffer.element_stride = container->element_stride;
-    if (preview_data_container_set) {
-      const algorithm::AlgorithmContainer* preview_container =
-        algorithm::FindAlgorithmContainer(*preview_data_container_set, binding.container_name);
-      if (preview_container && !preview_container->bytes.empty()) {
-        preview_buffer.bytes.assign(preview_container->bytes.begin(), preview_container->bytes.end());
-      } else {
-        preview_buffer.bytes.assign(container->bytes.begin(), container->bytes.end());
-      }
-    } else {
-      preview_buffer.bytes.assign(container->bytes.begin(), container->bytes.end());
-    }
+    preview_buffer.bytes.assign(container->bytes.begin(), container->bytes.end());
     out_request->storage_buffers.push_back(std::move(preview_buffer));
   }
 
@@ -1839,20 +1883,6 @@ bool DebugToolBackendRuntime::BuildRenderPreviewRequest(
     out_request->Clear();
     return false;
   }
-
-  const algorithm::AlgorithmContainer* instance_count_container =
-    algorithm::FindAlgorithmContainer(*container_set, "instance_count");
-  if (!instance_count_container || instance_count_container->bytes.size() < sizeof(uint32_t)) {
-    DEBUG_TOOL_ASSERT(false, "Preview instance count container is missing.");
-    if (out_error_message) {
-      *out_error_message = "Preview instance count container is missing: instance_count";
-    }
-    out_request->Clear();
-    return false;
-  }
-  uint32_t instance_count_value = 0u;
-  std::memcpy(&instance_count_value, instance_count_container->bytes.data(), sizeof(instance_count_value));
-  out_request->instance_count = instance_count_value;
 
   out_request->valid = true;
   DEBUG_TOOL_ASSERT(

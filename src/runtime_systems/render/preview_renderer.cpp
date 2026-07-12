@@ -846,7 +846,7 @@ bool PreviewRenderer::Record(VkCommandBuffer command_buffer) {
     &push_constants);
   vkCmdSetViewport(command_buffer, 0, 1, &viewport);
   vkCmdSetScissor(command_buffer, 0, 1, &scissor);
-  vkCmdDraw(command_buffer, 4, request_.instance_count, 0, 0);
+  vkCmdDraw(command_buffer, 4u, 1u, 0u, 0u);
   vkCmdEndRenderPass(command_buffer);
 
   VkImageMemoryBarrier to_transfer_barrier{};

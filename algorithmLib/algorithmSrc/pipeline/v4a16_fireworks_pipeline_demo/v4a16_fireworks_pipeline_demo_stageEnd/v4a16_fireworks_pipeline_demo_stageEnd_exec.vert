@@ -1,28 +1,36 @@
 #version 450
 
-layout(set = 0, binding = 32) readonly buffer V1In {
+layout(set = 0, binding = 34) readonly buffer V1In {
   float value[];
 } v1_in;
 
-layout(set = 0, binding = 33) buffer V1Out {
+layout(set = 0, binding = 35) buffer V1Out {
   float value[];
 } v1_out;
 
-layout(set = 0, binding = 34) readonly buffer V2In {
+layout(set = 0, binding = 36) readonly buffer V2In {
   float value[];
 } v2_in;
 
-layout(set = 0, binding = 35) buffer V2Out {
+layout(set = 0, binding = 37) buffer V2Out {
   float value[];
 } v2_out;
 
-layout(set = 0, binding = 36) readonly buffer V3In {
+layout(set = 0, binding = 38) readonly buffer V3In {
   float value[];
 } v3_in;
 
-layout(set = 0, binding = 37) buffer V3Out {
+layout(set = 0, binding = 39) buffer V3Out {
   float value[];
 } v3_out;
+
+layout(set = 0, binding = 40) readonly buffer V4In {
+  float value[];
+} v4_in;
+
+layout(set = 0, binding = 41) buffer V4Out {
+  float value[];
+} v4_out;
 
 layout(set = 0, binding = 0) readonly buffer ShellPosXIn {
   float value[];
@@ -152,6 +160,14 @@ layout(set = 0, binding = 31) buffer SparkSeedOut {
   float value[];
 } spark_seed_out;
 
+layout(set = 0, binding = 32) readonly buffer RenderDrawIn {
+  uint value[];
+} render_draw_in;
+
+layout(set = 0, binding = 33) buffer RenderDrawOut {
+  uint value[];
+} render_draw_out;
+
 layout(push_constant) uniform AlgorithmViewport {
   float width;
   float height;
@@ -175,6 +191,11 @@ void main() {
     v1_out.value[0] = v1_in.value[0];
     v2_out.value[0] = v2_in.value[0];
     v3_out.value[0] = v3_in.value[0];
+    v4_out.value[0] = v4_in.value[0];
+    render_draw_out.value[0] = 4u;
+    render_draw_out.value[1] = uint(max(v4_in.value[0], 0.0));
+    render_draw_out.value[2] = 0u;
+    render_draw_out.value[3] = 0u;
   }
 
   if (gl_VertexIndex == 0u && index < kArrayLimit) {

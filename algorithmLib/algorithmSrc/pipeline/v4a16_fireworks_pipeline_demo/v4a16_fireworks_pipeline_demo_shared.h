@@ -6,7 +6,6 @@
 #include <cstring>
 #include <cstdint>
 #include <filesystem>
-#include <fstream>
 #include <string>
 
 #include "../algorithm_plugin_api.h"
@@ -14,11 +13,6 @@
 namespace v4a16_fireworks_pipeline_demo {
 
 namespace {
-
-inline void _AppendFireworksJobsProbe(const std::string& line) {
-  std::ofstream file("testData/pipeline/debugInfo/fireworks_jobs_probe.log", std::ios::binary | std::ios::app);
-  file << line << '\n';
-}
 
 inline algorithm::AlgorithmContainer* _FindMutableContainer(
   algorithm::AlgorithmContainerSet* container_set,
@@ -40,6 +34,14 @@ inline float _ReadScalar(const algorithm::AlgorithmContainer* container) {
 
 inline void _WriteScalar(algorithm::AlgorithmContainer* container, float value) {
   std::memcpy(container->bytes.data(), &value, sizeof(value));
+}
+
+inline void _WriteDrawIndirect(
+  algorithm::AlgorithmContainer* container,
+  uint32_t vertex_count,
+  uint32_t draw_count) {
+  const uint32_t command[4] = {vertex_count, draw_count, 0u, 0u};
+  std::memcpy(container->bytes.data(), command, sizeof(command));
 }
 
 inline size_t _ArrayCount(const algorithm::AlgorithmContainer* container) {
@@ -94,6 +96,7 @@ class FireworksJobsExecutor final : public agent::IAlgorithmJobsExecutor {
     AlgorithmToAgentSignal* algorithm_to_agent_signal,
     agent::AlgorithmPackageDebugState* debug_state) override {
     (void)context;
+    (void)algorithm_profile;
     (void)agent_to_algorithm_signal;
     (void)algorithm_to_agent_signal;
     (void)debug_state;
@@ -104,6 +107,7 @@ class FireworksJobsExecutor final : public agent::IAlgorithmJobsExecutor {
     algorithm::AlgorithmContainer* v2 = _FindMutableContainer(algorithm_container_set, "v2");
     algorithm::AlgorithmContainer* v3 = _FindMutableContainer(algorithm_container_set, "v3");
     algorithm::AlgorithmContainer* v4 = _FindMutableContainer(algorithm_container_set, "v4");
+    algorithm::AlgorithmContainer* render_draw = _FindMutableContainer(algorithm_container_set, "render_draw");
     algorithm::AlgorithmContainer* shell_pos_x = _FindMutableContainer(algorithm_container_set, "shell_pos_x");
     algorithm::AlgorithmContainer* shell_pos_y = _FindMutableContainer(algorithm_container_set, "shell_pos_y");
     algorithm::AlgorithmContainer* shell_vel_x = _FindMutableContainer(algorithm_container_set, "shell_vel_x");
@@ -121,37 +125,13 @@ class FireworksJobsExecutor final : public agent::IAlgorithmJobsExecutor {
     algorithm::AlgorithmContainer* spark_life = _FindMutableContainer(algorithm_container_set, "spark_life");
     algorithm::AlgorithmContainer* spark_seed = _FindMutableContainer(algorithm_container_set, "spark_seed");
 
-    _AppendFireworksJobsProbe(
-      std::string("jobs.container_lookup.resolved algorithm=") + algorithm_name_ +
-      " profile=" + algorithm_profile.algorithm_name +
-      " v1=" + std::to_string(reinterpret_cast<uintptr_t>(v1)) +
-      " v2=" + std::to_string(reinterpret_cast<uintptr_t>(v2)) +
-      " v3=" + std::to_string(reinterpret_cast<uintptr_t>(v3)) +
-      " v4=" + std::to_string(reinterpret_cast<uintptr_t>(v4)) +
-      " shell_state=" + std::to_string(reinterpret_cast<uintptr_t>(shell_state)) +
-      " spark_state=" + std::to_string(reinterpret_cast<uintptr_t>(spark_state)));
-    _AppendFireworksJobsProbe("jobs.scalar_read.begin algorithm=" + algorithm_name_);
     const float tick_value = _ReadScalar(v1);
-    _AppendFireworksJobsProbe("jobs.scalar_read.v1 algorithm=" + algorithm_name_);
     const float launch_budget_value = _ReadScalar(v2);
-    _AppendFireworksJobsProbe("jobs.scalar_read.v2 algorithm=" + algorithm_name_);
     const float live_spark_value = _ReadScalar(v3);
-    _AppendFireworksJobsProbe("jobs.scalar_read.v3 algorithm=" + algorithm_name_);
     const float render_instance_count_value = _ReadScalar(v4);
-    _AppendFireworksJobsProbe("jobs.scalar_read.v4 algorithm=" + algorithm_name_);
     const uint32_t tick_seed = static_cast<uint32_t>(tick_value) + 1u;
     const Vec2 preview_extent = context.render_preview_extent;
     assert(preview_extent.x > 0.0f && preview_extent.y > 0.0f && "Render preview extent must be positive.");
-    _AppendFireworksJobsProbe(
-      std::string("jobs.begin algorithm=") + algorithm_name_ +
-      " profile=" + algorithm_profile.algorithm_name +
-      " set=" + std::to_string(reinterpret_cast<uintptr_t>(algorithm_container_set)) +
-      " v1=" + std::to_string(reinterpret_cast<uintptr_t>(v1)) +
-      " v2=" + std::to_string(reinterpret_cast<uintptr_t>(v2)) +
-      " v3=" + std::to_string(reinterpret_cast<uintptr_t>(v3)) +
-      " v4=" + std::to_string(reinterpret_cast<uintptr_t>(v4)) +
-      " shell_state=" + std::to_string(reinterpret_cast<uintptr_t>(shell_state)) +
-      " spark_state=" + std::to_string(reinterpret_cast<uintptr_t>(spark_state)));
     if (preview_extent.x <= 0.0f || preview_extent.y <= 0.0f) {
       return false;
     }
@@ -263,7 +243,6 @@ class FireworksJobsExecutor final : public agent::IAlgorithmJobsExecutor {
     };
 
     if (algorithm_name_ == "v4a16_fireworks_pipeline_demo_stageBegin") {
-      _AppendFireworksJobsProbe("jobs.stageBegin.enter algorithm=" + algorithm_name_);
       float begin_launch_budget_value = launch_budget_value;
       float begin_live_spark_value = live_spark_value;
       if (tick_value < 1.5f) {
@@ -298,11 +277,6 @@ class FireworksJobsExecutor final : public agent::IAlgorithmJobsExecutor {
       _WriteScalar(v1, tick_value);
       _WriteScalar(v2, begin_launch_budget_value);
       _WriteScalar(v3, begin_live_spark_value);
-      _AppendFireworksJobsProbe(
-        "jobs.stageBegin.exit algorithm=" + algorithm_name_ +
-        " tick=" + std::to_string(tick_value) +
-        " launch_budget=" + std::to_string(begin_launch_budget_value) +
-        " live_spark=" + std::to_string(begin_live_spark_value));
     } else if (algorithm_name_ == "v4a16_fireworks_pipeline_demo") {
       const uint32_t window_frame = static_cast<uint32_t>(tick_value) % 30u;
       const bool window_reset = window_frame == 0u;
@@ -311,17 +285,8 @@ class FireworksJobsExecutor final : public agent::IAlgorithmJobsExecutor {
       const uint32_t launch_quota = std::min<uint32_t>(
         launch_budget_count,
         6u + static_cast<uint32_t>(std::floor(_Random01(tick_seed + 23u) * 5.0f)));
-      uint32_t inactive_count = 0u;
-      for (size_t i = 0u; i < _ArrayCount(shell_state); ++i) {
-        float state = 0.0f;
-        std::memcpy(&state, shell_state->bytes.data() + i * shell_state->element_stride, sizeof(state));
-        if (state < 0.5f) {
-          ++inactive_count;
-        }
-      }
-      const uint32_t spawned_count = std::min<uint32_t>(launch_quota, inactive_count);
+      uint32_t spawned_count = 0u;
       _WriteScalar(v1, tick_value + 1.0f);
-      _WriteScalar(v2, std::max(0.0f, launch_budget - static_cast<float>(spawned_count)));
       _WriteScalar(v3, live_spark_value);
       _WriteScalar(v4, static_cast<float>(_ArrayCount(spark_state)));
       if (shell_state && shell_pos_x && shell_pos_y && shell_vel_x && shell_vel_y && shell_age && shell_life && shell_seed) {
@@ -340,24 +305,11 @@ class FireworksJobsExecutor final : public agent::IAlgorithmJobsExecutor {
           if (state != 0.0f) {
             continue;
           }
-          float slot_score = _Random01(tick_seed + static_cast<uint32_t>(i) * 17u);
-          uint32_t rank = 0u;
-          for (size_t other = 0u; other < shell_count; ++other) {
-            float other_state = 0.0f;
-            std::memcpy(&other_state, shell_state->bytes.data() + other * shell_state->element_stride, sizeof(other_state));
-            if (other_state >= 0.5f) {
-              continue;
-            }
-            float other_score = _Random01(tick_seed + static_cast<uint32_t>(other) * 17u);
-            if (other_score < slot_score || (other_score == slot_score && other < i)) {
-              ++rank;
-            }
-          }
-          if (rank >= launch_quota) {
+          if (spawned_count >= launch_quota) {
             continue;
           }
-          const uint32_t emitter_column = rank % emitter_columns;
-          const uint32_t emitter_row = rank / emitter_columns;
+          const uint32_t emitter_column = spawned_count % emitter_columns;
+          const uint32_t emitter_row = spawned_count / emitter_columns;
           const float emitter_u = (static_cast<float>(emitter_column) + 0.5f) / static_cast<float>(emitter_columns);
           const float emitter_v = (static_cast<float>(emitter_row) + 0.5f) / static_cast<float>(emitter_rows);
           const float x = launch_min.x +
@@ -380,8 +332,10 @@ class FireworksJobsExecutor final : public agent::IAlgorithmJobsExecutor {
           std::memcpy(shell_seed->bytes.data() + i * shell_seed->element_stride, &seed, sizeof(seed));
           state = 1.0f;
           std::memcpy(shell_state->bytes.data() + i * shell_state->element_stride, &state, sizeof(state));
+          ++spawned_count;
         }
       }
+      _WriteScalar(v2, std::max(0.0f, launch_budget - static_cast<float>(spawned_count)));
     } else if (algorithm_name_ == "v4a16_fireworks_pipeline_demo_stage1") {
       if (shell_state && shell_pos_x && shell_pos_y && shell_vel_x && shell_vel_y && shell_age && shell_life) {
         const size_t shell_count = _ArrayCount(shell_state);
@@ -618,7 +572,6 @@ class FireworksJobsExecutor final : public agent::IAlgorithmJobsExecutor {
       _WriteScalar(v2, launch_budget_value);
       _WriteScalar(v4, render_instance_count_value);
     } else if (algorithm_name_ == "v4a16_fireworks_pipeline_demo_stageEnd") {
-      _AppendFireworksJobsProbe("jobs.stageEnd.enter algorithm=" + algorithm_name_);
       algorithm::AlgorithmContainer* v4 = _FindMutableContainer(algorithm_container_set, "v4");
       convert_shell_coordinates(false);
       convert_spark_coordinates(false);
@@ -626,10 +579,7 @@ class FireworksJobsExecutor final : public agent::IAlgorithmJobsExecutor {
       _WriteScalar(v2, launch_budget_value);
       _WriteScalar(v3, live_spark_value);
       _WriteScalar(v4, render_instance_count_value);
-      _AppendFireworksJobsProbe(
-        "jobs.stageEnd.exit algorithm=" + algorithm_name_ +
-        " tick=" + std::to_string(tick_value) +
-        " render_instance_count=" + std::to_string(render_instance_count_value));
+      _WriteDrawIndirect(render_draw, 4u, static_cast<uint32_t>(render_instance_count_value));
     }
 
     return true;

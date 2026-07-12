@@ -294,6 +294,12 @@ class IDebugToolHost {
     size_t* out_algorithm_index = nullptr,
     std::string* out_error_message = nullptr,
     AlgorithmExecutionPreference execution_preference = AlgorithmExecutionPreference::Vk) = 0;
+  virtual bool EnqueuePipelineStage0Submission(
+    size_t agent_index,
+    const std::string& pipeline_name,
+    const std::vector<AlgorithmResourceBinding>& resource_bindings,
+    const std::vector<AlgorithmDescriptorValue>& descriptor_values,
+    std::string* out_error_message = nullptr) = 0;
   virtual bool DetachAlgorithmFromAgent(
     size_t agent_index,
     size_t algorithm_index,
@@ -302,6 +308,15 @@ class IDebugToolHost {
     size_t agent_index,
     size_t algorithm_index,
     std::string* out_error_message = nullptr) = 0;
+  virtual bool RequestAgentTimingLog(
+    size_t agent_index,
+    std::string* out_error_message = nullptr) = 0;
+  virtual bool ExportPipelineTimingArtifacts(
+    size_t agent_index,
+    const std::string& pipeline_name,
+    std::string* out_csv_path,
+    std::string* out_mermaid_path,
+    std::string* out_error_message = nullptr) const = 0;
   virtual bool HotReloadAlgorithmPackage(
     size_t agent_index,
     size_t algorithm_index,

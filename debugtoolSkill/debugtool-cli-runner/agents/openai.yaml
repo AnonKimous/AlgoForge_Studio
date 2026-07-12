@@ -1,0 +1,3 @@
+display_name: DebugTool CLI Runner
+short_description: Connect to the debugTool CLI runner and execute validated commands.
+default_prompt: Use the CLI runner skill to connect to debugTool, run an algorithm or pipeline, and inspect structured results.

@@ -24,6 +24,10 @@ layout(set = 0, binding = 5) readonly buffer BvhY {
   float data[];
 } bvh_y;
 
+layout(set = 0, binding = 6) readonly buffer RenderDraw {
+  uint data[];
+} render_draw;
+
 layout(push_constant) uniform PreviewViewport {
   float width;
   float height;
@@ -97,6 +101,12 @@ float ReadRadius(float span_x, float span_y) {
 }
 
 void main() {
+  if (render_draw.data[0] == 0u || render_draw.data[1] == 0u) {
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    v_uv = vec2(0.0);
+    return;
+  }
+
   uint index = uint(gl_InstanceIndex);
   if (index >= kBallCount) {
     v_uv = vec2(0.0);

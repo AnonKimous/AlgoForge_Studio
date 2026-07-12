@@ -1,0 +1,3 @@
+display_name: Windows Path Environment
+short_description: Handle the repository machine with broken PATH and preserve the working Path variable.
+default_prompt: Use the Windows environment skill when builds or tools fail because PATH is broken on the main development machine.

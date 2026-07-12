@@ -197,13 +197,46 @@ void main() {
   );
 
   if (gl_VertexIndex == 0u && index == 0u) {
-    uint inactive_count = 0u;
+    uint spawned_count = 0u;
     for (uint i = 0u; i < kArrayLimit; ++i) {
       if (shell_state_in.value[i] <= 0.5) {
-        inactive_count += 1u;
+        if (spawned_count < launch_quota) {
+          uint emitter_columns = 6u;
+          uint emitter_rows = 2u;
+          uint emitter_column = spawned_count % emitter_columns;
+          uint emitter_row = spawned_count / emitter_columns;
+          float emitter_u = (float(emitter_column) + 0.5) / float(emitter_columns);
+          float emitter_v = (float(emitter_row) + 0.5) / float(emitter_rows);
+          vec2 launch_min = PixelToLogical(vec2(algorithm_viewport.width * 0.04, algorithm_viewport.height * 0.05));
+          vec2 launch_max = PixelToLogical(vec2(algorithm_viewport.width * 0.96, algorithm_viewport.height * 0.18));
+          float x = launch_min.x +
+            (emitter_u + (Random01(tick_seed + i * 17u) - 0.5) * 0.06) * (launch_max.x - launch_min.x);
+          float y = launch_min.y +
+            (emitter_v + (Random01(tick_seed + i * 29u) - 0.5) * 0.08) * (launch_max.y - launch_min.y);
+          float vx = -0.018 + Random01(tick_seed + i * 31u) * 0.036;
+          float vy = 0.058 + Random01(tick_seed + i * 47u) * 0.032;
+          float life = 100.0 + Random01(tick_seed + i * 59u) * 60.0;
+          shell_pos_x_out.value[i] = x;
+          shell_pos_y_out.value[i] = y;
+          shell_vel_x_out.value[i] = vx;
+          shell_vel_y_out.value[i] = vy;
+          shell_state_out.value[i] = 1.0;
+          shell_age_out.value[i] = 0.0;
+          shell_life_out.value[i] = life;
+          shell_seed_out.value[i] = float(tick_seed + i * 131u);
+          spawned_count += 1u;
+        } else {
+          shell_pos_x_out.value[i] = 0.0;
+          shell_pos_y_out.value[i] = 0.0;
+          shell_vel_x_out.value[i] = 0.0;
+          shell_vel_y_out.value[i] = 0.0;
+          shell_state_out.value[i] = 0.0;
+          shell_age_out.value[i] = 0.0;
+          shell_life_out.value[i] = 0.0;
+          shell_seed_out.value[i] = 0.0;
+        }
       }
     }
-    uint spawned_count = min(launch_quota, inactive_count);
     v1_out.value[0] = tick_value + 1.0;
     v2_out.value[0] = max(0.0, launch_budget - float(spawned_count));
     v3_out.value[0] = live_spark_value;
@@ -220,53 +253,6 @@ void main() {
       shell_age_out.value[index] = shell_age_in.value[index];
       shell_life_out.value[index] = shell_life_in.value[index];
       shell_seed_out.value[index] = shell_seed_in.value[index];
-    } else {
-      float slot_score = Random01(tick_seed + index * 17u);
-      uint rank = 0u;
-      for (uint other = 0u; other < kArrayLimit; ++other) {
-        if (shell_state_in.value[other] > 0.5) {
-          continue;
-        }
-        float other_score = Random01(tick_seed + other * 17u);
-        if (other_score < slot_score || (other_score == slot_score && other < index)) {
-          rank += 1u;
-        }
-      }
-
-      if (rank < launch_quota) {
-        uint emitter_columns = 6u;
-        uint emitter_rows = 2u;
-        uint emitter_column = rank % emitter_columns;
-        uint emitter_row = rank / emitter_columns;
-        float emitter_u = (float(emitter_column) + 0.5) / float(emitter_columns);
-        float emitter_v = (float(emitter_row) + 0.5) / float(emitter_rows);
-        vec2 launch_min = PixelToLogical(vec2(algorithm_viewport.width * 0.04, algorithm_viewport.height * 0.05));
-        vec2 launch_max = PixelToLogical(vec2(algorithm_viewport.width * 0.96, algorithm_viewport.height * 0.18));
-        float x = launch_min.x +
-          (emitter_u + (Random01(tick_seed + index * 17u) - 0.5) * 0.06) * (launch_max.x - launch_min.x);
-        float y = launch_min.y +
-          (emitter_v + (Random01(tick_seed + index * 29u) - 0.5) * 0.08) * (launch_max.y - launch_min.y);
-        float vx = -0.018 + Random01(tick_seed + index * 31u) * 0.036;
-        float vy = 0.058 + Random01(tick_seed + index * 47u) * 0.032;
-        float life = 100.0 + Random01(tick_seed + index * 59u) * 60.0;
-        shell_pos_x_out.value[index] = x;
-        shell_pos_y_out.value[index] = y;
-        shell_vel_x_out.value[index] = vx;
-        shell_vel_y_out.value[index] = vy;
-        shell_state_out.value[index] = 1.0;
-        shell_age_out.value[index] = 0.0;
-        shell_life_out.value[index] = life;
-        shell_seed_out.value[index] = float(tick_seed + index * 131u);
-      } else {
-        shell_pos_x_out.value[index] = 0.0;
-        shell_pos_y_out.value[index] = 0.0;
-        shell_vel_x_out.value[index] = 0.0;
-        shell_vel_y_out.value[index] = 0.0;
-        shell_state_out.value[index] = 0.0;
-        shell_age_out.value[index] = 0.0;
-        shell_life_out.value[index] = 0.0;
-        shell_seed_out.value[index] = 0.0;
-      }
     }
 
     spark_pos_x_out.value[index] = spark_pos_x_in.value[index];

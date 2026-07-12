@@ -186,6 +186,14 @@ void _StoreCollisionCount(
   }
 }
 
+void _StoreRenderDraw(
+  algorithm::AlgorithmContainerSet* container_set,
+  uint32_t instance_count) {
+  algorithm::AlgorithmContainer* container = algorithm::FindAlgorithmContainer(container_set, "render_draw");
+  const std::array<uint32_t, 4> command{4u, instance_count, 0u, 0u};
+  std::memcpy(container->bytes.data(), command.data(), sizeof(command));
+}
+
 bool _ReadBallStates(
   const algorithm::AlgorithmContainerSet* container_set,
   std::vector<BallState>* out_balls) {
@@ -854,6 +862,7 @@ class CollisionDemoJobsExecutor final : public agent::IAlgorithmJobsExecutor {
     std::vector<BvhNode> nodes;
     (void)_BuildCandidatePairs(balls, radius, &nodes);
     _WriteBvhDebugBuffers(algorithm_container_set, rect, radius, collision_count, nodes);
+    _StoreRenderDraw(algorithm_container_set, static_cast<uint32_t>(balls.size()));
 
     if (algorithm_to_agent_signal) {
       *algorithm_to_agent_signal = {};

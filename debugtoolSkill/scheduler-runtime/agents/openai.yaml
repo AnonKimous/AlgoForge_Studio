@@ -1,0 +1,3 @@
+display_name: Scheduler Runtime
+short_description: Navigate scheduler runtime, pipeline stages, lanes, and tick flow.
+default_prompt: Use the scheduler runtime skill to inspect or change pipeline scheduling without violating stage and lane ownership.

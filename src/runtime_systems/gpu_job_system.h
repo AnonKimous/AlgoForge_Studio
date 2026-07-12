@@ -16,6 +16,7 @@ struct RuntimeVkBufferBindingView {
   size_t size_bytes{0u};
   size_t element_stride{0u};
   bool array_like{false};
+  bool draw_indirect{false};
   bool required{true};
 };
 

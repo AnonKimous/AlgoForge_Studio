@@ -43,6 +43,9 @@
       },
       "bvh_y": {
         "count": 145
+      },
+      "render_draw": {
+        "count": 4
       }
     }
   },
@@ -290,6 +293,12 @@
             {
               "name": "bvh_y",
               "kind": "array",
+              "tuple_width": 1,
+              "required": true
+            },
+            {
+              "name": "render_draw",
+              "kind": "draw_indirect",
               "tuple_width": 1,
               "required": true
             }

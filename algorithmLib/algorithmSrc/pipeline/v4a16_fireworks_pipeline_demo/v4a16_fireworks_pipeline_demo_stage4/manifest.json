@@ -54,6 +54,9 @@
       },
       "spark_seed": {
         "count": 512
+      },
+      "render_draw": {
+        "count": 4
       }
     }
   },
@@ -345,7 +348,8 @@
           "v1": "v1",
           "v2": "v2",
           "v3": "v3",
-          "v4": "v4"
+          "v4": "v4",
+          "render_draw": "render_draw"
         },
         "v4a16_fireworks_pipeline_demo_stage1->v4a16_fireworks_pipeline_demo_stage2": {
           "shell_pos_x": "shell_pos_x",
@@ -367,7 +371,8 @@
           "v1": "v1",
           "v2": "v2",
           "v3": "v3",
-          "v4": "v4"
+          "v4": "v4",
+          "render_draw": "render_draw"
         },
         "v4a16_fireworks_pipeline_demo_stage2->v4a16_fireworks_pipeline_demo_stage3": {
           "shell_pos_x": "shell_pos_x",
@@ -389,7 +394,8 @@
           "v1": "v1",
           "v2": "v2",
           "v3": "v3",
-          "v4": "v4"
+          "v4": "v4",
+          "render_draw": "render_draw"
         },
         "v4a16_fireworks_pipeline_demo_stage3->v4a16_fireworks_pipeline_demo_stage4": {
           "shell_pos_x": "shell_pos_x",
@@ -411,7 +417,8 @@
           "v1": "v1",
           "v2": "v2",
           "v3": "v3",
-          "v4": "v4"
+          "v4": "v4",
+          "render_draw": "render_draw"
         }
       }
     }

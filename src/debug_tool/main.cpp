@@ -1,5 +1,6 @@
 #include "debug_tool/runner_control_socket.h"
 #include "debug_tool/debug_tool_backend_runtime.h"
+#include "debug_tool/debug_cmd.h"
 #include "debug_tool/debug_tool_frontend_panel.h"
 
 #include <SDL3/SDL_main.h>
@@ -1161,44 +1162,74 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
   const std::string submission_name = _BuildRunnerSubmissionName(options);
 
   size_t mounted_pipeline_index = 0u;
-  if (!runtime.AttachPipelinePackageToAgent(
-        0u,
-        mounted_pipeline_name,
-        options.algorithm_name,
-        resource_bindings,
-        descriptor_values,
-        &mounted_pipeline_index,
-        &error_message,
-        options.execution_preference)) {
+  debug_tool::DebugCommandResult mount_result{};
+  if (!debug_tool::DebugCmd::Execute(
+        runtime,
+        debug_tool::DebugCommand{
+          .id = debug_tool::DebugCommandId::AttachPipelinePackage,
+          .algorithm_name = options.algorithm_name,
+          .pipeline_name = mounted_pipeline_name,
+          .execution_preference = options.execution_preference,
+          .resource_bindings = resource_bindings,
+          .descriptor_values = descriptor_values,
+        },
+        &mount_result)) {
     throw std::runtime_error(
-      error_message.empty()
+      mount_result.message.empty()
         ? ("Failed to mount pipeline '" + mounted_pipeline_name + "'.")
-        : error_message);
+        : mount_result.message);
   }
+  mounted_pipeline_index = mount_result.algorithm_index;
   append_progress("pipeline_mounted");
 
-  if (!runtime.AttachPipelinePackageToAgent(
-        0u,
-        submission_name,
-        options.algorithm_name,
-        resource_bindings,
-        descriptor_values,
-        nullptr,
-        &error_message,
-        options.execution_preference)) {
+  debug_tool::DebugCommandResult submission_result{};
+  if (!debug_tool::DebugCmd::Execute(
+        runtime,
+        debug_tool::DebugCommand{
+          .id = debug_tool::DebugCommandId::AttachPipelinePackage,
+          .algorithm_name = options.algorithm_name,
+          .pipeline_name = submission_name,
+          .execution_preference = options.execution_preference,
+          .resource_bindings = resource_bindings,
+          .descriptor_values = descriptor_values,
+        },
+        &submission_result)) {
     throw std::runtime_error(
-      error_message.empty()
+      submission_result.message.empty()
         ? ("Failed to submit pipeline resource batch '" + submission_name + "'.")
-        : error_message);
+        : submission_result.message);
   }
   append_progress("resource_batch_submitted");
 
   append_progress("start_ticking_begin");
-  runtime.StartTicking();
+  if (!debug_tool::DebugCmd::Execute(runtime, debug_tool::DebugCommand{
+        .id = debug_tool::DebugCommandId::StartTick,
+      }, nullptr)) {
+    throw std::runtime_error("Failed to start pipeline ticking.");
+  }
   append_progress("start_ticking_end");
   append_progress("ticking_started");
-  runtime.SetRenderPreviewExtent(
-    ImVec2(static_cast<float>(options.preview_width), static_cast<float>(options.preview_height)));
+  debug_tool::DebugCommandResult timing_request_result{};
+  if (!debug_tool::DebugCmd::Execute(
+        runtime,
+        debug_tool::DebugCommand{
+          .id = debug_tool::DebugCommandId::RequestTimingLog,
+          .agent_index = 0u,
+        },
+        &timing_request_result)) {
+    throw std::runtime_error(
+      timing_request_result.message.empty()
+        ? "Failed to request pipeline timing log."
+        : timing_request_result.message);
+  }
+  if (!debug_tool::DebugCmd::Execute(runtime, debug_tool::DebugCommand{
+        .id = debug_tool::DebugCommandId::SetRenderPreviewExtent,
+        .preview_extent = ImVec2(
+          static_cast<float>(options.preview_width),
+          static_cast<float>(options.preview_height)),
+      }, nullptr)) {
+    throw std::runtime_error("Failed to set pipeline preview extent.");
+  }
   append_progress("preview_extent_set");
 
   std::cout
@@ -1294,8 +1325,32 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
     }
   }
 
-  runtime.PauseTicking();
+  if (!debug_tool::DebugCmd::Execute(runtime, debug_tool::DebugCommand{
+        .id = debug_tool::DebugCommandId::PauseTick,
+      }, nullptr)) {
+    throw std::runtime_error("Failed to pause pipeline ticking.");
+  }
   append_progress("ticking_paused");
+
+  debug_tool::DebugCommandResult timing_export_result{};
+  if (!debug_tool::DebugCmd::Execute(
+        runtime,
+        debug_tool::DebugCommand{
+          .id = debug_tool::DebugCommandId::ExportPipelineTiming,
+          .agent_index = 0u,
+          .pipeline_name = mounted_pipeline_name,
+        },
+        &timing_export_result)) {
+    throw std::runtime_error(
+      timing_export_result.message.empty()
+        ? "Failed to export pipeline timing artifacts."
+        : timing_export_result.message);
+  }
+  append_progress("pipeline_timing_csv=" + timing_export_result.csv_path);
+  append_progress("pipeline_timing_mermaid=" + timing_export_result.mermaid_path);
+  std::cout
+    << "pipeline_timing.csv=" << timing_export_result.csv_path << '\n'
+    << "pipeline_timing.mermaid=" << timing_export_result.mermaid_path << '\n';
 
   runtime_systems::RenderPreviewRequest preview_request{};
   if (!runtime.BuildRenderPreviewRequest(0u, mounted_pipeline_index, &preview_request, &error_message)) {
@@ -1307,7 +1362,12 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
   if (!preview_request.valid) {
     throw std::runtime_error("Render preview request is invalid after pipeline execution.");
   }
-  runtime.SetRenderPreviewRequest(std::move(preview_request));
+  if (!debug_tool::DebugCmd::Execute(runtime, debug_tool::DebugCommand{
+        .id = debug_tool::DebugCommandId::SetRenderPreviewRequest,
+        .preview_request = std::move(preview_request),
+      }, nullptr)) {
+    throw std::runtime_error("Failed to set pipeline preview request.");
+  }
   append_progress("preview_request_set");
 
   if (!runtime.runtime_environment().Tick()) {
@@ -1473,28 +1533,42 @@ bool _RunAlgorithmRunner(const AlgorithmRunnerOptions& options) {
   append_progress("default_bindings_loaded");
 
   size_t mounted_algorithm_index = 0u;
-  if (!runtime.AttachAlgorithmToAgent(
-        0u,
-        options.algorithm_name,
-        resource_bindings,
-        descriptor_values,
-        &mounted_algorithm_index,
-        &error_message,
-        debug_tool::AlgorithmMountMode::Direct,
-        options.execution_preference)) {
+  debug_tool::DebugCommandResult mount_result{};
+  if (!debug_tool::DebugCmd::Execute(
+        runtime,
+        debug_tool::DebugCommand{
+          .id = debug_tool::DebugCommandId::AttachAlgorithm,
+          .algorithm_name = options.algorithm_name,
+          .mount_mode = debug_tool::AlgorithmMountMode::Direct,
+          .execution_preference = options.execution_preference,
+          .resource_bindings = resource_bindings,
+          .descriptor_values = descriptor_values,
+        },
+        &mount_result)) {
     throw std::runtime_error(
-      error_message.empty()
+      mount_result.message.empty()
         ? ("Failed to mount algorithm '" + options.algorithm_name + "'.")
-        : error_message);
+        : mount_result.message);
   }
+  mounted_algorithm_index = mount_result.algorithm_index;
   append_progress("algorithm_mounted");
 
   append_progress("start_ticking_begin");
-  runtime.StartTicking();
+  if (!debug_tool::DebugCmd::Execute(runtime, debug_tool::DebugCommand{
+        .id = debug_tool::DebugCommandId::StartTick,
+      }, nullptr)) {
+    throw std::runtime_error("Failed to start algorithm ticking.");
+  }
   append_progress("start_ticking_end");
   append_progress("ticking_started");
-  runtime.SetRenderPreviewExtent(
-    ImVec2(static_cast<float>(options.preview_width), static_cast<float>(options.preview_height)));
+  if (!debug_tool::DebugCmd::Execute(runtime, debug_tool::DebugCommand{
+        .id = debug_tool::DebugCommandId::SetRenderPreviewExtent,
+        .preview_extent = ImVec2(
+          static_cast<float>(options.preview_width),
+          static_cast<float>(options.preview_height)),
+      }, nullptr)) {
+    throw std::runtime_error("Failed to set algorithm preview extent.");
+  }
   append_progress("preview_extent_set");
 
   std::cout
@@ -1580,7 +1654,11 @@ bool _RunAlgorithmRunner(const AlgorithmRunnerOptions& options) {
     }
   }
 
-  runtime.PauseTicking();
+  if (!debug_tool::DebugCmd::Execute(runtime, debug_tool::DebugCommand{
+        .id = debug_tool::DebugCommandId::PauseTick,
+      }, nullptr)) {
+    throw std::runtime_error("Failed to pause algorithm ticking.");
+  }
   append_progress("ticking_paused");
 
   runtime_systems::RenderPreviewRequest preview_request{};
@@ -1593,7 +1671,12 @@ bool _RunAlgorithmRunner(const AlgorithmRunnerOptions& options) {
   if (!preview_request.valid) {
     throw std::runtime_error("Render preview request is invalid after algorithm execution.");
   }
-  runtime.SetRenderPreviewRequest(std::move(preview_request));
+  if (!debug_tool::DebugCmd::Execute(runtime, debug_tool::DebugCommand{
+        .id = debug_tool::DebugCommandId::SetRenderPreviewRequest,
+        .preview_request = std::move(preview_request),
+      }, nullptr)) {
+    throw std::runtime_error("Failed to set algorithm preview request.");
+  }
   append_progress("preview_request_set");
 
   if (!runtime.runtime_environment().Tick()) {
@@ -2141,6 +2224,11 @@ int main(int argc, char** argv) {
 
     DebugToolBackendRuntime runtime;
     DebugToolFrontendPanel ui_panel;
+    const std::filesystem::path gui_debug_log_path =
+      std::filesystem::path("testData") / "debugTool_gui.log";
+    std::filesystem::create_directories(gui_debug_log_path.parent_path());
+    std::ofstream gui_debug_log(gui_debug_log_path, std::ios::binary | std::ios::trunc);
+    std::streambuf* const original_cerr_buffer = std::cerr.rdbuf(gui_debug_log.rdbuf());
     if (!runtime.Init("debugTool", 1280, 720)) {
       throw std::runtime_error("DebugToolBackendRuntime init failed");
     }
@@ -2153,6 +2241,7 @@ int main(int argc, char** argv) {
 
     ui_panel.Destroy();
     runtime.Destroy();
+    std::cerr.rdbuf(original_cerr_buffer);
     return 0;
   } catch (const std::exception& e) {
     std::cerr << "debugTool error: " << e.what() << '\n';

@@ -14,19 +14,19 @@ struct RenderPreviewBuffer {
 };
 
 struct RenderPreviewRequest {
+  const void* execution_key{nullptr};
   std::string stage_name;
   std::string vertex_shader_path;
   std::string fragment_shader_path;
   std::vector<RenderPreviewBuffer> storage_buffers;
-  uint32_t instance_count{1u};
   bool valid{false};
 
   void Clear() {
+    execution_key = nullptr;
     stage_name.clear();
     vertex_shader_path.clear();
     fragment_shader_path.clear();
     storage_buffers.clear();
-    instance_count = 1u;
     valid = false;
   }
 };

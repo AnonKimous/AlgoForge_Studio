@@ -294,12 +294,11 @@ bool _MountAlgoPackageFile(
     return false;
   }
 
-  (void)runtime_root;
   (void)relative_package_path;
 
   std::error_code ec;
   const fs::path package_root = package_file_path.parent_path();
-  const fs::path cache_root = package_root / "algocache";
+  const fs::path cache_root = runtime_root / "algocache";
   const uintmax_t package_file_size = fs::file_size(package_file_path, ec);
   if (ec) {
     if (out_error_message) {

@@ -6,6 +6,8 @@ layout(set = 0, binding = 34) readonly buffer LaunchBudgetIn { float value[]; } 
 layout(set = 0, binding = 35) buffer LaunchBudgetOut { float value[]; } v2_out;
 layout(set = 0, binding = 36) readonly buffer LiveSparkCountIn { float value[]; } v3_in;
 layout(set = 0, binding = 37) buffer LiveSparkCountOut { float value[]; } v3_out;
+layout(set = 0, binding = 38) readonly buffer RenderInstanceCountIn { float value[]; } v4_in;
+layout(set = 0, binding = 39) buffer RenderInstanceCountOut { float value[]; } v4_out;
 layout(set = 0, binding = 0) readonly buffer ShellPosXIn { float value[]; } shell_pos_x_in;
 layout(set = 0, binding = 1) buffer ShellPosXOut { float value[]; } shell_pos_x_out;
 layout(set = 0, binding = 2) readonly buffer ShellPosYIn { float value[]; } shell_pos_y_in;
@@ -61,6 +63,7 @@ void main() {
   if (gl_VertexIndex == 0u && index == 0u) {
     v1_out.value[0] = v1_in.value[0];
     v2_out.value[0] = v2_in.value[0];
+    v4_out.value[0] = float(kArrayLimit);
     uint live_count = 0u;
     for (uint i = 0u; i < kArrayLimit; ++i) {
       if (spark_state_in.value[i] != 1.0) {

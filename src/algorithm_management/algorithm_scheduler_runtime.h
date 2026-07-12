@@ -18,6 +18,7 @@
 #include "common_data/kernel_cfg.h"
 #define RUNTIME_SYSTEMS_LAYER_PUBLIC_FACADE_INCLUDE 1
 #include "runtime_systems/runtime_systems.h"
+#include "runtime_systems/runtime_gpu_context.h"
 #undef RUNTIME_SYSTEMS_LAYER_PUBLIC_FACADE_INCLUDE
 
 namespace algorithmManager { namespace scheduler {
@@ -72,14 +73,14 @@ bool HasPipelineStageBufferSlot(
   const algorithm::AlgorithmContainerSet& container_set,
   const std::string& stage_buffer_slot_name);
 
-bool CopyPipelineCircularLoopback(
+bool ValidatePipelineCircularLoopback(
   const algorithm::AlgorithmContainerSet& source_container_set,
   uint32_t shared_variable_count,
   uint32_t shared_array_count,
   ::agentmanager::agent::AlgorithmObject* target_stage,
   std::string* out_error_message);
 
-bool CopyWholeStandardContainerLayout(
+bool ValidateWholeStandardContainerLayout(
   const algorithm::AlgorithmContainerSet& source_container_set,
   algorithm::AlgorithmContainerSet* target_container_set,
   std::string* out_error_message);
@@ -103,7 +104,7 @@ inline bool HasPipelineStageBufferSlot(
     algorithm::IsStandardContainerSlotName(container_set, stage_buffer_slot_name);
 }
 
-inline bool CopyPipelineCircularLoopback(
+inline bool ValidatePipelineCircularLoopback(
   const algorithm::AlgorithmContainerSet& source_container_set,
   uint32_t shared_variable_count,
   uint32_t shared_array_count,
@@ -150,7 +151,6 @@ inline bool CopyPipelineCircularLoopback(
       }
       return false;
     }
-    std::memcpy(target_container->bytes.data(), source_container->bytes.data(), source_container->bytes.size());
   }
   for (uint32_t i = 0; i < shared_array_count; ++i) {
     const std::string slot_name = source_container_set.standard_layout.MakeArrayName(i);
@@ -170,7 +170,6 @@ inline bool CopyPipelineCircularLoopback(
       }
       return false;
     }
-    std::memcpy(target_container->bytes.data(), source_container->bytes.data(), source_container->bytes.size());
   }
   if (out_error_message) {
     out_error_message->clear();
@@ -178,7 +177,7 @@ inline bool CopyPipelineCircularLoopback(
   return true;
 }
 
-inline bool CopyWholeStandardContainerLayout(
+inline bool ValidateWholeStandardContainerLayout(
   const algorithm::AlgorithmContainerSet& source_container_set,
   algorithm::AlgorithmContainerSet* target_container_set,
   std::string* out_error_message) {
@@ -220,7 +219,6 @@ inline bool CopyWholeStandardContainerLayout(
       }
       return false;
     }
-    std::memcpy(target_container->bytes.data(), source_container->bytes.data(), source_container->bytes.size());
   }
   for (uint32_t i = 0u; i < source_container_set.standard_layout.array_count; ++i) {
     const std::string slot_name = source_container_set.standard_layout.MakeArrayName(i);
@@ -240,7 +238,6 @@ inline bool CopyWholeStandardContainerLayout(
       }
       return false;
     }
-    std::memcpy(target_container->bytes.data(), source_container->bytes.data(), source_container->bytes.size());
   }
   if (out_error_message) {
     out_error_message->clear();
@@ -671,7 +668,8 @@ constexpr uint64_t kFnvOffsetBasis64 = 1469598103934665603ull;
 constexpr uint64_t kFnvPrime64 = 1099511628211ull;
 
 inline bool ShouldEmitPipelineRunnerProbe(const std::string& pipeline_name) {
-  return pipeline_name.find("::runner_mount") != std::string::npos;
+  (void)pipeline_name;
+  return false;
 }
 
 inline void AppendPipelineRunnerProbe(const std::string& file_name, const std::string& line) {
@@ -857,6 +855,11 @@ inline uint64_t HashPipelineGroupState(
     const algorithm::AlgorithmContainerSet* container_set = object.container_set();
     if (container_set) {
       hash = HashContainerSet(hash, *container_set);
+    }
+    if (container_set) {
+      hash = HashU64(
+        hash,
+        runtime_systems::RuntimeVkContextRegistry::Instance().SnapshotExecutionProgress(container_set));
     }
     if (index < runtime_states.size()) {
       hash = HashSignal(hash, runtime_states[index].agent_to_algorithm_signal);
@@ -1163,6 +1166,136 @@ class NoOpPipelineWrapperJobsExecutor final : public ::algorithmManager::IAlgori
   }
 };
 
+inline bool AddPipelineStandardContainerAlias(
+  algorithm::AlgorithmContainerSet* standard_container_set,
+  const std::string& alias_name,
+  const std::vector<std::string>& standard_slot_names,
+  std::string* out_error_message) {
+  if (algorithm::IsStandardContainerSlotName(*standard_container_set, alias_name)) {
+    if (standard_slot_names.size() == 1u && standard_slot_names.front() == alias_name) {
+      return true;
+    }
+    if (out_error_message) {
+      *out_error_message = "Pipeline standard container alias conflicts with a standard slot: " + alias_name;
+    }
+    return false;
+  }
+
+  const auto found = standard_container_set->container_aliases_by_name.find(alias_name);
+  if (found == standard_container_set->container_aliases_by_name.end()) {
+    standard_container_set->container_aliases_by_name.emplace(alias_name, standard_slot_names);
+    return true;
+  }
+  if (found->second == standard_slot_names) {
+    return true;
+  }
+  if (out_error_message) {
+    *out_error_message = "Pipeline standard container alias maps to different slots: " + alias_name;
+  }
+  return false;
+}
+
+inline bool CollectPipelineStandardAliasTable(
+  const algorithm::AlgorithmContainerSet& stage_container_set,
+  std::unordered_map<std::string, std::vector<std::string>>* out_alias_table,
+  std::string* out_error_message) {
+  out_alias_table->clear();
+  std::unordered_map<std::string, std::string> direct_name_to_slot{};
+
+  const auto collect_direct = [&](
+    const std::vector<algorithm::AlgorithmContainer>& containers,
+    bool array_kind) {
+    for (size_t index = 0u; index < containers.size(); ++index) {
+      const std::string slot_name = array_kind
+        ? stage_container_set.standard_layout.MakeArrayName(static_cast<uint32_t>(index))
+        : stage_container_set.standard_layout.MakeVariableName(static_cast<uint32_t>(index));
+      direct_name_to_slot.emplace(containers[index].name, slot_name);
+      direct_name_to_slot.emplace(slot_name, slot_name);
+    }
+  };
+
+  collect_direct(stage_container_set.arrays, true);
+  collect_direct(stage_container_set.temporary_registers, false);
+
+  for (const auto& [name, slot_name] : direct_name_to_slot) {
+    if (name != slot_name) {
+      (*out_alias_table)[name] = {slot_name};
+    }
+  }
+
+  for (const auto& [alias_name, source_names] : stage_container_set.container_aliases_by_name) {
+    std::vector<std::string> slot_names{};
+    slot_names.reserve(source_names.size());
+    for (const std::string& source_name : source_names) {
+      const auto direct_found = direct_name_to_slot.find(source_name);
+      if (direct_found != direct_name_to_slot.end()) {
+        slot_names.push_back(direct_found->second);
+        continue;
+      }
+      if (algorithm::IsStandardContainerSlotName(stage_container_set, source_name)) {
+        slot_names.push_back(source_name);
+        continue;
+      }
+      if (out_error_message) {
+        *out_error_message = "Pipeline stage alias source is not mapped to a standard slot: " + source_name;
+      }
+      return false;
+    }
+    (*out_alias_table)[alias_name] = std::move(slot_names);
+  }
+  return true;
+}
+
+inline bool NormalizePipelineStandardContainerSet(
+  algorithm::AlgorithmContainerSet* standard_container_set,
+  std::string* out_error_message) {
+  std::unordered_map<std::string, std::vector<std::string>> alias_table{};
+  if (!CollectPipelineStandardAliasTable(*standard_container_set, &alias_table, out_error_message)) {
+    return false;
+  }
+
+  for (size_t index = 0u; index < standard_container_set->arrays.size(); ++index) {
+    standard_container_set->arrays[index].name =
+      standard_container_set->standard_layout.MakeArrayName(static_cast<uint32_t>(index));
+  }
+  for (size_t index = 0u; index < standard_container_set->temporary_registers.size(); ++index) {
+    standard_container_set->temporary_registers[index].name =
+      standard_container_set->standard_layout.MakeVariableName(static_cast<uint32_t>(index));
+  }
+
+  standard_container_set->container_aliases_by_name.clear();
+  for (const auto& [alias_name, slot_names] : alias_table) {
+    if (!AddPipelineStandardContainerAlias(
+          standard_container_set,
+          alias_name,
+          slot_names,
+          out_error_message)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+inline bool BindPipelineStageContainerSetToStandardContainerSet(
+  const algorithm::AlgorithmContainerSet& stage_container_set,
+  algorithm::AlgorithmContainerSet* standard_container_set,
+  std::string* out_error_message) {
+  std::unordered_map<std::string, std::vector<std::string>> alias_table{};
+  if (!CollectPipelineStandardAliasTable(stage_container_set, &alias_table, out_error_message)) {
+    return false;
+  }
+  for (const auto& [alias_name, slot_names] : alias_table) {
+    if (!AddPipelineStandardContainerAlias(
+          standard_container_set,
+          alias_name,
+          slot_names,
+          out_error_message)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 inline std::string StandardLayoutKey(const algorithm::AlgorithmContainerSet& container_set) {
   if (container_set.standard_layout.enabled()) {
     return container_set.standard_layout.layout_name;
@@ -1271,8 +1404,7 @@ inline BuiltAlgorithmMount BuildEmptyPipelineWrapperMount(
   result.object.jobs_executor = std::make_shared<NoOpPipelineWrapperJobsExecutor>();
   result.object.pipeline_wrapper_role = wrapper_role;
   result.object.pipeline_wrapper_empty = true;
-  result.object.shared_container_set = std::make_shared<algorithm::AlgorithmContainerSet>();
-  algorithm::CopyAlgorithmContainerSet(*body_stage0_object.container_set(), result.object.shared_container_set.get());
+  result.object.shared_container_set = body_stage0_object.shared_container_set;
   result.container_set = result.object.shared_container_set;
   result.ok = true;
   return result;
@@ -2431,6 +2563,18 @@ inline bool AlgorithmScheduler::EnqueuePipelineStage0Submission(
     return false;
   }
 
+  std::string prepared_standard_mapping_error;
+  if (!pipeline_scheduler_detail::NormalizePipelineStandardContainerSet(
+        prepared_stage0_object.mutable_container_set(),
+        &prepared_standard_mapping_error)) {
+    if (out_error_message) {
+      *out_error_message = prepared_standard_mapping_error.empty()
+        ? "Failed to normalize the submitted pipeline standard container set."
+        : std::move(prepared_standard_mapping_error);
+    }
+    return false;
+  }
+
   JobsPendingPipelineStage0Submission submission{};
   submission.owner_agent_name = owner_agent_name;
   submission.lane_id = pipeline_runtime_state.next_lane_id;
@@ -2736,6 +2880,34 @@ inline bool AlgorithmScheduler::MountPipelineAlgorithmObjects(
     pipeline_scheduler_detail::AppendPipelineRunnerProbe(
       "scheduler_mount_probe.log",
       "mount.stage_vector.end total=" + std::to_string(built_stages.size()));
+  }
+
+  const size_t standard_stage_index = has_wrapper_nodes ? 1u : 0u;
+  std::shared_ptr<algorithm::AlgorithmContainerSet> pipeline_standard_container_set =
+    built_stages[standard_stage_index].object.shared_container_set;
+  std::string standard_container_mapping_error;
+  if (!pipeline_scheduler_detail::NormalizePipelineStandardContainerSet(
+        pipeline_standard_container_set.get(),
+        &standard_container_mapping_error)) {
+    set_error(standard_container_mapping_error.empty()
+      ? "Failed to normalize the pipeline standard container set."
+      : std::move(standard_container_mapping_error));
+    return false;
+  }
+  for (const pipeline_scheduler_detail::BuiltAlgorithmMount& built_stage : built_stages) {
+    if (!pipeline_scheduler_detail::BindPipelineStageContainerSetToStandardContainerSet(
+          *built_stage.object.container_set(),
+          pipeline_standard_container_set.get(),
+          &standard_container_mapping_error)) {
+      set_error(standard_container_mapping_error.empty()
+        ? "Failed to bind a pipeline stage to the standard container set."
+        : std::move(standard_container_mapping_error));
+      return false;
+    }
+  }
+  for (pipeline_scheduler_detail::BuiltAlgorithmMount& built_stage : built_stages) {
+    built_stage.object.SetContainerSet(pipeline_standard_container_set);
+    built_stage.container_set = pipeline_standard_container_set;
   }
 
   const size_t pipeline_total_stage_count = built_stages.size();
@@ -3227,14 +3399,6 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
   };
   current_body_stage_has_data = build_body_stage_has_data(primary_lane_state->stage_has_data);
 
-  if (body_stage0_object.shared_container_set == primary_lane_state->standard_container_set) {
-    std::shared_ptr<algorithm::AlgorithmContainerSet> detached_body_stage0_container =
-      std::make_shared<algorithm::AlgorithmContainerSet>();
-    algorithm::CopyAlgorithmContainerSet(
-      *primary_lane_state->standard_container_set,
-      detached_body_stage0_container.get());
-    body_stage0_object.SetContainerSet(std::move(detached_body_stage0_container));
-  }
   body_stage0_object.resource_bindings = primary_lane_state->resource_bindings;
   body_stage0_object.descriptor_values = primary_lane_state->descriptor_values;
 
@@ -3374,6 +3538,10 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
     current_body_stage_has_data.front() = true;
     pipeline_state.stage0_saturated = false;
     imported_submission_this_tick = true;
+  }
+
+  for (size_t index = begin_index; index < end_index; ++index) {
+    algorithm_objects[index].SetContainerSet(primary_lane_state->standard_container_set);
   }
 
   body_stage0_object.resource_bindings = primary_lane_state->resource_bindings;
@@ -3627,7 +3795,7 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
         "tick.ingress.end stage=" + object.algorithm_profile.algorithm_name);
     }
     std::string ingress_debug_error_message;
-    if (!bridge.CaptureIngressDebugSet(
+    if (emit_runner_probe && !bridge.CaptureIngressDebugSet(
           object.pipeline_name,
           object.algorithm_profile.algorithm_name,
           stage_container_sets,
@@ -3720,26 +3888,6 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
     std::string egress_error_message;
     const bool is_body_last_stage = body_stage_offset + 1u == body_stage_count;
     if (is_body_last_stage) {
-      if (!pipeline_scheduler_detail::CopyWholeStandardContainerLayout(
-            *source_container_set,
-            primary_lane_state->standard_container_set.get(),
-            &egress_error_message)) {
-        const std::string failure_message = egress_error_message.empty()
-          ? std::string("Failed to copy pipeline body tail output into wrapper tail input.")
-          : std::move(egress_error_message);
-        ALGORITHM_SCHEDULER_ASSERT(false, failure_message.c_str());
-        runtime_state.algorithm_to_agent_signal.stop_requested = true;
-        pipeline_scheduler_detail::SetPipelineStageRuntimeReason(
-          pipeline_stage_runtime_stats,
-          object.algorithm_profile.algorithm_name,
-          "Egress failed: " + failure_message);
-        pipeline_scheduler_detail::MergeAlgorithmToAgentSignal(
-          runtime_state.algorithm_to_agent_signal,
-          out_pipeline_signal);
-        set_error(failure_message);
-        *out_pipeline_processing_failed = true;
-        return false;
-      }
       if (pipeline_state.topology == ::algorithmManager::AlgorithmPipelineTopology::Circular) {
         const bool emit_loopback_ok = pipeline_uses_inter_stage_buffer
           ? bridge.EmitToNextStage(
@@ -3757,29 +3905,6 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
           const std::string failure_message = egress_error_message.empty()
             ? std::string("Failed to emit circular pipeline stage output.")
             : std::move(egress_error_message);
-          ALGORITHM_SCHEDULER_ASSERT(false, failure_message.c_str());
-          runtime_state.algorithm_to_agent_signal.stop_requested = true;
-          pipeline_scheduler_detail::SetPipelineStageRuntimeReason(
-            pipeline_stage_runtime_stats,
-            object.algorithm_profile.algorithm_name,
-            "Egress failed: " + failure_message);
-          pipeline_scheduler_detail::MergeAlgorithmToAgentSignal(
-            runtime_state.algorithm_to_agent_signal,
-            out_pipeline_signal);
-          set_error(failure_message);
-          *out_pipeline_processing_failed = true;
-          return false;
-        }
-        std::string loopback_error_message;
-        if (!pipeline_scheduler_detail::CopyPipelineCircularLoopback(
-              *source_container_set,
-              object.runtime_transfer_map->pipeline_shared_variable_count,
-              object.runtime_transfer_map->pipeline_shared_array_count,
-              &algorithm_objects[body_begin_index],
-              &loopback_error_message)) {
-          const std::string failure_message = loopback_error_message.empty()
-            ? std::string("Failed to emit circular pipeline loopback output.")
-            : std::move(loopback_error_message);
           ALGORITHM_SCHEDULER_ASSERT(false, failure_message.c_str());
           runtime_state.algorithm_to_agent_signal.stop_requested = true;
           pipeline_scheduler_detail::SetPipelineStageRuntimeReason(
@@ -3833,7 +3958,7 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
     }
 
     std::string egress_debug_error_message;
-    if (!bridge.CaptureEgressDebugSet(
+    if (emit_runner_probe && !bridge.CaptureEgressDebugSet(
           object.pipeline_name,
           object.algorithm_profile.algorithm_name,
           *source_container_set,
@@ -3950,26 +4075,6 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
   if (!tick_wrapper_stage(begin_index, false, "Wrapper begin executed.")) {
     return false;
   }
-  if (!current_body_stage_has_data.empty() &&
-      current_body_stage_has_data.front() &&
-      (pipeline_state.topology != ::algorithmManager::AlgorithmPipelineTopology::Circular ||
-       imported_submission_this_tick)) {
-    std::string begin_copy_error_message;
-    if (!pipeline_scheduler_detail::CopyWholeStandardContainerLayout(
-          *primary_lane_state->standard_container_set,
-          body_stage0_object.mutable_container_set(),
-          &begin_copy_error_message)) {
-      const std::string failure_message = begin_copy_error_message.empty()
-        ? std::string("Failed to copy wrapper begin output into pipeline body stage0 input.")
-        : std::move(begin_copy_error_message);
-      ALGORITHM_SCHEDULER_ASSERT(false, failure_message.c_str());
-      set_error(failure_message);
-      out_pipeline_signal->stop_requested = true;
-      *out_pipeline_processing_failed = true;
-      return false;
-    }
-  }
-
   auto build_body_execution_bundle = [&](
     size_t start_body_stage_offset,
     const std::vector<bool>& stage_has_data_state) {

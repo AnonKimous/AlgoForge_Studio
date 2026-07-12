@@ -2328,224 +2328,6 @@ class PackageSchemaDecomposer final {
   PackageDescriptorDecomposer descriptor_decomposer_;
 };
 
-bool _CopyRuntimeMappedContainer(
-  const algorithm::AlgorithmContainerSet& source_container_set,
-  const algorithm::AlgorithmContainer& source_container,
-  const algorithm::AlgorithmContainerSet& target_container_set,
-  algorithm::AlgorithmContainer* target_container,
-  const std::string& source_stage_name,
-  const std::string& target_stage_name,
-  const std::string& source_container_name,
-  const std::string& target_container_name,
-  std::string* out_error_message) {
-  if (!target_container) {
-    _SetErrorMessage(
-      out_error_message,
-      "Runtime transfer target container is null for '" + source_stage_name + "->" + target_stage_name + "'.");
-    return false;
-  }
-  if (source_container.bytes.empty() || target_container->bytes.empty()) {
-    _SetErrorMessage(
-      out_error_message,
-      "Runtime transfer container has no data for '" + source_stage_name + "->" + target_stage_name +
-        "': '" + source_container_name + "' to '" + target_container_name + "'.");
-    return false;
-  }
-
-  const bool source_is_standard_slot =
-    algorithm::IsStandardContainerSlotName(source_container_set, source_container_name);
-  const bool target_is_standard_slot =
-    algorithm::IsStandardContainerSlotName(target_container_set, target_container_name);
-  if (source_is_standard_slot != target_is_standard_slot) {
-    _SetErrorMessage(
-      out_error_message,
-      "Runtime transfer cannot mix standard slots with custom containers for '" +
-        source_stage_name + "->" + target_stage_name + "': '" + source_container_name +
-        "' to '" + target_container_name + "'.");
-    return false;
-  }
-
-  if (!source_is_standard_slot && source_container_name != target_container_name) {
-    _SetErrorMessage(
-      out_error_message,
-      "Runtime transfer requires same-name custom containers for '" + source_stage_name + "->" +
-        target_stage_name + "': '" + source_container_name + "' to '" + target_container_name + "'.");
-    return false;
-  }
-
-  if (!algorithm::HasSameContainerStructure(source_container, *target_container)) {
-    _SetErrorMessage(
-      out_error_message,
-      "Runtime transfer container structure mismatch for '" + source_stage_name + "->" + target_stage_name +
-        "': '" + source_container_name + "' to '" + target_container_name + "'.");
-    return false;
-  }
-
-  std::memcpy(target_container->bytes.data(), source_container.bytes.data(), source_container.bytes.size());
-  return true;
-}
-
-bool _ApplyRuntimeTransferEdgeToTarget(
-  const algorithm::AlgorithmRuntimeTransferMap& transfer_map,
-  const algorithm::AlgorithmRuntimeTransferEdge& edge,
-  const std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>& stage_container_sets,
-  algorithm::AlgorithmContainerSet* target_container_set,
-  std::unordered_set<std::string>* written_target_names,
-  std::string* out_error_message) {
-  (void)transfer_map;
-  if (!written_target_names) {
-    _SetErrorMessage(out_error_message, "Runtime transfer target tracking set is null.");
-    return false;
-  }
-  if (!target_container_set) {
-    _SetErrorMessage(
-      out_error_message,
-      "Runtime transfer target container set is null for stage '" + edge.target_stage_name + "'.");
-    return false;
-  }
-
-  const auto source_stage_it = stage_container_sets.find(edge.source_stage_name);
-  if (source_stage_it == stage_container_sets.end() || !source_stage_it->second) {
-    if (edge.bindings.empty()) {
-      return true;
-    }
-    _SetErrorMessage(
-      out_error_message,
-      "Runtime transfer source stage is unavailable: " + edge.source_stage_name);
-    return false;
-  }
-
-  const algorithm::AlgorithmContainerSet& source_container_set = *source_stage_it->second;
-  for (const algorithm::AlgorithmRuntimeTransferBinding& binding : edge.bindings) {
-    const algorithm::AlgorithmContainer* source_container =
-      algorithm::FindAlgorithmContainer(source_container_set, binding.from_name);
-    if (!source_container) {
-      if (!binding.required) {
-        continue;
-      }
-      _SetErrorMessage(
-        out_error_message,
-        "Runtime transfer source container is missing: " + edge.source_stage_name + "." + binding.from_name);
-      return false;
-    }
-
-    algorithm::AlgorithmContainer* target_container =
-      algorithm::FindAlgorithmContainer(target_container_set, binding.to_name);
-    if (!target_container) {
-      if (!binding.required) {
-        continue;
-      }
-      _SetErrorMessage(
-        out_error_message,
-        "Runtime transfer target container is missing: " + edge.target_stage_name + "." + binding.to_name);
-      return false;
-    }
-
-    if (written_target_names->find(binding.to_name) != written_target_names->end()) {
-      _SetErrorMessage(
-        out_error_message,
-        "Runtime transfer target container is written more than once: " +
-          edge.target_stage_name + "." + binding.to_name);
-      return false;
-    }
-
-    if (!_CopyRuntimeMappedContainer(
-          source_container_set,
-          *source_container,
-          *target_container_set,
-          target_container,
-          edge.source_stage_name,
-          edge.target_stage_name,
-          binding.from_name,
-          binding.to_name,
-          out_error_message)) {
-      return false;
-    }
-
-    written_target_names->insert(binding.to_name);
-  }
-
-  return true;
-}
-
-bool _ApplyRuntimeTransferEdgeFromSource(
-  const algorithm::AlgorithmRuntimeTransferMap& transfer_map,
-  const algorithm::AlgorithmRuntimeTransferEdge& edge,
-  const algorithm::AlgorithmContainerSet& source_container_set,
-  std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>* stage_container_sets,
-  std::unordered_map<std::string, std::unordered_set<std::string>>* written_target_names_by_stage,
-  std::string* out_error_message) {
-  (void)transfer_map;
-  if (!stage_container_sets || !written_target_names_by_stage) {
-    _SetErrorMessage(out_error_message, "Runtime transfer stage container set map is null.");
-    return false;
-  }
-
-  for (const algorithm::AlgorithmRuntimeTransferBinding& binding : edge.bindings) {
-    const algorithm::AlgorithmContainer* source_container =
-      algorithm::FindAlgorithmContainer(source_container_set, binding.from_name);
-    if (!source_container) {
-      if (!binding.required) {
-        continue;
-      }
-      _SetErrorMessage(
-        out_error_message,
-        "Runtime transfer source container is missing: " + edge.source_stage_name + "." + binding.from_name);
-      return false;
-    }
-
-    auto target_stage_it = stage_container_sets->find(edge.target_stage_name);
-    if (target_stage_it == stage_container_sets->end() || !target_stage_it->second) {
-      if (!binding.required) {
-        continue;
-      }
-      _SetErrorMessage(
-        out_error_message,
-        "Runtime transfer target stage is unavailable: " + edge.target_stage_name);
-      return false;
-    }
-
-    algorithm::AlgorithmContainerSet* target_container_set = target_stage_it->second.get();
-    algorithm::AlgorithmContainer* target_container =
-      algorithm::FindAlgorithmContainer(target_container_set, binding.to_name);
-    if (!target_container) {
-      if (!binding.required) {
-        continue;
-      }
-      _SetErrorMessage(
-        out_error_message,
-        "Runtime transfer target container is missing: " + edge.target_stage_name + "." + binding.to_name);
-      return false;
-    }
-
-    std::unordered_set<std::string>& written_target_names = (*written_target_names_by_stage)[edge.target_stage_name];
-    if (written_target_names.find(binding.to_name) != written_target_names.end()) {
-      _SetErrorMessage(
-        out_error_message,
-        "Runtime transfer target container is written more than once: " +
-          edge.target_stage_name + "." + binding.to_name);
-      return false;
-    }
-
-    if (!_CopyRuntimeMappedContainer(
-          source_container_set,
-          *source_container,
-          *target_container_set,
-          target_container,
-          edge.source_stage_name,
-          edge.target_stage_name,
-          binding.from_name,
-          binding.to_name,
-          out_error_message)) {
-      return false;
-    }
-
-    written_target_names.insert(binding.to_name);
-  }
-
-  return true;
-}
-
 void _CopyBridgeDebugBindings(
   const algorithm::AlgorithmRuntimeTransferEdge* edge,
   std::vector<algorithmManager::scheduler::PipelineStageBridgeDebugBinding>* out_bindings) {
@@ -3045,32 +2827,9 @@ bool _PipelineStageBridgeIngressImpl(
     _SetErrorMessage(out_error_message, "Runtime transfer target container set is null.");
     return false;
   }
-
-  const std::vector<const algorithm::AlgorithmRuntimeTransferEdge*> incoming_edges =
-    transfer_map.FindIncomingEdges(target_stage_name);
-  if (incoming_edges.size() > 1u) {
-    _SetErrorMessage(
-      out_error_message,
-      "Runtime transfer map is not linear: stage '" + target_stage_name + "' has multiple predecessors.");
-    return false;
-  }
-
-  std::unordered_set<std::string> written_target_names{};
-  for (const algorithm::AlgorithmRuntimeTransferEdge* edge : incoming_edges) {
-    if (!edge) {
-      continue;
-    }
-    if (!_ApplyRuntimeTransferEdgeToTarget(
-          transfer_map,
-          *edge,
-          stage_container_sets,
-          out_target_container_set,
-          &written_target_names,
-          out_error_message)) {
-      return false;
-    }
-  }
+  (void)stage_container_sets;
   if (inter_stage_buffer) {
+    std::unordered_set<std::string> written_target_names;
     if (!_ApplyImplicitStageBufferIngress(
           transfer_map,
           target_stage_name,
@@ -3134,43 +2893,13 @@ bool _PipelineStageBridgeEgressImpl(
     _SetErrorMessage(out_error_message, "Runtime transfer stage container set map is null.");
     return false;
   }
+  (void)stage_container_sets;
   if (inter_stage_buffer) {
     if (!_ApplyImplicitStageBufferEgress(
           transfer_map,
           source_stage_name,
           source_container_set,
           inter_stage_buffer,
-          out_error_message)) {
-      return false;
-    }
-  }
-
-  const std::vector<const algorithm::AlgorithmRuntimeTransferEdge*> outgoing_edges =
-    transfer_map.FindOutgoingEdges(source_stage_name);
-  if (outgoing_edges.size() > 1u) {
-    _SetErrorMessage(
-      out_error_message,
-      "Runtime transfer map is not linear: stage '" + source_stage_name + "' has multiple successors.");
-    return false;
-  }
-  if (outgoing_edges.empty()) {
-    if (out_error_message) {
-      out_error_message->clear();
-    }
-    return true;
-  }
-
-  std::unordered_map<std::string, std::unordered_set<std::string>> written_target_names_by_stage{};
-  for (const algorithm::AlgorithmRuntimeTransferEdge* edge : outgoing_edges) {
-    if (!edge) {
-      continue;
-    }
-    if (!_ApplyRuntimeTransferEdgeFromSource(
-          transfer_map,
-          *edge,
-          source_container_set,
-          stage_container_sets,
-          &written_target_names_by_stage,
           out_error_message)) {
       return false;
     }
@@ -3249,10 +2978,7 @@ bool PipelineStageBridgeCaptureIngressDebugSet(
     _CopyBridgeDebugBindings(incoming_edges.front(), &out_debug_set->ingress_bindings);
   }
 
-  algorithm::CopyAlgorithmContainerSet(
-    target_container_set,
-    &out_debug_set->stage_input_container_set);
-  out_debug_set->has_stage_input_container_set = true;
+  (void)target_container_set;
   out_debug_set->valid = true;
 
   if (out_error_message) {
@@ -3286,10 +3012,7 @@ bool PipelineStageBridgeCaptureEgressDebugSet(
   }
   in_out_debug_set->stage_name = source_stage_name;
 
-  algorithm::CopyAlgorithmContainerSet(
-    source_container_set,
-    &in_out_debug_set->stage_output_container_set);
-  in_out_debug_set->has_stage_output_container_set = true;
+  (void)source_container_set;
 
   const std::vector<const algorithm::AlgorithmRuntimeTransferEdge*> outgoing_edges =
     transfer_map.FindOutgoingEdges(source_stage_name);
@@ -3319,10 +3042,7 @@ bool PipelineStageBridgeCaptureEgressDebugSet(
       return false;
     }
 
-    algorithm::CopyAlgorithmContainerSet(
-      *target_stage_it->second,
-      &in_out_debug_set->next_stage_input_container_set);
-    in_out_debug_set->has_next_stage_input_container_set = true;
+    (void)target_stage_it;
   }
 
   in_out_debug_set->valid = true;

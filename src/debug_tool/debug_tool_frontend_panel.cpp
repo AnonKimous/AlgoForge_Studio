@@ -1,4 +1,5 @@
 #include "debug_tool_frontend_panel.h"
+#include "debug_cmd.h"
 
 #include <algorithm>
 #include <cassert>
@@ -15,6 +16,27 @@
 namespace debug_tool_frontend {
 
 namespace {
+
+bool ExecuteDebugCommand(
+  IDebugToolHost& host,
+  const debug_tool::DebugCommand& command,
+  std::string* out_error_message = nullptr,
+  debug_tool::DebugCommandResult* out_result = nullptr) {
+  debug_tool::DebugCommandResult result{};
+  if (debug_tool::DebugCmd::Execute(host, command, &result)) {
+    if (out_result) {
+      *out_result = std::move(result);
+    }
+    return true;
+  }
+  if (out_error_message) {
+    *out_error_message = result.message;
+  }
+  if (out_result) {
+    *out_result = std::move(result);
+  }
+  return false;
+}
 
 std::string _ProjectDataRootPath() {
   const std::filesystem::path base_path(SDL_GetBasePath() ? SDL_GetBasePath() : "");
@@ -137,20 +159,14 @@ const char* _AlgorithmRuntimeBuildFlavorDisplayName(
 void _DrawReflectionSnapshot(
   const char* title,
   const debug_tool::AlgorithmReflectionSnapshot& snapshot) {
-  struct ChildScope {
-    ~ChildScope() {
-      ImGui::EndChild();
-    }
-  };
-
   if (!title) {
     title = "Reflection Snapshot";
   }
   ImGui::SeparatorText(title);
   ImGui::BeginChild(title, ImVec2(0.0f, 120.0f), true);
-  const ChildScope child_scope{};
   if (!snapshot.valid) {
     ImGui::TextUnformatted("No reflection snapshot available.");
+    ImGui::EndChild();
     return;
   }
   ImGui::Text("Variables: %zu", snapshot.variables.size());
@@ -198,6 +214,7 @@ void _DrawReflectionSnapshot(
         value.bytes.size());
     }
   }
+  ImGui::EndChild();
 }
 
 
@@ -790,7 +807,12 @@ void DebugToolFrontendPanel::DrawAgentComposerUi(IDebugToolHost& host) {
       const bool is_selected = agent_composer_ui_state_.runtime_build_flavor == option.value;
       if (ImGui::Selectable(option.label, is_selected)) {
         agent_composer_ui_state_.runtime_build_flavor = option.value;
-        host.SetAlgorithmRuntimeBuildFlavor(option.value);
+        ExecuteDebugCommand(
+          host,
+          debug_tool::DebugCommand{
+            .id = debug_tool::DebugCommandId::SetRuntimeBuildFlavor,
+            .runtime_build_flavor = option.value,
+          });
         agent_composer_ui_state_.preview_request_dirty = true;
         const std::string current_algorithm_name = _TrimCopy(agent_composer_ui_state_.algorithm_name.data());
         if (!current_algorithm_name.empty()) {
@@ -1102,12 +1124,16 @@ void DebugToolFrontendPanel::DrawAgentManagerUi(IDebugToolHost& host) {
   ImGui::Text("Built-in agent count: %zu", host.agent_count());
   ImGui::Text("Tick State: %s", host.tick_enabled() ? "running" : "paused");
   if (ImGui::Button("Start Tick")) {
-    host.StartTicking();
+    ExecuteDebugCommand(host, debug_tool::DebugCommand{
+      .id = debug_tool::DebugCommandId::StartTick,
+    });
     host.ui_status_message() = "Agent manager tick started.";
   }
   ImGui::SameLine();
   if (ImGui::Button("Pause Tick")) {
-    host.PauseTicking();
+    ExecuteDebugCommand(host, debug_tool::DebugCommand{
+      .id = debug_tool::DebugCommandId::PauseTick,
+    });
     host.ui_status_message() = "Agent manager tick paused.";
   }
   if (!host.has_agents()) {
@@ -1257,27 +1283,34 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
     if (ImGui::Button("Mount This Stage As Algorithm", ImVec2(260.0f, 0.0f))) {
       std::string attach_error_message;
       size_t attached_algorithm_index = 0u;
-      host.SetRenderPreviewRequest({});
-      host.PauseTicking();
-      if (!host.AttachAlgorithmToAgent(
-            0u,
-            selected_algorithm_summary->algorithm_name,
-            selected_algorithm_summary->resource_bindings,
-            selected_algorithm_summary->descriptor_values,
-            &attached_algorithm_index,
-            &attach_error_message,
-            debug_tool::AlgorithmMountMode::Direct,
-            selected_algorithm_summary->execution_preference)) {
+      ExecuteDebugCommand(host, debug_tool::DebugCommand{
+        .id = debug_tool::DebugCommandId::ClearRenderPreviewRequest,
+      });
+      ExecuteDebugCommand(host, debug_tool::DebugCommand{
+        .id = debug_tool::DebugCommandId::PauseTick,
+      });
+      debug_tool::DebugCommandResult attach_result{};
+      if (!ExecuteDebugCommand(host, debug_tool::DebugCommand{
+            .id = debug_tool::DebugCommandId::AttachAlgorithm,
+            .algorithm_name = selected_algorithm_summary->algorithm_name,
+            .mount_mode = debug_tool::AlgorithmMountMode::Direct,
+            .execution_preference = selected_algorithm_summary->execution_preference,
+            .resource_bindings = selected_algorithm_summary->resource_bindings,
+            .descriptor_values = selected_algorithm_summary->descriptor_values,
+          }, &attach_error_message, &attach_result)) {
         DEBUG_TOOL_ASSERT(false, "Failed to mount the selected pipeline stage as a normal algorithm.");
         host.ui_status_message() = attach_error_message.empty()
           ? "Failed to mount the selected pipeline stage as a normal algorithm."
           : attach_error_message;
           } else {
+            attached_algorithm_index = attach_result.algorithm_index;
             agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(attached_algorithm_index);
             selected_algorithm_index = static_cast<int>(attached_algorithm_index);
             selected_algorithm_summary = refresh_selected_algorithm_summary();
             agent_composer_ui_state_.preview_request_dirty = true;
-            host.ClearVkRuntimeCaches();
+            ExecuteDebugCommand(host, debug_tool::DebugCommand{
+              .id = debug_tool::DebugCommandId::ClearVkRuntimeCaches,
+            });
             host.ui_status_message() =
               "Mounted the selected stage as a normal algorithm. Use this mount for single-stage debug.";
       }
@@ -1499,10 +1532,10 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
 
       if (ImGui::Button("Replay Logical Stage Once", ImVec2(220.0f, 0.0f))) {
         std::string replay_error_message;
-        if (!host.ReplayPipelineStageBridgeDebug(
-              0u,
-              static_cast<size_t>(selected_algorithm_index),
-              &replay_error_message)) {
+        if (!ExecuteDebugCommand(host, debug_tool::DebugCommand{
+              .id = debug_tool::DebugCommandId::ReplayPipelineStage,
+              .algorithm_index = static_cast<size_t>(selected_algorithm_index),
+            }, &replay_error_message)) {
           host.ui_status_message() = replay_error_message.empty()
             ? "Logical stage replay failed."
             : std::move(replay_error_message);
@@ -1538,7 +1571,9 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
           algorithm_index,
           &mounted_preview_request,
           &mounted_preview_error_message)) {
-      host.SetRenderPreviewRequest({});
+      ExecuteDebugCommand(host, debug_tool::DebugCommand{
+        .id = debug_tool::DebugCommandId::ClearRenderPreviewRequest,
+      });
       if (out_error_message) {
         *out_error_message = mounted_preview_error_message.empty()
           ? "Submitted algorithm did not produce a drawable preview."
@@ -1547,7 +1582,9 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
       return false;
     }
     if (!mounted_preview_request.valid) {
-      host.SetRenderPreviewRequest({});
+      ExecuteDebugCommand(host, debug_tool::DebugCommand{
+        .id = debug_tool::DebugCommandId::ClearRenderPreviewRequest,
+      });
       if (out_error_message) {
         *out_error_message = mounted_preview_error_message.empty()
           ? "Submitted algorithm did not produce a drawable preview."
@@ -1558,7 +1595,10 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
     if (out_error_message) {
       out_error_message->clear();
     }
-    host.SetRenderPreviewRequest(std::move(mounted_preview_request));
+    ExecuteDebugCommand(host, debug_tool::DebugCommand{
+      .id = debug_tool::DebugCommandId::SetRenderPreviewRequest,
+      .preview_request = std::move(mounted_preview_request),
+    });
     agent_composer_ui_state_.preview_request_dirty = false;
     return true;
   };
@@ -1623,7 +1663,10 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
     std::string clear_error_message;
     debug_tool::AgentRuntimeSummary clear_summary{};
     while (host.GetAgentSummary(0u, &clear_summary) && !clear_summary.algorithms.empty()) {
-      if (!host.DetachAlgorithmFromAgent(0u, 0u, &clear_error_message)) {
+      if (!ExecuteDebugCommand(host, debug_tool::DebugCommand{
+            .id = debug_tool::DebugCommandId::DetachAlgorithm,
+            .algorithm_index = 0u,
+          }, &clear_error_message)) {
         if (out_error_message) {
           *out_error_message = clear_error_message.empty()
             ? "Failed to clear mounted algorithms from the built-in agent."
@@ -1634,8 +1677,12 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
     }
     agent_composer_ui_state_.selected_algorithm_index = -1;
     agent_composer_ui_state_.preview_request_dirty = true;
-    host.SetRenderPreviewRequest({});
-    host.ClearVkRuntimeCaches();
+    ExecuteDebugCommand(host, debug_tool::DebugCommand{
+      .id = debug_tool::DebugCommandId::ClearRenderPreviewRequest,
+    });
+    ExecuteDebugCommand(host, debug_tool::DebugCommand{
+      .id = debug_tool::DebugCommandId::ClearVkRuntimeCaches,
+    });
     selected_algorithm_summary = refresh_selected_algorithm_summary();
     if (out_error_message) {
       out_error_message->clear();
@@ -1684,10 +1731,15 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
           &preview_request,
           &preview_error_message) &&
         preview_request.valid) {
-      host.SetRenderPreviewRequest(std::move(preview_request));
+      ExecuteDebugCommand(host, debug_tool::DebugCommand{
+        .id = debug_tool::DebugCommandId::SetRenderPreviewRequest,
+        .preview_request = std::move(preview_request),
+      });
       agent_composer_ui_state_.preview_request_dirty = false;
     } else if (selected_algorithm_summary->pipeline_name.empty()) {
-      host.SetRenderPreviewRequest({});
+      ExecuteDebugCommand(host, debug_tool::DebugCommand{
+        .id = debug_tool::DebugCommandId::ClearRenderPreviewRequest,
+      });
       agent_composer_ui_state_.preview_request_dirty = true;
     }
   }
@@ -1713,10 +1765,14 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
 
   const auto apply_pipeline_run_policy = [&](const std::string& mounted_name, const char* mounted_state_text) {
     if (agent_composer_ui_state_.pipeline_run_from_stage0_to_end) {
-      host.StartTicking();
+      ExecuteDebugCommand(host, debug_tool::DebugCommand{
+        .id = debug_tool::DebugCommandId::StartTick,
+      });
       host.ui_status_message() = std::string(mounted_state_text) + " '" + mounted_name + "' and started ticking.";
     } else {
-      host.PauseTicking();
+      ExecuteDebugCommand(host, debug_tool::DebugCommand{
+        .id = debug_tool::DebugCommandId::PauseTick,
+      });
       host.ui_status_message() = std::string(mounted_state_text) + " '" + mounted_name + "' for stage-by-stage debug.";
     }
   };
@@ -1737,26 +1793,29 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
       } else {
         const auto [resource_bindings, descriptor_values] = build_effective_mount_bindings();
         std::string attach_error_message;
-        host.PauseTicking();
+        ExecuteDebugCommand(host, debug_tool::DebugCommand{
+          .id = debug_tool::DebugCommandId::PauseTick,
+        });
         if (!clear_built_in_agent_mounts(&attach_error_message)) {
           host.ui_status_message() = attach_error_message;
         } else {
           const std::string pipeline_instance_name = algorithm_name + "::runner_mount";
           const std::string pipeline_algorithm_name = algorithm_name;
           size_t attached_algorithm_index = 0u;
-          if (!host.AttachPipelinePackageToAgent(
-                0u,
-                pipeline_instance_name,
-                pipeline_algorithm_name,
-                resource_bindings,
-                descriptor_values,
-                &attached_algorithm_index,
-                &attach_error_message,
-                agent_composer_ui_state_.execution_preference)) {
+          debug_tool::DebugCommandResult attach_result{};
+          if (!ExecuteDebugCommand(host, debug_tool::DebugCommand{
+                .id = debug_tool::DebugCommandId::AttachPipelinePackage,
+                .algorithm_name = pipeline_algorithm_name,
+                .pipeline_name = pipeline_instance_name,
+                .execution_preference = agent_composer_ui_state_.execution_preference,
+                .resource_bindings = resource_bindings,
+                .descriptor_values = descriptor_values,
+              }, &attach_error_message, &attach_result)) {
             host.ui_status_message() = attach_error_message.empty()
               ? "Failed to mount pipeline package."
               : ("Failed to mount pipeline package: " + attach_error_message);
           } else {
+            attached_algorithm_index = attach_result.algorithm_index;
             agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(attached_algorithm_index);
             selected_algorithm_index = static_cast<int>(attached_algorithm_index);
             selected_algorithm_summary = refresh_selected_algorithm_summary();
@@ -1784,26 +1843,29 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
         std::string attach_error_message;
         if (!selected_runtime_pipeline_matches_requested) {
           const auto [resource_bindings, descriptor_values] = build_effective_mount_bindings();
-          host.PauseTicking();
+          ExecuteDebugCommand(host, debug_tool::DebugCommand{
+            .id = debug_tool::DebugCommandId::PauseTick,
+          });
           if (!clear_built_in_agent_mounts(&attach_error_message)) {
             host.ui_status_message() = attach_error_message;
           } else {
             const std::string pipeline_instance_name = mounted_pipeline_name;
             size_t mounted_pipeline_index = 0u;
-            if (!host.AttachPipelinePackageToAgent(
-                  0u,
-                  pipeline_instance_name,
-                  algorithm_name,
-                  resource_bindings,
-                  descriptor_values,
-                  &mounted_pipeline_index,
-                  &attach_error_message,
-                  agent_composer_ui_state_.execution_preference)) {
+            debug_tool::DebugCommandResult attach_result{};
+            if (!ExecuteDebugCommand(host, debug_tool::DebugCommand{
+                  .id = debug_tool::DebugCommandId::AttachPipelinePackage,
+                  .algorithm_name = algorithm_name,
+                  .pipeline_name = pipeline_instance_name,
+                  .execution_preference = agent_composer_ui_state_.execution_preference,
+                  .resource_bindings = resource_bindings,
+                  .descriptor_values = descriptor_values,
+                }, &attach_error_message, &attach_result)) {
               host.ui_status_message() = attach_error_message.empty()
                 ? "Failed to mount pipeline before submission."
                 : ("Failed to mount pipeline before submission: " + attach_error_message);
               return;
             }
+            mounted_pipeline_index = attach_result.algorithm_index;
             agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(mounted_pipeline_index);
             selected_algorithm_index = static_cast<int>(mounted_pipeline_index);
             selected_algorithm_summary = refresh_selected_algorithm_summary();
@@ -1813,26 +1875,29 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
         const auto [resource_bindings, descriptor_values] = build_effective_mount_bindings();
         const std::string pipeline_instance_name = build_testsubmit_pipeline_name(mounted_pipeline_name);
         size_t attached_algorithm_index = 0u;
-        if (!host.AttachPipelinePackageToAgent(
-              0u,
-              pipeline_instance_name,
-              algorithm_name,
-              resource_bindings,
-              descriptor_values,
-              &attached_algorithm_index,
-              &attach_error_message,
-              agent_composer_ui_state_.execution_preference)) {
+        debug_tool::DebugCommandResult attach_result{};
+        if (!ExecuteDebugCommand(host, debug_tool::DebugCommand{
+              .id = debug_tool::DebugCommandId::AttachPipelinePackage,
+              .algorithm_name = algorithm_name,
+              .pipeline_name = pipeline_instance_name,
+              .execution_preference = agent_composer_ui_state_.execution_preference,
+              .resource_bindings = resource_bindings,
+              .descriptor_values = descriptor_values,
+            }, &attach_error_message, &attach_result)) {
           host.ui_status_message() = attach_error_message.empty()
             ? "Failed to append the pipeline resource submission."
             : ("Failed to append the pipeline resource submission: " + attach_error_message);
         } else {
+          attached_algorithm_index = attach_result.algorithm_index;
           agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(attached_algorithm_index);
           selected_algorithm_index = static_cast<int>(attached_algorithm_index);
           selected_algorithm_summary = refresh_selected_algorithm_summary();
           std::string preview_error_message;
           const bool preview_ready =
             build_and_apply_preview_for_algorithm(attached_algorithm_index, &preview_error_message);
-          host.StartTicking();
+          ExecuteDebugCommand(host, debug_tool::DebugCommand{
+            .id = debug_tool::DebugCommandId::StartTick,
+          });
           if (!preview_ready) {
             host.ui_status_message() = preview_error_message.empty()
               ? "Pipeline resource submission mounted, but no drawable result was produced."
@@ -1853,24 +1918,27 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
       } else {
         const auto [resource_bindings, descriptor_values] = build_effective_mount_bindings();
         std::string attach_error_message;
-        host.PauseTicking();
+        ExecuteDebugCommand(host, debug_tool::DebugCommand{
+          .id = debug_tool::DebugCommandId::PauseTick,
+        });
         if (!clear_built_in_agent_mounts(&attach_error_message)) {
           host.ui_status_message() = attach_error_message;
         } else {
           size_t attached_algorithm_index = 0u;
-          if (!host.AttachAlgorithmToAgent(
-                0u,
-                algorithm_name,
-                resource_bindings,
-                descriptor_values,
-                &attached_algorithm_index,
-                &attach_error_message,
-                debug_tool::AlgorithmMountMode::Direct,
-                agent_composer_ui_state_.execution_preference)) {
+          debug_tool::DebugCommandResult attach_result{};
+          if (!ExecuteDebugCommand(host, debug_tool::DebugCommand{
+                .id = debug_tool::DebugCommandId::AttachAlgorithm,
+                .algorithm_name = algorithm_name,
+                .mount_mode = debug_tool::AlgorithmMountMode::Direct,
+                .execution_preference = agent_composer_ui_state_.execution_preference,
+                .resource_bindings = resource_bindings,
+                .descriptor_values = descriptor_values,
+              }, &attach_error_message, &attach_result)) {
             host.ui_status_message() = attach_error_message.empty()
               ? "Failed to mount algorithm on built-in agent."
               : ("Failed to mount algorithm on built-in agent: " + attach_error_message);
           } else {
+            attached_algorithm_index = attach_result.algorithm_index;
             agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(attached_algorithm_index);
             selected_algorithm_index = static_cast<int>(attached_algorithm_index);
             selected_algorithm_summary = refresh_selected_algorithm_summary();
@@ -1878,7 +1946,9 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
             const bool preview_ready =
               build_and_apply_preview_for_algorithm(attached_algorithm_index, &preview_error_message);
             if (!preview_ready) {
-              host.SetRenderPreviewRequest({});
+              ExecuteDebugCommand(host, debug_tool::DebugCommand{
+                .id = debug_tool::DebugCommandId::ClearRenderPreviewRequest,
+              });
               agent_composer_ui_state_.preview_request_dirty = true;
               host.ui_status_message() = preview_error_message.empty()
                 ? "Algorithm mounted. No drawable preview is available, but ticking can still start."
@@ -1907,10 +1977,14 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
           mounted_algorithm_index,
           &preview_error_message);
         if (!preview_ready) {
-          host.SetRenderPreviewRequest({});
+          ExecuteDebugCommand(host, debug_tool::DebugCommand{
+            .id = debug_tool::DebugCommandId::ClearRenderPreviewRequest,
+          });
           agent_composer_ui_state_.preview_request_dirty = true;
         }
-        host.StartTicking();
+        ExecuteDebugCommand(host, debug_tool::DebugCommand{
+          .id = debug_tool::DebugCommandId::StartTick,
+        });
         host.ui_status_message() = preview_ready
           ? "Mounted algorithm started."
           : (preview_error_message.empty()
@@ -1926,7 +2000,9 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
             ? "Mounted pipeline did not produce a drawable preview."
             : std::move(preview_error_message);
         } else {
-          host.StartTicking();
+          ExecuteDebugCommand(host, debug_tool::DebugCommand{
+            .id = debug_tool::DebugCommandId::StartTick,
+          });
           host.ui_status_message() = "Mounted pipeline started.";
         }
       }
@@ -1939,11 +2015,12 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
   if (ImGui::Button("Hot Update DLL + SPV", ImVec2(180.0f, 0.0f))) {
     size_t rebuilt_algorithm_index = static_cast<size_t>(selected_algorithm_index);
     std::string hot_reload_error_message;
-    if (host.HotReloadAlgorithmPackage(
-          0u,
-          static_cast<size_t>(selected_algorithm_index),
-          &rebuilt_algorithm_index,
-          &hot_reload_error_message)) {
+    debug_tool::DebugCommandResult hot_reload_result{};
+    if (ExecuteDebugCommand(host, debug_tool::DebugCommand{
+          .id = debug_tool::DebugCommandId::HotReloadAlgorithm,
+          .algorithm_index = static_cast<size_t>(selected_algorithm_index),
+        }, &hot_reload_error_message, &hot_reload_result)) {
+      rebuilt_algorithm_index = hot_reload_result.algorithm_index;
       agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(rebuilt_algorithm_index);
       host.ui_status_message() = "Algorithm hot rebuilt and reloaded.";
     } else {
@@ -1999,7 +2076,10 @@ void DebugToolFrontendPanel::DrawAlgorithmPreviewUi(IDebugToolHost& host) {
 
   const ImVec2 preview_size = ImGui::GetContentRegionAvail();
   if (preview_size.x > 0.0f && preview_size.y > 0.0f) {
-    host.SetRenderPreviewExtent(preview_size);
+    ExecuteDebugCommand(host, debug_tool::DebugCommand{
+      .id = debug_tool::DebugCommandId::SetRenderPreviewExtent,
+      .preview_extent = preview_size,
+    });
   }
   if (host.has_render_preview_texture()) {
     ImGui::Image(host.render_preview_texture_id(), preview_size);

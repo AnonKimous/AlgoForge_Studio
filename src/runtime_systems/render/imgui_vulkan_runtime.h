@@ -14,11 +14,13 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <vulkan/vulkan.h>
 
 #include "runtime_systems/render/render_preview_request.h"
 #include "runtime_systems/render/preview_renderer.h"
+#include "runtime_systems/runtime_vk_context.h"
 
 namespace runtime_systems {
 
@@ -44,6 +46,8 @@ class ImGuiVulkanRuntime {
   void SetupVulkanWindow(SDL_Window* window, int width, int height);
   void CleanupVulkanWindow();
   void CleanupVulkan();
+  void RemoveResultTexture();
+  void RefreshResultTexture();
   bool FrameRender(ImDrawData* draw_data);
   void DrawDefaultOverlay(SDL_Window* window);
   static void CheckVkResult(VkResult err);
@@ -54,6 +58,7 @@ class ImGuiVulkanRuntime {
   VkPhysicalDevice physical_device_{VK_NULL_HANDLE};
   VkDevice device_{VK_NULL_HANDLE};
   VkQueue queue_{VK_NULL_HANDLE};
+  std::vector<VkQueue> algorithm_queues_{};
   uint32_t queue_family_{UINT32_MAX};
   VkDescriptorPool descriptor_pool_{VK_NULL_HANDLE};
   VkPipelineCache pipeline_cache_{VK_NULL_HANDLE};
@@ -69,6 +74,8 @@ class ImGuiVulkanRuntime {
   std::unique_ptr<PreviewRenderer> preview_renderer_{};
   RenderPreviewRequest pending_render_preview_request_{};
   bool has_pending_render_preview_request_{false};
+  VkDescriptorSet result_texture_descriptor_set_{VK_NULL_HANDLE};
+  RuntimeVkResultImage result_image_{};
 };
 
 }  // namespace runtime_systems

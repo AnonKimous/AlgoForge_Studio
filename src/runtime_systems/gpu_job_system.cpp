@@ -39,6 +39,7 @@ struct VkBufferResource {
 struct VkBufferPairResource {
   VkBufferResource input;
   VkBufferResource output;
+  bool draw_indirect{false};
 };
 
 struct VkExecutionState {
@@ -49,10 +50,12 @@ struct VkOffscreenTarget {
   VkImage image{VK_NULL_HANDLE};
   VmaAllocation allocation{VK_NULL_HANDLE};
   VkImageView view{VK_NULL_HANDLE};
+  VkSampler sampler{VK_NULL_HANDLE};
   VkRenderPass render_pass{VK_NULL_HANDLE};
   VkFramebuffer framebuffer{VK_NULL_HANDLE};
   VkExtent2D extent{1u, 1u};
   VkFormat format{VK_FORMAT_R8G8B8A8_UNORM};
+  uint64_t generation{0u};
 };
 
 struct VkPipelineResource {
@@ -66,6 +69,19 @@ struct VkPipelineResource {
 struct RuntimeVkViewportPushConstants {
   float width{0.0f};
   float height{0.0f};
+};
+
+struct VkJobCommandResources {
+  VkCommandPool command_pool{VK_NULL_HANDLE};
+  VkCommandBuffer command_buffer{VK_NULL_HANDLE};
+};
+
+struct VkJobRuntimeState {
+  runtime_systems::RuntimeVkExecutionContext context{};
+  VkJobCommandResources command_resources{};
+  VkOffscreenTarget offscreen_target{};
+  std::unordered_map<std::string, VkPipelineResource> pipeline_cache{};
+  std::unordered_map<std::string, VkExecutionState> execution_state_cache{};
 };
 
 std::string _MakeVkErrorMessage(const char* prefix, VkResult err) {
@@ -175,16 +191,24 @@ class VkJobRuntimeSystem {
   }
 
   void Clear() {
-    for (auto& [_, pipeline] : pipeline_cache_) {
-      _DestroyPipeline(pipeline);
+    _StoreActiveState();
+    active_execution_key_ = nullptr;
+    for (const auto& [execution_key, state] : runtime_states_) {
+      (void)state;
+      _ActivateState(execution_key);
+      for (auto& [_, pipeline] : pipeline_cache_) {
+        _DestroyPipeline(pipeline);
+      }
+      pipeline_cache_.clear();
+      for (auto& [_, execution_state] : execution_state_cache_) {
+        _DestroyExecutionState(execution_state);
+      }
+      execution_state_cache_.clear();
+      _DestroyOffscreenTarget();
+      _DestroyCommandResources();
     }
-    pipeline_cache_.clear();
-    for (auto& [_, execution_state] : execution_state_cache_) {
-      _DestroyExecutionState(execution_state);
-    }
-    execution_state_cache_.clear();
-    _DestroyOffscreenTarget();
-    _DestroyCommandResources();
+    runtime_states_.clear();
+    active_execution_key_ = nullptr;
     context_ = {};
   }
 
@@ -225,12 +249,13 @@ class VkJobRuntimeSystem {
     }
 
     runtime_systems::RuntimeVkExecutionContext execution_context =
-      runtime_systems::RuntimeVkContextRegistry::Instance().Snapshot();
+      runtime_systems::RuntimeVkContextRegistry::Instance().Snapshot(job.execution_key);
     if (!execution_context.valid()) {
       _ThrowVkTickError("VK execution context is unavailable.", out_error_message);
     }
 
     try {
+      _ActivateState(job.execution_key);
       _EnsureContext(execution_context);
       _UpdateOffscreenExtent(
         static_cast<uint32_t>(std::max(job.viewport_width, 1.0f)),
@@ -301,6 +326,7 @@ class VkJobRuntimeSystem {
           working_state.buffers.emplace_back();
         }
         VkBufferPairResource& buffer_pair = working_state.buffers[buffer_index];
+        buffer_pair.draw_indirect = binding.draw_indirect;
         const VkDeviceSize required_size = static_cast<VkDeviceSize>(binding.size_bytes);
 
         if (buffer_pair.input.buffer == VK_NULL_HANDLE || buffer_pair.input.size_bytes < required_size) {
@@ -334,14 +360,14 @@ class VkJobRuntimeSystem {
             buffer_pair.output.size_bytes));
         }
 
-        // Bridge ingress updates host container bytes each stage tick.
-        // Always upload the latest host view into this stage input buffer.
-        std::memcpy(buffer_pair.input.allocation_info.pMappedData, binding.bytes, binding.size_bytes);
-        _CheckVkResult(vmaFlushAllocation(
-          execution_context.allocator,
-          buffer_pair.input.allocation,
-          0u,
-          buffer_pair.input.size_bytes));
+        if (!binding.array_like || binding.draw_indirect) {
+          std::memcpy(buffer_pair.input.allocation_info.pMappedData, binding.bytes, binding.size_bytes);
+          _CheckVkResult(vmaFlushAllocation(
+            execution_context.allocator,
+            buffer_pair.input.allocation,
+            0u,
+            binding.size_bytes));
+        }
 
         ++buffer_index;
       }
@@ -422,11 +448,26 @@ class VkJobRuntimeSystem {
         << "vk_runtime.record.begin debug_name=" << job.debug_name
         << " shader_key=" << shader_key
         << '\n';
-      _RecordAndSubmit(*pipeline, descriptor_set, execution_context);
+      _RecordAndSubmit(*pipeline, descriptor_set, working_state.buffers, execution_context);
+      runtime_systems::RuntimeVkContextRegistry::Instance().PublishExecutionProgress(job.execution_key);
       std::cerr
         << "vk_runtime.record.end debug_name=" << job.debug_name
         << " shader_key=" << shader_key
         << '\n';
+
+      if (job.stage_name == "resultRender") {
+        ++offscreen_target_.generation;
+        runtime_systems::RuntimeVkContextRegistry::Instance().PublishResultImage(
+          job.execution_key,
+          runtime_systems::RuntimeVkResultImage{
+            .image = offscreen_target_.image,
+            .view = offscreen_target_.view,
+            .sampler = offscreen_target_.sampler,
+            .layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .extent = offscreen_target_.extent,
+            .generation = offscreen_target_.generation,
+          });
+      }
 
       if (!read_only_stage) {
         std::cerr
@@ -498,6 +539,8 @@ class VkJobRuntimeSystem {
       _ThrowVkTickError("Runtime VK job synchronization key is null.", out_error_message);
     }
 
+    _ActivateState(job.execution_key);
+
     const std::string shader_key = _StageShaderKey(job);
     const std::string execution_state_key = _ExecutionStateKey(job, shader_key);
     auto state_it = execution_state_cache_.find(execution_state_key);
@@ -564,10 +607,53 @@ class VkJobRuntimeSystem {
   }
 
  private:
-  struct CommandResources {
-    VkCommandPool command_pool{VK_NULL_HANDLE};
-    VkCommandBuffer command_buffer{VK_NULL_HANDLE};
-  };
+  void _StoreActiveState() {
+    if (active_execution_key_ == nullptr) {
+      return;
+    }
+    VkJobRuntimeState& state = runtime_states_[active_execution_key_];
+    state.context = std::move(context_);
+    state.command_resources = std::move(command_resources_);
+    state.offscreen_target = std::move(offscreen_target_);
+    state.pipeline_cache = std::move(pipeline_cache_);
+    state.execution_state_cache = std::move(execution_state_cache_);
+    context_ = {};
+    command_resources_ = {};
+    offscreen_target_ = {};
+    pipeline_cache_.clear();
+    execution_state_cache_.clear();
+  }
+
+  void _ActivateState(const void* execution_key) {
+    if (active_execution_key_ == execution_key) {
+      return;
+    }
+    _StoreActiveState();
+    auto state_it = runtime_states_.find(execution_key);
+    if (state_it != runtime_states_.end()) {
+      VkJobRuntimeState& state = state_it->second;
+      context_ = std::move(state.context);
+      command_resources_ = std::move(state.command_resources);
+      offscreen_target_ = std::move(state.offscreen_target);
+      pipeline_cache_ = std::move(state.pipeline_cache);
+      execution_state_cache_ = std::move(state.execution_state_cache);
+    }
+    active_execution_key_ = execution_key;
+  }
+
+  void _ClearActiveState() {
+    for (auto& [_, pipeline] : pipeline_cache_) {
+      _DestroyPipeline(pipeline);
+    }
+    pipeline_cache_.clear();
+    for (auto& [_, execution_state] : execution_state_cache_) {
+      _DestroyExecutionState(execution_state);
+    }
+    execution_state_cache_.clear();
+    _DestroyOffscreenTarget();
+    _DestroyCommandResources();
+    context_ = {};
+  }
 
   void _DestroyBuffer(VkBufferResource& buffer) {
     if (buffer.buffer != VK_NULL_HANDLE) {
@@ -618,6 +704,10 @@ class VkJobRuntimeSystem {
         vkDestroyImageView(context_.device, offscreen_target_.view, nullptr);
         offscreen_target_.view = VK_NULL_HANDLE;
       }
+      if (offscreen_target_.sampler != VK_NULL_HANDLE) {
+        vkDestroySampler(context_.device, offscreen_target_.sampler, nullptr);
+        offscreen_target_.sampler = VK_NULL_HANDLE;
+      }
     }
     if (offscreen_target_.image != VK_NULL_HANDLE) {
       vmaDestroyImage(context_.allocator, offscreen_target_.image, offscreen_target_.allocation);
@@ -642,7 +732,7 @@ class VkJobRuntimeSystem {
       context_.queue_family != context.queue_family ||
       context_.descriptor_pool != context.descriptor_pool;
     if (needs_reset) {
-      Clear();
+      _ClearActiveState();
       context_ = context;
       _CreateCommandResources();
     } else if (!context_.valid()) {
@@ -694,7 +784,10 @@ class VkJobRuntimeSystem {
     image_info.arrayLayers = 1;
     image_info.samples = VK_SAMPLE_COUNT_1_BIT;
     image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
-    image_info.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    image_info.usage =
+      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+      VK_IMAGE_USAGE_SAMPLED_BIT |
+      VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     VmaAllocationCreateInfo allocation_info{};
@@ -722,11 +815,11 @@ class VkJobRuntimeSystem {
     attachment.format = offscreen_target_.format;
     attachment.samples = VK_SAMPLE_COUNT_1_BIT;
     attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    attachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    attachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    attachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
     VkAttachmentReference color_attachment{};
     color_attachment.attachment = 0;
@@ -754,6 +847,17 @@ class VkJobRuntimeSystem {
     framebuffer_info.height = offscreen_target_.extent.height;
     framebuffer_info.layers = 1;
     _CheckVkResult(vkCreateFramebuffer(context_.device, &framebuffer_info, nullptr, &offscreen_target_.framebuffer));
+
+    VkSamplerCreateInfo sampler_info{};
+    sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    sampler_info.magFilter = VK_FILTER_LINEAR;
+    sampler_info.minFilter = VK_FILTER_LINEAR;
+    sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sampler_info.maxLod = 1.0f;
+    _CheckVkResult(vkCreateSampler(context_.device, &sampler_info, nullptr, &offscreen_target_.sampler));
     return true;
   }
 
@@ -765,7 +869,9 @@ class VkJobRuntimeSystem {
     VkBufferCreateInfo buffer_info{};
     buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     buffer_info.size = std::max<VkDeviceSize>(size, 1u);
-    buffer_info.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+    buffer_info.usage =
+      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+      VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
     buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     VmaAllocationCreateInfo allocation_info{};
@@ -994,6 +1100,7 @@ class VkJobRuntimeSystem {
     void _RecordAndSubmit(
       const VkPipelineResource& pipeline,
       VkDescriptorSet descriptor_set,
+      const std::vector<VkBufferPairResource>& buffers,
       const runtime_systems::RuntimeVkExecutionContext& execution_context) {
     _CheckVkResult(vkResetCommandPool(execution_context.device, command_resources_.command_pool, 0));
 
@@ -1055,7 +1162,19 @@ class VkJobRuntimeSystem {
     vkCmdSetViewport(command_resources_.command_buffer, 0, 1, &viewport);
     vkCmdSetScissor(command_resources_.command_buffer, 0, 1, &scissor);
     std::cerr << "vk_record.after_viewport\n";
-    vkCmdDraw(command_resources_.command_buffer, 4, 1, 0, 0);
+    for (const VkBufferPairResource& buffer_pair : buffers) {
+      if (buffer_pair.draw_indirect) {
+        vkCmdDrawIndirect(
+          command_resources_.command_buffer,
+          buffer_pair.input.buffer,
+          0u,
+          1u,
+          sizeof(VkDrawIndirectCommand));
+        goto draw_submitted;
+      }
+    }
+    vkCmdDraw(command_resources_.command_buffer, 4u, 1u, 0u, 0u);
+draw_submitted:
     std::cerr << "vk_record.after_draw\n";
 
     vkCmdEndRenderPass(command_resources_.command_buffer);
@@ -1081,10 +1200,12 @@ class VkJobRuntimeSystem {
   }
 
   runtime_systems::RuntimeVkExecutionContext context_{};
-  CommandResources command_resources_{};
+  VkJobCommandResources command_resources_{};
   VkOffscreenTarget offscreen_target_{};
   std::unordered_map<std::string, VkPipelineResource> pipeline_cache_{};
   std::unordered_map<std::string, VkExecutionState> execution_state_cache_{};
+  std::unordered_map<const void*, VkJobRuntimeState> runtime_states_{};
+  const void* active_execution_key_{nullptr};
 };
 
 void ClearRuntimeVkJobCaches() {

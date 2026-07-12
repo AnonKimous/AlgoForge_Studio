@@ -2898,6 +2898,7 @@ bool TryBuildAlgorithmInterventionVkPhaseSubJob(
     binding_view.size_bytes = container->bytes.size();
     binding_view.element_stride = container->element_stride;
     binding_view.array_like = binding.container_kind == "array";
+    binding_view.draw_indirect = binding.container_kind == "draw_indirect";
     binding_view.required = binding.required;
     out_stage_job->buffer_bindings.push_back(std::move(binding_view));
   }
@@ -2979,6 +2980,7 @@ bool TryBuildAlgorithmVkExecStageSubJob(
     binding_view.size_bytes = container->bytes.size();
     binding_view.element_stride = container->element_stride;
     binding_view.array_like = binding.container_kind == "array";
+    binding_view.draw_indirect = binding.container_kind == "draw_indirect";
     binding_view.required = binding.required;
     out_stage_job->buffer_bindings.push_back(std::move(binding_view));
   }

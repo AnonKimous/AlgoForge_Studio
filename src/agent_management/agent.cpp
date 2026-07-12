@@ -136,7 +136,8 @@ uint64_t _HashContainer(uint64_t hash, const algorithm::AlgorithmContainer& cont
 }
 
 bool _ShouldEmitPipelineRunnerProbe(const std::string& pipeline_name) {
-  return pipeline_name.find("::runner_mount") != std::string::npos;
+  (void)pipeline_name;
+  return false;
 }
 
 void _AppendPipelineRunnerProbe(const std::string& file_name, const std::string& line) {
@@ -1821,7 +1822,8 @@ bool Agent::SubmitAlgorithm(
     AlgorithmToAgentSignal pipeline_signal{};
     std::string pipeline_error_message;
     bool mounted_pipeline_processing_failed = false;
-  if (!algorithmManager::TickMountedPipeline(
+    const auto pipeline_tick_begin = std::chrono::steady_clock::now();
+    if (!algorithmManager::TickMountedPipeline(
           &algorithm_objects_,
           begin_index,
           end_index,
@@ -1852,6 +1854,31 @@ bool Agent::SubmitAlgorithm(
       const std::string pipeline_name = algorithm_objects_[begin_index].pipeline_name.empty()
         ? algorithm_objects_[begin_index].algorithm_profile.algorithm_name
         : algorithm_objects_[begin_index].pipeline_name;
+      if (updated_runtime_states[begin_index].pipeline_stage_runtime_stats.empty()) {
+        const float group_elapsed_seconds =
+          std::chrono::duration<float>(std::chrono::steady_clock::now() - pipeline_tick_begin).count();
+        updated_runtime_states[begin_index].pipeline_total_elapsed_seconds = group_elapsed_seconds;
+        updated_runtime_states[begin_index].pipeline_stage_runtime_stats.clear();
+        updated_runtime_states[begin_index].pipeline_stage_runtime_stats.reserve(end_index - begin_index);
+        timing_log_stream
+          << "pipeline " << pipeline_name
+          << " | group_elapsed_seconds="
+          << group_elapsed_seconds
+          << '\n';
+        for (size_t stage_index = begin_index; stage_index < end_index; ++stage_index) {
+          updated_runtime_states[begin_index].pipeline_stage_runtime_stats.push_back(
+            AlgorithmPipelineStageRuntimeStat{
+              .stage_name = algorithm_objects_[stage_index].algorithm_profile.algorithm_name,
+              .elapsed_seconds = updated_runtime_states[stage_index].algorithm_exec_elapsed_seconds,
+              .reason = {},
+            });
+          timing_log_stream
+            << "  stage " << algorithm_objects_[stage_index].algorithm_profile.algorithm_name
+            << " | execution_elapsed_seconds="
+            << updated_runtime_states[stage_index].algorithm_exec_elapsed_seconds
+            << '\n';
+        }
+      }
       _AppendPipelineTimingLog(
         &timing_log_stream,
         pipeline_name,

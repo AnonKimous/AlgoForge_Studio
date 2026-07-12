@@ -54,6 +54,9 @@
       },
       "spark_seed": {
         "count": 512
+      },
+      "render_draw": {
+        "count": 4
       }
     },
     "aliases": [
@@ -315,6 +318,12 @@
           "kind": "array",
           "tuple_width": 1,
           "required": true
+        },
+        {
+          "name": "render_draw",
+          "kind": "array",
+          "tuple_width": 1,
+          "required": true
         }
       ]
     },
@@ -515,6 +524,12 @@
             {
               "name": "spark_seed",
               "kind": "array",
+              "tuple_width": 1,
+              "required": true
+            },
+            {
+              "name": "render_draw",
+              "kind": "draw_indirect",
               "tuple_width": 1,
               "required": true
             }
