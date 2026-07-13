@@ -277,8 +277,6 @@ void AgentTicker::Tick(
   if (!agent_binding_) {
     return;
   }
-  std::cerr << "agent_ticker.tick.begin\n";
-
   const agentmanager::agent::AgentTickContext context{
     .input = &input,
     .mouse_pixel = mouse_pixel,
@@ -286,9 +284,7 @@ void AgentTicker::Tick(
     .dt_seconds = dt_seconds,
     .intervention_request = &intervention_request_,
   };
-  std::cerr << "agent_ticker.refresh_intervention.begin\n";
   agent_binding_->RefreshInterventionSignals(context);
-  std::cerr << "agent_ticker.refresh_intervention.end\n";
 
   std::vector<bool> allow_tick_mask(agent_binding_->algorithm_count(), true);
   for (size_t i = 0; i < agent_binding_->algorithm_count(); ++i) {
@@ -304,7 +300,6 @@ void AgentTicker::Tick(
   }
 
   agentmanager::agent::AgentTickResult result{};
-  std::cerr << "agent_ticker.agent_tick.begin\n";
   if (agent_binding_->Tick(context, allow_tick_mask, &result)) {
     algorithm_to_agent_signal_ = result.algorithm_to_agent_signal;
     last_timing_log_ = std::move(result.timing_log);
@@ -312,7 +307,6 @@ void AgentTicker::Tick(
     algorithm_to_agent_signal_ = {};
     last_timing_log_.clear();
   }
-  std::cerr << "agent_ticker.agent_tick.end\n";
 }
 
 void AgentTicker::Destroy() {
@@ -425,7 +419,6 @@ bool AgentManager::Tick(
   if (!tick_enabled_) {
     return true;
   }
-  std::cerr << "agent_manager.tick.begin agents=" << managed_agents_.size() << '\n';
   const auto now = std::chrono::steady_clock::now();
   for (size_t agent_index = 0u; agent_index < managed_agents_.size(); ++agent_index) {
     std::shared_ptr<ManagedAgentEntry>& managed_agent = managed_agents_[agent_index];
@@ -447,9 +440,7 @@ bool AgentManager::Tick(
       }
     }
 
-    std::cerr << "agent_manager.agent_tick.begin index=" << agent_index << '\n';
     managed_agent->ticker.Tick(input, mouse_pixel, dt_seconds, render_preview_extent);
-    std::cerr << "agent_manager.agent_tick.end index=" << agent_index << '\n';
     if (!managed_agent->ticker.last_timing_log().empty()) {
       std::cerr << managed_agent->ticker.last_timing_log();
     }
@@ -510,7 +501,6 @@ bool AgentManager::Tick(
       signal.reflection_collection_requested;
     combined_algorithm_to_agent_signal_.control_bits |= signal.control_bits;
   }
-  std::cerr << "agent_manager.tick.end\n";
   return true;
 }
 

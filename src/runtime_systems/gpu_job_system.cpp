@@ -265,22 +265,11 @@ class VkJobRuntimeSystem {
       }
 
       const std::string shader_key = _StageShaderKey(job);
-      std::cerr
-        << "vk_runtime.pipeline.begin debug_name=" << job.debug_name
-        << " shader_key=" << shader_key
-        << " vertex=" << job.vertex_shader_path
-        << " fragment=" << job.fragment_shader_path
-        << '\n';
       VkPipelineResource* pipeline =
         _GetOrCreatePipeline(shader_key, job);
       if (!pipeline) {
         _ThrowVkTickError("Failed to create VK pipeline.", out_error_message);
       }
-      std::cerr
-        << "vk_runtime.pipeline.end debug_name=" << job.debug_name
-        << " shader_key=" << shader_key
-        << '\n';
-
       const std::string execution_state_key = _ExecutionStateKey(job, shader_key);
       auto state_it = execution_state_cache_.find(execution_state_key);
       if (state_it == execution_state_cache_.end()) {
@@ -298,11 +287,7 @@ class VkJobRuntimeSystem {
         }
       } cleanup{execution_context, VK_NULL_HANDLE};
 
-      std::cerr
-        << "vk_runtime.buffers.begin debug_name=" << job.debug_name
-        << " shader_key=" << shader_key
-        << " bindings=" << job.buffer_bindings.size()
-        << '\n';
+      const bool read_only_stage = _IsReadOnlyStage(job);
       size_t buffer_index = 0u;
       for (const RuntimeVkBufferBindingView& binding : job.buffer_bindings) {
         if (binding.bytes == nullptr) {
@@ -360,7 +345,10 @@ class VkJobRuntimeSystem {
             buffer_pair.output.size_bytes));
         }
 
-        if (!binding.array_like || binding.draw_indirect) {
+        if (read_only_stage ||
+            job.host_ingress_authoritative ||
+            !binding.array_like ||
+            binding.draw_indirect) {
           std::memcpy(buffer_pair.input.allocation_info.pMappedData, binding.bytes, binding.size_bytes);
           _CheckVkResult(vmaFlushAllocation(
             execution_context.allocator,
@@ -375,12 +363,6 @@ class VkJobRuntimeSystem {
       if (buffer_index == 0u) {
         _ThrowVkTickError("VK tick stage could not build any usable buffers.", out_error_message);
       }
-      std::cerr
-        << "vk_runtime.buffers.end debug_name=" << job.debug_name
-        << " shader_key=" << shader_key
-        << " buffers=" << buffer_index
-        << '\n';
-
       if (working_state.buffers.size() > buffer_index) {
         for (size_t i = buffer_index; i < working_state.buffers.size(); ++i) {
           _DestroyBuffer(working_state.buffers[i].input);
@@ -390,20 +372,11 @@ class VkJobRuntimeSystem {
       }
 
       VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
-      std::cerr
-        << "vk_runtime.descriptor.begin debug_name=" << job.debug_name
-        << " shader_key=" << shader_key
-        << '\n';
       if (!_AllocateDescriptorSet(pipeline->descriptor_set_layout, &descriptor_set)) {
         _ThrowVkTickError("Failed to allocate VK descriptor set.", out_error_message);
       }
-      std::cerr
-        << "vk_runtime.descriptor.end debug_name=" << job.debug_name
-        << " shader_key=" << shader_key
-        << '\n';
       cleanup.descriptor_set = descriptor_set;
 
-      const bool read_only_stage = _IsReadOnlyStage(job);
       std::vector<VkDescriptorBufferInfo> buffer_infos;
       buffer_infos.reserve(read_only_stage ? working_state.buffers.size() : working_state.buffers.size() * 2u);
       for (const VkBufferPairResource& buffer_pair : working_state.buffers) {
@@ -444,16 +417,12 @@ class VkJobRuntimeSystem {
           nullptr);
       }
 
-      std::cerr
-        << "vk_runtime.record.begin debug_name=" << job.debug_name
-        << " shader_key=" << shader_key
-        << '\n';
-      _RecordAndSubmit(*pipeline, descriptor_set, working_state.buffers, execution_context);
+      _RecordAndSubmit(
+        *pipeline,
+        descriptor_set,
+        working_state.buffers,
+        execution_context);
       runtime_systems::RuntimeVkContextRegistry::Instance().PublishExecutionProgress(job.execution_key);
-      std::cerr
-        << "vk_runtime.record.end debug_name=" << job.debug_name
-        << " shader_key=" << shader_key
-        << '\n';
 
       if (job.stage_name == "resultRender") {
         ++offscreen_target_.generation;
@@ -470,33 +439,11 @@ class VkJobRuntimeSystem {
       }
 
       if (!read_only_stage) {
-        std::cerr
-          << "vk_runtime.swap.begin debug_name=" << job.debug_name
-          << " shader_key=" << shader_key
-          << '\n';
         for (VkBufferPairResource& buffer_pair : working_state.buffers) {
           std::swap(buffer_pair.input, buffer_pair.output);
         }
-        std::cerr
-          << "vk_runtime.swap.end debug_name=" << job.debug_name
-          << " shader_key=" << shader_key
-          << '\n';
       }
-
-      std::cerr
-        << "vk_runtime.cache.begin debug_name=" << job.debug_name
-        << " shader_key=" << shader_key
-        << '\n';
       state_it->second.buffers = std::move(working_state.buffers);
-      std::cerr
-        << "vk_runtime.cache.end debug_name=" << job.debug_name
-        << " shader_key=" << shader_key
-        << '\n';
-
-      std::cerr
-        << "vk_runtime.return.true debug_name=" << job.debug_name
-        << " shader_key=" << shader_key
-        << '\n';
       return true;
     } catch (const std::exception& ex) {
       if (out_error_message) {
@@ -911,18 +858,8 @@ class VkJobRuntimeSystem {
   VkPipelineResource* _GetOrCreatePipeline(
     const std::string& shader_key,
     const RuntimeVkStageJob& job) {
-    std::cerr
-      << "vk_pipeline.create.begin shader_key=" << shader_key
-      << " debug_name=" << job.debug_name
-      << " vertex=" << job.vertex_shader_path
-      << " fragment=" << job.fragment_shader_path
-      << '\n';
     const auto found = pipeline_cache_.find(shader_key);
     if (found != pipeline_cache_.end()) {
-      std::cerr
-        << "vk_pipeline.create.end shader_key=" << shader_key
-        << " cached=true"
-        << '\n';
       return &found->second;
     }
 
@@ -941,13 +878,6 @@ class VkJobRuntimeSystem {
       _ResolveShaderBinaryPath(job.fragment_shader_path);
     const std::vector<std::byte> vertex_bytes = _ReadBinaryFile(vertex_path);
     const std::vector<std::byte> fragment_bytes = _ReadBinaryFile(fragment_path);
-    std::cerr
-      << "vk_pipeline.read.end shader_key=" << shader_key
-      << " vertex_path=" << vertex_path
-      << " fragment_path=" << fragment_path
-      << " vertex_bytes=" << vertex_bytes.size()
-      << " fragment_bytes=" << fragment_bytes.size()
-      << '\n';
     if (vertex_bytes.empty() || fragment_bytes.empty()) {
       _AbortVkTick(
         "VK tick pipeline creation failed: shader binaries could not be loaded for '" +
@@ -1097,7 +1027,7 @@ class VkJobRuntimeSystem {
     return &inserted->second;
   }
 
-    void _RecordAndSubmit(
+  void _RecordAndSubmit(
       const VkPipelineResource& pipeline,
       VkDescriptorSet descriptor_set,
       const std::vector<VkBufferPairResource>& buffers,
@@ -1108,7 +1038,6 @@ class VkJobRuntimeSystem {
     begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     _CheckVkResult(vkBeginCommandBuffer(command_resources_.command_buffer, &begin_info));
-    std::cerr << "vk_record.after_begin\n";
 
     VkClearValue clear_value{};
     clear_value.color.float32[0] = 0.0f;
@@ -1147,7 +1076,6 @@ class VkJobRuntimeSystem {
       &descriptor_set,
       0,
       nullptr);
-    std::cerr << "vk_record.after_bind\n";
     const RuntimeVkViewportPushConstants push_constants{
       static_cast<float>(offscreen_target_.extent.width),
       static_cast<float>(offscreen_target_.extent.height),
@@ -1161,7 +1089,30 @@ class VkJobRuntimeSystem {
       &push_constants);
     vkCmdSetViewport(command_resources_.command_buffer, 0, 1, &viewport);
     vkCmdSetScissor(command_resources_.command_buffer, 0, 1, &scissor);
-    std::cerr << "vk_record.after_viewport\n";
+
+    VkMemoryBarrier buffer_read_barrier{};
+    buffer_read_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    buffer_read_barrier.srcAccessMask =
+      VK_ACCESS_HOST_WRITE_BIT |
+      VK_ACCESS_SHADER_WRITE_BIT;
+    buffer_read_barrier.dstAccessMask =
+      VK_ACCESS_SHADER_READ_BIT |
+      VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
+    vkCmdPipelineBarrier(
+      command_resources_.command_buffer,
+      VK_PIPELINE_STAGE_HOST_BIT |
+        VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+      VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
+        VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
+      0,
+      1,
+      &buffer_read_barrier,
+      0,
+      nullptr,
+      0,
+      nullptr);
+
     for (const VkBufferPairResource& buffer_pair : buffers) {
       if (buffer_pair.draw_indirect) {
         vkCmdDrawIndirect(
@@ -1175,11 +1126,26 @@ class VkJobRuntimeSystem {
     }
     vkCmdDraw(command_resources_.command_buffer, 4u, 1u, 0u, 0u);
 draw_submitted:
-    std::cerr << "vk_record.after_draw\n";
 
     vkCmdEndRenderPass(command_resources_.command_buffer);
+
+    VkMemoryBarrier buffer_write_barrier{};
+    buffer_write_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    buffer_write_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    buffer_write_barrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+    vkCmdPipelineBarrier(
+      command_resources_.command_buffer,
+      VK_PIPELINE_STAGE_VERTEX_SHADER_BIT |
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+      VK_PIPELINE_STAGE_HOST_BIT,
+      0,
+      1,
+      &buffer_write_barrier,
+      0,
+      nullptr,
+      0,
+      nullptr);
     _CheckVkResult(vkEndCommandBuffer(command_resources_.command_buffer));
-    std::cerr << "vk_record.after_end\n";
 
     VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     VkSubmitInfo submit_info{};
@@ -1192,11 +1158,8 @@ draw_submitted:
     submit_info.signalSemaphoreCount = 0;
     submit_info.pSignalSemaphores = nullptr;
 
-    std::cerr << "vk_record.before_submit\n";
     _CheckVkResult(vkQueueSubmit(execution_context.queue, 1, &submit_info, VK_NULL_HANDLE));
-    std::cerr << "vk_record.after_submit\n";
     _CheckVkResult(vkQueueWaitIdle(execution_context.queue));
-    std::cerr << "vk_record.after_wait_idle\n";
   }
 
   runtime_systems::RuntimeVkExecutionContext context_{};

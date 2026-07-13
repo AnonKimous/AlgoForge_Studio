@@ -63,7 +63,6 @@ class AgentManagementHooker {
     agentmanager::agent::AlgorithmPipelineSyncMode sync_mode = agentmanager::agent::AlgorithmPipelineSyncMode::Forced,
     bool load_reflector = true) {
     algorithm::library_paths::SetAlgorithmLibraryRuntimeBuildFlavor(algorithm_library_runtime_build_flavor_);
-    load_reflector = false;
     return agent_manager_.AttachPipelineAlgorithmToAgent(
       agent_index,
       pipeline_name,

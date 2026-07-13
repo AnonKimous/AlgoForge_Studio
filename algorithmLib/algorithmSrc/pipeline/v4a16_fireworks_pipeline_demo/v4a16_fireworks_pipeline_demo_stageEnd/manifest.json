@@ -321,7 +321,7 @@
         },
         {
           "name": "render_draw",
-          "kind": "array",
+          "kind": "draw_indirect",
           "tuple_width": 1,
           "required": true
         }

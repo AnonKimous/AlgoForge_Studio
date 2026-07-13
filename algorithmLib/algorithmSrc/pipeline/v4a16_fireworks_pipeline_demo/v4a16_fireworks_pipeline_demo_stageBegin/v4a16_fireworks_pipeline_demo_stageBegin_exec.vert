@@ -24,6 +24,10 @@ layout(set = 0, binding = 37) buffer V3Out {
   float value[];
 } v3_out;
 
+layout(set = 0, binding = 41) buffer RenderDrawOut {
+  uint value[];
+} render_draw_out;
+
 layout(set = 0, binding = 0) readonly buffer ShellPosXIn {
   float value[];
 } shell_pos_x_in;
@@ -193,53 +197,55 @@ void main() {
     v1_out.value[0] = tick_value;
     v2_out.value[0] = first_tick ? 12.0 : launch_budget_value;
     v3_out.value[0] = first_tick ? 0.0 : live_spark_value;
+    render_draw_out.value[0] = 4u;
+    render_draw_out.value[1] = 512u;
+    render_draw_out.value[2] = 0u;
+    render_draw_out.value[3] = 0u;
   }
 
-  if (gl_VertexIndex == 0u && index < kArrayLimit) {
-    float shell_state = shell_state_in.value[index];
-    if (first_tick || shell_state <= 0.5) {
-      shell_pos_x_out.value[index] = 0.0;
-      shell_pos_y_out.value[index] = 0.0;
-      shell_vel_x_out.value[index] = 0.0;
-      shell_vel_y_out.value[index] = 0.0;
-      shell_state_out.value[index] = 0.0;
-      shell_age_out.value[index] = 0.0;
-      shell_life_out.value[index] = 0.0;
-      shell_seed_out.value[index] = 0.0;
-    } else {
-      vec2 shell_pos = PixelToLogical(vec2(shell_pos_x_in.value[index], shell_pos_y_in.value[index]));
-      vec2 shell_vel = PixelVelocityToLogical(vec2(shell_vel_x_in.value[index], shell_vel_y_in.value[index]));
-      shell_pos_x_out.value[index] = shell_pos.x;
-      shell_pos_y_out.value[index] = shell_pos.y;
-      shell_vel_x_out.value[index] = shell_vel.x;
-      shell_vel_y_out.value[index] = shell_vel.y;
-      shell_state_out.value[index] = shell_state;
-      shell_age_out.value[index] = shell_age_in.value[index];
-      shell_life_out.value[index] = shell_life_in.value[index];
-      shell_seed_out.value[index] = shell_seed_in.value[index];
-    }
+  if (gl_VertexIndex == 0u && index == 0u) {
+    for (uint array_index = 0u; array_index < kArrayLimit; ++array_index) {
+      float shell_state = shell_state_in.value[array_index];
+      if (first_tick || shell_state <= 0.5) {
+        shell_pos_x_out.value[array_index] = 0.0;
+        shell_pos_y_out.value[array_index] = 0.0;
+        shell_vel_x_out.value[array_index] = 0.0;
+        shell_vel_y_out.value[array_index] = 0.0;
+        shell_state_out.value[array_index] = 0.0;
+        shell_age_out.value[array_index] = 0.0;
+        shell_life_out.value[array_index] = 0.0;
+        shell_seed_out.value[array_index] = 0.0;
+      } else {
+        shell_pos_x_out.value[array_index] = shell_pos_x_in.value[array_index];
+        shell_pos_y_out.value[array_index] = shell_pos_y_in.value[array_index];
+        shell_vel_x_out.value[array_index] = shell_vel_x_in.value[array_index];
+        shell_vel_y_out.value[array_index] = shell_vel_y_in.value[array_index];
+        shell_state_out.value[array_index] = shell_state;
+        shell_age_out.value[array_index] = shell_age_in.value[array_index];
+        shell_life_out.value[array_index] = shell_life_in.value[array_index];
+        shell_seed_out.value[array_index] = shell_seed_in.value[array_index];
+      }
 
-    float spark_state = spark_state_in.value[index];
-    if (first_tick || spark_state <= 0.5) {
-      spark_pos_x_out.value[index] = 0.0;
-      spark_pos_y_out.value[index] = 0.0;
-      spark_vel_x_out.value[index] = 0.0;
-      spark_vel_y_out.value[index] = 0.0;
-      spark_state_out.value[index] = 0.0;
-      spark_age_out.value[index] = 0.0;
-      spark_life_out.value[index] = 0.0;
-      spark_seed_out.value[index] = 0.0;
-    } else {
-      vec2 spark_pos = PixelToLogical(vec2(spark_pos_x_in.value[index], spark_pos_y_in.value[index]));
-      vec2 spark_vel = PixelVelocityToLogical(vec2(spark_vel_x_in.value[index], spark_vel_y_in.value[index]));
-      spark_pos_x_out.value[index] = spark_pos.x;
-      spark_pos_y_out.value[index] = spark_pos.y;
-      spark_vel_x_out.value[index] = spark_vel.x;
-      spark_vel_y_out.value[index] = spark_vel.y;
-      spark_state_out.value[index] = spark_state;
-      spark_age_out.value[index] = spark_age_in.value[index];
-      spark_life_out.value[index] = spark_life_in.value[index];
-      spark_seed_out.value[index] = spark_seed_in.value[index];
+      float spark_state = spark_state_in.value[array_index];
+      if (first_tick || spark_state <= 0.5) {
+        spark_pos_x_out.value[array_index] = 0.0;
+        spark_pos_y_out.value[array_index] = 0.0;
+        spark_vel_x_out.value[array_index] = 0.0;
+        spark_vel_y_out.value[array_index] = 0.0;
+        spark_state_out.value[array_index] = 0.0;
+        spark_age_out.value[array_index] = 0.0;
+        spark_life_out.value[array_index] = 0.0;
+        spark_seed_out.value[array_index] = 0.0;
+      } else {
+        spark_pos_x_out.value[array_index] = spark_pos_x_in.value[array_index];
+        spark_pos_y_out.value[array_index] = spark_pos_y_in.value[array_index];
+        spark_vel_x_out.value[array_index] = spark_vel_x_in.value[array_index];
+        spark_vel_y_out.value[array_index] = spark_vel_y_in.value[array_index];
+        spark_state_out.value[array_index] = spark_state;
+        spark_age_out.value[array_index] = spark_age_in.value[array_index];
+        spark_life_out.value[array_index] = spark_life_in.value[array_index];
+        spark_seed_out.value[array_index] = spark_seed_in.value[array_index];
+      }
     }
   }
 

@@ -6,7 +6,6 @@
 #include <fstream>
 #include <cstring>
 #include <limits>
-#include <iostream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -136,14 +135,18 @@ void PreviewRenderer::ApplyTargetExtent() {
 void PreviewRenderer::SetRequest(RenderPreviewRequest request) {
 #ifndef NDEBUG
   if (request.valid) {
-    std::cerr << "Render preview request is missing a stage name.\n";
-    assert(!request.stage_name.empty() && "Render preview request is missing a stage name.");
-    std::cerr << "Render preview request is missing a vertex shader path.\n";
-    assert(!request.vertex_shader_path.empty() && "Render preview request is missing a vertex shader path.");
-    std::cerr << "Render preview request is missing a fragment shader path.\n";
-    assert(!request.fragment_shader_path.empty() && "Render preview request is missing a fragment shader path.");
-    std::cerr << "Render preview request is missing storage buffers.\n";
-    assert(!request.storage_buffers.empty() && "Render preview request is missing storage buffers.");
+    if (request.stage_name.empty()) {
+      assert(!request.stage_name.empty() && "Render preview request is missing a stage name.");
+    }
+    if (request.vertex_shader_path.empty()) {
+      assert(!request.vertex_shader_path.empty() && "Render preview request is missing a vertex shader path.");
+    }
+    if (request.fragment_shader_path.empty()) {
+      assert(!request.fragment_shader_path.empty() && "Render preview request is missing a fragment shader path.");
+    }
+    if (request.storage_buffers.empty()) {
+      assert(!request.storage_buffers.empty() && "Render preview request is missing storage buffers.");
+    }
   }
 #endif
   request_ = std::move(request);
@@ -739,10 +742,12 @@ bool PreviewRenderer::Record(VkCommandBuffer command_buffer) {
     return false;
   }
 #ifndef NDEBUG
-  std::cerr << "Preview renderer received an invalid stage name.\n";
-  assert(!request_.stage_name.empty() && "Preview renderer received an invalid stage name.");
-  std::cerr << "Preview renderer received no storage buffers.\n";
-  assert(!request_.storage_buffers.empty() && "Preview renderer received no storage buffers.");
+  if (request_.stage_name.empty()) {
+    assert(!request_.stage_name.empty() && "Preview renderer received an invalid stage name.");
+  }
+  if (request_.storage_buffers.empty()) {
+    assert(!request_.storage_buffers.empty() && "Preview renderer received no storage buffers.");
+  }
 #endif
   if (!EnsureTarget()) {
     return false;

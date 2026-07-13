@@ -24,6 +24,10 @@ namespace runtime_systems {
 
 namespace {
 
+#ifndef ALGOFORGE_VERBOSE_RUNTIME_LOGGING
+#define ALGOFORGE_VERBOSE_RUNTIME_LOGGING 0
+#endif
+
 #ifndef NDEBUG
 #define DEBUG_TOOL_ASSERT(condition, message) do { \
   if (!(condition)) { \
@@ -44,6 +48,7 @@ bool IsExtensionPresent(const std::vector<const char*>& extensions, const char* 
 }
 
 void AppendImguiVulkanProbe(const std::string& line) {
+#if ALGOFORGE_VERBOSE_RUNTIME_LOGGING
   const std::filesystem::path probe_path =
     algorithm::library_paths::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot() / "runtime_init_probe.log";
   std::error_code ec;
@@ -52,6 +57,9 @@ void AppendImguiVulkanProbe(const std::string& line) {
   if (file) {
     file << line << '\n';
   }
+#else
+  (void)line;
+#endif
 }
 
 }  // namespace
@@ -609,6 +617,16 @@ std::string ImGuiVulkanRuntime::RenderPreviewDebugSummary() const {
   if (!preview_renderer_) {
     return "preview_renderer=uninitialized";
   }
+  if (pending_render_preview_request_.valid && result_image_.valid()) {
+    return
+      "request=valid stage=" + pending_render_preview_request_.stage_name +
+      " buffers=" + std::to_string(pending_render_preview_request_.storage_buffers.size()) +
+      " pipeline=ready target=ready extent=" +
+      std::to_string(result_image_.extent.width) + "x" +
+      std::to_string(result_image_.extent.height) +
+      " vs=" + pending_render_preview_request_.vertex_shader_path +
+      " fs=" + pending_render_preview_request_.fragment_shader_path;
+  }
   return preview_renderer_->DebugSummary();
 }
 
@@ -728,6 +746,8 @@ bool ImGuiVulkanRuntime::Tick(SDL_Window* window) {
     return true;
   }
 
+  ++preview_frame_sequence_;
+
   int fb_width = 0;
   int fb_height = 0;
   SDL_GetWindowSizeInPixels(window, &fb_width, &fb_height);
@@ -793,6 +813,7 @@ bool ImGuiVulkanRuntime::Tick(SDL_Window* window) {
     }
   }
 
+  last_preview_frame_end_ = std::chrono::steady_clock::now();
   return true;
 }
 

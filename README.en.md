@@ -259,10 +259,16 @@ build_debugtool.bat
 ### 6.2 Build an algorithm package
 
 ```bat
-build_algorithm.bat <algorithm_target_name>
+build_algorithm_releaseWithDebugInfo.bat <algorithm_target_name>
 ```
 
 ### 6.3 Launch the visual tool
+
+Install the visual tool dependency first:
+
+```bat
+py -3 -m pip install -r algorithmDevTools\algorithm_studio\requirements.txt
+```
 
 ```bat
 algorithmDevTools\launch_algorithmDevTools.bat
@@ -290,28 +296,8 @@ AlgoForge is suitable for the following types of developers or teams:
 - Algorithm research teams that need visual debugging, preview, and hot reload
 - Platform developers who want to expose algorithm capabilities through an SDK
 
-## 8. About the project itself and the update plan
+## 8. Project vision
 
-The project is positioned as the underlying infrastructure for algorithm runtime and assembly, aiming to provide system-base-level capabilities: unified scheduling, composable execution, observable debugging, and stable integration.
-
-In the long run, the project will continue lowering the barrier for algorithm development so that non-low-level developers can also build, validate, and iterate complex algorithms with the toolchain. It will also strengthen the integration experience so it can be embedded more easily into existing large projects: the business side prepares the data, while the runtime side is handled by `Agent` and the scheduling system.
-
-For architectural evolution, the project will continue exploring the idea of an "algorithm tree." The current `pipeline` already validates a staged organization model based on the scheduler. The next step is to expand the routing and decision-making ability of the `wrapper`: dynamically choose between multiple algorithm paths based on container state and sampling results, supporting everything from branch algorithms to combinations such as feature extraction plus classification heads.
-
-Short-term plan:
-
-- Move `tools` toward a stable usable state, continue working on the memory management system, and enable CUDA execution preference
-- Improve `tools` support for editing `pipeline`, and add the ability to freeze the current value as the default algorithm descriptor
-- Improve `sdk` integration so external projects can use it more stably and maintainably
-
-## 9. Final thoughts
-
-The project is still at a very, very early stage. The ideas in the current development documents are numerous, and some of them even conflict with one another. I have been trying very hard to define boundaries for the `agent`, but situations like this still happen: one feature works, and another one breaks. Sometimes an algorithm that used to mount correctly suddenly cannot be mounted anymore. The cause is often container changes, new feature additions, legacy removals, or simply the AI going out of bounds while making changes.
-
-I think it will have to improve step by step. In the age of large models, software probably only has two paths: one is to move fast and become a more important reference when large models make quick decisions; the other is to move toward thrift and boundaries, using harder constraints to keep models from going out of bounds. This is actually a bit like an operating system: on one hand it supports software, and on the other hand it also limits software. It does provide room for execution, but that room is still limited, no matter how large it may seem. Things like virtual memory are, at their core, just little tricks that make problems feel like they are not there.
-
-The reason the `agent` in `agentmanager` is named that way is that I really do have an ambition: I want the `agent` in this project to mount a real `agent`, and mount a true multimodal model as its brain, with the remaining support algorithms acting as its spine (the names "brain algorithm" and "spine algorithm" are just made up). From that perspective, the project as a whole may eventually take on a role similar to an operating system.
-
-Before large models became a reality, I honestly could not imagine that I would be able to build something this heavy on my own PC. Before starting this project, I did not really understand cross-platform development, I did not understand Vulkan, and CUDA was just something I only knew through `iscuda()` in Python. Maybe in about five years, companies like Google, Amazon, NVIDIA, and Microsoft will be able to build operating systems meant specifically for large models rather than for software. This project may just be something that will never compare with theirs. After all, I am not especially capable, I do not have particularly strong hands-on skills, and my academic background is only average. If money were not an issue, my dream would actually be to become a science fiction writer.
-
-But I do think this thing should be useful, and I hope it will be useful.
+The long-form project vision and update plan are maintained in
+[`docs/VISION.md`](docs/VISION.md), keeping this README focused on onboarding,
+architecture, capabilities, and reproducibility.

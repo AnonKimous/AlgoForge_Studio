@@ -201,12 +201,10 @@ void main() {
   if (gl_VertexIndex == 0u && index < kArrayLimit) {
     float shell_state = shell_state_in.value[index];
     if (shell_state > 0.5) {
-      vec2 shell_pos = LogicalToPixel(vec2(shell_pos_x_in.value[index], shell_pos_y_in.value[index]));
-      vec2 shell_vel = LogicalVelocityToPixel(vec2(shell_vel_x_in.value[index], shell_vel_y_in.value[index]));
-      shell_pos_x_out.value[index] = shell_pos.x;
-      shell_pos_y_out.value[index] = shell_pos.y;
-      shell_vel_x_out.value[index] = shell_vel.x;
-      shell_vel_y_out.value[index] = shell_vel.y;
+      shell_pos_x_out.value[index] = shell_pos_x_in.value[index];
+      shell_pos_y_out.value[index] = shell_pos_y_in.value[index];
+      shell_vel_x_out.value[index] = shell_vel_x_in.value[index];
+      shell_vel_y_out.value[index] = shell_vel_y_in.value[index];
       shell_state_out.value[index] = shell_state;
       shell_age_out.value[index] = shell_age_in.value[index];
       shell_life_out.value[index] = shell_life_in.value[index];
@@ -224,12 +222,10 @@ void main() {
 
     float spark_state = spark_state_in.value[index];
     if (spark_state > 0.5) {
-      vec2 spark_pos = LogicalToPixel(vec2(spark_pos_x_in.value[index], spark_pos_y_in.value[index]));
-      vec2 spark_vel = LogicalVelocityToPixel(vec2(spark_vel_x_in.value[index], spark_vel_y_in.value[index]));
-      spark_pos_x_out.value[index] = spark_pos.x;
-      spark_pos_y_out.value[index] = spark_pos.y;
-      spark_vel_x_out.value[index] = spark_vel.x;
-      spark_vel_y_out.value[index] = spark_vel.y;
+      spark_pos_x_out.value[index] = spark_pos_x_in.value[index];
+      spark_pos_y_out.value[index] = spark_pos_y_in.value[index];
+      spark_vel_x_out.value[index] = spark_vel_x_in.value[index];
+      spark_vel_y_out.value[index] = spark_vel_y_in.value[index];
       spark_state_out.value[index] = spark_state;
       spark_age_out.value[index] = spark_age_in.value[index];
       spark_life_out.value[index] = spark_life_in.value[index];

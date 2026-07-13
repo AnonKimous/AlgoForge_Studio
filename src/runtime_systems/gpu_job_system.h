@@ -37,6 +37,7 @@ struct RuntimeVkStageJob {
   float viewport_width{1.0f};
   float viewport_height{1.0f};
   const void* execution_key{nullptr};
+  bool host_ingress_authoritative{false};
   std::vector<RuntimeVkBufferBindingView> buffer_bindings;
   std::vector<RuntimeVkStageSubJob> stage_jobs;
 };

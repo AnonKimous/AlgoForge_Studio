@@ -88,3 +88,13 @@ tools/launch_algorithm_studio_local.bat
 /artifacts/pipeline_runner/
 /testData/**
 !/testData/.gitkeep
+
+# Local recorder and CLI diagnostics
+/ScreenToGif/
+/cli_submit_probe*
+/fireworks_preview_server.txt
+/fireworks_runner.txt
+/help_out.txt
+/teapot_pipeline_runner.txt
+/v4a10_runner_once.txt
+/build_manifest_relwithdebinfo_verify.txt

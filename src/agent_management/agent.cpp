@@ -919,7 +919,6 @@ bool _TickAlgorithmObject(
   runtime_state->algorithm_to_agent_signal.control_bits = runtime_state->agent_to_algorithm_signal.control_bits;
 
   std::string submit_error_message;
-  std::cerr << "agent_tick_submit.begin algorithm=" << object.algorithm_profile.algorithm_name << '\n';
   if (!algorithmManager::SubmitAlgorithmObject(
         object,
         context,
@@ -938,8 +937,6 @@ bool _TickAlgorithmObject(
     runtime_state->algorithm_to_agent_signal.stop_requested = true;
     return false;
   }
-  std::cerr << "agent_tick_submit.end algorithm=" << object.algorithm_profile.algorithm_name << '\n';
-
   AlgorithmPackageDebugState collected_debug_state{};
   _CollectDebugState(object, &collected_debug_state);
   runtime_state->debug_state.signals.insert(

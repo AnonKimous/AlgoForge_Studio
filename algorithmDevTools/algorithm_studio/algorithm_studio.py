@@ -1722,7 +1722,7 @@ class AlgorithmStudioApp(
         return " | ".join(self._compact_activity_text(line, limit=72) for line in preview)
 
     def _run_build_command(self, algorithm_name: str) -> str:
-        build_script = PROJECT_ROOT.parent / "build_algorithm.bat"
+        build_script = PROJECT_ROOT.parent / "build_algorithm_releaseWithDebugInfo.bat"
         if not build_script.exists():
             raise RuntimeError(f"Build script is missing: {build_script}")
         completed = subprocess.run(

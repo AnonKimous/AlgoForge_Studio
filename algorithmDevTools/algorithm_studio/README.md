@@ -53,6 +53,12 @@ It provides:
 
 ## Run
 
+Install the Python dependency before the first launch:
+
+```bat
+py -3 -m pip install -r algorithmDevTools\algorithm_studio\requirements.txt
+```
+
 Double-click `algorithmDevTools\launch_algorithmDevTools.bat`, or run the same command from a terminal:
 
 ```bat
@@ -108,4 +114,4 @@ This is a UI-first prototype.
 - The GUI runs on the machine's local Python interpreter.
 - The Windows double-click launcher is `algorithmDevTools\launch_algorithmDevTools.bat`.
 - The direct script entry point is the stable cross-device launch path.
-- `requirements.txt` is currently empty, so no automatic package install step runs before launch.
+- `requirements.txt` declares the Pillow dependency used by the preview and image UI.

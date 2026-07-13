@@ -2073,11 +2073,6 @@ inline bool TickAlgorithmObject(
   std::shared_ptr<algorithm::AlgorithmContainerSet> container_set_handle = object.shared_container_set;
   std::string submit_error_message;
   const auto exec_begin = std::chrono::steady_clock::now();
-  std::cerr
-    << "scheduler_submit.begin algorithm=" << object.algorithm_profile.algorithm_name
-    << " pipeline=" << object.pipeline_name
-    << " exec=" << static_cast<int>(object.execution_preference)
-    << '\n';
   const bool submit_ok = AlgorithmScheduler::Instance().SubmitAlgorithmObject(
         object,
         context,
@@ -2086,11 +2081,6 @@ inline bool TickAlgorithmObject(
         &runtime_state->algorithm_to_agent_signal,
         &runtime_state->debug_state,
         &submit_error_message);
-  std::cerr
-    << "scheduler_submit.end algorithm=" << object.algorithm_profile.algorithm_name
-    << " pipeline=" << object.pipeline_name
-    << " ok=" << (submit_ok ? "true" : "false")
-    << '\n';
   runtime_state->algorithm_exec_elapsed_seconds =
     std::chrono::duration<float>(std::chrono::steady_clock::now() - exec_begin).count();
   runtime_state->algorithm_exec_elapsed_valid = true;
@@ -2720,7 +2710,7 @@ inline bool AlgorithmScheduler::MountPipelineAlgorithmObjects(
         stage_submission.resource_bindings,
         stage_submission.descriptor_values,
         ::algorithmManager::AlgorithmMountMode::Pipeline,
-        stage_submission.execution_preference,
+        execution_preference,
         standard_shared_container_sets);
     if (!built_mount.ok) {
       set_error(built_mount.error_message);
@@ -4203,8 +4193,8 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
       pipeline_state.pending_stage0_submissions.size(),
       pipeline_state.stage0_saturated,
       updated_runtime_states,
-      begin_index,
-      end_index);
+       begin_index,
+       end_index);
   const bool signature_unchanged =
     previous_progress_state.signature_valid &&
     previous_progress_state.signature == current_signature;

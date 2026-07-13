@@ -84,10 +84,6 @@ inline bool ExecuteJobsAlgorithmObject(
   std::shared_ptr<::algorithmManager::scheduler::IAlgorithmJobsExecutor> jobs_executor = object.jobs_executor;
   algorithm::AlgorithmProfile algorithm_profile = object.algorithm_profile;
   std::shared_ptr<algorithm::AlgorithmContainerSet> container_set_handle = object.shared_container_set;
-  std::cerr
-    << "jobs_exec.submit_blocking.begin algorithm=" << algorithm_profile.algorithm_name
-    << " phase=" << static_cast<int>(context.execution_phase)
-    << '\n';
   const bool submit_ok = runtime_systems::SubmitBlockingJob(
     context.job_priority == AlgorithmJobPriority::High
       ? runtime_systems::RuntimeJobPriority::High
@@ -102,25 +98,6 @@ inline bool ExecuteJobsAlgorithmObject(
       container_set_handle,
       out_algorithm_to_agent_signal,
       out_debug_state](std::string* out_job_error_message) {
-      std::cerr
-        << "jobs_exec.lambda.begin algorithm=" << algorithm_profile.algorithm_name
-        << " phase=" << static_cast<int>(context.execution_phase)
-        << '\n';
-      if (container_set_handle) {
-        std::cerr
-          << "jobs_exec.lambda.container_set algorithm=" << algorithm_profile.algorithm_name
-          << " ptr=" << container_set_handle.get()
-          << " arrays=" << container_set_handle->arrays.size()
-          << " regs=" << container_set_handle->temporary_registers.size()
-          << " caches=" << container_set_handle->temporary_caches.size()
-          << " hidden=" << container_set_handle->hidden_containers.size()
-          << " standard_enabled=" << (container_set_handle->standard_layout.enabled() ? "true" : "false")
-          << '\n';
-      }
-      std::cerr
-        << "jobs_exec.lambda.executor algorithm=" << algorithm_profile.algorithm_name
-        << " ptr=" << jobs_executor.get()
-        << '\n';
       const bool ok = jobs_executor->ExecuteJobsAlgorithm(
         context,
         algorithm_profile,
@@ -128,21 +105,11 @@ inline bool ExecuteJobsAlgorithmObject(
         container_set_handle.get(),
         out_algorithm_to_agent_signal,
         out_debug_state);
-      std::cerr
-        << "jobs_exec.lambda.end algorithm=" << algorithm_profile.algorithm_name
-        << " phase=" << static_cast<int>(context.execution_phase)
-        << " ok=" << (ok ? "true" : "false")
-        << '\n';
       if (!ok && out_job_error_message) {
         *out_job_error_message = "Jobs algorithm execution failed.";
       }
     },
     out_error_message);
-  std::cerr
-    << "jobs_exec.submit_blocking.end algorithm=" << algorithm_profile.algorithm_name
-    << " phase=" << static_cast<int>(context.execution_phase)
-    << " ok=" << (submit_ok ? "true" : "false")
-    << '\n';
   return submit_ok;
 }
 
@@ -370,11 +337,6 @@ inline bool ExecuteAlgorithmObjectStagePlan(
     }
     return false;
   }
-  std::cerr
-    << "stage_plan.begin algorithm=" << object.algorithm_profile.algorithm_name
-    << " exec=" << static_cast<int>(object.execution_preference)
-    << '\n';
-
   struct StageEntry {
     ::algorithmManager::scheduler::AlgorithmExecutionPhase execution_phase{::algorithmManager::scheduler::AlgorithmExecutionPhase::Exec};
     ::algorithmManager::scheduler::AlgorithmExecutionPreference execution_preference{::algorithmManager::scheduler::AlgorithmExecutionPreference::Jobs};
@@ -459,28 +421,15 @@ inline bool ExecuteAlgorithmObjectStagePlan(
            stage_entries[bundle_end].execution_preference == bundle_preference) {
       ++bundle_end;
     }
-    std::cerr
-      << "stage_plan.bundle.begin algorithm=" << object.algorithm_profile.algorithm_name
-      << " bundle_preference=" << static_cast<int>(bundle_preference)
-      << " bundle_begin=" << bundle_begin
-      << " bundle_end=" << bundle_end
-      << '\n';
-
     if (bundle_preference == ::algorithmManager::scheduler::AlgorithmExecutionPreference::Vk) {
       runtime_systems::RuntimeVkStageJob vk_job{};
       vk_job.shader_namespace = object.algorithm_profile.algorithm_name;
       vk_job.execution_key = container_set;
       vk_job.viewport_width = std::max(context.render_preview_extent.x, 1.0f);
       vk_job.viewport_height = std::max(context.render_preview_extent.y, 1.0f);
+      vk_job.host_ingress_authoritative = true;
       for (size_t index = bundle_begin; index < bundle_end; ++index) {
         const StageEntry& entry = stage_entries[index];
-        std::cerr
-          << "stage_plan.stage.begin algorithm=" << object.algorithm_profile.algorithm_name
-          << " phase=" << static_cast<int>(entry.execution_phase)
-          << " pref=" << static_cast<int>(entry.execution_preference)
-          << " exec=" << (entry.exec_stage ? "true" : "false")
-          << " reflect=" << (entry.reflect_stage ? "true" : "false")
-          << '\n';
         runtime_systems::RuntimeVkStageSubJob stage_job{};
         if (entry.exec_stage) {
           if (!object.vk_executor) {
@@ -520,13 +469,6 @@ inline bool ExecuteAlgorithmObjectStagePlan(
           return false;
         }
         vk_job.stage_jobs.push_back(std::move(stage_job));
-        std::cerr
-          << "stage_plan.stage.end algorithm=" << object.algorithm_profile.algorithm_name
-          << " phase=" << static_cast<int>(entry.execution_phase)
-          << " pref=" << static_cast<int>(entry.execution_preference)
-          << " exec=" << (entry.exec_stage ? "true" : "false")
-          << " reflect=" << (entry.reflect_stage ? "true" : "false")
-          << '\n';
       }
       if (vk_job.stage_jobs.empty()) {
         if (out_error_message) {
@@ -539,11 +481,6 @@ inline bool ExecuteAlgorithmObjectStagePlan(
       vk_job.vertex_shader_path = vk_job.stage_jobs.front().vertex_shader_path;
       vk_job.fragment_shader_path = vk_job.stage_jobs.front().fragment_shader_path;
       vk_job.buffer_bindings = vk_job.stage_jobs.front().buffer_bindings;
-      std::cerr
-        << "vk_bundle.execute.begin algorithm=" << object.algorithm_profile.algorithm_name
-        << " bundle_begin=" << bundle_begin
-        << " bundle_end=" << bundle_end
-        << '\n';
       if (!runtime_systems::ExecuteRuntimeVkJob(vk_job, out_error_message)) {
         std::cerr
           << "vk_bundle.execute.failed algorithm=" << object.algorithm_profile.algorithm_name
@@ -553,16 +490,6 @@ inline bool ExecuteAlgorithmObjectStagePlan(
           << '\n';
         return false;
       }
-      std::cerr
-        << "vk_bundle.execute.end algorithm=" << object.algorithm_profile.algorithm_name
-        << " bundle_begin=" << bundle_begin
-        << " bundle_end=" << bundle_end
-        << '\n';
-      std::cerr
-        << "vk_bundle.sync.begin algorithm=" << object.algorithm_profile.algorithm_name
-        << " bundle_begin=" << bundle_begin
-        << " bundle_end=" << bundle_end
-        << '\n';
       if (!runtime_systems::SynchronizeRuntimeVkJob(vk_job, out_error_message)) {
         std::cerr
           << "vk_bundle.sync.failed algorithm=" << object.algorithm_profile.algorithm_name
@@ -572,24 +499,12 @@ inline bool ExecuteAlgorithmObjectStagePlan(
           << '\n';
         return false;
       }
-      std::cerr
-        << "vk_bundle.sync.end algorithm=" << object.algorithm_profile.algorithm_name
-        << " bundle_begin=" << bundle_begin
-        << " bundle_end=" << bundle_end
-        << '\n';
     } else if (bundle_preference == ::algorithmManager::scheduler::AlgorithmExecutionPreference::Cuda) {
       for (size_t index = bundle_begin; index < bundle_end; ++index) {
         const StageEntry& entry = stage_entries[index];
         if (!entry.exec_stage) {
           continue;
         }
-        std::cerr
-          << "stage_plan.stage.begin algorithm=" << object.algorithm_profile.algorithm_name
-          << " phase=" << static_cast<int>(entry.execution_phase)
-          << " pref=" << static_cast<int>(entry.execution_preference)
-          << " exec=" << (entry.exec_stage ? "true" : "false")
-          << " reflect=" << (entry.reflect_stage ? "true" : "false")
-          << '\n';
         ::agentmanager::agent::AgentTickContext stage_context = context;
         stage_context.execution_phase = entry.execution_phase;
         if (!ExecuteCudaAlgorithmObject(
@@ -602,13 +517,6 @@ inline bool ExecuteAlgorithmObjectStagePlan(
               out_error_message)) {
           return false;
         }
-        std::cerr
-          << "stage_plan.stage.end algorithm=" << object.algorithm_profile.algorithm_name
-          << " phase=" << static_cast<int>(entry.execution_phase)
-          << " pref=" << static_cast<int>(entry.execution_preference)
-          << " exec=" << (entry.exec_stage ? "true" : "false")
-          << " reflect=" << (entry.reflect_stage ? "true" : "false")
-          << '\n';
       }
     } else {
       for (size_t index = bundle_begin; index < bundle_end; ++index) {
@@ -617,13 +525,6 @@ inline bool ExecuteAlgorithmObjectStagePlan(
           continue;
         }
 
-        std::cerr
-          << "stage_plan.stage.begin algorithm=" << object.algorithm_profile.algorithm_name
-          << " phase=" << static_cast<int>(entry.execution_phase)
-          << " pref=" << static_cast<int>(entry.execution_preference)
-          << " exec=" << (entry.exec_stage ? "true" : "false")
-          << " reflect=" << (entry.reflect_stage ? "true" : "false")
-          << '\n';
         ::agentmanager::agent::AgentTickContext stage_context = context;
         stage_context.execution_phase = entry.execution_phase;
         if (!ExecuteJobsAlgorithmObject(
@@ -636,32 +537,15 @@ inline bool ExecuteAlgorithmObjectStagePlan(
               out_error_message)) {
           return false;
         }
-        std::cerr
-          << "stage_plan.stage.end algorithm=" << object.algorithm_profile.algorithm_name
-          << " phase=" << static_cast<int>(entry.execution_phase)
-          << " pref=" << static_cast<int>(entry.execution_preference)
-          << " exec=" << (entry.exec_stage ? "true" : "false")
-          << " reflect=" << (entry.reflect_stage ? "true" : "false")
-          << '\n';
       }
     }
 
     stage_offset = bundle_end;
-    std::cerr
-      << "stage_plan.bundle.end algorithm=" << object.algorithm_profile.algorithm_name
-      << " bundle_preference=" << static_cast<int>(bundle_preference)
-      << " bundle_begin=" << bundle_begin
-      << " bundle_end=" << bundle_end
-      << '\n';
   }
 
   if (out_error_message) {
     out_error_message->clear();
   }
-  std::cerr
-    << "stage_plan.end algorithm=" << object.algorithm_profile.algorithm_name
-    << " exec=" << static_cast<int>(object.execution_preference)
-    << '\n';
   return true;
 }
 

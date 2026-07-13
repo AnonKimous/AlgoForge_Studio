@@ -926,35 +926,17 @@ bool DebugToolBackendRuntime::Tick() {
   const auto now = std::chrono::steady_clock::now();
   frame_dt_ = std::chrono::duration<float>(now - last_frame_time_).count();
   last_frame_time_ = now;
-  const auto tick_begin = std::chrono::steady_clock::now();
+  const uint64_t tick_sequence = ++tick_sequence_;
 
-  std::cerr << "backend_tick.begin\n";
   if (!agent_manager_.Tick(
         runtime_environment_.input(),
         runtime_environment_.MousePosition(),
         frame_dt_,
         render_preview_extent_)) {
-    std::cerr << "backend_tick.agent_failed\n";
+    std::cerr << "backend_tick.agent_failed sequence=" << tick_sequence << '\n';
     return false;
   }
-  const auto agent_tick_end = std::chrono::steady_clock::now();
-  std::cerr << "backend_tick.agent_done\n";
-  std::cerr
-    << "backend_tick.agent_elapsed_seconds="
-    << std::chrono::duration<float>(agent_tick_end - tick_begin).count()
-    << '\n';
-  std::cerr << "backend_tick.env_begin\n";
   const bool runtime_tick_ok = runtime_environment_.Tick();
-  const auto tick_end = std::chrono::steady_clock::now();
-  std::cerr << "backend_tick.env_done result=" << (runtime_tick_ok ? "true" : "false") << "\n";
-  std::cerr
-    << "backend_tick.env_elapsed_seconds="
-    << std::chrono::duration<float>(tick_end - agent_tick_end).count()
-    << '\n';
-  std::cerr
-    << "backend_tick.total_elapsed_seconds="
-    << std::chrono::duration<float>(tick_end - tick_begin).count()
-    << '\n';
   return runtime_tick_ok;
 }
 
@@ -964,6 +946,7 @@ void DebugToolBackendRuntime::Destroy() {
   ui_status_message_.clear();
   last_frame_time_ = {};
   frame_dt_ = 0.0f;
+  tick_sequence_ = 0u;
 }
 
 bool DebugToolBackendRuntime::CreateAgent(const char* agent_name, uint32_t limit_fps_flag, size_t* out_agent_index) {
@@ -1021,7 +1004,7 @@ bool DebugToolBackendRuntime::AttachAlgorithmToAgent(
     return false;
   }
 
-  const bool load_reflector = false;
+  const bool load_reflector = true;
   const bool attached = agent_manager_.AttachAlgorithmToAgent(
     agent_index,
     algorithm_name,
@@ -1234,7 +1217,7 @@ bool DebugToolBackendRuntime::AttachPipelineAlgorithmToAgent(
   size_t* out_algorithm_index,
   std::string* out_error_message,
   debug_tool::AlgorithmExecutionPreference execution_preference) {
-  const bool load_reflector = false;
+  const bool load_reflector = true;
   const bool attached = agent_manager_.AttachPipelineAlgorithmToAgent(
     agent_index,
     pipeline_name,
@@ -1669,7 +1652,6 @@ bool DebugToolBackendRuntime::LoadAlgorithmPackageDefaultBindings(
     *out_has_default_file = false;
   }
 
-  std::cerr << "backend_load_default_bindings.begin algorithm=" << algorithm_name << '\n';
   std::vector<algorithmManager::AlgorithmResourceBinding> package_resource_bindings;
   std::vector<algorithmManager::AlgorithmDescriptorValue> package_descriptor_values;
   bool has_default_file = false;
@@ -1685,14 +1667,10 @@ bool DebugToolBackendRuntime::LoadAlgorithmPackageDefaultBindings(
         ? ("Failed to load default bindings for '" + algorithm_name + "'.")
         : std::move(default_error_message);
     }
-    std::cerr
-      << "backend_load_default_bindings.failed algorithm=" << algorithm_name
-      << " error=" << (out_error_message ? *out_error_message : default_error_message) << '\n';
     return false;
   }
 
   if (!has_default_file) {
-    std::cerr << "backend_load_default_bindings.end algorithm=" << algorithm_name << " has_default_file=false\n";
     if (out_error_message) {
       out_error_message->clear();
     }
@@ -1718,12 +1696,6 @@ bool DebugToolBackendRuntime::LoadAlgorithmPackageDefaultBindings(
   if (out_has_default_file) {
     *out_has_default_file = true;
   }
-  std::cerr
-    << "backend_load_default_bindings.end algorithm=" << algorithm_name
-    << " has_default_file=true"
-    << " resource_bindings=" << out_resource_bindings->size()
-    << " descriptor_values=" << out_descriptor_values->size()
-    << '\n';
   if (out_error_message) {
     out_error_message->clear();
   }

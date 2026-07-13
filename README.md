@@ -259,10 +259,14 @@ build_debugtool.bat
 ### 6.2 Build an algorithm package
 
 ```bat
-build_algorithm.bat <algorithm_target_name>
+build_algorithm_releaseWithDebugInfo.bat <algorithm_target_name>
 ```
 
 ### 6.3 Launch the visual tool
+
+```bat
+py -3 -m pip install -r algorithmDevTools\algorithm_studio\requirements.txt
+```
 
 ```bat
 algorithmDevTools\launch_algorithmDevTools.bat
@@ -291,6 +295,8 @@ AlgoForge is suitable for the following types of developers or teams:
 - Platform developers who want to expose algorithm capabilities through an SDK
 
 ## 8. 关于项目本身，以及后面的更新计划
+
+项目愿景和长期更新计划已整理到 [`docs/VISION.md`](docs/VISION.md)，本节保留兼容说明。
 
 项目旨在成为算法运行与装配的底层基础设施，目标是提供接近“系统底座”级别的能力：统一调度、可组合执行、可观测调试与稳定集成。
 
@@ -572,10 +578,14 @@ build_debugtool.bat
 ### 6.2 构建算法包
 
 ```bat
-build_algorithm.bat <algorithm_target_name>
+build_algorithm_releaseWithDebugInfo.bat <algorithm_target_name>
 ```
 
 ### 6.3 启动图形化工具
+
+```bat
+py -3 -m pip install -r algorithmDevTools\algorithm_studio\requirements.txt
+```
 
 ```bat
 algorithmDevTools\launch_algorithmDevTools.bat

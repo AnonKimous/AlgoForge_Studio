@@ -30,6 +30,10 @@
 
 namespace {
 
+#ifndef ALGOFORGE_VERBOSE_RUNTIME_LOGGING
+#define ALGOFORGE_VERBOSE_RUNTIME_LOGGING 0
+#endif
+
 struct PipelineRunnerOptions {
   bool enabled{false};
   std::string algorithm_name{"v4a16_fireworks_pipeline_demo"};
@@ -571,6 +575,13 @@ bool _WritePpmImage(
   }
 
   return true;
+}
+
+std::filesystem::path _BuildPipelineFramePreviewPath(
+  const std::filesystem::path& output_path,
+  uint32_t frame_index) {
+  return output_path.parent_path() /
+    (output_path.stem().string() + "_frame" + std::to_string(frame_index) + output_path.extension().string());
 }
 
 std::vector<std::byte> _ReadBinaryFile(const std::filesystem::path& path) {
@@ -1209,19 +1220,6 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
   }
   append_progress("start_ticking_end");
   append_progress("ticking_started");
-  debug_tool::DebugCommandResult timing_request_result{};
-  if (!debug_tool::DebugCmd::Execute(
-        runtime,
-        debug_tool::DebugCommand{
-          .id = debug_tool::DebugCommandId::RequestTimingLog,
-          .agent_index = 0u,
-        },
-        &timing_request_result)) {
-    throw std::runtime_error(
-      timing_request_result.message.empty()
-        ? "Failed to request pipeline timing log."
-        : timing_request_result.message);
-  }
   if (!debug_tool::DebugCmd::Execute(runtime, debug_tool::DebugCommand{
         .id = debug_tool::DebugCommandId::SetRenderPreviewExtent,
         .preview_extent = ImVec2(
@@ -1231,6 +1229,26 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
     throw std::runtime_error("Failed to set pipeline preview extent.");
   }
   append_progress("preview_extent_set");
+
+  runtime_systems::RenderPreviewRequest preview_request{};
+  if (!runtime.BuildRenderPreviewRequest(
+        0u,
+        mounted_pipeline_index,
+        &preview_request,
+        &error_message) ||
+      !preview_request.valid) {
+    throw std::runtime_error(
+      error_message.empty()
+        ? "Render preview request is invalid after pipeline mount."
+        : error_message);
+  }
+  if (!debug_tool::DebugCmd::Execute(runtime, debug_tool::DebugCommand{
+        .id = debug_tool::DebugCommandId::SetRenderPreviewRequest,
+        .preview_request = std::move(preview_request),
+      }, nullptr)) {
+    throw std::runtime_error("Failed to set pipeline preview request before ticking.");
+  }
+  append_progress("preview_request_set_before_ticks");
 
   std::cout
     << "pipeline_runner.begin algorithm=" << options.algorithm_name
@@ -1243,8 +1261,26 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
   std::optional<PositionSample> first_valid_position{};
   PositionSample last_valid_position{};
   bool observed_motion = false;
+  std::vector<std::byte> first_preview_rgba{};
+  std::vector<std::byte> last_preview_rgba{};
+  ImVec2 last_preview_size{};
+  uint64_t first_preview_hash = 0u;
+  uint64_t last_preview_hash = 0u;
 
   for (uint32_t tick_index = 0u; tick_index < options.ticks; ++tick_index) {
+    debug_tool::DebugCommandResult timing_request_result{};
+    if (!debug_tool::DebugCmd::Execute(
+          runtime,
+          debug_tool::DebugCommand{
+            .id = debug_tool::DebugCommandId::RequestTimingLog,
+            .agent_index = 0u,
+          },
+          &timing_request_result)) {
+      throw std::runtime_error(
+        timing_request_result.message.empty()
+          ? "Failed to request pipeline timing log."
+          : timing_request_result.message);
+    }
     append_progress("tick_loop_begin_" + std::to_string(tick_index + 1u));
     std::this_thread::sleep_for(std::chrono::milliseconds(12));
     if (!runtime.Tick()) {
@@ -1254,6 +1290,51 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
           : runtime.ui_status_message());
     }
     append_progress("tick_complete_" + std::to_string(tick_index + 1u));
+
+    std::vector<std::byte> frame_rgba{};
+    ImVec2 frame_size{};
+    if (!runtime.runtime_environment().ReadbackRenderPreviewTexture(&frame_rgba, &frame_size)) {
+      throw std::runtime_error(
+        "Failed to read back pipeline preview frame " + std::to_string(tick_index + 1u) + ".");
+    }
+    const uint32_t frame_width = static_cast<uint32_t>(frame_size.x);
+    const uint32_t frame_height = static_cast<uint32_t>(frame_size.y);
+    const uint64_t frame_hash = _HashBytes(frame_rgba);
+    const size_t frame_pixel_count =
+      static_cast<size_t>(frame_width) * static_cast<size_t>(frame_height);
+    size_t frame_non_empty_pixel_count = 0u;
+    for (size_t pixel_index = 0u; pixel_index < frame_pixel_count; ++pixel_index) {
+      const size_t byte_index = pixel_index * 4u;
+      if (frame_rgba[byte_index + 0u] != std::byte{0} ||
+          frame_rgba[byte_index + 1u] != std::byte{0} ||
+          frame_rgba[byte_index + 2u] != std::byte{0} ||
+          frame_rgba[byte_index + 3u] != std::byte{0}) {
+        ++frame_non_empty_pixel_count;
+      }
+    }
+    if (tick_index == 0u) {
+      first_preview_rgba = frame_rgba;
+      first_preview_hash = frame_hash;
+    }
+    last_preview_rgba = std::move(frame_rgba);
+    last_preview_size = frame_size;
+    last_preview_hash = frame_hash;
+    if (tick_index < 2u &&
+        !_WritePpmImage(
+          _BuildPipelineFramePreviewPath(render_preview_output_path, tick_index + 1u),
+          tick_index == 0u ? first_preview_rgba : last_preview_rgba,
+          frame_width,
+          frame_height)) {
+      throw std::runtime_error(
+        "Failed to write pipeline preview frame " + std::to_string(tick_index + 1u) + ".");
+    }
+    std::cout
+      << "  frame[" << (tick_index + 1u) << "] hash=0x"
+      << std::hex << frame_hash << std::dec
+      << " pixels=" << frame_non_empty_pixel_count
+      << " output="
+      << _BuildPipelineFramePreviewPath(render_preview_output_path, tick_index + 1u).string()
+      << '\n';
 
     debug_tool::AgentRuntimeSummary agent_summary{};
     if (!runtime.GetAgentSummary(0u, &agent_summary)) {
@@ -1277,8 +1358,11 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
       throw std::runtime_error("Mounted pipeline stages disappeared during runner execution.");
     }
 
+#if ALGOFORGE_VERBOSE_RUNTIME_LOGGING
     std::cout << "[tick " << (tick_index + 1u) << "] stage_count=" << pipeline_stages.size() << '\n';
+#endif
     for (const debug_tool::AlgorithmRuntimeSummary& summary : pipeline_stages) {
+#if ALGOFORGE_VERBOSE_RUNTIME_LOGGING
       append_reflection_probe(
         "tick=" + std::to_string(tick_index + 1u) +
         " stage_index=" + std::to_string(summary.pipeline_stage_index) +
@@ -1308,6 +1392,7 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
 
       _PrintReflectionSnapshotPresence("reflection", summary.reflection_snapshot);
       _PrintReflectionSnapshot(summary.reflection_snapshot);
+#endif
       if (summary.pipeline_stage_index == 0u) {
         const PositionSample sample = _ExtractPositionSample(summary.reflection_snapshot);
         if (sample.valid) {
@@ -1321,7 +1406,9 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
           last_valid_position = sample;
         }
       }
+#if ALGOFORGE_VERBOSE_RUNTIME_LOGGING
       _PrintBridgeDebugSummary(summary.bridge_debug_set);
+#endif
     }
   }
 
@@ -1331,65 +1418,14 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
     throw std::runtime_error("Failed to pause pipeline ticking.");
   }
   append_progress("ticking_paused");
-
-  debug_tool::DebugCommandResult timing_export_result{};
-  if (!debug_tool::DebugCmd::Execute(
-        runtime,
-        debug_tool::DebugCommand{
-          .id = debug_tool::DebugCommandId::ExportPipelineTiming,
-          .agent_index = 0u,
-          .pipeline_name = mounted_pipeline_name,
-        },
-        &timing_export_result)) {
+  if (options.ticks >= 2u && first_preview_hash == last_preview_hash) {
     throw std::runtime_error(
-      timing_export_result.message.empty()
-        ? "Failed to export pipeline timing artifacts."
-        : timing_export_result.message);
-  }
-  append_progress("pipeline_timing_csv=" + timing_export_result.csv_path);
-  append_progress("pipeline_timing_mermaid=" + timing_export_result.mermaid_path);
-  std::cout
-    << "pipeline_timing.csv=" << timing_export_result.csv_path << '\n'
-    << "pipeline_timing.mermaid=" << timing_export_result.mermaid_path << '\n';
-
-  runtime_systems::RenderPreviewRequest preview_request{};
-  if (!runtime.BuildRenderPreviewRequest(0u, mounted_pipeline_index, &preview_request, &error_message)) {
-    throw std::runtime_error(
-      error_message.empty()
-        ? "Failed to build render preview request for mounted pipeline."
-        : error_message);
-  }
-  if (!preview_request.valid) {
-    throw std::runtime_error("Render preview request is invalid after pipeline execution.");
-  }
-  if (!debug_tool::DebugCmd::Execute(runtime, debug_tool::DebugCommand{
-        .id = debug_tool::DebugCommandId::SetRenderPreviewRequest,
-        .preview_request = std::move(preview_request),
-      }, nullptr)) {
-    throw std::runtime_error("Failed to set pipeline preview request.");
-  }
-  append_progress("preview_request_set");
-
-  if (!runtime.runtime_environment().Tick()) {
-    throw std::runtime_error("Runtime environment failed while rendering the preview frame.");
-  }
-  append_progress("preview_frame_rendered");
-
-  if (!runtime.has_render_preview_texture()) {
-    throw std::runtime_error(
-      "Render preview texture was not created. summary=" + runtime.render_preview_debug_summary());
+      "VK/pipeline preview frames are identical; pipeline execution did not advance the image.");
   }
 
-  std::vector<std::byte> preview_rgba{};
-  ImVec2 preview_size{};
-  if (!runtime.runtime_environment().ReadbackRenderPreviewTexture(&preview_rgba, &preview_size)) {
-    throw std::runtime_error(
-      "Failed to read back render preview texture. summary=" + runtime.render_preview_debug_summary());
-  }
-  append_progress("preview_readback_complete");
-
-  const uint32_t preview_width = static_cast<uint32_t>(preview_size.x);
-  const uint32_t preview_height = static_cast<uint32_t>(preview_size.y);
+  const uint32_t preview_width = static_cast<uint32_t>(last_preview_size.x);
+  const uint32_t preview_height = static_cast<uint32_t>(last_preview_size.y);
+  const std::vector<std::byte>& preview_rgba = last_preview_rgba;
   if (preview_width == 0u || preview_height == 0u) {
     throw std::runtime_error("Render preview readback returned an empty extent.");
   }
@@ -1414,6 +1450,26 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
       "Failed to write render preview image: " + render_preview_output_path.string());
   }
   append_progress("preview_image_written");
+
+  debug_tool::DebugCommandResult timing_export_result{};
+  if (!debug_tool::DebugCmd::Execute(
+        runtime,
+        debug_tool::DebugCommand{
+          .id = debug_tool::DebugCommandId::ExportPipelineTiming,
+          .agent_index = 0u,
+          .pipeline_name = mounted_pipeline_name,
+        },
+        &timing_export_result)) {
+    throw std::runtime_error(
+      timing_export_result.message.empty()
+        ? "Failed to export pipeline timing artifacts."
+        : timing_export_result.message);
+  }
+  append_progress("pipeline_timing_csv=" + timing_export_result.csv_path);
+  append_progress("pipeline_timing_mermaid=" + timing_export_result.mermaid_path);
+  std::cout
+    << "pipeline_timing.csv=" << timing_export_result.csv_path << '\n'
+    << "pipeline_timing.mermaid=" << timing_export_result.mermaid_path << '\n';
 
   if (first_valid_position.has_value() && last_valid_position.valid && !observed_motion) {
     throw std::runtime_error(
@@ -1571,6 +1627,26 @@ bool _RunAlgorithmRunner(const AlgorithmRunnerOptions& options) {
   }
   append_progress("preview_extent_set");
 
+  runtime_systems::RenderPreviewRequest tick_preview_request{};
+  if (!runtime.BuildRenderPreviewRequest(
+        0u,
+        mounted_algorithm_index,
+        &tick_preview_request,
+        &error_message) ||
+      !tick_preview_request.valid) {
+    throw std::runtime_error(
+      error_message.empty()
+        ? "Render preview request is invalid before algorithm ticking."
+        : error_message);
+  }
+  if (!debug_tool::DebugCmd::Execute(runtime, debug_tool::DebugCommand{
+        .id = debug_tool::DebugCommandId::SetRenderPreviewRequest,
+        .preview_request = std::move(tick_preview_request),
+      }, nullptr)) {
+    throw std::runtime_error("Failed to set algorithm preview request before ticking.");
+  }
+  append_progress("preview_request_set_before_ticks");
+
   std::cout
     << "algorithm_runner.begin algorithm=" << options.algorithm_name
     << " execution=" << _ExecutionPreferenceName(options.execution_preference)
@@ -1589,10 +1665,49 @@ bool _RunAlgorithmRunner(const AlgorithmRunnerOptions& options) {
     }
     append_progress("tick_complete_" + std::to_string(tick_index + 1u));
 
+    std::vector<std::byte> frame_rgba{};
+    ImVec2 frame_size{};
+    if (!runtime.runtime_environment().ReadbackRenderPreviewTexture(&frame_rgba, &frame_size)) {
+      throw std::runtime_error(
+        "Failed to read back algorithm preview frame " + std::to_string(tick_index + 1u) + ".");
+    }
+    const uint32_t frame_width = static_cast<uint32_t>(frame_size.x);
+    const uint32_t frame_height = static_cast<uint32_t>(frame_size.y);
+    const uint64_t frame_hash = _HashBytes(frame_rgba);
+    const size_t frame_pixel_count =
+      static_cast<size_t>(frame_width) * static_cast<size_t>(frame_height);
+    size_t frame_non_empty_pixel_count = 0u;
+    for (size_t pixel_index = 0u; pixel_index < frame_pixel_count; ++pixel_index) {
+      const size_t byte_index = pixel_index * 4u;
+      if (frame_rgba[byte_index + 0u] != std::byte{0} ||
+          frame_rgba[byte_index + 1u] != std::byte{0} ||
+          frame_rgba[byte_index + 2u] != std::byte{0} ||
+          frame_rgba[byte_index + 3u] != std::byte{0}) {
+        ++frame_non_empty_pixel_count;
+      }
+    }
+    if (tick_index < 2u &&
+        !_WritePpmImage(
+          _BuildPipelineFramePreviewPath(render_preview_output_path, tick_index + 1u),
+          frame_rgba,
+          frame_width,
+          frame_height)) {
+      throw std::runtime_error(
+        "Failed to write algorithm preview frame " + std::to_string(tick_index + 1u) + ".");
+    }
+    std::cout
+      << "  frame[" << (tick_index + 1u) << "] hash=0x"
+      << std::hex << frame_hash << std::dec
+      << " pixels=" << frame_non_empty_pixel_count
+      << " output="
+      << _BuildPipelineFramePreviewPath(render_preview_output_path, tick_index + 1u).string()
+      << '\n';
+
     debug_tool::AgentRuntimeSummary agent_summary{};
     if (!runtime.GetAgentSummary(0u, &agent_summary)) {
       throw std::runtime_error("Failed to collect agent summary after algorithm tick.");
     }
+#if ALGOFORGE_VERBOSE_RUNTIME_LOGGING
     std::cout << "[tick " << (tick_index + 1u) << "] algorithm_count=" << agent_summary.algorithms.size() << '\n';
     for (const debug_tool::AlgorithmRuntimeSummary& summary : agent_summary.algorithms) {
       std::cout
@@ -1652,6 +1767,7 @@ bool _RunAlgorithmRunner(const AlgorithmRunnerOptions& options) {
         }
       }
     }
+#endif
   }
 
   if (!debug_tool::DebugCmd::Execute(runtime, debug_tool::DebugCommand{

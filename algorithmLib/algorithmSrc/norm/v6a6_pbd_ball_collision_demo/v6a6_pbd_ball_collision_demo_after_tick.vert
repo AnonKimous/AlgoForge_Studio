@@ -48,6 +48,10 @@ layout(set = 0, binding = 11) buffer BvhYOut {
   float data[];
 } bvh_y_out;
 
+layout(set = 0, binding = 13) buffer RenderDrawOut {
+  uint data[];
+} render_draw_out;
+
 layout(push_constant) uniform AlgorithmViewport {
   float width;
   float height;
@@ -180,9 +184,13 @@ void main() {
     float dist2 = dot(delta, delta);
     float min_dist = radius * 2.0;
     float min_dist2 = min_dist * min_dist;
-    if (dist2 < min_dist2 && dist2 > 1.0e-6) {
-      float dist = sqrt(dist2);
-      vec2 n = delta / dist;
+    if (dist2 < min_dist2) {
+      float dist = sqrt(max(dist2, 1.0e-6));
+      vec2 n = dist2 > 1.0e-6
+        ? delta / dist
+        : vec2(
+          cos(float(index + other_index) * 0.6180339887),
+          sin(float(index + other_index) * 0.6180339887));
       float penetration = min_dist - dist;
       pos += n * (penetration * 0.5);
       float rel_normal = dot(vel - other_vel, n);
@@ -214,6 +222,13 @@ void main() {
     }
     if (uint(bvh_y_out.data.length()) > 4u + index) {
       bvh_y_out.data[4u + index] = pos.y;
+    }
+
+    if (index == 0u) {
+      render_draw_out.data[0] = 4u;
+      render_draw_out.data[1] = kBallCount;
+      render_draw_out.data[2] = 0u;
+      render_draw_out.data[3] = 0u;
     }
   }
 

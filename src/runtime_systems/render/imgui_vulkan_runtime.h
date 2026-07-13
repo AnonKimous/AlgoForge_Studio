@@ -12,6 +12,8 @@
 #include <imgui_impl_vulkan.h>
 
 #include <functional>
+#include <chrono>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -76,6 +78,8 @@ class ImGuiVulkanRuntime {
   bool has_pending_render_preview_request_{false};
   VkDescriptorSet result_texture_descriptor_set_{VK_NULL_HANDLE};
   RuntimeVkResultImage result_image_{};
+  uint64_t preview_frame_sequence_{0u};
+  std::chrono::steady_clock::time_point last_preview_frame_end_{};
 };
 
 }  // namespace runtime_systems

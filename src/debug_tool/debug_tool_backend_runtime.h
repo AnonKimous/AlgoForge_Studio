@@ -5,6 +5,7 @@
 
 #include <chrono>
 #include <cassert>
+#include <cstdint>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -168,6 +169,7 @@ class DebugToolBackendRuntime : public IDebugToolHost {
   std::chrono::steady_clock::time_point last_frame_time_{}; 
   float frame_dt_{0.0f}; 
   Vec2 render_preview_extent_{1024.0f, 1024.0f};
+  uint64_t tick_sequence_{0u};
 };
 
 }  // namespace debug_tool_backend

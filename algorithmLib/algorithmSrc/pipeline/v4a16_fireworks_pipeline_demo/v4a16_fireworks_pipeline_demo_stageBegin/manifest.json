@@ -312,6 +312,12 @@
           "kind": "variable",
           "tuple_width": 1,
           "required": true
+        },
+        {
+          "name": "render_draw",
+          "kind": "array",
+          "tuple_width": 1,
+          "required": true
         }
       ]
     },

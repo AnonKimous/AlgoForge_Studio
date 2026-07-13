@@ -228,13 +228,19 @@
           "tuple_width": 1,
           "required": true
         },
-        {
-          "name": "bvh_y",
-          "kind": "array",
-          "tuple_width": 1,
-          "required": true
-        }
-      ],
+          {
+            "name": "bvh_y",
+            "kind": "array",
+            "tuple_width": 1,
+            "required": true
+          },
+          {
+            "name": "render_draw",
+            "kind": "draw_indirect",
+            "tuple_width": 1,
+            "required": true
+          }
+        ],
       "variables": []
     },
     "shader": {
@@ -248,9 +254,26 @@
       "preTick": {
         "stage_name": "preTick",
         "stage_kind": "preTick",
+        "execution_preference": "vk",
         "functions": [
           "InitializeCollisionState"
-        ]
+        ],
+        "used_algorithm_containers": {
+          "arrays": [
+            {
+              "name": "render_draw",
+              "kind": "array",
+              "tuple_width": 1,
+              "required": true
+            }
+          ],
+          "variables": []
+        },
+        "shader": {
+          "pipeline": "graphics",
+          "vertex": "v6a6_pbd_ball_collision_demo_pre_tick.vert",
+          "fragment": "v6a6_pbd_ball_collision_demo_pre_tick.frag"
+        }
       },
       "resultRender": {
         "stage_name": "resultRender",

@@ -127,6 +127,7 @@ class DebugToolFrontendPanel {
   void DrawDebugToolFrontend(IDebugToolHost& host);
   void DrawWindowMenu();
   void DrawAgentComposerUi(IDebugToolHost& host);
+  void DrawAgentRuntimeControlsUi(IDebugToolHost& host);
   void DrawAgentBindingUi(IDebugToolHost& host);
   void DrawAgentManagerUi(IDebugToolHost& host);
   void DrawAgentDetailUi(IDebugToolHost& host);

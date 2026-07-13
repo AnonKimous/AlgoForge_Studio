@@ -1112,6 +1112,540 @@ void DebugToolFrontendPanel::DrawFileBrowserUi(IDebugToolHost&) {
   ImGui::End();
 }
 
+void DebugToolFrontendPanel::DrawAgentRuntimeControlsUi(IDebugToolHost& host) {
+  InitializeAgentComposerDefaults();
+  InitializeAlgorithmCatalog(host);
+
+  if (!host.has_agents()) {
+    return;
+  }
+
+  if (agent_composer_ui_state_.algorithm_name[0] == '\0' &&
+      !agent_composer_ui_state_.algorithm_catalog_entries.empty()) {
+    _SetTextBuffer(
+      &agent_composer_ui_state_.algorithm_name,
+      agent_composer_ui_state_.algorithm_catalog_entries.front().algorithm_name);
+    agent_composer_ui_state_.preview_request_dirty = true;
+    RefreshAlgorithmComposerBindings(
+      host,
+      agent_composer_ui_state_.algorithm_catalog_entries.front().algorithm_name);
+  }
+
+  debug_tool::AgentRuntimeSummary selected_agent_summary{};
+  if (!host.GetAgentSummary(0u, &selected_agent_summary)) {
+    return;
+  }
+
+  const auto refresh_selected_algorithm_summary = [&]() -> const debug_tool::AlgorithmRuntimeSummary* {
+    if (!host.GetAgentSummary(0u, &selected_agent_summary)) {
+      return nullptr;
+    }
+
+    int refreshed_algorithm_index = agent_composer_ui_state_.selected_algorithm_index;
+    if (refreshed_algorithm_index < 0 ||
+        refreshed_algorithm_index >= static_cast<int>(selected_agent_summary.algorithms.size())) {
+      if (!selected_agent_summary.algorithms.empty()) {
+        refreshed_algorithm_index = 0;
+        agent_composer_ui_state_.selected_algorithm_index = refreshed_algorithm_index;
+        agent_composer_ui_state_.preview_request_dirty = true;
+      } else {
+        return nullptr;
+      }
+    }
+
+    return &selected_agent_summary.algorithms[static_cast<size_t>(refreshed_algorithm_index)];
+  };
+
+  int selected_algorithm_index = agent_composer_ui_state_.selected_algorithm_index;
+  const debug_tool::AlgorithmRuntimeSummary* selected_algorithm_summary =
+    refresh_selected_algorithm_summary();
+
+  auto build_and_apply_preview_for_algorithm = [&](size_t algorithm_index, std::string* out_error_message) -> bool {
+    runtime_systems::RenderPreviewRequest mounted_preview_request{};
+    std::string mounted_preview_error_message;
+    if (!host.BuildRenderPreviewRequest(
+          0u,
+          algorithm_index,
+          &mounted_preview_request,
+          &mounted_preview_error_message)) {
+      ExecuteDebugCommand(host, debug_tool::DebugCommand{
+        .id = debug_tool::DebugCommandId::ClearRenderPreviewRequest,
+      });
+      if (out_error_message) {
+        *out_error_message = mounted_preview_error_message.empty()
+          ? "Submitted algorithm did not produce a drawable preview."
+          : std::move(mounted_preview_error_message);
+      }
+      return false;
+    }
+    if (!mounted_preview_request.valid) {
+      ExecuteDebugCommand(host, debug_tool::DebugCommand{
+        .id = debug_tool::DebugCommandId::ClearRenderPreviewRequest,
+      });
+      if (out_error_message) {
+        *out_error_message = mounted_preview_error_message.empty()
+          ? "Submitted algorithm did not produce a drawable preview."
+          : std::move(mounted_preview_error_message);
+      }
+      return false;
+    }
+    if (out_error_message) {
+      out_error_message->clear();
+    }
+    ExecuteDebugCommand(host, debug_tool::DebugCommand{
+      .id = debug_tool::DebugCommandId::SetRenderPreviewRequest,
+      .preview_request = std::move(mounted_preview_request),
+    });
+    agent_composer_ui_state_.preview_request_dirty = false;
+    return true;
+  };
+
+  const std::string algorithm_name = _TrimCopy(agent_composer_ui_state_.algorithm_name.data());
+
+  const auto build_current_resource_bindings = [&]() {
+    std::vector<debug_tool::AlgorithmResourceBinding> resource_bindings;
+    resource_bindings.reserve(agent_composer_ui_state_.resource_inputs.size());
+    for (const auto& resource : agent_composer_ui_state_.resource_inputs) {
+      resource_bindings.push_back(debug_tool::AlgorithmResourceBinding{
+        .resource_name = resource.resource_name,
+        .resource_kind = resource.resource_kind,
+        .source_path = _TrimCopy(resource.resource_path.data()),
+      });
+    }
+    return resource_bindings;
+  };
+
+  const auto build_current_descriptor_values = [&]() {
+    std::vector<debug_tool::AlgorithmDescriptorValue> descriptor_values;
+    descriptor_values.reserve(agent_composer_ui_state_.descriptor_inputs.size());
+    for (const auto& descriptor : agent_composer_ui_state_.descriptor_inputs) {
+      descriptor_values.push_back(debug_tool::AlgorithmDescriptorValue{
+        .descriptor_name = descriptor.descriptor_name,
+        .scalar_value = descriptor.scalar_value,
+      });
+    }
+    return descriptor_values;
+  };
+
+  const auto build_effective_mount_bindings = [&]() {
+    std::vector<debug_tool::AlgorithmResourceBinding> resource_bindings = build_current_resource_bindings();
+    std::vector<debug_tool::AlgorithmDescriptorValue> descriptor_values = build_current_descriptor_values();
+    if ((resource_bindings.empty() || descriptor_values.empty()) && !algorithm_name.empty()) {
+      std::vector<debug_tool::AlgorithmResourceBinding> default_resource_bindings;
+      std::vector<debug_tool::AlgorithmDescriptorValue> default_descriptor_values;
+      bool has_default_file = false;
+      std::string default_error_message;
+      if (host.LoadAlgorithmPackageDefaultBindings(
+            algorithm_name,
+            &default_resource_bindings,
+            &default_descriptor_values,
+            &has_default_file,
+            &default_error_message) &&
+          has_default_file) {
+        if (resource_bindings.empty()) {
+          resource_bindings = std::move(default_resource_bindings);
+        }
+        if (descriptor_values.empty()) {
+          descriptor_values = std::move(default_descriptor_values);
+        }
+      }
+    }
+    return std::pair{
+      std::move(resource_bindings),
+      std::move(descriptor_values),
+    };
+  };
+
+  const auto clear_built_in_agent_mounts = [&](std::string* out_error_message) {
+    std::string clear_error_message;
+    debug_tool::AgentRuntimeSummary clear_summary{};
+    while (host.GetAgentSummary(0u, &clear_summary) && !clear_summary.algorithms.empty()) {
+      if (!ExecuteDebugCommand(host, debug_tool::DebugCommand{
+            .id = debug_tool::DebugCommandId::DetachAlgorithm,
+            .algorithm_index = 0u,
+          }, &clear_error_message)) {
+        if (out_error_message) {
+          *out_error_message = clear_error_message.empty()
+            ? "Failed to clear mounted algorithms from the built-in agent."
+            : std::move(clear_error_message);
+        }
+        return false;
+      }
+    }
+    agent_composer_ui_state_.selected_algorithm_index = -1;
+    agent_composer_ui_state_.preview_request_dirty = true;
+    ExecuteDebugCommand(host, debug_tool::DebugCommand{
+      .id = debug_tool::DebugCommandId::ClearRenderPreviewRequest,
+    });
+    ExecuteDebugCommand(host, debug_tool::DebugCommand{
+      .id = debug_tool::DebugCommandId::ClearVkRuntimeCaches,
+    });
+    selected_algorithm_summary = refresh_selected_algorithm_summary();
+    if (out_error_message) {
+      out_error_message->clear();
+    }
+    return true;
+  };
+
+  bool current_algorithm_is_pipeline = false;
+  std::string pipeline_query_error_message;
+  if (!algorithm_name.empty() &&
+      !host.IsPipelineAlgorithm(
+        algorithm_name,
+        &current_algorithm_is_pipeline,
+        &pipeline_query_error_message)) {
+    current_algorithm_is_pipeline = false;
+  }
+
+  const auto build_testsubmit_pipeline_name = [&](const std::string& pipeline_algorithm_name) {
+    std::unordered_set<std::string> used_pipeline_names{};
+    for (const debug_tool::AlgorithmRuntimeSummary& algorithm_summary : selected_agent_summary.algorithms) {
+      if (algorithm_summary.pipeline_stage && !algorithm_summary.pipeline_name.empty()) {
+        used_pipeline_names.insert(algorithm_summary.pipeline_name);
+      }
+    }
+
+    const std::string prefix = pipeline_algorithm_name + "::testsubmit";
+    size_t suffix = 0u;
+    while (true) {
+      const std::string candidate = prefix + "_" + std::to_string(suffix);
+      if (used_pipeline_names.find(candidate) == used_pipeline_names.end()) {
+        return candidate;
+      }
+      ++suffix;
+    }
+  };
+
+  if (selected_algorithm_summary) {
+    runtime_systems::RenderPreviewRequest preview_request{};
+    const size_t preview_algorithm_index = selected_algorithm_index >= 0
+      ? static_cast<size_t>(selected_algorithm_index)
+      : 0u;
+    std::string preview_error_message;
+    if (host.BuildRenderPreviewRequest(
+          0u,
+          preview_algorithm_index,
+          &preview_request,
+          &preview_error_message) &&
+        preview_request.valid) {
+      ExecuteDebugCommand(host, debug_tool::DebugCommand{
+        .id = debug_tool::DebugCommandId::SetRenderPreviewRequest,
+        .preview_request = std::move(preview_request),
+      });
+      agent_composer_ui_state_.preview_request_dirty = false;
+    } else if (selected_algorithm_summary->pipeline_name.empty()) {
+      ExecuteDebugCommand(host, debug_tool::DebugCommand{
+        .id = debug_tool::DebugCommandId::ClearRenderPreviewRequest,
+      });
+      agent_composer_ui_state_.preview_request_dirty = true;
+    }
+  }
+
+  const bool selected_runtime_is_pipeline =
+    selected_algorithm_summary &&
+    selected_algorithm_summary->pipeline_stage &&
+    !selected_algorithm_summary->pipeline_name.empty();
+  const bool selected_runtime_is_normal =
+    selected_algorithm_summary && !selected_algorithm_summary->pipeline_stage;
+  const std::string selected_runtime_pipeline_root_algorithm_name =
+    selected_runtime_is_pipeline && selected_algorithm_summary
+      ? selected_algorithm_summary->pipeline_root_stage_name
+      : std::string{};
+  const bool selected_runtime_pipeline_matches_requested =
+    selected_runtime_is_pipeline &&
+    !selected_runtime_pipeline_root_algorithm_name.empty() &&
+    selected_runtime_pipeline_root_algorithm_name == algorithm_name;
+  const bool selected_runtime_normal_matches_requested =
+    selected_runtime_is_normal &&
+    selected_algorithm_summary &&
+    selected_algorithm_summary->algorithm_name == algorithm_name;
+
+  const auto apply_pipeline_run_policy = [&](const std::string& mounted_name, const char* mounted_state_text) {
+    if (agent_composer_ui_state_.pipeline_run_from_stage0_to_end) {
+      ExecuteDebugCommand(host, debug_tool::DebugCommand{
+        .id = debug_tool::DebugCommandId::StartTick,
+      });
+      host.ui_status_message() = std::string(mounted_state_text) + " '" + mounted_name + "' and started ticking.";
+    } else {
+      ExecuteDebugCommand(host, debug_tool::DebugCommand{
+        .id = debug_tool::DebugCommandId::PauseTick,
+      });
+      host.ui_status_message() = std::string(mounted_state_text) + " '" + mounted_name + "' for stage-by-stage debug.";
+    }
+  };
+
+  ImGui::SeparatorText("Tick / Algorithm Controls");
+  ImGui::Text("Tick State: %s", host.tick_enabled() ? "running" : "paused");
+  if (ImGui::Button("Start Tick", ImVec2(180.0f, 0.0f))) {
+    ExecuteDebugCommand(host, debug_tool::DebugCommand{
+      .id = debug_tool::DebugCommandId::StartTick,
+    });
+    host.ui_status_message() = "Agent manager tick started.";
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Pause Tick", ImVec2(180.0f, 0.0f))) {
+    ExecuteDebugCommand(host, debug_tool::DebugCommand{
+      .id = debug_tool::DebugCommandId::PauseTick,
+    });
+    host.ui_status_message() = "Agent manager tick paused.";
+  }
+
+  if (current_algorithm_is_pipeline) {
+    ImGui::SeparatorText("Pipeline Controls");
+    ImGui::Checkbox(
+      "Run From Stage0 To End",
+      &agent_composer_ui_state_.pipeline_run_from_stage0_to_end);
+    ImGui::TextUnformatted(
+      "Select a mounted stage in Agent Manager to inspect its reflection snapshot while the pipeline is paused.");
+
+    const char* mount_pipeline_label =
+      selected_runtime_pipeline_matches_requested ? "Reset Pipeline" : "Mount Pipeline";
+    if (ImGui::Button(mount_pipeline_label, ImVec2(180.0f, 0.0f))) {
+      if (algorithm_name.empty()) {
+        host.ui_status_message() = "Algorithm name must not be empty.";
+      } else {
+        const auto [resource_bindings, descriptor_values] = build_effective_mount_bindings();
+        std::string attach_error_message;
+        ExecuteDebugCommand(host, debug_tool::DebugCommand{
+          .id = debug_tool::DebugCommandId::PauseTick,
+        });
+        if (!clear_built_in_agent_mounts(&attach_error_message)) {
+          host.ui_status_message() = attach_error_message;
+        } else {
+          const std::string pipeline_instance_name = algorithm_name + "::runner_mount";
+          const std::string pipeline_algorithm_name = algorithm_name;
+          size_t attached_algorithm_index = 0u;
+          debug_tool::DebugCommandResult attach_result{};
+          if (!ExecuteDebugCommand(host, debug_tool::DebugCommand{
+                .id = debug_tool::DebugCommandId::AttachPipelinePackage,
+                .algorithm_name = pipeline_algorithm_name,
+                .pipeline_name = pipeline_instance_name,
+                .execution_preference = agent_composer_ui_state_.execution_preference,
+                .resource_bindings = resource_bindings,
+                .descriptor_values = descriptor_values,
+              }, &attach_error_message, &attach_result)) {
+            host.ui_status_message() = attach_error_message.empty()
+              ? "Failed to mount pipeline package."
+              : ("Failed to mount pipeline package: " + attach_error_message);
+          } else {
+            attached_algorithm_index = attach_result.algorithm_index;
+            agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(attached_algorithm_index);
+            selected_algorithm_index = static_cast<int>(attached_algorithm_index);
+            selected_algorithm_summary = refresh_selected_algorithm_summary();
+            std::string preview_error_message;
+            if (!build_and_apply_preview_for_algorithm(attached_algorithm_index, &preview_error_message)) {
+              host.ui_status_message() = preview_error_message.empty()
+                ? ("Pipeline mounted as '" + pipeline_instance_name + "'. Submit a resource batch to run it.")
+                : ("Pipeline mounted as '" + pipeline_instance_name + "' without a drawable preview: " +
+                  preview_error_message);
+            } else {
+              host.ui_status_message() =
+                "Pipeline mounted as '" + pipeline_instance_name + "'. Submit a resource batch to run it.";
+            }
+          }
+        }
+      }
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button("Submit Resource Batch", ImVec2(180.0f, 0.0f))) {
+      if (algorithm_name.empty()) {
+        host.ui_status_message() = "Algorithm name must not be empty.";
+      } else {
+        const std::string mounted_pipeline_name = algorithm_name + "::runner_mount";
+        std::string attach_error_message;
+        if (!selected_runtime_pipeline_matches_requested) {
+          const auto [resource_bindings, descriptor_values] = build_effective_mount_bindings();
+          ExecuteDebugCommand(host, debug_tool::DebugCommand{
+            .id = debug_tool::DebugCommandId::PauseTick,
+          });
+          if (!clear_built_in_agent_mounts(&attach_error_message)) {
+            host.ui_status_message() = attach_error_message;
+          } else {
+            const std::string pipeline_instance_name = mounted_pipeline_name;
+            size_t mounted_pipeline_index = 0u;
+            debug_tool::DebugCommandResult attach_result{};
+            if (!ExecuteDebugCommand(host, debug_tool::DebugCommand{
+                  .id = debug_tool::DebugCommandId::AttachPipelinePackage,
+                  .algorithm_name = algorithm_name,
+                  .pipeline_name = pipeline_instance_name,
+                  .execution_preference = agent_composer_ui_state_.execution_preference,
+                  .resource_bindings = resource_bindings,
+                  .descriptor_values = descriptor_values,
+                }, &attach_error_message, &attach_result)) {
+              host.ui_status_message() = attach_error_message.empty()
+                ? "Failed to mount pipeline before submission."
+                : ("Failed to mount pipeline before submission: " + attach_error_message);
+              return;
+            }
+            mounted_pipeline_index = attach_result.algorithm_index;
+            agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(mounted_pipeline_index);
+            selected_algorithm_index = static_cast<int>(mounted_pipeline_index);
+            selected_algorithm_summary = refresh_selected_algorithm_summary();
+          }
+        }
+
+        const auto [resource_bindings, descriptor_values] = build_effective_mount_bindings();
+        const std::string pipeline_instance_name = build_testsubmit_pipeline_name(mounted_pipeline_name);
+        size_t attached_algorithm_index = 0u;
+        debug_tool::DebugCommandResult attach_result{};
+        if (!ExecuteDebugCommand(host, debug_tool::DebugCommand{
+              .id = debug_tool::DebugCommandId::AttachPipelinePackage,
+              .algorithm_name = algorithm_name,
+              .pipeline_name = pipeline_instance_name,
+              .execution_preference = agent_composer_ui_state_.execution_preference,
+              .resource_bindings = resource_bindings,
+              .descriptor_values = descriptor_values,
+            }, &attach_error_message, &attach_result)) {
+          host.ui_status_message() = attach_error_message.empty()
+            ? "Failed to append the pipeline resource submission."
+            : ("Failed to append the pipeline resource submission: " + attach_error_message);
+        } else {
+          attached_algorithm_index = attach_result.algorithm_index;
+          agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(attached_algorithm_index);
+          selected_algorithm_index = static_cast<int>(attached_algorithm_index);
+          selected_algorithm_summary = refresh_selected_algorithm_summary();
+          std::string preview_error_message;
+          const bool preview_ready =
+            build_and_apply_preview_for_algorithm(attached_algorithm_index, &preview_error_message);
+          ExecuteDebugCommand(host, debug_tool::DebugCommand{
+            .id = debug_tool::DebugCommandId::StartTick,
+          });
+          if (!preview_ready) {
+            host.ui_status_message() = preview_error_message.empty()
+              ? "Pipeline resource submission mounted, but no drawable result was produced."
+              : std::move(preview_error_message);
+          } else if (agent_composer_ui_state_.pipeline_run_from_stage0_to_end) {
+            host.ui_status_message() = "Submitted pipeline resource batch and started ticking.";
+          }
+        }
+      }
+    }
+  } else {
+    ImGui::SeparatorText("Algorithm Controls");
+    const char* mount_algorithm_label =
+      selected_runtime_normal_matches_requested ? "Reset Mount" : "Mount Algorithm";
+    if (ImGui::Button(mount_algorithm_label, ImVec2(180.0f, 0.0f))) {
+      if (algorithm_name.empty()) {
+        host.ui_status_message() = "Algorithm name must not be empty.";
+      } else {
+        const auto [resource_bindings, descriptor_values] = build_effective_mount_bindings();
+        std::string attach_error_message;
+        ExecuteDebugCommand(host, debug_tool::DebugCommand{
+          .id = debug_tool::DebugCommandId::PauseTick,
+        });
+        if (!clear_built_in_agent_mounts(&attach_error_message)) {
+          host.ui_status_message() = attach_error_message;
+        } else {
+          size_t attached_algorithm_index = 0u;
+          debug_tool::DebugCommandResult attach_result{};
+          if (!ExecuteDebugCommand(host, debug_tool::DebugCommand{
+                .id = debug_tool::DebugCommandId::AttachAlgorithm,
+                .algorithm_name = algorithm_name,
+                .mount_mode = debug_tool::AlgorithmMountMode::Direct,
+                .execution_preference = agent_composer_ui_state_.execution_preference,
+                .resource_bindings = resource_bindings,
+                .descriptor_values = descriptor_values,
+              }, &attach_error_message, &attach_result)) {
+            host.ui_status_message() = attach_error_message.empty()
+              ? "Failed to mount algorithm on built-in agent."
+              : ("Failed to mount algorithm on built-in agent: " + attach_error_message);
+          } else {
+            attached_algorithm_index = attach_result.algorithm_index;
+            agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(attached_algorithm_index);
+            selected_algorithm_index = static_cast<int>(attached_algorithm_index);
+            selected_algorithm_summary = refresh_selected_algorithm_summary();
+            std::string preview_error_message;
+            const bool preview_ready =
+              build_and_apply_preview_for_algorithm(attached_algorithm_index, &preview_error_message);
+            if (!preview_ready) {
+              ExecuteDebugCommand(host, debug_tool::DebugCommand{
+                .id = debug_tool::DebugCommandId::ClearRenderPreviewRequest,
+              });
+              agent_composer_ui_state_.preview_request_dirty = true;
+              host.ui_status_message() = preview_error_message.empty()
+                ? "Algorithm mounted. No drawable preview is available, but ticking can still start."
+                : ("Algorithm mounted without drawable preview: " + preview_error_message);
+            } else {
+              host.ui_status_message() = "Algorithm mounted. Press Start Tick to run it.";
+            }
+          }
+        }
+      }
+    }
+
+    ImGui::SameLine();
+    ImGui::BeginDisabled(selected_algorithm_index < 0);
+    if (ImGui::Button("Start Tick", ImVec2(180.0f, 0.0f))) {
+      const debug_tool::AlgorithmRuntimeSummary* active_algorithm_summary = selected_algorithm_summary;
+      if (!active_algorithm_summary) {
+        active_algorithm_summary = refresh_selected_algorithm_summary();
+      }
+      if (!active_algorithm_summary) {
+        host.ui_status_message() = "Mount an algorithm first.";
+      } else if (!active_algorithm_summary->pipeline_stage) {
+        const size_t mounted_algorithm_index = static_cast<size_t>(selected_algorithm_index);
+        std::string preview_error_message;
+        const bool preview_ready = build_and_apply_preview_for_algorithm(
+          mounted_algorithm_index,
+          &preview_error_message);
+        if (!preview_ready) {
+          ExecuteDebugCommand(host, debug_tool::DebugCommand{
+            .id = debug_tool::DebugCommandId::ClearRenderPreviewRequest,
+          });
+          agent_composer_ui_state_.preview_request_dirty = true;
+        }
+        ExecuteDebugCommand(host, debug_tool::DebugCommand{
+          .id = debug_tool::DebugCommandId::StartTick,
+        });
+        host.ui_status_message() = preview_ready
+          ? "Mounted algorithm started."
+          : (preview_error_message.empty()
+              ? "Mounted algorithm started without a drawable preview."
+              : ("Mounted algorithm started without a drawable preview: " + preview_error_message));
+      } else {
+        const size_t mounted_algorithm_index = static_cast<size_t>(selected_algorithm_index);
+        std::string preview_error_message;
+        if (!build_and_apply_preview_for_algorithm(
+              mounted_algorithm_index,
+              &preview_error_message)) {
+          host.ui_status_message() = preview_error_message.empty()
+            ? "Mounted pipeline did not produce a drawable preview."
+            : std::move(preview_error_message);
+        } else {
+          ExecuteDebugCommand(host, debug_tool::DebugCommand{
+            .id = debug_tool::DebugCommandId::StartTick,
+          });
+          host.ui_status_message() = "Mounted pipeline started.";
+        }
+      }
+    }
+    ImGui::EndDisabled();
+  }
+
+  ImGui::Spacing();
+  ImGui::BeginDisabled(!selected_algorithm_summary);
+  if (ImGui::Button("Hot Update DLL + SPV", ImVec2(180.0f, 0.0f))) {
+    size_t rebuilt_algorithm_index = static_cast<size_t>(selected_algorithm_index);
+    std::string hot_reload_error_message;
+    debug_tool::DebugCommandResult hot_reload_result{};
+    if (ExecuteDebugCommand(host, debug_tool::DebugCommand{
+          .id = debug_tool::DebugCommandId::HotReloadAlgorithm,
+          .algorithm_index = static_cast<size_t>(selected_algorithm_index),
+        }, &hot_reload_error_message, &hot_reload_result)) {
+      rebuilt_algorithm_index = hot_reload_result.algorithm_index;
+      agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(rebuilt_algorithm_index);
+      host.ui_status_message() = "Algorithm hot rebuilt and reloaded.";
+    } else {
+      host.ui_status_message() = hot_reload_error_message.empty()
+        ? "Algorithm hot rebuild failed."
+        : std::move(hot_reload_error_message);
+    }
+  }
+  ImGui::EndDisabled();
+
+}
+
 void DebugToolFrontendPanel::DrawAgentManagerUi(IDebugToolHost& host) {
   InitializeAgentComposerDefaults();
 
@@ -1120,28 +1654,18 @@ void DebugToolFrontendPanel::DrawAgentManagerUi(IDebugToolHost& host) {
     return;
   }
 
-  ImGui::SeparatorText("Debug Agent");
-  ImGui::Text("Built-in agent count: %zu", host.agent_count());
-  ImGui::Text("Tick State: %s", host.tick_enabled() ? "running" : "paused");
-  if (ImGui::Button("Start Tick")) {
-    ExecuteDebugCommand(host, debug_tool::DebugCommand{
-      .id = debug_tool::DebugCommandId::StartTick,
-    });
-    host.ui_status_message() = "Agent manager tick started.";
-  }
-  ImGui::SameLine();
-  if (ImGui::Button("Pause Tick")) {
-    ExecuteDebugCommand(host, debug_tool::DebugCommand{
-      .id = debug_tool::DebugCommandId::PauseTick,
-    });
-    host.ui_status_message() = "Agent manager tick paused.";
-  }
   if (!host.has_agents()) {
+    ImGui::SeparatorText("Debug Agent");
+    ImGui::Text("Built-in agent count: %zu", host.agent_count());
     ImGui::TextUnformatted("Debug agent is unavailable.");
     ImGui::End();
     return;
   }
 
+  DrawAgentRuntimeControlsUi(host);
+  ImGui::Separator();
+  ImGui::SeparatorText("Debug Agent");
+  ImGui::Text("Built-in agent count: %zu", host.agent_count());
   DrawAgentComposerUi(host);
   ImGui::Separator();
 
@@ -1562,474 +2086,6 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
     ImGui::SeparatorText(custom_title ? custom_title : "Custom Intervention UI");
     DrawCustomInterventionUi(host, slot.agent_index, slot.algorithm_index, selected_agent_summary, *selected_algorithm_summary, &slot);
   }
-
-  auto build_and_apply_preview_for_algorithm = [&](size_t algorithm_index, std::string* out_error_message) -> bool {
-    runtime_systems::RenderPreviewRequest mounted_preview_request{};
-    std::string mounted_preview_error_message;
-    if (!host.BuildRenderPreviewRequest(
-          0u,
-          algorithm_index,
-          &mounted_preview_request,
-          &mounted_preview_error_message)) {
-      ExecuteDebugCommand(host, debug_tool::DebugCommand{
-        .id = debug_tool::DebugCommandId::ClearRenderPreviewRequest,
-      });
-      if (out_error_message) {
-        *out_error_message = mounted_preview_error_message.empty()
-          ? "Submitted algorithm did not produce a drawable preview."
-          : std::move(mounted_preview_error_message);
-      }
-      return false;
-    }
-    if (!mounted_preview_request.valid) {
-      ExecuteDebugCommand(host, debug_tool::DebugCommand{
-        .id = debug_tool::DebugCommandId::ClearRenderPreviewRequest,
-      });
-      if (out_error_message) {
-        *out_error_message = mounted_preview_error_message.empty()
-          ? "Submitted algorithm did not produce a drawable preview."
-          : std::move(mounted_preview_error_message);
-      }
-      return false;
-    }
-    if (out_error_message) {
-      out_error_message->clear();
-    }
-    ExecuteDebugCommand(host, debug_tool::DebugCommand{
-      .id = debug_tool::DebugCommandId::SetRenderPreviewRequest,
-      .preview_request = std::move(mounted_preview_request),
-    });
-    agent_composer_ui_state_.preview_request_dirty = false;
-    return true;
-  };
-
-  const std::string algorithm_name = _TrimCopy(agent_composer_ui_state_.algorithm_name.data());
-
-  const auto build_current_resource_bindings = [&]() {
-    std::vector<debug_tool::AlgorithmResourceBinding> resource_bindings;
-    resource_bindings.reserve(agent_composer_ui_state_.resource_inputs.size());
-    for (const auto& resource : agent_composer_ui_state_.resource_inputs) {
-      resource_bindings.push_back(debug_tool::AlgorithmResourceBinding{
-        .resource_name = resource.resource_name,
-        .resource_kind = resource.resource_kind,
-        .source_path = _TrimCopy(resource.resource_path.data()),
-      });
-    }
-    return resource_bindings;
-  };
-
-  const auto build_current_descriptor_values = [&]() {
-    std::vector<debug_tool::AlgorithmDescriptorValue> descriptor_values;
-    descriptor_values.reserve(agent_composer_ui_state_.descriptor_inputs.size());
-    for (const auto& descriptor : agent_composer_ui_state_.descriptor_inputs) {
-      descriptor_values.push_back(debug_tool::AlgorithmDescriptorValue{
-        .descriptor_name = descriptor.descriptor_name,
-        .scalar_value = descriptor.scalar_value,
-      });
-    }
-    return descriptor_values;
-  };
-
-  const auto build_effective_mount_bindings = [&]() {
-    std::vector<debug_tool::AlgorithmResourceBinding> resource_bindings = build_current_resource_bindings();
-    std::vector<debug_tool::AlgorithmDescriptorValue> descriptor_values = build_current_descriptor_values();
-    if ((resource_bindings.empty() || descriptor_values.empty()) && !algorithm_name.empty()) {
-      std::vector<debug_tool::AlgorithmResourceBinding> default_resource_bindings;
-      std::vector<debug_tool::AlgorithmDescriptorValue> default_descriptor_values;
-      bool has_default_file = false;
-      std::string default_error_message;
-      if (host.LoadAlgorithmPackageDefaultBindings(
-            algorithm_name,
-            &default_resource_bindings,
-            &default_descriptor_values,
-            &has_default_file,
-            &default_error_message) &&
-          has_default_file) {
-        if (resource_bindings.empty()) {
-          resource_bindings = std::move(default_resource_bindings);
-        }
-        if (descriptor_values.empty()) {
-          descriptor_values = std::move(default_descriptor_values);
-        }
-      }
-    }
-    return std::pair{
-      std::move(resource_bindings),
-      std::move(descriptor_values),
-    };
-  };
-
-  const auto clear_built_in_agent_mounts = [&](std::string* out_error_message) {
-    std::string clear_error_message;
-    debug_tool::AgentRuntimeSummary clear_summary{};
-    while (host.GetAgentSummary(0u, &clear_summary) && !clear_summary.algorithms.empty()) {
-      if (!ExecuteDebugCommand(host, debug_tool::DebugCommand{
-            .id = debug_tool::DebugCommandId::DetachAlgorithm,
-            .algorithm_index = 0u,
-          }, &clear_error_message)) {
-        if (out_error_message) {
-          *out_error_message = clear_error_message.empty()
-            ? "Failed to clear mounted algorithms from the built-in agent."
-            : std::move(clear_error_message);
-        }
-        return false;
-      }
-    }
-    agent_composer_ui_state_.selected_algorithm_index = -1;
-    agent_composer_ui_state_.preview_request_dirty = true;
-    ExecuteDebugCommand(host, debug_tool::DebugCommand{
-      .id = debug_tool::DebugCommandId::ClearRenderPreviewRequest,
-    });
-    ExecuteDebugCommand(host, debug_tool::DebugCommand{
-      .id = debug_tool::DebugCommandId::ClearVkRuntimeCaches,
-    });
-    selected_algorithm_summary = refresh_selected_algorithm_summary();
-    if (out_error_message) {
-      out_error_message->clear();
-    }
-    return true;
-  };
-
-  bool current_algorithm_is_pipeline = false;
-  std::string pipeline_query_error_message;
-  if (!algorithm_name.empty() &&
-      !host.IsPipelineAlgorithm(
-        algorithm_name,
-        &current_algorithm_is_pipeline,
-        &pipeline_query_error_message)) {
-    current_algorithm_is_pipeline = false;
-  }
-
-  const auto build_testsubmit_pipeline_name = [&](const std::string& pipeline_algorithm_name) {
-    std::unordered_set<std::string> used_pipeline_names{};
-    for (const debug_tool::AlgorithmRuntimeSummary& algorithm_summary : selected_agent_summary.algorithms) {
-      if (algorithm_summary.pipeline_stage && !algorithm_summary.pipeline_name.empty()) {
-        used_pipeline_names.insert(algorithm_summary.pipeline_name);
-      }
-    }
-
-    const std::string prefix = pipeline_algorithm_name + "::testsubmit";
-    size_t suffix = 0u;
-    while (true) {
-      const std::string candidate = prefix + "_" + std::to_string(suffix);
-      if (used_pipeline_names.find(candidate) == used_pipeline_names.end()) {
-        return candidate;
-      }
-      ++suffix;
-    }
-  };
-
-  if (selected_algorithm_summary) {
-    runtime_systems::RenderPreviewRequest preview_request{};
-    const size_t preview_algorithm_index = selected_algorithm_index >= 0
-      ? static_cast<size_t>(selected_algorithm_index)
-      : 0u;
-    std::string preview_error_message;
-    if (host.BuildRenderPreviewRequest(
-          0u,
-          preview_algorithm_index,
-          &preview_request,
-          &preview_error_message) &&
-        preview_request.valid) {
-      ExecuteDebugCommand(host, debug_tool::DebugCommand{
-        .id = debug_tool::DebugCommandId::SetRenderPreviewRequest,
-        .preview_request = std::move(preview_request),
-      });
-      agent_composer_ui_state_.preview_request_dirty = false;
-    } else if (selected_algorithm_summary->pipeline_name.empty()) {
-      ExecuteDebugCommand(host, debug_tool::DebugCommand{
-        .id = debug_tool::DebugCommandId::ClearRenderPreviewRequest,
-      });
-      agent_composer_ui_state_.preview_request_dirty = true;
-    }
-  }
-
-  const bool selected_runtime_is_pipeline =
-    selected_algorithm_summary &&
-    selected_algorithm_summary->pipeline_stage &&
-    !selected_algorithm_summary->pipeline_name.empty();
-  const bool selected_runtime_is_normal =
-    selected_algorithm_summary && !selected_algorithm_summary->pipeline_stage;
-  const std::string selected_runtime_pipeline_root_algorithm_name =
-    selected_runtime_is_pipeline && selected_algorithm_summary
-      ? selected_algorithm_summary->pipeline_root_stage_name
-      : std::string{};
-  const bool selected_runtime_pipeline_matches_requested =
-    selected_runtime_is_pipeline &&
-    !selected_runtime_pipeline_root_algorithm_name.empty() &&
-    selected_runtime_pipeline_root_algorithm_name == algorithm_name;
-  const bool selected_runtime_normal_matches_requested =
-    selected_runtime_is_normal &&
-    selected_algorithm_summary &&
-    selected_algorithm_summary->algorithm_name == algorithm_name;
-
-  const auto apply_pipeline_run_policy = [&](const std::string& mounted_name, const char* mounted_state_text) {
-    if (agent_composer_ui_state_.pipeline_run_from_stage0_to_end) {
-      ExecuteDebugCommand(host, debug_tool::DebugCommand{
-        .id = debug_tool::DebugCommandId::StartTick,
-      });
-      host.ui_status_message() = std::string(mounted_state_text) + " '" + mounted_name + "' and started ticking.";
-    } else {
-      ExecuteDebugCommand(host, debug_tool::DebugCommand{
-        .id = debug_tool::DebugCommandId::PauseTick,
-      });
-      host.ui_status_message() = std::string(mounted_state_text) + " '" + mounted_name + "' for stage-by-stage debug.";
-    }
-  };
-
-  if (current_algorithm_is_pipeline) {
-    ImGui::SeparatorText("Pipeline Controls");
-    ImGui::Checkbox(
-      "Run From Stage0 To End",
-      &agent_composer_ui_state_.pipeline_run_from_stage0_to_end);
-    ImGui::TextUnformatted(
-      "Select a mounted stage in Agent Manager to inspect its reflection snapshot while the pipeline is paused.");
-
-    const char* mount_pipeline_label =
-      selected_runtime_pipeline_matches_requested ? "Reset Pipeline" : "Mount Pipeline";
-    if (ImGui::Button(mount_pipeline_label, ImVec2(180.0f, 0.0f))) {
-      if (algorithm_name.empty()) {
-        host.ui_status_message() = "Algorithm name must not be empty.";
-      } else {
-        const auto [resource_bindings, descriptor_values] = build_effective_mount_bindings();
-        std::string attach_error_message;
-        ExecuteDebugCommand(host, debug_tool::DebugCommand{
-          .id = debug_tool::DebugCommandId::PauseTick,
-        });
-        if (!clear_built_in_agent_mounts(&attach_error_message)) {
-          host.ui_status_message() = attach_error_message;
-        } else {
-          const std::string pipeline_instance_name = algorithm_name + "::runner_mount";
-          const std::string pipeline_algorithm_name = algorithm_name;
-          size_t attached_algorithm_index = 0u;
-          debug_tool::DebugCommandResult attach_result{};
-          if (!ExecuteDebugCommand(host, debug_tool::DebugCommand{
-                .id = debug_tool::DebugCommandId::AttachPipelinePackage,
-                .algorithm_name = pipeline_algorithm_name,
-                .pipeline_name = pipeline_instance_name,
-                .execution_preference = agent_composer_ui_state_.execution_preference,
-                .resource_bindings = resource_bindings,
-                .descriptor_values = descriptor_values,
-              }, &attach_error_message, &attach_result)) {
-            host.ui_status_message() = attach_error_message.empty()
-              ? "Failed to mount pipeline package."
-              : ("Failed to mount pipeline package: " + attach_error_message);
-          } else {
-            attached_algorithm_index = attach_result.algorithm_index;
-            agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(attached_algorithm_index);
-            selected_algorithm_index = static_cast<int>(attached_algorithm_index);
-            selected_algorithm_summary = refresh_selected_algorithm_summary();
-            std::string preview_error_message;
-            if (!build_and_apply_preview_for_algorithm(attached_algorithm_index, &preview_error_message)) {
-              host.ui_status_message() = preview_error_message.empty()
-                ? ("Pipeline mounted as '" + pipeline_instance_name + "'. Submit a resource batch to run it.")
-                : ("Pipeline mounted as '" + pipeline_instance_name + "' without a drawable preview: " +
-                  preview_error_message);
-            } else {
-              host.ui_status_message() =
-                "Pipeline mounted as '" + pipeline_instance_name + "'. Submit a resource batch to run it.";
-            }
-          }
-        }
-      }
-    }
-
-    ImGui::SameLine();
-    if (ImGui::Button("Submit Resource Batch", ImVec2(180.0f, 0.0f))) {
-      if (algorithm_name.empty()) {
-        host.ui_status_message() = "Algorithm name must not be empty.";
-      } else {
-        const std::string mounted_pipeline_name = algorithm_name + "::runner_mount";
-        std::string attach_error_message;
-        if (!selected_runtime_pipeline_matches_requested) {
-          const auto [resource_bindings, descriptor_values] = build_effective_mount_bindings();
-          ExecuteDebugCommand(host, debug_tool::DebugCommand{
-            .id = debug_tool::DebugCommandId::PauseTick,
-          });
-          if (!clear_built_in_agent_mounts(&attach_error_message)) {
-            host.ui_status_message() = attach_error_message;
-          } else {
-            const std::string pipeline_instance_name = mounted_pipeline_name;
-            size_t mounted_pipeline_index = 0u;
-            debug_tool::DebugCommandResult attach_result{};
-            if (!ExecuteDebugCommand(host, debug_tool::DebugCommand{
-                  .id = debug_tool::DebugCommandId::AttachPipelinePackage,
-                  .algorithm_name = algorithm_name,
-                  .pipeline_name = pipeline_instance_name,
-                  .execution_preference = agent_composer_ui_state_.execution_preference,
-                  .resource_bindings = resource_bindings,
-                  .descriptor_values = descriptor_values,
-                }, &attach_error_message, &attach_result)) {
-              host.ui_status_message() = attach_error_message.empty()
-                ? "Failed to mount pipeline before submission."
-                : ("Failed to mount pipeline before submission: " + attach_error_message);
-              return;
-            }
-            mounted_pipeline_index = attach_result.algorithm_index;
-            agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(mounted_pipeline_index);
-            selected_algorithm_index = static_cast<int>(mounted_pipeline_index);
-            selected_algorithm_summary = refresh_selected_algorithm_summary();
-          }
-        }
-
-        const auto [resource_bindings, descriptor_values] = build_effective_mount_bindings();
-        const std::string pipeline_instance_name = build_testsubmit_pipeline_name(mounted_pipeline_name);
-        size_t attached_algorithm_index = 0u;
-        debug_tool::DebugCommandResult attach_result{};
-        if (!ExecuteDebugCommand(host, debug_tool::DebugCommand{
-              .id = debug_tool::DebugCommandId::AttachPipelinePackage,
-              .algorithm_name = algorithm_name,
-              .pipeline_name = pipeline_instance_name,
-              .execution_preference = agent_composer_ui_state_.execution_preference,
-              .resource_bindings = resource_bindings,
-              .descriptor_values = descriptor_values,
-            }, &attach_error_message, &attach_result)) {
-          host.ui_status_message() = attach_error_message.empty()
-            ? "Failed to append the pipeline resource submission."
-            : ("Failed to append the pipeline resource submission: " + attach_error_message);
-        } else {
-          attached_algorithm_index = attach_result.algorithm_index;
-          agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(attached_algorithm_index);
-          selected_algorithm_index = static_cast<int>(attached_algorithm_index);
-          selected_algorithm_summary = refresh_selected_algorithm_summary();
-          std::string preview_error_message;
-          const bool preview_ready =
-            build_and_apply_preview_for_algorithm(attached_algorithm_index, &preview_error_message);
-          ExecuteDebugCommand(host, debug_tool::DebugCommand{
-            .id = debug_tool::DebugCommandId::StartTick,
-          });
-          if (!preview_ready) {
-            host.ui_status_message() = preview_error_message.empty()
-              ? "Pipeline resource submission mounted, but no drawable result was produced."
-              : std::move(preview_error_message);
-          } else if (agent_composer_ui_state_.pipeline_run_from_stage0_to_end) {
-            host.ui_status_message() = "Submitted pipeline resource batch and started ticking.";
-          }
-        }
-      }
-    }
-  } else {
-    ImGui::SeparatorText("Algorithm Controls");
-    const char* mount_algorithm_label =
-      selected_runtime_normal_matches_requested ? "Reset Mount" : "Mount Algorithm";
-    if (ImGui::Button(mount_algorithm_label, ImVec2(180.0f, 0.0f))) {
-      if (algorithm_name.empty()) {
-        host.ui_status_message() = "Algorithm name must not be empty.";
-      } else {
-        const auto [resource_bindings, descriptor_values] = build_effective_mount_bindings();
-        std::string attach_error_message;
-        ExecuteDebugCommand(host, debug_tool::DebugCommand{
-          .id = debug_tool::DebugCommandId::PauseTick,
-        });
-        if (!clear_built_in_agent_mounts(&attach_error_message)) {
-          host.ui_status_message() = attach_error_message;
-        } else {
-          size_t attached_algorithm_index = 0u;
-          debug_tool::DebugCommandResult attach_result{};
-          if (!ExecuteDebugCommand(host, debug_tool::DebugCommand{
-                .id = debug_tool::DebugCommandId::AttachAlgorithm,
-                .algorithm_name = algorithm_name,
-                .mount_mode = debug_tool::AlgorithmMountMode::Direct,
-                .execution_preference = agent_composer_ui_state_.execution_preference,
-                .resource_bindings = resource_bindings,
-                .descriptor_values = descriptor_values,
-              }, &attach_error_message, &attach_result)) {
-            host.ui_status_message() = attach_error_message.empty()
-              ? "Failed to mount algorithm on built-in agent."
-              : ("Failed to mount algorithm on built-in agent: " + attach_error_message);
-          } else {
-            attached_algorithm_index = attach_result.algorithm_index;
-            agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(attached_algorithm_index);
-            selected_algorithm_index = static_cast<int>(attached_algorithm_index);
-            selected_algorithm_summary = refresh_selected_algorithm_summary();
-            std::string preview_error_message;
-            const bool preview_ready =
-              build_and_apply_preview_for_algorithm(attached_algorithm_index, &preview_error_message);
-            if (!preview_ready) {
-              ExecuteDebugCommand(host, debug_tool::DebugCommand{
-                .id = debug_tool::DebugCommandId::ClearRenderPreviewRequest,
-              });
-              agent_composer_ui_state_.preview_request_dirty = true;
-              host.ui_status_message() = preview_error_message.empty()
-                ? "Algorithm mounted. No drawable preview is available, but ticking can still start."
-                : ("Algorithm mounted without drawable preview: " + preview_error_message);
-            } else {
-              host.ui_status_message() = "Algorithm mounted. Press Start Tick to run it.";
-            }
-          }
-        }
-      }
-    }
-
-    ImGui::SameLine();
-    ImGui::BeginDisabled(selected_algorithm_index < 0);
-    if (ImGui::Button("Start Tick", ImVec2(180.0f, 0.0f))) {
-      const debug_tool::AlgorithmRuntimeSummary* active_algorithm_summary = selected_algorithm_summary;
-      if (!active_algorithm_summary) {
-        active_algorithm_summary = refresh_selected_algorithm_summary();
-      }
-      if (!active_algorithm_summary) {
-        host.ui_status_message() = "Mount an algorithm first.";
-      } else if (!active_algorithm_summary->pipeline_stage) {
-        const size_t mounted_algorithm_index = static_cast<size_t>(selected_algorithm_index);
-        std::string preview_error_message;
-        const bool preview_ready = build_and_apply_preview_for_algorithm(
-          mounted_algorithm_index,
-          &preview_error_message);
-        if (!preview_ready) {
-          ExecuteDebugCommand(host, debug_tool::DebugCommand{
-            .id = debug_tool::DebugCommandId::ClearRenderPreviewRequest,
-          });
-          agent_composer_ui_state_.preview_request_dirty = true;
-        }
-        ExecuteDebugCommand(host, debug_tool::DebugCommand{
-          .id = debug_tool::DebugCommandId::StartTick,
-        });
-        host.ui_status_message() = preview_ready
-          ? "Mounted algorithm started."
-          : (preview_error_message.empty()
-              ? "Mounted algorithm started without a drawable preview."
-              : ("Mounted algorithm started without a drawable preview: " + preview_error_message));
-      } else {
-        const size_t mounted_algorithm_index = static_cast<size_t>(selected_algorithm_index);
-        std::string preview_error_message;
-        if (!build_and_apply_preview_for_algorithm(
-              mounted_algorithm_index,
-              &preview_error_message)) {
-          host.ui_status_message() = preview_error_message.empty()
-            ? "Mounted pipeline did not produce a drawable preview."
-            : std::move(preview_error_message);
-        } else {
-          ExecuteDebugCommand(host, debug_tool::DebugCommand{
-            .id = debug_tool::DebugCommandId::StartTick,
-          });
-          host.ui_status_message() = "Mounted pipeline started.";
-        }
-      }
-    }
-    ImGui::EndDisabled();
-  }
-
-  ImGui::Spacing();
-  ImGui::BeginDisabled(!selected_algorithm_summary);
-  if (ImGui::Button("Hot Update DLL + SPV", ImVec2(180.0f, 0.0f))) {
-    size_t rebuilt_algorithm_index = static_cast<size_t>(selected_algorithm_index);
-    std::string hot_reload_error_message;
-    debug_tool::DebugCommandResult hot_reload_result{};
-    if (ExecuteDebugCommand(host, debug_tool::DebugCommand{
-          .id = debug_tool::DebugCommandId::HotReloadAlgorithm,
-          .algorithm_index = static_cast<size_t>(selected_algorithm_index),
-        }, &hot_reload_error_message, &hot_reload_result)) {
-      rebuilt_algorithm_index = hot_reload_result.algorithm_index;
-      agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(rebuilt_algorithm_index);
-      host.ui_status_message() = "Algorithm hot rebuilt and reloaded.";
-    } else {
-      host.ui_status_message() = hot_reload_error_message.empty()
-        ? "Algorithm hot rebuild failed."
-        : std::move(hot_reload_error_message);
-    }
-  }
-  ImGui::EndDisabled();
 
   ImGui::End();
 }

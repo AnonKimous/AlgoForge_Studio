@@ -9,7 +9,6 @@
 #include "algorithm_catalog/algorithm_library_paths.h"
 
 #include <cassert>
-#include <iostream>
 #include <string>
 #include <utility>
 #include <fstream>
@@ -142,15 +141,16 @@ void RuntimeEnvironment::SetDrawCallback(DrawCallback callback) {
 
 void RuntimeEnvironment::SetRenderPreviewRequest(RenderPreviewRequest request) {
   if (request.valid) {
-    std::cerr << "Render preview request is missing a stage name.\n";
-    assert(!request.stage_name.empty() && "Render preview request is missing a stage name.");
-    std::cerr << "Render preview request is missing storage buffers.\n";
-    assert(!request.storage_buffers.empty() && "Render preview request is missing storage buffers.");
+    if (request.stage_name.empty()) {
+      assert(!request.stage_name.empty() && "Render preview request is missing a stage name.");
+    }
+    if (request.storage_buffers.empty()) {
+      assert(!request.storage_buffers.empty() && "Render preview request is missing storage buffers.");
+    }
   }
   if (imgui_runtime_) {
     imgui_runtime_->SetRenderPreviewRequest(std::move(request));
   } else {
-    std::cerr << "A valid render preview request arrived before the runtime was initialized.\n";
     assert(!request.valid && "A valid render preview request arrived before the runtime was initialized.");
   }
 }
