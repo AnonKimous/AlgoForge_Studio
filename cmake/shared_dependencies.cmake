@@ -256,6 +256,9 @@ function(resolve_assimp_dependency repo_root)
   set(ASSIMP_NO_EXPORT ON CACHE BOOL "Disable Assimp export targets" FORCE)
   set(ASSIMP_BUILD_ZLIB ON CACHE BOOL "Build Assimp bundled zlib" FORCE)
   set(ASSIMP_BUILD_MINIZIP ON CACHE BOOL "Build Assimp bundled minizip" FORCE)
+  if(ALGOFORGE_TOOLCHAIN_CLANG)
+    set(ASSIMP_WARNINGS_AS_ERRORS OFF CACHE BOOL "Build Assimp without treating warnings as errors" FORCE)
+  endif()
 
   resolve_existing_path(_ASSIMP_SOURCE_DIR CMakeLists.txt
     "${repo_root}/build/_deps/assimp_source-src"

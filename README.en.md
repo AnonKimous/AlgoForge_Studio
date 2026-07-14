@@ -1,5 +1,29 @@
 # AlgoForge Studio
 
+## Quick start
+
+An Anaconda or Miniconda conda environment is mandatory. The entry points refuse system Python, bundled Python, and unactivated conda environments.
+
+```bat
+conda activate <your-environment>
+python -m pip install -r requirements.txt
+python boot\quick_begin.py
+```
+
+Then build the mainline and an algorithm:
+
+```bat
+python boot\compiler_with_msvc.py <algorithm_name>
+```
+
+Or use Ninja + clang:
+
+```bat
+python boot\compiler_with_ninja_clang.py <algorithm_name>
+```
+
+After the build, open the generated shortcuts in `boot`: `debugTool.exe` launches the debug tool and `devTools.py` launches the algorithm development tool.
+
 A general-purpose algorithm production platform for modular assembly, debugging, execution, and packaging.
 
 > Turn algorithms from scattered implementations into standardized modules that are describable, encapsulable, mountable, executable, debuggable, and previewable.

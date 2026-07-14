@@ -19,6 +19,12 @@ lib/
 /algorithmLib/**/*.obj
 /algorithmLib/**/*.exe
 /sdk/*.lib
+/sdk/python/
+/sdk/cpp/
+/boot/debugTool
+/boot/debugTool.exe
+/boot/devTools
+/boot/devTools.py
 app/**/*.dll
 app/**/*.pdb
 app/**/*.lib

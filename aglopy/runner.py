@@ -72,10 +72,22 @@ class RunnerServer:
         startup_timeout: float = 15.0,
     ) -> None:
         self.root = Path(root).resolve()
-        self.debugtool = Path(debugtool).resolve() if debugtool else self.root / "build" / "Debug" / "debugTool.exe"
+        default_debugtool = self.root / "boot" / ("debugTool.exe" if os.name == "nt" else "debugTool")
+        self.debugtool = Path(debugtool).resolve() if debugtool else default_debugtool.resolve()
         self.endpoint = endpoint
         self.startup_timeout = startup_timeout
         self._process: subprocess.Popen[str] | None = None
+
+    @property
+    def process_environment(self) -> dict[str, str]:
+        environment = dict(os.environ)
+        path_name = next(name for name in environment if name.lower() == "path")
+        runtime_paths = [self.debugtool.parent]
+        build_root = self.debugtool.parent.parent.parent
+        runtime_paths.append(build_root / "assimp-build" / "bin" / "Debug")
+        runtime_paths_text = os.pathsep.join(str(path) for path in runtime_paths)
+        environment[path_name] = runtime_paths_text + os.pathsep + environment[path_name]
+        return environment
 
     @property
     def running(self) -> bool:
@@ -102,6 +114,7 @@ class RunnerServer:
                 self.endpoint,
             ],
             cwd=self.root,
+            env=self.process_environment,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -129,6 +142,7 @@ class RunnerServer:
                 subprocess.run(
                     [str(self.debugtool), "--runner-shutdown", "--runner-endpoint", endpoint],
                     cwd=self.root,
+                    env=self.process_environment,
                     capture_output=True,
                     text=True,
                     encoding="utf-8",
@@ -167,6 +181,7 @@ class RunnerServer:
         completed = subprocess.run(
             [str(self.debugtool), *tokens, "--runner-endpoint", endpoint],
             cwd=self.root,
+            env=self.process_environment,
             capture_output=True,
             text=True,
             encoding="utf-8",

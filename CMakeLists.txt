@@ -393,10 +393,13 @@ target_include_directories(sdk PUBLIC ${PROJECT_INCLUDE_DIRS})
 target_link_libraries(sdk PUBLIC agentmanager)
 
 set(SDK_PACKAGE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/sdk")
-set(SDK_PACKAGE_INCLUDE_DIR "${SDK_PACKAGE_ROOT}/include")
+set(SDK_PACKAGE_INCLUDE_DIR "${SDK_PACKAGE_ROOT}/cpp/include")
 
 add_custom_command(TARGET sdk POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E make_directory "${SDK_PACKAGE_INCLUDE_DIR}"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/sdk/sdk.h"
+    "${SDK_PACKAGE_INCLUDE_DIR}/sdk.h"
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
     "${CMAKE_CURRENT_SOURCE_DIR}/src/sdk/sdk_runtime_system.h"
     "${SDK_PACKAGE_INCLUDE_DIR}/sdk_runtime_system.h"

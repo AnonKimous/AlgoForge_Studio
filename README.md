@@ -1,5 +1,29 @@
 # AlgoForge Studio
 
+## Quick start
+
+本项目必须使用 Anaconda/Miniconda 的 conda 环境。未安装 Anaconda、未激活 conda，或使用系统 Python/bundled Python 时，入口会直接拒绝执行。
+
+```bat
+conda activate <your-environment>
+python -m pip install -r requirements.txt
+python boot\quick_begin.py
+```
+
+然后编译主干和算法：
+
+```bat
+python boot\compiler_with_msvc.py <algorithm_name>
+```
+
+或使用 Ninja + clang：
+
+```bat
+python boot\compiler_with_ninja_clang.py <algorithm_name>
+```
+
+编译完成后，到 `boot` 目录使用生成的快捷方式：`debugTool.exe` 启动调试工具，`devTools.py` 启动算法开发工具。
+
 A general-purpose algorithm production platform for modular assembly, debugging, execution, and packaging.
 
 > Turn algorithms from scattered implementations into standardized modules that are describable, encapsulable, mountable, executable, debuggable, and previewable.
