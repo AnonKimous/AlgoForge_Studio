@@ -7,7 +7,6 @@ out/
 bin/
 lib/
 .tmp/
-/artifacts
 /algorithmLib/.build_*/
 /algorithmLib/.rebuild_stash_*/
 /algorithmLib/algorithmruntimeLib*/
@@ -91,7 +90,7 @@ tools/launch_algorithm_studio_local.bat
 
 # Temporary pipeline runner diagnostics
 /build/Debug/debugTool_runner*
-/artifacts/pipeline_runner/
+/testData/pipeline/
 /testData/**
 !/testData/.gitkeep
 

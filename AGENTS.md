@@ -46,14 +46,14 @@
 
 - Redirect all test outputs and transient test artifacts into `testData\`.
 - Put new temporary test data under `testData\` and keep the repository root clean.
-- Pipeline timing artifacts may use the repository's existing `artifacts\pipeline_timing\` directory.
+- Pipeline timing artifacts must be written under `testData\pipeline_timing\`.
 - Do not create transient runner logs, images, or reports at the repository root.
 
 ## Runner Completion Validation
 
 - After completing any change that can affect an algorithm, pipeline, runtime, Vulkan execution, preview rendering, or debugTool behavior, run the repository runner before reporting completion.
 - Run the runner only after the final build succeeds; a successful compile without runner validation is not completion.
-- Use the workflow in `skills/runner-validation/SKILL.md`.
+- Use the workflow in `doc/skills/projectSkills/runner-validation/SKILL.md`.
 - Start `build\Debug\debugTool.exe --runner-server --runner-server-once --runner-endpoint 127.0.0.1:0`, then run the matching `--algorithm-runner` or `--pipeline-runner` client.
 - A client that only prints `runner_client.begin` is not a validation result.
 - Require `OK algorithm_runner` or `OK pipeline_runner`.
@@ -78,12 +78,12 @@
 
 Read the relevant English skill before changing the corresponding subsystem:
 
-- `debugtoolSkill\scheduler-runtime\SKILL.md` for scheduler registration, pipeline stages, lanes, runtime state, and tick flow.
-- `debugtoolSkill\decomposer-manifest\SKILL.md` for package manifests, decomposition, runtime mappings, wrapper stages, and bridge ingress/egress.
-- `debugtoolSkill\debugtool-cli-runner\SKILL.md` for CLI connection, runner commands, preview export, and timing validation.
-- `debugtoolSkill\windows-path-environment\SKILL.md` for the main development machine's broken PATH environment and build-tool initialization.
-- `debugtoolSkill\algorithm-development\SKILL.md` for the algorithm catalog, package files, development documents, build paths, mounting, protocol, and performance validation.
+- `doc/skills/debugtoolSkill/scheduler-runtime/SKILL.md` for scheduler registration, pipeline stages, lanes, runtime state, and tick flow.
+- `doc/skills/debugtoolSkill/decomposer-manifest/SKILL.md` for package manifests, decomposition, runtime mappings, wrapper stages, and bridge ingress/egress.
+- `doc/skills/debugtoolSkill/debugtool-cli-runner/SKILL.md` for CLI connection, runner commands, preview export, and timing validation.
+- `doc/skills/debugtoolSkill/windows-path-environment/SKILL.md` for the main development machine's broken PATH environment and build-tool initialization.
+- `doc/skills/debugtoolSkill/algorithm-development/SKILL.md` for the algorithm catalog, package files, development documents, build paths, mounting, protocol, and performance validation.
 
 The Python runner facade is documented in `aglopy\README.md`. Use it for repeatable algorithm and pipeline checks from Python scripts.
 
-All skill files under `debugtoolSkill` are English-only. Keep future additions to these skills in English.
+All skill files under `doc/skills/debugtoolSkill` are English-only. Keep future additions to these skills in English.

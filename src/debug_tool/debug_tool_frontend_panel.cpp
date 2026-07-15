@@ -2185,6 +2185,33 @@ void DebugToolFrontendPanel::Draw(IDebugToolHost& host) {
   DrawDebugToolFrontend(host);
 }
 
+void DebugToolFrontendPanel::DrawRenderPreviewOnly(IDebugToolHost& host) {
+  const ImGuiViewport* viewport = ImGui::GetMainViewport();
+  ImGui::SetNextWindowPos(viewport->WorkPos);
+  ImGui::SetNextWindowSize(viewport->WorkSize);
+  if (!ImGui::Begin(
+        "Render Preview",
+        nullptr,
+        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
+    ImGui::End();
+    return;
+  }
+
+  const ImVec2 preview_size = ImGui::GetContentRegionAvail();
+  if (preview_size.x > 0.0f && preview_size.y > 0.0f) {
+    ExecuteDebugCommand(host, debug_tool::DebugCommand{
+      .id = debug_tool::DebugCommandId::SetRenderPreviewExtent,
+      .preview_extent = preview_size,
+    });
+  }
+  if (host.has_render_preview_texture()) {
+    ImGui::Image(host.render_preview_texture_id(), preview_size);
+  } else {
+    ImGui::TextUnformatted("Render preview is not ready.");
+  }
+  ImGui::End();
+}
+
 void DebugToolFrontendPanel::Destroy() {
   agent_composer_ui_state_ = {};
   agent_composer_defaults_initialized_ = false;

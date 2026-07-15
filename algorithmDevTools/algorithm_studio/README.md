@@ -59,10 +59,10 @@ Install the Python dependency before the first launch:
 py -3 -m pip install -r algorithmDevTools\algorithm_studio\requirements.txt
 ```
 
-Double-click `algorithmDevTools\launch_algorithmDevTools.bat`, or run the same command from a terminal:
+Run the repository Python launcher from the project root:
 
 ```bat
-py -3 algorithmDevTools\algorithm_studio\algorithm_studio.py
+python boot\launch_devTools.py
 ```
 
 If you prefer the script path form, this also works:
@@ -112,6 +112,8 @@ This is a UI-first prototype.
 ## Launch behavior
 
 - The GUI runs on the machine's local Python interpreter.
-- The Windows double-click launcher is `algorithmDevTools\launch_algorithmDevTools.bat`.
+- The repository launcher is `python boot\launch_devTools.py`.
 - The direct script entry point is the stable cross-device launch path.
-- `requirements.txt` declares the Pillow dependency used by the preview and image UI.
+- Render Preview starts the matching DebugTool runtime window as the rendering backend and embeds that native Vulkan/ImGui window inside the DevTools Render Preview view.
+- The Render Preview path does not read back a PPM frame or use a TCP image endpoint.
+- The `releaseWithDebugInfo` algorithm runtime must be launched by a matching `RelWithDebInfo` DebugTool build; the launcher prefers that configuration automatically.

@@ -1,0 +1,9 @@
+{
+  "name": "llvm",
+  "version": "22.1.8",
+  "windows_x64": {
+    "asset": "LLVM-22.1.8-win64.exe",
+    "url": "https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/LLVM-22.1.8-win64.exe",
+    "sha256": "16e5709785fef73c854646241c4a92c5cd574318d1b33c63330dd7721903e55c"
+  }
+}

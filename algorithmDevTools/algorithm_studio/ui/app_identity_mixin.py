@@ -50,6 +50,8 @@ class AlgorithmStudioIdentityMixin:
 
     def _current_container_scene_scope(self, view_mode: str | None = None) -> str:
         normalized = str(view_mode or self.canvas_view_mode).strip().lower()
+        if normalized == "renderpreview":
+            return CONTAINER_SCENE_SCOPE_GRAPH
         return self._normalize_container_scene_scope(normalized)
 
     def _scene_scope_matches_view(self, scope: str, view_mode: str | None = None) -> bool:
@@ -141,6 +143,7 @@ class AlgorithmStudioIdentityMixin:
             "interventioner_pretick",
             "interventioner_aftertick",
             "interventioner_render",
+            "renderpreview",
         }:
             return (ALGORITHM_SYNC_ZONE,)
         raise AssertionError(f"Unsupported canvas view mode: {normalized}")
@@ -500,7 +503,13 @@ class AlgorithmStudioIdentityMixin:
         _save_algorithm_studio_settings(self._settings_payload())
 
     def _on_close(self) -> None:
+        self.studio_closing = True
         self._save_settings()
         self._cancel_document_apply()
         self._uninstall_chat_input_drop_target()
+        for process in self.debugtool_processes:
+            if process.poll() is None:
+                process.terminate()
+            process.close()
+        self.debugtool_processes.clear()
         self.root.destroy()

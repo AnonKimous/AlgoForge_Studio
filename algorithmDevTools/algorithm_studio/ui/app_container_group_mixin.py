@@ -283,14 +283,14 @@ class AlgorithmStudioContainerGroupMixin:
                 return item is not None and self._is_function_visible_in_current_view(item.function_name)
             return False
         if self.canvas_view_mode == "graph":
-            if kind == "reflector":
-                return self._find_reflector(name) is not None
             if kind == "function":
-                return self._find_function_frame(name) is not None
+                return self._find_function_frame(name) is not None and self._is_function_visible_in_current_view(name)
             if kind == "functiontext":
-                return self._find_function_text_item(name) is not None
+                item = self._find_function_text_item(name)
+                return item is not None and self._is_function_visible_in_current_view(item.function_name)
             if kind in {"interventioner", "stage"}:
-                return self._find_stage(name) is not None
+                stage = self._find_stage(name)
+                return stage is not None and self._is_stage_visible_in_current_view(stage)
             return False
         if self.canvas_view_mode == "container_overview":
             return False

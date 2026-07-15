@@ -11,6 +11,7 @@ import tempfile
 from pathlib import Path
 
 from anaconda import require_anaconda
+from toolchain import ensure_windows_clang_toolchain
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -53,6 +54,43 @@ def visual_studio_environment(environment: dict[str, str]) -> dict[str, str]:
     return environment
 
 
+def windows_resource_environment(environment: dict[str, str]) -> dict[str, str]:
+    if os.name != "nt":
+        return environment
+
+    sdk_root = Path(environment_value(environment, "UniversalCRTSdkDir")).resolve()
+    include_root = sdk_root / "Include"
+    configured_version = environment.get("WindowsSDKVersion", "").strip("\\/")
+    version_roots = []
+    if configured_version:
+        version_roots.append(include_root / configured_version)
+    version_roots.extend(sorted((path for path in include_root.iterdir() if path.is_dir()), reverse=True))
+    sdk_version_root = next(
+        path for path in version_roots if (path / "um" / "winres.h").is_file()
+    )
+    sdk_version = sdk_version_root.name
+    resource_compiler = sdk_root / "bin" / sdk_version / "x64" / "rc.exe"
+    if not resource_compiler.is_file():
+        raise RuntimeError(f"Windows SDK resource compiler is missing: {resource_compiler}")
+
+    include_entries = [
+        sdk_version_root / "ucrt",
+        sdk_version_root / "um",
+        sdk_version_root / "shared",
+        sdk_version_root / "winrt",
+        sdk_version_root / "cppwinrt",
+    ]
+    inherited_include = environment.get("INCLUDE", "")
+    set_environment_value(
+        environment,
+        "INCLUDE",
+        ";".join(str(path) for path in include_entries) + (";" + inherited_include if inherited_include else ""),
+    )
+    set_environment_value(environment, "WindowsSdkDir", str(sdk_root))
+    set_environment_value(environment, "WindowsSDKVersion", sdk_version + "\\")
+    return environment
+
+
 def build_environment(toolchain: str) -> dict[str, str]:
     environment = dict(os.environ)
     set_environment_value(environment, "PATH", environment.get("Path", environment.get("PATH", "")))
@@ -62,8 +100,9 @@ def build_environment(toolchain: str) -> dict[str, str]:
         return visual_studio_environment(environment)
 
     environment = visual_studio_environment(environment)
+    environment = windows_resource_environment(environment)
     if os.name == "nt":
-        llvm_root = ROOT / ".toolchains" / "llvm-22.1.8"
+        llvm_root = ensure_windows_clang_toolchain()
         environment["CC"] = str(llvm_root / "bin" / "clang-cl.exe")
         environment["CXX"] = str(llvm_root / "bin" / "clang-cl.exe")
         environment["NINJA_EXE"] = str(Path(environment_value(environment, "VSINSTALLDIR")) / "Common7" / "IDE" / "CommonExtensions" / "Microsoft" / "CMake" / "Ninja" / "ninja.exe")
@@ -141,6 +180,7 @@ def build_mainline(toolchain: str) -> None:
     ]
     if toolchain == "OpenSource":
         configure.append(f"-DCMAKE_MAKE_PROGRAM={environment['NINJA_EXE']}")
+        configure.append(f"-DALGOFORGE_CLANG_CL={environment['CXX']}")
     run(configure, environment)
     run(["cmake", "--build", str(build_root), "--config", "Debug", "--target", "debugTool", "--parallel"], environment)
     run(["cmake", "--build", str(build_root), "--config", "Debug", "--target", "sdk", "--parallel"], environment)
@@ -207,8 +247,8 @@ def write_algo_package(archive_path: Path, staging_dir: Path) -> None:
                 shutil.copyfileobj(source, archive)
 
 
-def package_runtime(source_root: Path, runtime_root: Path, configuration: str) -> None:
-    shutil.copy2(source_root / "algorithm_plugin_api.h", runtime_root / "algorithm_plugin_api.h")
+def package_runtime(source_root: Path, runtime_root: Path, configuration: str, api_source_root: Path) -> None:
+    shutil.copy2(api_source_root / "algorithm_plugin_api.h", runtime_root / "algorithm_plugin_api.h")
     entries = []
     for manifest in sorted(source_root.rglob("manifest.json")):
         relative_dir = manifest.parent.relative_to(source_root)
@@ -272,10 +312,16 @@ def build_algorithm(toolchain: str, algorithm_name: str) -> None:
     ]
     if toolchain == "OpenSource":
         configure.append(f"-DCMAKE_MAKE_PROGRAM={environment['NINJA_EXE']}")
+        configure.append(f"-DALGOFORGE_CLANG_CL={environment['CXX']}")
     run(configure, environment)
     for target in targets:
         run(["cmake", "--build", str(build_dir), "--config", "RelWithDebInfo", "--target", target, "--parallel"], environment)
-    package_runtime(SOURCE_ROOT, RUNTIME_ROOT, "RelWithDebInfo")
+    package_runtime(
+        algorithm_dir,
+        RUNTIME_ROOT / algorithm_dir.relative_to(SOURCE_ROOT),
+        "RelWithDebInfo",
+        SOURCE_ROOT,
+    )
     export_sdk(toolchain)
     refresh_boot_links(toolchain)
     shutil.rmtree(build_dir)

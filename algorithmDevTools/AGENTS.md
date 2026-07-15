@@ -9,8 +9,8 @@ This `algorithmDevTools` workspace hosts the algorithmDevTools editor, its agent
 - Agent prompt builder: `algorithmDevTools/algorithm_studio/agent_client.py`
 - UI command surface: `algorithmDevTools/algorithm_studio/interface4agents.py`
 - Teaching skills:
-  - `algorithmDevTools/skills/algorithm-studio-minimal-demo/`
-  - `algorithmDevTools/skills/algorithm-studio-minimal-tide-demo/`
+  - `doc/skills/algorithmStudio/algorithm-studio-minimal-demo/`
+  - `doc/skills/algorithmStudio/algorithm-studio-minimal-tide-demo/`
 
 Read the relevant skill and reference file before teaching.
 

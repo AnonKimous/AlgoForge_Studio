@@ -52,6 +52,7 @@ struct AgentInterventionUiBinding {
 class DebugToolFrontendPanel {
  public:
   void Draw(IDebugToolHost& host);
+  void DrawRenderPreviewOnly(IDebugToolHost& host);
   void Destroy();
   void RegisterAgentUiBindings(size_t agent_index, std::vector<AgentInterventionUiBinding> ui_bindings);
 

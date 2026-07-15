@@ -12,13 +12,13 @@ $endpointFile = Join-Path $controlDir 'endpoint.txt'
 $serverStdout = Join-Path $controlDir 'debugtool_cli_bridge_server_stdout.txt'
 $serverStderr = Join-Path $controlDir 'debugtool_cli_bridge_server_stderr.txt'
 $debugTool = Join-Path $root 'build\Debug\debugTool.exe'
-$buildScript = Join-Path $root 'build_debugtool.bat'
+$buildScript = Join-Path $root 'boot\booterMSVC.py'
 
 New-Item -ItemType Directory -Force -Path $controlDir | Out-Null
 Remove-Item -Force $endpointFile, $serverStdout, $serverStderr -ErrorAction SilentlyContinue
 
 if (-not (Test-Path -LiteralPath $debugTool)) {
-  & $buildScript
+  python $buildScript
   if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
   }

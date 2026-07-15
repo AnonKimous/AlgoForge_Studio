@@ -32,12 +32,7 @@ inline std::filesystem::path ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot
 
 inline std::string HotReloadBuildCommand(const std::string& algorithm_name) {
   const std::string root = ProjectRootPath();
-  const std::string script_name =
-    algorithmManager::GetAlgorithmLibraryRuntimeBuildFlavor() ==
-      algorithm::library_paths::AlgorithmLibraryRuntimeBuildFlavor::ReleaseWithDebugInfo
-      ? "build_algorithm_releaseWithDebugInfo.bat"
-      : "build_algorithm.bat";
-  const std::string script_path = (std::filesystem::path(root) / script_name).string();
+  const std::string script_path = (std::filesystem::path(root) / "boot" / "booterNinjaClang.py").string();
   const std::string target_name = algorithm_name;
   std::string normalized_target_name;
   normalized_target_name.reserve(target_name.size() + 1u);
@@ -53,7 +48,7 @@ inline std::string HotReloadBuildCommand(const std::string& algorithm_name) {
     }
     normalized_target_name.push_back(is_identifier_char ? static_cast<char>(ch) : '_');
   }
-  return "\"" + script_path + "\" \"" + normalized_target_name + "\"";
+  return "python \"" + script_path + "\" \"" + normalized_target_name + "\"";
 }
 
 inline bool TryResolveAlgorithmPackageLocation(

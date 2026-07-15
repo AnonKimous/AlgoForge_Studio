@@ -36,6 +36,7 @@ namespace {
 
 struct PipelineRunnerOptions {
   bool enabled{false};
+  bool display_window{false};
   std::string algorithm_name{"v4a16_fireworks_pipeline_demo"};
   std::string pipeline_name{};
   uint32_t ticks{24u};
@@ -46,10 +47,13 @@ struct PipelineRunnerOptions {
     algorithmManager::ResolvePipelineRunnerArtifactRoot().string() + "/render_preview.ppm"};
   debug_tool::AlgorithmExecutionPreference execution_preference{
     debug_tool::AlgorithmExecutionPreference::Vk};
+  debug_tool::AlgorithmRuntimeBuildFlavor runtime_build_flavor{
+    debug_tool::AlgorithmRuntimeBuildFlavor::Debug};
 };
 
 struct AlgorithmRunnerOptions {
   bool enabled{false};
+  bool display_window{false};
   std::string algorithm_name{"v6a6_pbd_ball_collision_demo"};
   uint32_t ticks{24u};
   uint32_t preview_width{640u};
@@ -60,10 +64,13 @@ struct AlgorithmRunnerOptions {
       "/render_preview.ppm"};
   debug_tool::AlgorithmExecutionPreference execution_preference{
     debug_tool::AlgorithmExecutionPreference::Vk};
+  debug_tool::AlgorithmRuntimeBuildFlavor runtime_build_flavor{
+    debug_tool::AlgorithmRuntimeBuildFlavor::Debug};
 };
 
 struct PreviewRenderServerOptions {
   bool enabled{false};
+  bool display_window{false};
   std::string algorithm_name{"v6a6_pbd_ball_collision_demo"};
   uint32_t ticks{24u};
   uint32_t preview_width{640u};
@@ -74,6 +81,8 @@ struct PreviewRenderServerOptions {
       "/render_preview.ppm"};
   debug_tool::AlgorithmExecutionPreference execution_preference{
     debug_tool::AlgorithmExecutionPreference::Vk};
+  debug_tool::AlgorithmRuntimeBuildFlavor runtime_build_flavor{
+    debug_tool::AlgorithmRuntimeBuildFlavor::Debug};
 };
 
 struct RunnerServerOptions {
@@ -494,6 +503,24 @@ bool _ParseExecutionPreference(
   return false;
 }
 
+bool _ParseRuntimeBuildFlavor(
+  const char* text,
+  debug_tool::AlgorithmRuntimeBuildFlavor* out_flavor) {
+  if (!text || !out_flavor) {
+    return false;
+  }
+  const std::string value(text);
+  if (value == "Debug" || value == "debug") {
+    *out_flavor = debug_tool::AlgorithmRuntimeBuildFlavor::Debug;
+    return true;
+  }
+  if (value == "releaseWithDebugInfo" || value == "relwithdebinfo") {
+    *out_flavor = debug_tool::AlgorithmRuntimeBuildFlavor::ReleaseWithDebugInfo;
+    return true;
+  }
+  return false;
+}
+
 bool _IsPipelineRunnerInvocation(int argc, char** argv) {
   for (int i = 1; i < argc; ++i) {
     if (argv[i] && std::string(argv[i]) == "--pipeline-runner") {
@@ -515,6 +542,15 @@ bool _IsAlgorithmRunnerInvocation(int argc, char** argv) {
 bool _IsPreviewRenderServerInvocation(int argc, char** argv) {
   for (int i = 1; i < argc; ++i) {
     if (argv[i] && std::string(argv[i]) == "--preview-render-server") {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool _IsPreviewWindowInvocation(int argc, char** argv) {
+  for (int i = 1; i < argc; ++i) {
+    if (argv[i] && std::string(argv[i]) == "--preview-window") {
       return true;
     }
   }
@@ -623,6 +659,20 @@ bool _ParsePipelineRunnerOptions(
       options.enabled = true;
       continue;
     }
+    if (argument == "--preview-window") {
+      options.display_window = true;
+      continue;
+    }
+    if (argument == "--runtime-build") {
+      if (i + 1 >= argc || !_ParseRuntimeBuildFlavor(argv[i + 1], &options.runtime_build_flavor)) {
+        if (out_error_message) {
+          *out_error_message = "--runtime-build requires 'Debug' or 'releaseWithDebugInfo'.";
+        }
+        return false;
+      }
+      ++i;
+      continue;
+    }
     if (argument == "--algorithm") {
       if (i + 1 >= argc || !argv[i + 1] || !*argv[i + 1]) {
         if (out_error_message) {
@@ -709,11 +759,13 @@ bool _ParsePipelineRunnerOptions(
         << "  debugTool.exe --algorithm-runner "
         << "[--algorithm <name>] [--ticks <count>] "
         << "[--preview-width <px>] [--preview-height <px>] [--preview-output <path>] "
-        << "[--execution jobs|vk|cuda] [--runner-endpoint <host:port>]\n"
+        << "[--execution jobs|vk|cuda] [--runtime-build Debug|releaseWithDebugInfo] "
+        << "[--runner-endpoint <host:port>]\n"
         << "  debugTool.exe --pipeline-runner "
         << "[--algorithm <name>] [--pipeline-name <name>] [--ticks <count>] "
         << "[--preview-width <px>] [--preview-height <px>] [--preview-output <path>] "
-        << "[--execution jobs|vk|cuda] [--runner-endpoint <host:port>]\n"
+        << "[--execution jobs|vk|cuda] [--runtime-build Debug|releaseWithDebugInfo] "
+        << "[--runner-endpoint <host:port>]\n"
         << "  debugTool.exe --runner-server [--runner-endpoint <host:port>] [--runner-server-once]\n";
       return false;
     }
@@ -743,6 +795,20 @@ bool _ParseAlgorithmRunnerOptions(
     const std::string argument = argv[i] ? argv[i] : "";
     if (argument == "--algorithm-runner") {
       options.enabled = true;
+      continue;
+    }
+    if (argument == "--preview-window") {
+      options.display_window = true;
+      continue;
+    }
+    if (argument == "--runtime-build") {
+      if (i + 1 >= argc || !_ParseRuntimeBuildFlavor(argv[i + 1], &options.runtime_build_flavor)) {
+        if (out_error_message) {
+          *out_error_message = "--runtime-build requires 'Debug' or 'releaseWithDebugInfo'.";
+        }
+        return false;
+      }
+      ++i;
       continue;
     }
     if (argument == "--algorithm") {
@@ -852,6 +918,21 @@ bool _ParsePreviewRenderServerOptions(
       options.enabled = true;
       continue;
     }
+    if (argument == "--preview-window") {
+      options.enabled = true;
+      options.display_window = true;
+      continue;
+    }
+    if (argument == "--runtime-build") {
+      if (i + 1 >= argc || !_ParseRuntimeBuildFlavor(argv[i + 1], &options.runtime_build_flavor)) {
+        if (out_error_message) {
+          *out_error_message = "--runtime-build requires 'Debug' or 'releaseWithDebugInfo'.";
+        }
+        return false;
+      }
+      ++i;
+      continue;
+    }
     if (argument == "--algorithm") {
       if (i + 1 >= argc || !argv[i + 1] || !*argv[i + 1]) {
         if (out_error_message) {
@@ -925,10 +1006,10 @@ bool _ParsePreviewRenderServerOptions(
     if (argument == "--help" || argument == "-h") {
       std::cout
         << "Usage:\n"
-        << "  debugTool.exe --preview-render-server "
+        << "  debugTool.exe --preview-window "
         << "[--algorithm <name>] [--ticks <count>] "
         << "[--preview-width <px>] [--preview-height <px>] [--preview-output <path>] "
-        << "[--execution jobs|vk|cuda] [--runner-endpoint <host:port>]\n";
+        << "[--execution jobs|vk|cuda] [--runtime-build Debug|releaseWithDebugInfo]\n";
       return false;
     }
   }
@@ -1131,6 +1212,7 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
   if (!runtime.Init("debugToolRunner", 1280, 720)) {
     throw std::runtime_error("DebugToolBackendRuntime init failed in pipeline runner mode.");
   }
+  runtime.SetAlgorithmRuntimeBuildFlavor(options.runtime_build_flavor);
   append_progress("runtime_init_end");
   append_progress("runtime.initialized");
 
@@ -1212,14 +1294,6 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
   }
   append_progress("resource_batch_submitted");
 
-  append_progress("start_ticking_begin");
-  if (!debug_tool::DebugCmd::Execute(runtime, debug_tool::DebugCommand{
-        .id = debug_tool::DebugCommandId::StartTick,
-      }, nullptr)) {
-    throw std::runtime_error("Failed to start pipeline ticking.");
-  }
-  append_progress("start_ticking_end");
-  append_progress("ticking_started");
   if (!debug_tool::DebugCmd::Execute(runtime, debug_tool::DebugCommand{
         .id = debug_tool::DebugCommandId::SetRenderPreviewExtent,
         .preview_extent = ImVec2(
@@ -1249,6 +1323,36 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
     throw std::runtime_error("Failed to set pipeline preview request before ticking.");
   }
   append_progress("preview_request_set_before_ticks");
+
+  if (!runtime.runtime_environment().Tick()) {
+    throw std::runtime_error("Runtime environment failed before pipeline ticking.");
+  }
+  append_progress("preview_frame_rendered_before_ticks");
+
+  append_progress("start_ticking_begin");
+  if (!debug_tool::DebugCmd::Execute(runtime, debug_tool::DebugCommand{
+        .id = debug_tool::DebugCommandId::StartTick,
+      }, nullptr)) {
+    throw std::runtime_error("Failed to start pipeline ticking.");
+  }
+  append_progress("start_ticking_end");
+  append_progress("ticking_started");
+
+  if (options.display_window) {
+    DebugToolFrontendPanel ui_panel;
+    runtime.runtime_environment().SetDrawCallback([&]() {
+      ui_panel.DrawRenderPreviewOnly(runtime);
+    });
+    while (runtime.Tick()) {
+    }
+    ui_panel.Destroy();
+    std::cout.rdbuf(original_cout_buffer);
+    std::cerr.rdbuf(original_cerr_buffer);
+    append_progress("runner.completed");
+    runtime.Destroy();
+    append_progress("runtime.destroyed");
+    return true;
+  }
 
   std::cout
     << "pipeline_runner.begin algorithm=" << options.algorithm_name
@@ -1550,6 +1654,7 @@ bool _RunAlgorithmRunner(const AlgorithmRunnerOptions& options) {
   if (!runtime.Init("debugToolRunner", 1280, 720)) {
     throw std::runtime_error("DebugToolBackendRuntime init failed in algorithm runner mode.");
   }
+  runtime.SetAlgorithmRuntimeBuildFlavor(options.runtime_build_flavor);
   append_progress("runtime_init_end");
   append_progress("runtime.initialized");
 
@@ -1609,14 +1714,6 @@ bool _RunAlgorithmRunner(const AlgorithmRunnerOptions& options) {
   mounted_algorithm_index = mount_result.algorithm_index;
   append_progress("algorithm_mounted");
 
-  append_progress("start_ticking_begin");
-  if (!debug_tool::DebugCmd::Execute(runtime, debug_tool::DebugCommand{
-        .id = debug_tool::DebugCommandId::StartTick,
-      }, nullptr)) {
-    throw std::runtime_error("Failed to start algorithm ticking.");
-  }
-  append_progress("start_ticking_end");
-  append_progress("ticking_started");
   if (!debug_tool::DebugCmd::Execute(runtime, debug_tool::DebugCommand{
         .id = debug_tool::DebugCommandId::SetRenderPreviewExtent,
         .preview_extent = ImVec2(
@@ -1646,6 +1743,20 @@ bool _RunAlgorithmRunner(const AlgorithmRunnerOptions& options) {
     throw std::runtime_error("Failed to set algorithm preview request before ticking.");
   }
   append_progress("preview_request_set_before_ticks");
+
+  if (!runtime.runtime_environment().Tick()) {
+    throw std::runtime_error("Runtime environment failed before algorithm ticking.");
+  }
+  append_progress("preview_frame_rendered_before_ticks");
+
+  append_progress("start_ticking_begin");
+  if (!debug_tool::DebugCmd::Execute(runtime, debug_tool::DebugCommand{
+        .id = debug_tool::DebugCommandId::StartTick,
+      }, nullptr)) {
+    throw std::runtime_error("Failed to start algorithm ticking.");
+  }
+  append_progress("start_ticking_end");
+  append_progress("ticking_started");
 
   std::cout
     << "algorithm_runner.begin algorithm=" << options.algorithm_name
@@ -1803,6 +1914,22 @@ bool _RunAlgorithmRunner(const AlgorithmRunnerOptions& options) {
   if (!runtime.has_render_preview_texture()) {
     throw std::runtime_error(
       "Render preview texture was not created. summary=" + runtime.render_preview_debug_summary());
+  }
+
+  if (options.display_window) {
+    DebugToolFrontendPanel ui_panel;
+    runtime.runtime_environment().SetDrawCallback([&]() {
+      ui_panel.DrawRenderPreviewOnly(runtime);
+    });
+    while (runtime.Tick()) {
+    }
+    ui_panel.Destroy();
+    std::cout.rdbuf(original_cout_buffer);
+    std::cerr.rdbuf(original_cerr_buffer);
+    append_progress("runner.completed");
+    runtime.Destroy();
+    append_progress("runtime.destroyed");
+    return true;
   }
 
   std::vector<std::byte> preview_rgba{};
@@ -2135,6 +2262,7 @@ bool _RunPreviewRenderServer(const PreviewRenderServerOptions& options) {
   bool is_pipeline = false;
   std::string query_error_message;
   DebugToolBackendRuntime type_probe_runtime;
+  type_probe_runtime.SetAlgorithmRuntimeBuildFlavor(options.runtime_build_flavor);
   append_preview_render_probe("preview_render_server.type_probe.begin");
   if (!type_probe_runtime.IsPipelineAlgorithm(
         options.algorithm_name,
@@ -2153,6 +2281,7 @@ bool _RunPreviewRenderServer(const PreviewRenderServerOptions& options) {
     ? _RunPipelineRunner(
         PipelineRunnerOptions{
           .enabled = true,
+          .display_window = options.display_window,
           .algorithm_name = options.algorithm_name,
           .ticks = options.ticks,
           .preview_width = options.preview_width,
@@ -2160,10 +2289,12 @@ bool _RunPreviewRenderServer(const PreviewRenderServerOptions& options) {
           .runner_endpoint = options.runner_endpoint,
           .render_preview_output_path = options.render_preview_output_path,
           .execution_preference = options.execution_preference,
+          .runtime_build_flavor = options.runtime_build_flavor,
         })
     : _RunAlgorithmRunner(
         AlgorithmRunnerOptions{
           .enabled = true,
+          .display_window = options.display_window,
           .algorithm_name = options.algorithm_name,
           .ticks = options.ticks,
           .preview_width = options.preview_width,
@@ -2171,9 +2302,13 @@ bool _RunPreviewRenderServer(const PreviewRenderServerOptions& options) {
           .runner_endpoint = options.runner_endpoint,
           .render_preview_output_path = options.render_preview_output_path,
           .execution_preference = options.execution_preference,
+          .runtime_build_flavor = options.runtime_build_flavor,
         });
   append_preview_render_probe(
     std::string("preview_render_server.run.end rendered=") + (rendered ? "true" : "false"));
+  if (options.display_window) {
+    return rendered;
+  }
   if (!rendered) {
     return false;
   }
@@ -2275,7 +2410,7 @@ int main(int argc, char** argv) {
       }
     }
 
-    if (_IsPreviewRenderServerInvocation(argc, argv)) {
+    if (_IsPreviewRenderServerInvocation(argc, argv) || _IsPreviewWindowInvocation(argc, argv)) {
       PreviewRenderServerOptions preview_render_server_options{};
       std::string preview_render_server_parse_error;
       if (!_ParsePreviewRenderServerOptions(

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import copy
 import ctypes
-import io
 import json
 import math
 import mimetypes
@@ -14,7 +13,7 @@ import shutil
 import subprocess
 import tempfile
 import time
-import socket
+import sys
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
@@ -24,7 +23,6 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 from typing import Any
 from ctypes import wintypes
 from urllib.parse import unquote, urlparse
-from PIL import Image, ImageTk
 
 LRESULT_TYPE = getattr(ctypes, "c_ssize_t", ctypes.c_longlong if ctypes.sizeof(ctypes.c_void_p) == ctypes.sizeof(ctypes.c_longlong) else ctypes.c_long)
 CHAT_HISTORY_FULL_TURN_LIMIT = 12
@@ -33,6 +31,144 @@ LEGACY_ALGORITHM_NAME_PREFIX = "vxax"
 RESOURCE_ROOT_GROUP_NAME = "resourceRoot"
 FUNCTION_SCRIPT_PLACEHOLDER = "Describe the function logic here."
 FUNCTION_SCRIPT_LANGUAGE_DEFAULT = "pseudocode"
+WINDOWS_PLATFORM = sys.platform == "win32"
+SEE_MASK_NOCLOSEPROCESS = 0x00000040
+SW_SHOWNORMAL = 1
+WAIT_OBJECT_0 = 0x00000000
+INFINITE = 0xFFFFFFFF
+STILL_ACTIVE = 259
+GWL_STYLE = -16
+WS_CHILD = 0x40000000
+WS_VISIBLE = 0x10000000
+WS_POPUP = 0x80000000
+WS_CAPTION = 0x00C00000
+WS_THICKFRAME = 0x00040000
+WS_SYSMENU = 0x00080000
+WS_MINIMIZEBOX = 0x00020000
+WS_MAXIMIZEBOX = 0x00010000
+SWP_NOACTIVATE = 0x0010
+SWP_SHOWWINDOW = 0x0040
+
+
+class _ShellExecuteInfo(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", wintypes.DWORD),
+        ("fMask", wintypes.DWORD),
+        ("hwnd", wintypes.HWND),
+        ("lpVerb", wintypes.LPCWSTR),
+        ("lpFile", wintypes.LPCWSTR),
+        ("lpParameters", wintypes.LPCWSTR),
+        ("lpDirectory", wintypes.LPCWSTR),
+        ("nShow", ctypes.c_int),
+        ("hInstApp", wintypes.HINSTANCE),
+        ("lpIDList", ctypes.c_void_p),
+        ("lpClass", wintypes.LPCWSTR),
+        ("hkeyClass", wintypes.HKEY),
+        ("dwHotKey", wintypes.DWORD),
+        ("hIcon", wintypes.HANDLE),
+        ("hProcess", wintypes.HANDLE),
+    ]
+
+
+class _ShellProcess:
+    def __init__(self, process_handle: wintypes.HANDLE) -> None:
+        self.process_handle = process_handle
+        self.process_id = int(ctypes.windll.kernel32.GetProcessId(process_handle))
+
+    def poll(self) -> int | None:
+        exit_code = wintypes.DWORD()
+        if not ctypes.windll.kernel32.GetExitCodeProcess(self.process_handle, ctypes.byref(exit_code)):
+            raise ctypes.WinError()
+        if exit_code.value == STILL_ACTIVE:
+            return None
+        return int(exit_code.value)
+
+    def wait(self) -> int:
+        result = ctypes.windll.kernel32.WaitForSingleObject(self.process_handle, INFINITE)
+        if result != WAIT_OBJECT_0:
+            raise ctypes.WinError()
+        return self.poll() or 0
+
+    def terminate(self) -> None:
+        if not ctypes.windll.kernel32.TerminateProcess(self.process_handle, 1):
+            raise ctypes.WinError()
+
+    def close(self) -> None:
+        if self.process_handle:
+            ctypes.windll.kernel32.CloseHandle(self.process_handle)
+            self.process_handle = None
+
+
+def _shell_execute_process(executable: Path, arguments: list[str], working_directory: Path) -> _ShellProcess:
+    if not WINDOWS_PLATFORM:
+        raise RuntimeError("ShellExecuteExW debugTool launch is only available on Windows.")
+    inherited_path = ""
+    for environment_key in list(os.environ):
+        if environment_key.lower() == "path":
+            inherited_path = os.environ[environment_key]
+            del os.environ[environment_key]
+    runtime_path_entries = [executable.parent]
+    toolchain_root = executable.parent.parent
+    runtime_configuration = executable.parent.name
+    assimp_debug_path = toolchain_root / "assimp-build" / "bin" / runtime_configuration
+    if assimp_debug_path.exists():
+        runtime_path_entries.append(assimp_debug_path)
+    vulkan_sdk = os.environ.get("VULKAN_SDK", "")
+    if vulkan_sdk:
+        vulkan_bin = Path(vulkan_sdk) / "Bin"
+        if vulkan_bin.exists():
+            runtime_path_entries.append(vulkan_bin)
+    os.environ["Path"] = ";".join(str(path) for path in runtime_path_entries) + ";" + inherited_path
+    shell_execute_info = _ShellExecuteInfo()
+    shell_execute_info.cbSize = ctypes.sizeof(_ShellExecuteInfo)
+    shell_execute_info.fMask = SEE_MASK_NOCLOSEPROCESS
+    shell_execute_info.lpVerb = "open"
+    shell_execute_info.lpFile = str(executable)
+    shell_execute_info.lpParameters = subprocess.list2cmdline(arguments)
+    shell_execute_info.lpDirectory = str(working_directory)
+    shell_execute_info.nShow = SW_SHOWNORMAL
+    if not ctypes.windll.shell32.ShellExecuteExW(ctypes.byref(shell_execute_info)):
+        raise ctypes.WinError()
+    return _ShellProcess(shell_execute_info.hProcess)
+
+
+def _find_process_window(process_id: int) -> wintypes.HWND | None:
+    if not WINDOWS_PLATFORM:
+        raise RuntimeError("Process window lookup is only available on Windows.")
+    found_window: list[wintypes.HWND] = []
+    process_id_type = wintypes.DWORD()
+    enum_windows_proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    def visit_window(hwnd: wintypes.HWND, _lparam: wintypes.LPARAM) -> bool:
+        ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(process_id_type))
+        if process_id_type.value == process_id and ctypes.windll.user32.IsWindowVisible(hwnd):
+            found_window.append(hwnd)
+            return False
+        return True
+
+    ctypes.windll.user32.EnumWindows(enum_windows_proc(visit_window), 0)
+    return found_window[0] if found_window else None
+
+
+def _embed_process_window(hwnd: wintypes.HWND, parent_hwnd: int, width: int, height: int) -> None:
+    if not WINDOWS_PLATFORM:
+        raise RuntimeError("Process window embedding is only available on Windows.")
+    get_window_long = ctypes.windll.user32.GetWindowLongPtrW
+    set_window_long = ctypes.windll.user32.SetWindowLongPtrW
+    style = int(get_window_long(hwnd, GWL_STYLE))
+    style &= ~(WS_POPUP | WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX)
+    style |= WS_CHILD | WS_VISIBLE
+    set_window_long(hwnd, GWL_STYLE, style)
+    ctypes.windll.user32.SetParent(hwnd, wintypes.HWND(parent_hwnd))
+    ctypes.windll.user32.SetWindowPos(
+        hwnd,
+        wintypes.HWND(0),
+        0,
+        0,
+        max(width, 1),
+        max(height, 1),
+        SWP_NOACTIVATE | SWP_SHOWWINDOW,
+    )
 
 try:
     from .core.approval_rules import ApprovalDecision, ApprovalRuleSet, evaluate_access_rules, load_access_rules, resolve_access_rules_path
@@ -330,13 +466,13 @@ class AlgorithmStudioApp(
         self.execution_runs: list[dict[str, Any]] = []
         self.execution_current_run: dict[str, Any] | None = None
         self.preview_text: tk.Text | None = None
-        self.render_preview_photo: ImageTk.PhotoImage | None = None
-        self.render_preview_endpoint_path = (
-            PROJECT_ROOT.parent / "testData" / "runner_control" / "preview_render_endpoint.txt"
-        )
         self.render_preview_status_var = tk.StringVar(value="renderpreview is idle.")
         self.render_preview_mount_inflight = False
         self.render_preview_retry_after_id: int | None = None
+        self.render_preview_embed_after_id: str | None = None
+        self.render_preview_embedded_hwnd: wintypes.HWND | None = None
+        self.debugtool_processes: list[Any] = []
+        self.studio_closing = False
         self.document_panel: ttk.Frame | None = None
         self.document_content_frame: ttk.Frame | None = None
         self.document_panel_title_var = tk.StringVar(value="algoDevDoc")
@@ -350,6 +486,7 @@ class AlgorithmStudioApp(
         self.scene_document_split_handle_button: ttk.Button | None = None
         self.log_text: tk.Text | None = None
         self.canvas: tk.Canvas | None = None
+        self.render_preview_host_frame: tk.Frame | None = None
         self.container_list: tk.Listbox | None = None
         self.rule_list: tk.Listbox | None = None
         self.reflector_list: tk.Listbox | None = None
@@ -818,6 +955,17 @@ class AlgorithmStudioApp(
             relief="flat",
         )
         self.canvas.grid(row=2, column=0, sticky="nsew")
+        self.render_preview_host_frame = tk.Frame(
+            self.canvas,
+            bg="#0b1017",
+            bd=0,
+            highlightthickness=0,
+        )
+        self.render_preview_host_frame.place_forget()
+        self.render_preview_host_frame.bind(
+            "<Configure>",
+            lambda _event: self._resize_embedded_debugtool_window(),
+        )
         self.interface4agents_highlight_targets["canvas"] = [
             (
                 self.canvas,
@@ -1446,7 +1594,8 @@ class AlgorithmStudioApp(
         self.document_editor_target_kind = None
         self.document_editor_target_name = None
         self._open_manifest_in_document_panel()
-        self._set_canvas_view_mode("graph", log_message=f"Loaded {path.name}.")
+        initial_view = self._initial_canvas_view_for_project(self.project)
+        self._set_canvas_view_mode(initial_view, log_message=f"Loaded {path.name}; opened {initial_view}.")
         self._refresh_window_title()
 
     def _apply_project_vars(self) -> None:
@@ -1479,6 +1628,21 @@ class AlgorithmStudioApp(
 
     def _load_default_template(self) -> None:
         self._new_project()
+
+    def _initial_canvas_view_for_project(self, project: ProjectState) -> str:
+        if (
+            project.decomposer_rules
+            or project.reflector_items
+            or project.function_frames
+            or project.function_text_items
+            or project.intervention_stages
+        ):
+            return "graph"
+        if project.containers or project.container_groups:
+            return "container_overview"
+        if project.res_nodes:
+            return "decomposer_overview"
+        return "graph"
 
     def _load_package(self) -> None:
         path = filedialog.askopenfilename(
@@ -1560,10 +1724,28 @@ class AlgorithmStudioApp(
 
     def _existing_algorithm_runtime_folder(self, algorithm_name: str) -> Path:
         root = PROJECT_ROOT.parent / "algorithmLib" / "algorithmruntimeLib"
-        norm_path = root / "norm" / algorithm_name
-        if norm_path.exists():
-            return norm_path
-        return root / algorithm_name
+        for build_flavor in ("releaseWithDebugInfo", ""):
+            flavor_root = root / build_flavor if build_flavor else root
+            norm_path = flavor_root / "norm" / algorithm_name
+            if norm_path.exists():
+                return norm_path
+        return root / "norm" / algorithm_name
+
+    def _existing_debug_tool_path(self) -> Path:
+        build_root = PROJECT_ROOT.parent / "build"
+        candidates = (
+            build_root / "Microsoft" / "RelWithDebInfo" / "debugTool.exe",
+            build_root / "OpenSource" / "RelWithDebInfo" / "debugTool.exe",
+            build_root / "Microsoft" / "Debug" / "debugTool.exe",
+            build_root / "OpenSource" / "Debug" / "debugTool.exe",
+            build_root / "RelWithDebInfo" / "debugTool.exe",
+            build_root / "Debug" / "debugTool.exe",
+        )
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+        raise RuntimeError(
+            "No compiled debugTool.exe was found in build/Microsoft, build/OpenSource, or the legacy build folders.")
 
     def _current_algorithm_name_for_preview(self) -> str:
         algorithm_name = self.project.algorithm_name.strip() or self.project.package_name.strip()
@@ -1722,11 +1904,11 @@ class AlgorithmStudioApp(
         return " | ".join(self._compact_activity_text(line, limit=72) for line in preview)
 
     def _run_build_command(self, algorithm_name: str) -> str:
-        build_script = PROJECT_ROOT.parent / "build_algorithm_releaseWithDebugInfo.bat"
+        build_script = PROJECT_ROOT.parent / "boot" / "booterNinjaClang.py"
         if not build_script.exists():
             raise RuntimeError(f"Build script is missing: {build_script}")
         completed = subprocess.run(
-            ["cmd.exe", "/c", str(build_script), algorithm_name],
+            [sys.executable, str(build_script), algorithm_name],
             cwd=str(PROJECT_ROOT.parent),
             capture_output=True,
             text=True,
@@ -1739,31 +1921,76 @@ class AlgorithmStudioApp(
         return self._summarize_build_output(completed.stdout, completed.stderr)
 
     def _launch_debugtool_gui(self, status_text: str = "debugTool launch requested.") -> None:
-        launch_script = PROJECT_ROOT / "run_debugtool_renderpreview.bat"
-        if not launch_script.exists():
-            raise RuntimeError(f"DebugTool launch script is missing: {launch_script}")
-        subprocess.Popen(
-            ["cmd.exe", "/c", str(launch_script)],
-            cwd=str(PROJECT_ROOT.parent),
-            creationflags=subprocess.CREATE_NO_WINDOW,
-        )
+        debug_tool = self._existing_debug_tool_path()
+        process = _shell_execute_process(debug_tool, [], PROJECT_ROOT.parent)
+        self.debugtool_processes.append(process)
         self.render_preview_status_var.set(status_text)
         self._log("Launched debugTool render preview window.")
         self._refresh_all()
 
+    def _show_render_preview_host(self) -> None:
+        if not self.canvas or not self.render_preview_host_frame:
+            return
+        width = max(self.canvas.winfo_width() - 32, 1)
+        height = max(self.canvas.winfo_height() - 32, 1)
+        self.render_preview_host_frame.place(x=16, y=16, width=width, height=height)
+        self.render_preview_host_frame.lift()
+        self.root.update_idletasks()
+
+    def _hide_render_preview_host(self) -> None:
+        if self.render_preview_host_frame:
+            self.render_preview_host_frame.place_forget()
+
+    def _resize_embedded_debugtool_window(self) -> None:
+        if not self.render_preview_embedded_hwnd or not self.render_preview_host_frame:
+            return
+        ctypes.windll.user32.SetWindowPos(
+            self.render_preview_embedded_hwnd,
+            wintypes.HWND(0),
+            0,
+            0,
+            max(self.render_preview_host_frame.winfo_width(), 1),
+            max(self.render_preview_host_frame.winfo_height(), 1),
+            SWP_NOACTIVATE | SWP_SHOWWINDOW,
+        )
+
+    def _attach_debugtool_preview_window(self, process: _ShellProcess, algorithm_name: str) -> None:
+        def try_attach() -> None:
+            if self.studio_closing or process.process_handle is None:
+                self.render_preview_embed_after_id = None
+                return
+            hwnd = _find_process_window(process.process_id)
+            if hwnd:
+                self.render_preview_embedded_hwnd = hwnd
+                self.root.update_idletasks()
+                if self.canvas_view_mode == "renderpreview":
+                    self._show_render_preview_host()
+                _embed_process_window(
+                    hwnd,
+                    self.render_preview_host_frame.winfo_id(),
+                    self.render_preview_host_frame.winfo_width(),
+                    self.render_preview_host_frame.winfo_height(),
+                )
+                self._resize_embedded_debugtool_window()
+                self.render_preview_status_var.set(
+                    f"DebugTool preview for {algorithm_name} is embedded in DevTools."
+                )
+                self._log(f"Embedded debugTool preview window for {algorithm_name} into DevTools.")
+                self._refresh_all()
+                self.render_preview_embed_after_id = None
+                return
+            if process.poll() is not None:
+                self.render_preview_embed_after_id = None
+                return
+            self.render_preview_embed_after_id = self.root.after(50, try_attach)
+
+        self.render_preview_embed_after_id = self.root.after(0, try_attach)
+
     def _launch_debugtool_preview_mount(self) -> None:
-        launch_script = PROJECT_ROOT / "run_debugtool_preview_mount.bat"
-        if not launch_script.exists():
-            raise RuntimeError(f"DebugTool preview mount script is missing: {launch_script}")
         if self.render_preview_mount_inflight:
             return
 
         algorithm_name = self._current_algorithm_name_for_preview()
-        if not self.project.build_finished:
-            self.render_preview_status_var.set(f"Build {algorithm_name} first before renderpreview.")
-            self._log(f"Refused debugTool preview mount for {algorithm_name}: build is not finished.")
-            return
-
         runtime_path = self._existing_algorithm_runtime_folder(algorithm_name)
         if not runtime_path.exists():
             raise RuntimeError(f"Built algorithm runtime folder is missing: {runtime_path}")
@@ -1772,101 +1999,54 @@ class AlgorithmStudioApp(
         self.render_preview_status_var.set(f"Mounting built algorithm {algorithm_name} from {runtime_path}...")
         self._log(f"Requested debugTool preview mount for built algorithm {algorithm_name} at {runtime_path}.")
         self.render_preview_mount_inflight = True
-
-        process = subprocess.Popen(
-            ["cmd.exe", "/c", str(launch_script), algorithm_name],
-            cwd=str(PROJECT_ROOT.parent),
-            creationflags=subprocess.CREATE_NO_WINDOW,
+        debug_tool = self._existing_debug_tool_path()
+        process = _shell_execute_process(
+            debug_tool,
+            [
+                "--preview-window",
+                "--algorithm",
+                algorithm_name,
+                "--ticks",
+                "12",
+                "--runtime-build",
+                "releaseWithDebugInfo",
+                "--execution",
+                "vk",
+            ],
+            PROJECT_ROOT.parent,
         )
+        self.debugtool_processes.append(process)
+        self.render_preview_embedded_hwnd = None
+        self._attach_debugtool_preview_window(process, algorithm_name)
 
         import threading
 
-        def bootstrap() -> None:
-            while not self.render_preview_endpoint_path.exists():
-                if process.poll() is not None:
-                    return
-                time.sleep(0.1)
-
-            def finalize_preview() -> None:
-                self.render_preview_status_var.set(f"Linked {algorithm_name} to preview render server.")
-                self._refresh_all()
-
-            self.root.after(0, finalize_preview)
+        self.render_preview_status_var.set(f"DebugTool preview window launched for {algorithm_name}.")
+        self._refresh_all()
 
         def watcher() -> None:
             returncode = process.wait()
+            if process in self.debugtool_processes:
+                self.debugtool_processes.remove(process)
+            process.close()
+            if self.studio_closing:
+                return
 
             def finalize() -> None:
                 self.render_preview_mount_inflight = False
+                self.render_preview_embedded_hwnd = None
+                self._hide_render_preview_host()
                 if returncode == 0:
-                    self.render_preview_status_var.set(f"Mounted {algorithm_name} and submitted preview render.")
-                    self._log(f"debugTool preview mount finished for {algorithm_name}.")
+                    self.render_preview_status_var.set(f"DebugTool preview window closed for {algorithm_name}.")
+                    self._log(f"debugTool preview window finished for {algorithm_name}.")
                 else:
-                    self.render_preview_status_var.set(f"debugTool preview mount failed for {algorithm_name}.")
-                    self._log(f"debugTool preview mount failed for {algorithm_name} with code {returncode}.")
+                    self.render_preview_status_var.set(f"DebugTool preview window failed for {algorithm_name}.")
+                    self._log(f"debugTool preview window failed for {algorithm_name} with code {returncode}.")
                 self._refresh_all()
 
             self.root.after(0, finalize)
 
-        threading.Thread(target=bootstrap, daemon=True).start()
         threading.Thread(target=watcher, daemon=True).start()
-
-    def _cancel_render_preview_retry(self) -> None:
-        after_id = self.render_preview_retry_after_id
-        if after_id is None:
-            return
-        self.root.after_cancel(after_id)
-        self.render_preview_retry_after_id = None
-
-    def _schedule_render_preview_retry(self, delay_ms: int = 250) -> None:
-        if self.render_preview_retry_after_id is not None:
-            return
-
-        def retry() -> None:
-            self.render_preview_retry_after_id = None
-            if self.canvas_view_mode == "renderpreview":
-                self._refresh_all()
-
-        self.render_preview_retry_after_id = self.root.after(delay_ms, retry)
-
-    def _fetch_render_preview_frame(self) -> bytes:
-        endpoint_text = self.render_preview_endpoint_path.read_text(encoding="utf-8").strip()
-        host, port_text = endpoint_text.rsplit(":", 1)
-        with socket.create_connection((host, int(port_text)), timeout=10.0) as connection:
-            connection.sendall(b"frame\n")
-            connection.shutdown(socket.SHUT_WR)
-            response = bytearray()
-            while True:
-                chunk = connection.recv(65536)
-                if not chunk:
-                    break
-                response.extend(chunk)
-        _, _, payload = bytes(response).partition(b"\n")
-        return payload or bytes(response)
-
-    def _load_render_preview_photo(self) -> None:
-        if self.canvas_view_mode != "renderpreview":
-            self.render_preview_photo = None
-            self._cancel_render_preview_retry()
-            return
-        if self.render_preview_endpoint_path.exists():
-            try:
-                payload = self._fetch_render_preview_frame()
-            except (ConnectionRefusedError, TimeoutError, OSError):
-                self.render_preview_photo = None
-                self._schedule_render_preview_retry()
-                return
-        else:
-            self.render_preview_photo = None
-            self._schedule_render_preview_retry()
-            return
-        if not payload:
-            self.render_preview_photo = None
-            self._schedule_render_preview_retry()
-            return
-        image = Image.open(io.BytesIO(payload))
-        self.render_preview_photo = ImageTk.PhotoImage(image)
-        self._cancel_render_preview_retry()
 
     def _build_current_algorithm(self) -> None:
         try:
@@ -3206,8 +3386,6 @@ class AlgorithmStudioApp(
         self._refresh_reflector_list()
         self._refresh_stage_list()
         self._refresh_preview()
-        if self.canvas_view_mode == "renderpreview":
-            self._load_render_preview_photo()
         self._redraw_canvas()
         self._refresh_canvas_detail_panel()
         self._refresh_inspector()
@@ -4262,6 +4440,8 @@ class AlgorithmStudioApp(
 
     def _intervention_phase_kind_for_view_mode(self, view_mode: str | None = None) -> str | None:
         normalized = str(view_mode or self.canvas_view_mode).strip().lower()
+        if normalized == "graph":
+            return "exec"
         if normalized == "interventioner_pretick":
             return "preTick"
         if normalized == "interventioner_aftertick":
@@ -4342,12 +4522,17 @@ class AlgorithmStudioApp(
         phase_kind = self._intervention_phase_kind_for_view_mode()
         if phase_kind is None:
             return True
-        for stage in self.project.intervention_stages:
-            if self._normalize_intervention_stage_kind(stage.kind) != phase_kind:
-                continue
-            if function_name in stage.functions:
-                return True
-        return False
+        function_phase_kinds = {
+            self._normalize_intervention_stage_kind(stage.kind)
+            for stage in self.project.intervention_stages
+            if function_name in stage.functions
+        }
+        if len(function_phase_kinds) > 1:
+            raise AssertionError(
+                f"Function {function_name} belongs to multiple phases: {sorted(function_phase_kinds)}"
+            )
+        function_phase_kind = next(iter(function_phase_kinds), "exec")
+        return function_phase_kind == phase_kind
 
     def _find_container_group(self, name: str) -> ContainerGroupItem | None:
         for group in self.project.container_groups:
@@ -7440,6 +7625,7 @@ class AlgorithmStudioApp(
         if self.canvas_view_mode == "renderpreview":
             self._draw_render_preview_scene(canvas, width, height)
             return
+        self._hide_render_preview_host()
         self._draw_grid(canvas, width, height)
         self._draw_container_reuse_links(canvas)
         self._draw_highlighted_container_chain_path(canvas)
@@ -7511,6 +7697,16 @@ class AlgorithmStudioApp(
             canvas.tag_raise("clip_mask")
             canvas.tag_raise("group_clip_overlay")
             canvas.tag_raise("group_resize_handle")
+        if not self.canvas_nodes and not self.canvas_container_group_nodes:
+            canvas.create_text(
+                width / 2.0,
+                height / 2.0,
+                anchor="center",
+                fill=COLORS["muted"],
+                text="No nodes in this scene. Load an algoDevDoc or switch scene.",
+                font=("Segoe UI", 12),
+                tags=("empty_scene_hint",),
+            )
         zoom = self._canvas_zoom_factor()
         if abs(zoom - 1.0) >= 1e-6:
             canvas.scale("all", 0.0, 0.0, zoom, zoom)
@@ -7544,18 +7740,19 @@ class AlgorithmStudioApp(
             width=2,
             tags=("renderpreview_preview_frame",),
         )
-        if self.render_preview_photo is not None:
-            image_width = float(self.render_preview_photo.width())
-            image_height = float(self.render_preview_photo.height())
-            image_x = frame_left + max((frame_right - frame_left - image_width) / 2.0, 12.0)
-            image_y = frame_top + max((frame_bottom - frame_top - image_height) / 2.0, 12.0)
-            canvas.create_image(
-                image_x,
-                image_y,
-                anchor="nw",
-                image=self.render_preview_photo,
-                tags=("renderpreview_preview_frame",),
-            )
+        canvas.create_text(
+            (frame_left + frame_right) / 2.0,
+            (frame_top + frame_bottom) / 2.0,
+            anchor="center",
+            fill=COLORS["text"],
+            text="Waiting for the DebugTool preview window...",
+            font=("Segoe UI", 12),
+            tags=("renderpreview_preview_frame",),
+        )
+        if self.render_preview_embedded_hwnd:
+            self._show_render_preview_host()
+        else:
+            self._hide_render_preview_host()
 
     def _resource_node_fill_color(self, item: ResourceNodeItem) -> str:
         source = str(getattr(item, "resource_source", "resource") or "resource").strip().lower()

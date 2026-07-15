@@ -5,16 +5,15 @@ Anaconda or Miniconda is mandatory for every entry point. Activate a conda envir
 From the repository root, install the Python requirements first:
 
 ```text
-conda activate <your-environment>
+conda activate algoforge
 python -m pip install -r requirements.txt
 ```
 
 ## Microsoft toolchain
 
 ```text
-conda activate <your-environment>
-python buildProject/Microsoft/build_mainline.py
-python buildProject/Microsoft/build_algorithm.py v6a6_pbd_ball_collision_demo
+conda activate algoforge
+python boot/booterMSVC.py v6a6_pbd_ball_collision_demo
 ```
 
 The Microsoft entry points use Visual Studio 2022 on Windows and write the mainline build to `build/Microsoft`. The toolchain file defines `ALGOFORGE_TOOLCHAIN_MSVC=1`.
@@ -22,8 +21,7 @@ The Microsoft entry points use Visual Studio 2022 on Windows and write the mainl
 ## Open-source toolchain
 
 ```text
-python buildProject/OpenSource/build_mainline.py
-python buildProject/OpenSource/build_algorithm.py v6a6_pbd_ball_collision_demo
+python boot/booterNinjaClang.py v6a6_pbd_ball_collision_demo
 ```
 
 The open-source entry points use LLVM clang-cl plus Ninja on Windows, and clang plus Ninja on other platforms. The toolchain file defines `ALGOFORGE_TOOLCHAIN_CLANG=1` and writes the mainline build to `build/OpenSource`.

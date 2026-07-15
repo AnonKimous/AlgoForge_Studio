@@ -14,7 +14,7 @@ def main() -> int:
     require_anaconda()
     subprocess.run([sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "--no-input", "-r", str(ROOT / "requirements.txt")], cwd=ROOT, check=True)
     print("Python environment is ready.")
-    print("Run compiler_with_msvc.py or compiler_with_ninja_clang.py next.")
+    print("Run booterMSVC.py or booterNinjaClang.py next.")
     return 0
 
 

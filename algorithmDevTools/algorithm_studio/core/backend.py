@@ -1212,6 +1212,14 @@ class ProjectState:
                 )
 
         container_groups = payload.get("containerElement", {})
+        if isinstance(container_groups, dict) and set(container_groups) == {"items"}:
+            container_group_items = container_groups["items"]
+            if not isinstance(container_group_items, list):
+                raise ValueError("containerElement.items must be a list.")
+            container_groups = {
+                str(entry.get("name") or f"containerElement_{index}"): entry
+                for index, entry in enumerate(container_group_items, start=1)
+            }
         if container_groups:
             if not isinstance(container_groups, dict):
                 raise ValueError("containerElement must be an object.")
@@ -1387,30 +1395,59 @@ class ProjectState:
                     )
                 )
 
-        stages = payload.get("intervention", {}).get("stages", {})
+        parsed_stage_names: set[str] = set()
+
+        def _used_names(value: Any) -> list[str]:
+            names: list[str] = []
+            for item in value:
+                if isinstance(item, dict):
+                    name = str(item.get("name") or "").strip()
+                else:
+                    match = re.search(r"(?:^|[;{])name=([^;}]+)", str(item))
+                    name = match.group(1).strip() if match else str(item).strip()
+                if name:
+                    names.append(name)
+            return names
+
+        def _append_stage(stage_name: str, stage: dict[str, Any]) -> None:
+            normalized_name = str(stage_name).strip()
+            if normalized_name in parsed_stage_names:
+                return
+            parsed_stage_names.add(normalized_name)
+            used = stage.get("used_algorithm_containers", {})
+            shader = stage.get("shader", {})
+            project.intervention_stages.append(
+                InterventionStage(
+                    name=normalized_name,
+                    kind=str(stage.get("stage_name") or stage.get("stage_kind") or stage.get("kind") or normalized_name),
+                    used_variables=_used_names(used.get("variables", [])),
+                    used_arrays=_used_names(used.get("arrays", [])),
+                    shader_vertex=str(shader.get("vertex") or ""),
+                    shader_fragment=str(shader.get("fragment") or ""),
+                    functions=[str(value) for value in stage.get("functions", [])],
+                    pipeline=str(shader.get("pipeline") or "graphics"),
+                    x=float(stage.get("x", 0.0)),
+                    y=float(stage.get("y", 0.0)),
+                    scene_positions=copy.deepcopy(stage.get("scene_positions", stage.get("scenePositions", {})))
+                    if isinstance(stage.get("scene_positions", stage.get("scenePositions", {})), dict)
+                    else {},
+                    width=float(stage.get("width", 360.0)),
+                    height=float(stage.get("height", 220.0)),
+                    expand=cls._expand_flag(stage.get("expand"), True),
+                )
+            )
+
+        exec_stage = payload.get("exec", {})
+        if isinstance(exec_stage, dict) and exec_stage:
+            _append_stage(str(exec_stage.get("stage_name") or "exec"), exec_stage)
+
+        intervention = payload.get("intervention", {})
+        stages = intervention.get("stages", {})
+        if not stages:
+            stages = intervention.get("stage", {})
         if isinstance(stages, dict):
             for stage_name, stage in stages.items():
-                used = stage.get("used_algorithm_containers", {})
-                project.intervention_stages.append(
-                    InterventionStage(
-                        name=str(stage_name),
-                        kind=str(stage.get("stage_kind") or stage.get("kind") or stage_name),
-                        used_variables=[str(item.get("name")) for item in used.get("variables", []) if item.get("name")],
-                        used_arrays=[str(item.get("name")) for item in used.get("arrays", []) if item.get("name")],
-                        shader_vertex=str(stage.get("shader", {}).get("vertex") or ""),
-                        shader_fragment=str(stage.get("shader", {}).get("fragment") or ""),
-                        functions=[str(value) for value in stage.get("functions", [])],
-                        pipeline=str(stage.get("shader", {}).get("pipeline") or "graphics"),
-                        x=float(stage.get("x", 0.0)),
-                        y=float(stage.get("y", 0.0)),
-                        scene_positions=copy.deepcopy(stage.get("scene_positions", stage.get("scenePositions", {})))
-                        if isinstance(stage.get("scene_positions", stage.get("scenePositions", {})), dict)
-                        else {},
-                        width=float(stage.get("width", 360.0)),
-                        height=float(stage.get("height", 220.0)),
-                        expand=cls._expand_flag(stage.get("expand"), True),
-                    )
-                )
+                _append_stage(str(stage_name), stage)
 
         for group in project.container_groups:
             project.validate_container_group(group)

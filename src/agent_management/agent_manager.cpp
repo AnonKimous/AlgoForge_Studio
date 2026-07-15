@@ -41,9 +41,9 @@ std::filesystem::path _ResolvePipelineTimingExportDirectory() {
   const std::filesystem::path project_root =
     algorithmManager::ResolveProjectRootFromAlgorithmLibraryRoot(algorithm_library_root);
   if (!project_root.empty()) {
-    return project_root / "artifacts" / "pipeline_timing";
+    return project_root / "testData" / "pipeline_timing";
   }
-  return std::filesystem::current_path() / "artifacts" / "pipeline_timing";
+  return std::filesystem::current_path() / "testData" / "pipeline_timing";
 }
 
 bool _ExportAlgorithmPipelineTimingArtifacts(
