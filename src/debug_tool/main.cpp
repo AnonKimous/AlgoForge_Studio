@@ -1917,6 +1917,12 @@ bool _RunAlgorithmRunner(const AlgorithmRunnerOptions& options) {
   }
 
   if (options.display_window) {
+    if (!debug_tool::DebugCmd::Execute(runtime, debug_tool::DebugCommand{
+          .id = debug_tool::DebugCommandId::StartTick,
+        }, nullptr)) {
+      throw std::runtime_error("Failed to restart algorithm ticking for the render preview window.");
+    }
+    append_progress("preview_window_ticking_started");
     DebugToolFrontendPanel ui_panel;
     runtime.runtime_environment().SetDrawCallback([&]() {
       ui_panel.DrawRenderPreviewOnly(runtime);
