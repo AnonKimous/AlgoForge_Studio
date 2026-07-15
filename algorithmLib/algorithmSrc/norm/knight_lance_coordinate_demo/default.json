@@ -1,0 +1,14 @@
+{
+  "algorithm_name": "knight_lance_coordinate_demo",
+  "descriptor_values": [
+    {"descriptor_name": "start_x", "scalar_value": 130.0},
+    {"descriptor_name": "start_y", "scalar_value": 240.0},
+    {"descriptor_name": "angle_degrees", "scalar_value": 0.0},
+    {"descriptor_name": "speed_pixels_per_second", "scalar_value": 150.0},
+    {"descriptor_name": "lance_length", "scalar_value": 260.0},
+    {"descriptor_name": "solid_x", "scalar_value": 500.0},
+    {"descriptor_name": "solid_y", "scalar_value": 180.0},
+    {"descriptor_name": "solid_width", "scalar_value": 70.0},
+    {"descriptor_name": "solid_height", "scalar_value": 120.0}
+  ]
+}

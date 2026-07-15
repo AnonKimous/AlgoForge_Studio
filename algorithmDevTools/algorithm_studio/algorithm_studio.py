@@ -692,8 +692,8 @@ class AlgorithmStudioApp(
         widget = event.widget if isinstance(event.widget, tk.Widget) else None
         if self._widget_consumes_canvas_shortcuts(widget):
             return None
-        if self.canvas_view_mode == "all_in_one" and command != "selection.copy":
-            self._log("all_in_one scene is read-only.")
+        if self.canvas_view_mode in {"all_in_one", "pipeline_overview"} and command != "selection.copy":
+            self._log(f"{self.canvas_view_mode} scene is read-only.")
             return "break"
         self._dispatch_message_center(command)
         return "break"
@@ -711,8 +711,8 @@ class AlgorithmStudioApp(
         widget = event.widget if isinstance(event.widget, tk.Widget) else None
         if self._widget_consumes_canvas_shortcuts(widget):
             return None
-        if self.canvas_view_mode == "all_in_one":
-            self._log("all_in_one scene is read-only.")
+        if self.canvas_view_mode in {"all_in_one", "pipeline_overview"}:
+            self._log(f"{self.canvas_view_mode} scene is read-only.")
             return "break"
         self._merge_current_selection()
         return "break"
@@ -898,6 +898,7 @@ class AlgorithmStudioApp(
             ("aftertick", "aftertick", "interventioner_aftertick", "algorithmDevScene"),
             ("renderresult", "renderresult", "interventioner_render", "algorithmDevScene"),
             ("reflect", "reflect", "reflector_overview", "algorithmDevScene"),
+            ("pipeline", "pipeline", "pipeline_overview", "algorithmDevScene"),
             ("allinone", "allinone", "all_in_one", "algorithmDevScene"),
             ("d2c", "d2c", "decomposer2container_overview", "helperScene"),
             ("renderpreview", "renderpreview", "renderpreview", "renderPreviewScene"),
@@ -1653,7 +1654,6 @@ class AlgorithmStudioApp(
             "reflector",
             "function",
             "functiontext",
-            "interventioner",
         )
         column_gap = 40.0
         row_gap = 48.0
@@ -4141,8 +4141,8 @@ class AlgorithmStudioApp(
         self._log(f"Copied {len(names)} container(s) from the batch selection.")
 
     def _merge_current_selection(self) -> None:
-        if self.canvas_view_mode == "all_in_one":
-            self._log("all_in_one scene is read-only.")
+        if self.canvas_view_mode in {"all_in_one", "pipeline_overview"}:
+            self._log(f"{self.canvas_view_mode} scene is read-only.")
             return
         selection = self._current_batch_selection()
         if not selection:
@@ -4197,8 +4197,8 @@ class AlgorithmStudioApp(
         self._log(f"Merged batch selection into custom variable {group.name}.")
 
     def _delete_current_selection(self) -> None:
-        if self.canvas_view_mode == "all_in_one":
-            self._log("all_in_one scene is read-only.")
+        if self.canvas_view_mode in {"all_in_one", "pipeline_overview"}:
+            self._log(f"{self.canvas_view_mode} scene is read-only.")
             return
         selection = self._current_batch_selection()
         if not selection:
@@ -4213,8 +4213,8 @@ class AlgorithmStudioApp(
         return "decomposer" if zone == "resource" else "container"
 
     def _arrange_current_selection(self) -> None:
-        if self.canvas_view_mode == "all_in_one":
-            self._log("all_in_one scene is read-only.")
+        if self.canvas_view_mode in {"all_in_one", "pipeline_overview"}:
+            self._log(f"{self.canvas_view_mode} scene is read-only.")
             return
         selection = self._current_batch_selection()
         if not selection:
@@ -7637,6 +7637,141 @@ class AlgorithmStudioApp(
                 tags=("chain_path_highlight",),
             )
 
+    def _draw_pipeline_overview_scene(self, canvas: tk.Canvas, width: int, height: int) -> None:
+        pipeline = self.project.pipeline
+        if pipeline is None:
+            canvas.create_text(
+                width / 2.0,
+                height / 2.0,
+                anchor="center",
+                fill=COLORS["muted"],
+                text="No pipeline metadata. Load a package with runtime.pipeline and wrapper.stage.",
+                font=("Segoe UI", 12),
+                tags=("pipeline_overview",),
+            )
+            return
+
+        stages = pipeline.ordered_stages()
+        card_width = 320.0
+        card_height = 150.0
+        gap = 78.0
+        left = 48.0
+        top = 132.0
+        positions: dict[str, tuple[float, float, float, float]] = {}
+        canvas.create_text(
+            left,
+            32.0,
+            anchor="nw",
+            fill=COLORS["text"],
+            text=f"Pipeline {pipeline.pipeline_name}",
+            font=("Segoe UI", 15, "bold"),
+            tags=("pipeline_overview",),
+        )
+        canvas.create_text(
+            left,
+            64.0,
+            anchor="nw",
+            fill=COLORS["muted"],
+            text=f"{len(pipeline.body_stages)} body stage(s)  |  {len(pipeline.mappings)} mapping edge(s)  |  circular tick: {str(pipeline.supports_circular_tick).lower()}",
+            font=("Segoe UI", 10),
+            tags=("pipeline_overview",),
+        )
+        for index, stage in enumerate(stages):
+            x = left + index * (card_width + gap)
+            y = top
+            positions[stage.algorithm_name] = (x, y, x + card_width, y + card_height)
+            fill = COLORS["resource"] if stage.role in {"stageBegin", "stageEnd"} else COLORS["accent_2"]
+            outline = COLORS["accent"] if stage.role in {"stageBegin", "stageEnd"} else COLORS["stage"]
+            node_tag = f"pipeline_stage:{stage.algorithm_name}"
+            canvas.create_rectangle(
+                x,
+                y,
+                x + card_width,
+                y + card_height,
+                fill=COLORS["panel_alt"],
+                outline=outline,
+                width=2,
+                tags=("pipeline_overview", node_tag),
+            )
+            canvas.create_rectangle(
+                x,
+                y,
+                x + card_width,
+                y + 32.0,
+                fill=fill,
+                outline=outline,
+                width=2,
+                tags=("pipeline_overview", node_tag),
+            )
+            if stage.role == "body":
+                stage_label = f"stage {stage.stage_index}/{len(pipeline.body_stages) - 1}  ·  {stage.phase}"
+            else:
+                stage_label = stage.role
+            canvas.create_text(
+                x + 12.0,
+                y + 8.0,
+                anchor="nw",
+                fill=COLORS["window"],
+                text=stage_label,
+                font=("Segoe UI", 11, "bold"),
+                tags=("pipeline_overview", node_tag),
+            )
+            canvas.create_text(
+                x + 14.0,
+                y + 50.0,
+                anchor="nw",
+                fill=COLORS["text"],
+                text=stage.algorithm_name,
+                width=card_width - 28.0,
+                font=("Segoe UI", 11, "bold"),
+                tags=("pipeline_overview", node_tag),
+            )
+            canvas.create_text(
+                x + 14.0,
+                y + 94.0,
+                anchor="nw",
+                fill=COLORS["muted"],
+                text=f"role: {stage.role}\nphase: {stage.phase or '-'}",
+                font=("Segoe UI", 10),
+                tags=("pipeline_overview", node_tag),
+            )
+
+        def _draw_stage_edge(source_name: str, target_name: str, text: str, dashed: bool = False) -> None:
+            source = positions[source_name]
+            target = positions[target_name]
+            sx = source[2]
+            sy = (source[1] + source[3]) / 2.0
+            tx = target[0]
+            ty = (target[1] + target[3]) / 2.0
+            line_kwargs: dict[str, Any] = {
+                "fill": COLORS["edge"],
+                "width": 3,
+                "arrow": tk.LAST,
+                "tags": ("pipeline_edge", "pipeline_overview"),
+            }
+            if dashed:
+                line_kwargs["dash"] = (8, 5)
+            canvas.create_line(sx, sy, tx, ty, **line_kwargs)
+            canvas.create_text(
+                (sx + tx) / 2.0,
+                min(sy, ty) - 12.0,
+                anchor="s",
+                fill=COLORS["muted"],
+                text=text,
+                font=("Segoe UI", 9),
+                tags=("pipeline_edge", "pipeline_overview"),
+            )
+
+        _draw_stage_edge(pipeline.stage_begin_name, pipeline.body_stages[0].algorithm_name, "ingress", dashed=True)
+        for mapping in pipeline.mappings:
+            binding_names = list(mapping.bindings.items())
+            binding_text = f"{len(binding_names)} binding(s)"
+            if binding_names:
+                binding_text += "  " + ", ".join(f"{source}→{target}" for source, target in binding_names[:2])
+            _draw_stage_edge(mapping.source_stage_name, mapping.target_stage_name, binding_text)
+        _draw_stage_edge(pipeline.body_stages[-1].algorithm_name, pipeline.stage_end_name, "resultRender", dashed=True)
+        canvas.tag_raise("pipeline_edge")
+
     def _remove_connections_for_node(self, kind: str, name: str) -> None:
         before = len(self.project.connections)
         self.project.connections = [
@@ -7672,6 +7807,21 @@ class AlgorithmStudioApp(
             return
         self._hide_render_preview_host()
         self._draw_grid(canvas, width, height)
+        if self.canvas_view_mode == "pipeline_overview":
+            self.canvas_container_group_nodes.clear()
+            self.canvas_nodes.clear()
+            self.canvas_item_to_name.clear()
+            self.canvas_port_positions.clear()
+            self.canvas_connection_item_to_index.clear()
+            self._draw_pipeline_overview_scene(canvas, width, height)
+            zoom = self._canvas_zoom_factor()
+            if abs(zoom - 1.0) >= 1e-6:
+                canvas.scale("all", 0.0, 0.0, zoom, zoom)
+                self._scale_canvas_rendering(canvas, zoom)
+            if abs(self.canvas_camera_x) >= 1e-6 or abs(self.canvas_camera_y) >= 1e-6:
+                canvas.move("all", self.canvas_camera_x, self.canvas_camera_y)
+            canvas.tag_raise("pipeline_edge")
+            return
         self._draw_container_reuse_links(canvas)
         self._draw_highlighted_container_chain_path(canvas)
         self._draw_partial_shared_links(canvas)
@@ -7725,12 +7875,6 @@ class AlgorithmStudioApp(
                 item_id = self._draw_function_text_node(canvas, item)
                 self.canvas_nodes[item.name] = item_id
                 self.canvas_item_to_name[item_id] = item.name
-            for stage in self.project.intervention_stages:
-                if not self._is_node_visible_in_current_view("interventioner", stage.name):
-                    continue
-                item_id = self._draw_stage_node(canvas, stage)
-                self.canvas_nodes[stage.name] = item_id
-                self.canvas_item_to_name[item_id] = stage.name
             self._draw_all_in_one_scene_overlays(canvas)
             self._draw_selected_node_highlights(canvas)
             self._draw_connections(canvas)
@@ -8969,47 +9113,6 @@ class AlgorithmStudioApp(
         )
         canvas.tag_raise(handle_id)
         return item_id
-
-    def _draw_stage_node(self, canvas: tk.Canvas, stage: InterventionStage) -> int:
-        x = stage.x or CANVAS_PADDING + 40
-        y = stage.y or CANVAS_PADDING + 280
-        display_name = self._canvas_node_display_name(stage, stage.name)
-        inputs = ["in"]
-        outputs = stage.functions or [stage.kind]
-        if not self._is_node_expanded(stage):
-            return self._draw_collapsed_port_node(
-                canvas,
-                "interventioner",
-                stage.name,
-                f"Interventioner {display_name}",
-                [
-                    f"kind: {stage.kind}",
-                    self._compact_activity_text(stage.shader_vertex or stage.shader_fragment, limit=48) or "shader",
-                ],
-                inputs,
-                outputs,
-                COLORS["accent_2"],
-                self.selected_stage_name == stage.name,
-                x,
-                y,
-                float(getattr(stage, "width", BLUEPRINT_NODE_WIDTH)),
-            )
-        script_lines = [stage.shader_vertex or stage.shader_fragment or "script"]
-        return self._draw_blueprint_node(
-            canvas,
-            "interventioner",
-            stage.name,
-            x,
-            y,
-            f"Interventioner {display_name}",
-            inputs,
-            outputs,
-            script_lines,
-            float(getattr(stage, "width", BLUEPRINT_NODE_WIDTH)),
-            float(getattr(stage, "height", BLUEPRINT_NODE_MIN_HEIGHT)),
-            COLORS["accent_2"],
-            self.selected_stage_name == stage.name,
-        )
 
     def _draw_blueprint_node(
         self,

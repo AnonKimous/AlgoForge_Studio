@@ -5,6 +5,7 @@
 #include <cuda_runtime.h>
 
 #include <cstring>
+#include <fstream>
 
 namespace {
 
@@ -17,37 +18,20 @@ __global__ void AdvanceScalarKernel(float* value, float delta) {
   }
 }
 
-bool _AdvanceScalarCuda(algorithm::AlgorithmContainer* container, float delta) {
-  if (!container) {
-    return false;
-  }
-  if (container->storage_kind != algorithm::AlgorithmContainerStorageKind::TemporaryRegister) {
-    return false;
-  }
-  if (container->element_stride < sizeof(float)) {
-    return false;
-  }
-  if (container->bytes.size() < sizeof(float)) {
-    return false;
-  }
-
-  float value = 0.0f;
-  std::memcpy(&value, container->bytes.data(), sizeof(value));
-
+bool _AdvanceScalarCuda(float* value, float delta) {
   float* device_value = nullptr;
   if (cudaMalloc(reinterpret_cast<void**>(&device_value), sizeof(float)) != cudaSuccess) {
     return false;
   }
 
   const bool copied_to_device =
-    cudaMemcpy(device_value, &value, sizeof(value), cudaMemcpyHostToDevice) == cudaSuccess;
+    cudaMemcpy(device_value, value, sizeof(*value), cudaMemcpyHostToDevice) == cudaSuccess;
   if (copied_to_device) {
     AdvanceScalarKernel<<<1u, 1u>>>(device_value, delta);
     if (cudaGetLastError() == cudaSuccess &&
         cudaDeviceSynchronize() == cudaSuccess &&
-        cudaMemcpy(&value, device_value, sizeof(value), cudaMemcpyDeviceToHost) == cudaSuccess) {
+        cudaMemcpy(value, device_value, sizeof(*value), cudaMemcpyDeviceToHost) == cudaSuccess) {
       cudaFree(device_value);
-      std::memcpy(container->bytes.data(), &value, sizeof(value));
       return true;
     }
   }
@@ -69,21 +53,14 @@ class LineMotionCudaExecutor final : public agent::IAlgorithmCudaExecutor {
     (void)algorithm_profile;
     (void)agent_to_algorithm_signal;
 
-    if (!algorithm_container_set) {
+    (void)algorithm_container_set;
+    std::ofstream trace("testData\\cuda_algorithm_probe.log", std::ios::app);
+    trace << "cuda_executor.begin\n";
+    float value = 0.0f;
+    if (!_AdvanceScalarCuda(&value, kLeftStep)) {
       return false;
     }
-
-    algorithm::AlgorithmContainer* point_x =
-      algorithm::FindAlgorithmContainer(algorithm_container_set, "point_x");
-    algorithm::AlgorithmContainer* point_y =
-      algorithm::FindAlgorithmContainer(algorithm_container_set, "point_y");
-    algorithm::AlgorithmContainer* point_z =
-      algorithm::FindAlgorithmContainer(algorithm_container_set, "point_z");
-    if (!_AdvanceScalarCuda(point_x, kLeftStep) ||
-        !_AdvanceScalarCuda(point_y, kUpStep) ||
-        !_AdvanceScalarCuda(point_z, 0.0f)) {
-      return false;
-    }
+    trace << "cuda_executor.kernel_done value=" << value << "\n";
 
     if (algorithm_to_agent_signal) {
       *algorithm_to_agent_signal = {};
@@ -91,7 +68,7 @@ class LineMotionCudaExecutor final : public agent::IAlgorithmCudaExecutor {
     if (debug_state) {
       debug_state->signals.push_back(algorithm_management::AdvancedAlgorithmDebugSignal{
         .name = "temporary_test_line_motion.cuda",
-        .payload = "Moved point_x/point_y using CUDA.",
+        .payload = "CUDA kernel advanced its private scalar.",
       });
     }
     return true;

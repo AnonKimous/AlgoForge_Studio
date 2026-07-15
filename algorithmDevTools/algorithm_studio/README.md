@@ -88,6 +88,7 @@ This is a UI-first prototype.
 - The project can be extended later to generate C++ and trigger hot builds.
 - The launcher expects Python 3.10 or newer.
 - The agent command layer is intentionally separate from raw script editing.
+- Agents can open the pipeline topology with `scene pipeline` after a pipeline package is loaded.
 
 ## Pipeline Bridge Notes
 
@@ -98,6 +99,9 @@ This is a UI-first prototype.
 - Standard slots like `v1`, `v2`, `v3` may be grouped into higher-level aliases for readability, while the runtime still resolves the underlying standard slots.
 - Tool-side aliases are for authoring and debug readability only; exported runtime-facing package fields should still be written back as `vN/aN`.
 - Direct transfer for non-standard containers must keep the same container name on both sides and the same structure.
+- A package with `runtime.pipeline` and `wrapper.stage` metadata exposes a read-only `pipeline` tab in `algorithmDevScene`.
+- The pipeline tab shows `stageBegin`, the ordered `exec` body stages, `stageEnd`, and each mapping edge with its container bindings.
+- Pipeline overview is a topology view separate from each stage's private graph; it does not merge stage-private nodes into one editable graph.
 
 ## Container And Decode Semantics
 

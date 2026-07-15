@@ -1,0 +1,138 @@
+{
+  "algorithm_name": "knight_lance_coordinate_demo",
+  "globalCfg": {
+    "solvePrecision": "32",
+    "defaultPrecision": "32"
+  },
+  "container": {
+    "variable": {},
+    "variableArray": {
+      "scene_data": {
+        "count": 12
+      },
+      "render_draw": {
+        "count": 4
+      }
+    }
+  },
+  "containerElement": {
+    "items": []
+  },
+  "decomposer": {
+    "res": {},
+    "description": [
+      {
+        "name": "start_x",
+        "from": ["start_x"],
+        "to": {"container": "scene_data", "indices": [1]}
+      },
+      {
+        "name": "start_y",
+        "from": ["start_y"],
+        "to": {"container": "scene_data", "indices": [2]}
+      },
+      {
+        "name": "angle_degrees",
+        "from": ["angle_degrees"],
+        "to": {"container": "scene_data", "indices": [3]}
+      },
+      {
+        "name": "speed_pixels_per_second",
+        "from": ["speed_pixels_per_second"],
+        "to": {"container": "scene_data", "indices": [4]}
+      },
+      {
+        "name": "lance_length",
+        "from": ["lance_length"],
+        "to": {"container": "scene_data", "indices": [5]}
+      },
+      {
+        "name": "solid_x",
+        "from": ["solid_x"],
+        "to": {"container": "scene_data", "indices": [6]}
+      },
+      {
+        "name": "solid_y",
+        "from": ["solid_y"],
+        "to": {"container": "scene_data", "indices": [7]}
+      },
+      {
+        "name": "solid_width",
+        "from": ["solid_width"],
+        "to": {"container": "scene_data", "indices": [8]}
+      },
+      {
+        "name": "solid_height",
+        "from": ["solid_height"],
+        "to": {"container": "scene_data", "indices": [9]}
+      }
+    ]
+  },
+  "reflector": {
+    "name": "knight_lance_coordinate_state",
+    "functionName": "direct",
+    "items": [
+      {
+        "name": "scene_data",
+        "from": ["scene_data"],
+        "to": ["scene_data"],
+        "reflectFun": "direct"
+      }
+    ]
+  },
+  "exec": {
+    "stage_name": "exec",
+    "used_algorithm_containers": {
+      "arrays": [
+        {
+          "name": "scene_data",
+          "kind": "array",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "render_draw",
+          "kind": "draw_indirect",
+          "tuple_width": 1,
+          "required": true
+        }
+      ],
+      "variables": []
+    },
+    "shader": {
+      "pipeline": "graphics",
+      "vertex": "knight_lance_coordinate_demo_result_render.vert",
+      "fragment": "knight_lance_coordinate_demo_result_render.frag"
+    }
+  },
+  "intervention": {
+    "stages": {
+      "resultRender": {
+        "stage_name": "resultRender",
+        "stage_kind": "resultRender",
+        "used_algorithm_containers": {
+          "arrays": [
+            {
+              "name": "scene_data",
+              "kind": "array",
+              "tuple_width": 1,
+              "required": true
+            },
+            {
+              "name": "render_draw",
+              "kind": "draw_indirect",
+              "tuple_width": 1,
+              "required": true
+            }
+          ],
+          "variables": []
+        },
+        "shader": {
+          "pipeline": "graphics",
+          "vertex": "knight_lance_coordinate_demo_result_render.vert",
+          "fragment": "knight_lance_coordinate_demo_result_render.frag"
+        }
+      }
+    }
+  }
+}

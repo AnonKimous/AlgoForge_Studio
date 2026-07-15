@@ -133,6 +133,7 @@ const char* _AlgorithmExecutionPreferenceDisplayName(
     case debug_tool::AlgorithmExecutionPreference::Jobs: return "jobs";
     case debug_tool::AlgorithmExecutionPreference::Vk: return "vk";
     case debug_tool::AlgorithmExecutionPreference::Cuda: return "cuda";
+    case debug_tool::AlgorithmExecutionPreference::Compatibility: return "compatibility";
   }
   return "jobs";
 }
@@ -143,6 +144,7 @@ const char* _AlgorithmExecutionPreferenceDisplayName(
     case algorithmManager::AlgorithmExecutionPreference::Jobs: return "jobs";
     case algorithmManager::AlgorithmExecutionPreference::Vk: return "vk";
     case algorithmManager::AlgorithmExecutionPreference::Cuda: return "cuda";
+    case algorithmManager::AlgorithmExecutionPreference::Compatibility: return "compatibility";
   }
   return "jobs";
 }
@@ -431,6 +433,9 @@ void DebugToolFrontendPanel::InitializeAgentComposerDefaults() {
   agent_composer_ui_state_.reflected_algorithm_name.clear();
   agent_composer_ui_state_.reflection_error.clear();
   agent_composer_ui_state_.reflection_valid = false;
+  agent_composer_ui_state_.pipeline_composition_algorithm_name.clear();
+  agent_composer_ui_state_.pipeline_composition.Clear();
+  agent_composer_ui_state_.pipeline_composition_error.clear();
   agent_composer_ui_state_.preview_request_dirty = true;
   agent_composer_ui_state_.pipeline_run_from_stage0_to_end = true;
   agent_composer_defaults_initialized_ = true;
@@ -442,6 +447,95 @@ void DebugToolFrontendPanel::InitializeAlgorithmCatalog(IDebugToolHost& host) {
     agent_composer_ui_state_.algorithm_catalog_error.clear();
   } else {
     agent_composer_ui_state_.algorithm_catalog_error = std::move(catalog_error);
+  }
+}
+
+bool DebugToolFrontendPanel::RefreshPipelineComposition(
+  IDebugToolHost& host,
+  const std::string& algorithm_name) {
+  agent_composer_ui_state_.pipeline_composition_algorithm_name = algorithm_name;
+  agent_composer_ui_state_.pipeline_composition.Clear();
+  agent_composer_ui_state_.pipeline_composition_error.clear();
+  if (algorithm_name.empty()) {
+    return true;
+  }
+
+  bool is_pipeline = false;
+  std::string pipeline_query_error;
+  if (!host.IsPipelineAlgorithm(algorithm_name, &is_pipeline, &pipeline_query_error)) {
+    agent_composer_ui_state_.pipeline_composition_error = pipeline_query_error.empty()
+      ? ("Failed to resolve algorithm type: " + algorithm_name)
+      : std::move(pipeline_query_error);
+    return false;
+  }
+  if (!is_pipeline) {
+    return true;
+  }
+
+  std::string composition_error;
+  if (!host.LoadPipelineComposition(
+        algorithm_name,
+        &agent_composer_ui_state_.pipeline_composition,
+        &composition_error)) {
+    agent_composer_ui_state_.pipeline_composition_error = composition_error.empty()
+      ? ("Failed to load pipeline composition: " + algorithm_name)
+      : std::move(composition_error);
+    return false;
+  }
+  return true;
+}
+
+void DebugToolFrontendPanel::DrawPipelineCompositionUi(
+  const debug_tool::AlgorithmPipelineCompositionSummary& composition) {
+  if (!composition.valid) {
+    return;
+  }
+
+  ImGui::SeparatorText("Pipeline Composition");
+  ImGui::Text(
+    "Body stages: %zu | Mapping edges: %zu | Circular tick: %s",
+    composition.body_stages.size(),
+    composition.edges.size(),
+    composition.supports_circular_tick ? "true" : "false");
+  ImGui::Text(
+    "Wrapper: %s -> %s",
+    composition.stage_begin_name.empty() ? "<none>" : composition.stage_begin_name.c_str(),
+    composition.stage_end_name.empty() ? "<none>" : composition.stage_end_name.c_str());
+
+  if (ImGui::BeginChild("PipelineCompositionBody", ImVec2(0.0f, 230.0f), true)) {
+    ImGui::TextUnformatted("Body stage order");
+    for (const debug_tool::AlgorithmPipelineCompositionStage& stage : composition.body_stages) {
+      ImGui::BulletText(
+        "stage[%u] %s  (body)",
+        stage.stage_index,
+        stage.stage_name.c_str());
+    }
+
+    ImGui::SeparatorText("Mapping Edges");
+    if (composition.edges.empty()) {
+      ImGui::TextUnformatted("No mapping edges.");
+    } else {
+      for (size_t edge_index = 0u; edge_index < composition.edges.size(); ++edge_index) {
+        const debug_tool::AlgorithmPipelineCompositionEdge& edge = composition.edges[edge_index];
+        ImGui::PushID(static_cast<int>(edge_index));
+        ImGui::BulletText(
+          "%s -> %s (%zu bindings)",
+          edge.source_stage_name.c_str(),
+          edge.target_stage_name.c_str(),
+          edge.bindings.size());
+        ImGui::Indent();
+        for (const debug_tool::PipelineStageBridgeDebugBinding& binding : edge.bindings) {
+          ImGui::Text(
+            "%s -> %s%s",
+            binding.source_container_name.c_str(),
+            binding.target_container_name.c_str(),
+            binding.required ? "" : " (optional)");
+        }
+        ImGui::Unindent();
+        ImGui::PopID();
+      }
+    }
+    ImGui::EndChild();
   }
 }
 
@@ -755,6 +849,16 @@ void DebugToolFrontendPanel::DrawAgentComposerUi(IDebugToolHost& host) {
     RefreshAlgorithmComposerBindings(host, algorithm_name);
   }
 
+  if (agent_composer_ui_state_.pipeline_composition_algorithm_name != algorithm_name) {
+    RefreshPipelineComposition(host, algorithm_name);
+  }
+  if (!agent_composer_ui_state_.pipeline_composition_error.empty()) {
+    ImGui::TextWrapped(
+      "Pipeline composition: %s",
+      agent_composer_ui_state_.pipeline_composition_error.c_str());
+  }
+  DrawPipelineCompositionUi(agent_composer_ui_state_.pipeline_composition);
+
   if (!agent_composer_ui_state_.reflection_error.empty()) {
     ImGui::TextWrapped("%s", agent_composer_ui_state_.reflection_error.c_str());
   }
@@ -765,6 +869,7 @@ void DebugToolFrontendPanel::DrawAgentComposerUi(IDebugToolHost& host) {
     case debug_tool::AlgorithmExecutionPreference::Jobs: execution_mode_text = "Jobs"; break;
     case debug_tool::AlgorithmExecutionPreference::Vk: execution_mode_text = "VK"; break;
     case debug_tool::AlgorithmExecutionPreference::Cuda: execution_mode_text = "CUDA"; break;
+    case debug_tool::AlgorithmExecutionPreference::Compatibility: execution_mode_text = "Compatibility"; break;
   }
   if (ImGui::BeginCombo("Backend", execution_mode_text)) {
     const struct Option {
@@ -774,6 +879,7 @@ void DebugToolFrontendPanel::DrawAgentComposerUi(IDebugToolHost& host) {
       {"Jobs", debug_tool::AlgorithmExecutionPreference::Jobs},
       {"VK", debug_tool::AlgorithmExecutionPreference::Vk},
       {"CUDA", debug_tool::AlgorithmExecutionPreference::Cuda},
+      {"Compatibility", debug_tool::AlgorithmExecutionPreference::Compatibility},
     };
     for (const Option& option : options) {
       const bool is_selected = agent_composer_ui_state_.execution_preference == option.value;
@@ -1711,13 +1817,58 @@ void DebugToolFrontendPanel::DrawAgentManagerUi(IDebugToolHost& host) {
             if (!shown_pipeline_names.insert(algorithm_summary.pipeline_name).second) {
               continue;
             }
+
+            const std::string pipeline_label =
+              "Pipeline  " + algorithm_summary.pipeline_name +
+              "  (" + std::to_string(algorithm_summary.pipeline_stage_count) + " stages)";
+            const bool pipeline_opened = ImGui::TreeNodeEx(
+              pipeline_label.c_str(),
+              ImGuiTreeNodeFlags_OpenOnArrow |
+                ImGuiTreeNodeFlags_OpenOnDoubleClick |
+                ImGuiTreeNodeFlags_SpanAvailWidth);
+            if (pipeline_opened) {
+              for (size_t stage_index = algorithm_index;
+                   stage_index < agent_summary.algorithms.size();
+                   ++stage_index) {
+                const debug_tool::AlgorithmRuntimeSummary& stage_summary =
+                  agent_summary.algorithms[stage_index];
+                if (!stage_summary.pipeline_stage ||
+                    stage_summary.pipeline_name != algorithm_summary.pipeline_name) {
+                  continue;
+                }
+
+                const char* wrapper_label = "body";
+                switch (stage_summary.pipeline_wrapper_role) {
+                  case algorithmManager::AlgorithmPipelineWrapperRole::Begin:
+                    wrapper_label = "stageBegin";
+                    break;
+                  case algorithmManager::AlgorithmPipelineWrapperRole::End:
+                    wrapper_label = "stageEnd";
+                    break;
+                  case algorithmManager::AlgorithmPipelineWrapperRole::None:
+                    break;
+                }
+                const std::string stage_label =
+                  "stage[" + std::to_string(stage_summary.pipeline_stage_index) + "/" +
+                  std::to_string(stage_summary.pipeline_stage_count) + "] " +
+                  stage_summary.algorithm_name + "  (" + wrapper_label + ")";
+                const bool stage_selected =
+                  agent_index == 0u &&
+                  static_cast<int>(stage_index) == agent_composer_ui_state_.selected_algorithm_index;
+                if (ImGui::Selectable(stage_label.c_str(), stage_selected)) {
+                  agent_composer_ui_state_.selected_algorithm_index = static_cast<int>(stage_index);
+                  agent_composer_ui_state_.preview_request_dirty = true;
+                }
+              }
+              ImGui::TreePop();
+            }
+            continue;
           }
-          const bool show_pipeline_stage_detail = !algorithm_summary.pipeline_stage;
           const std::string algorithm_name =
             _FormatAlgorithmRuntimeLabel(
               algorithm_summary,
               algorithm_index,
-              show_pipeline_stage_detail);
+              true);
           const bool algorithm_selected =
             agent_index == 0u &&
             static_cast<int>(algorithm_index) == agent_composer_ui_state_.selected_algorithm_index;
@@ -1868,6 +2019,7 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
       case debug_tool::AlgorithmExecutionPreference::Jobs: active_bundle_preference_text = "jobs"; break;
       case debug_tool::AlgorithmExecutionPreference::Vk: active_bundle_preference_text = "vk"; break;
       case debug_tool::AlgorithmExecutionPreference::Cuda: active_bundle_preference_text = "cuda"; break;
+      case debug_tool::AlgorithmExecutionPreference::Compatibility: active_bundle_preference_text = "compatibility"; break;
     }
     if (selected_algorithm_summary->pipeline_active_bundle_valid) {
       ImGui::Text(

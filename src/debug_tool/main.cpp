@@ -173,6 +173,7 @@ const char* _ExecutionPreferenceName(debug_tool::AlgorithmExecutionPreference pr
     case debug_tool::AlgorithmExecutionPreference::Jobs: return "jobs";
     case debug_tool::AlgorithmExecutionPreference::Vk: return "vk";
     case debug_tool::AlgorithmExecutionPreference::Cuda: return "cuda";
+    case debug_tool::AlgorithmExecutionPreference::Compatibility: return "compatibility";
   }
   return "unknown";
 }
@@ -182,6 +183,7 @@ const char* _ExecutionPreferenceName(algorithmManager::AlgorithmExecutionPrefere
     case algorithmManager::AlgorithmExecutionPreference::Jobs: return "jobs";
     case algorithmManager::AlgorithmExecutionPreference::Vk: return "vk";
     case algorithmManager::AlgorithmExecutionPreference::Cuda: return "cuda";
+    case algorithmManager::AlgorithmExecutionPreference::Compatibility: return "compatibility";
   }
   return "unknown";
 }
@@ -498,6 +500,10 @@ bool _ParseExecutionPreference(
   }
   if (value == "cuda") {
     *out_preference = debug_tool::AlgorithmExecutionPreference::Cuda;
+    return true;
+  }
+  if (value == "compat" || value == "compatibility") {
+    *out_preference = debug_tool::AlgorithmExecutionPreference::Compatibility;
     return true;
   }
   return false;

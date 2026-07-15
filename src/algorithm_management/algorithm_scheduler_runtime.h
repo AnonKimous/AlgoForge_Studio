@@ -363,6 +363,15 @@ class AlgorithmScheduler {
     std::string* out_error_message = nullptr,
     bool load_reflector = true);
 
+  bool EnqueueMountedPipelineStage0SubmissionNode(
+    ::algorithmManager::AlgorithmObject* pipeline_node,
+    std::vector<::algorithmManager::AlgorithmAssemblyState>* inout_assembly_states,
+    const std::string& owner_agent_name,
+    const std::vector<AlgorithmResourceBinding>& resource_bindings,
+    const std::vector<AlgorithmDescriptorValue>& descriptor_values,
+    std::string* out_error_message = nullptr,
+    bool load_reflector = true);
+
   bool TickMountedPipeline(
     std::vector<::algorithmManager::AlgorithmObject>* mounted_objects,
     size_t begin_index,
@@ -377,11 +386,30 @@ class AlgorithmScheduler {
     bool* out_pipeline_processing_failed,
     std::string* out_error_message = nullptr);
 
+  bool TickMountedPipelineNode(
+    ::algorithmManager::AlgorithmObject* pipeline_node,
+    ::algorithmManager::AgentAlgorithmRuntimeState* inout_runtime_state,
+    const std::string& owner_agent_name,
+    const ::agentmanager::agent::AgentTickContext& context,
+    bool allow_tick,
+    const ::algorithmManager::AlgorithmAssemblyState& assembly_state,
+    bool collect_pipeline_timing,
+    common_data::AlgorithmToAgentSignal* out_pipeline_signal,
+    bool* out_pipeline_processing_failed,
+    std::string* out_error_message = nullptr);
+
   bool ReplayMountedPipelineDebug(
     std::vector<::algorithmManager::AlgorithmObject>* mounted_objects,
     size_t index,
     const ::agentmanager::agent::AgentTickContext& context,
     std::vector<::algorithmManager::AgentAlgorithmRuntimeState>* inout_runtime_states,
+    std::string* out_error_message = nullptr);
+
+  bool ReplayMountedPipelineDebugNode(
+    ::algorithmManager::AlgorithmObject* pipeline_node,
+    ::algorithmManager::AgentAlgorithmRuntimeState* inout_runtime_state,
+    size_t child_index,
+    const ::agentmanager::agent::AgentTickContext& context,
     std::string* out_error_message = nullptr);
 
   void UnregisterPipeline(const std::string& pipeline_name, const std::string& owner_agent_name);
@@ -2249,6 +2277,65 @@ inline bool EnqueueMountedPipelineStage0Submission(
     load_reflector);
 }
 
+inline bool ExecuteCompatibilityAlgorithmObject(
+  const ::agentmanager::agent::AlgorithmObject& object,
+  const ::agentmanager::agent::AgentTickContext& context,
+  const common_data::AgentToAlgorithmSignal& agent_to_algorithm_signal,
+  common_data::AlgorithmToAgentSignal* out_algorithm_to_agent_signal,
+  ::agentmanager::agent::AlgorithmPackageDebugState* out_debug_state,
+  std::string* out_error_message = nullptr) {
+  if (!out_algorithm_to_agent_signal || !out_debug_state) {
+    if (out_error_message) {
+      *out_error_message = "Compatibility algorithm execution output pointer is null.";
+    }
+    return false;
+  }
+  if (!object.compatibility_executor) {
+    if (out_error_message) {
+      *out_error_message = "Compatibility algorithm executor is unavailable.";
+    }
+    return false;
+  }
+
+  return runtime_systems::SubmitBlockingJob(
+    context.job_priority == AlgorithmJobPriority::High
+      ? runtime_systems::RuntimeJobPriority::High
+      : (context.job_priority == AlgorithmJobPriority::Normal
+        ? runtime_systems::RuntimeJobPriority::Normal
+        : runtime_systems::RuntimeJobPriority::Low),
+    [&object, &context, &agent_to_algorithm_signal, out_algorithm_to_agent_signal, out_debug_state](
+      std::string* out_job_error_message) {
+      const bool ok = object.compatibility_executor->ExecuteCompatibleAlgorithm(
+        context,
+        object.algorithm_profile,
+        agent_to_algorithm_signal,
+        out_algorithm_to_agent_signal,
+        out_debug_state);
+      if (!ok && out_job_error_message) {
+        *out_job_error_message = "Compatibility algorithm execution failed.";
+      }
+    },
+    out_error_message);
+}
+
+inline bool EnqueueMountedPipelineStage0SubmissionNode(
+  ::algorithmManager::AlgorithmObject* pipeline_node,
+  std::vector<::algorithmManager::AlgorithmAssemblyState>* inout_assembly_states,
+  const std::string& owner_agent_name,
+  const std::vector<AlgorithmResourceBinding>& resource_bindings,
+  const std::vector<AlgorithmDescriptorValue>& descriptor_values,
+  std::string* out_error_message = nullptr,
+  bool load_reflector = true) {
+  return AlgorithmScheduler::Instance().EnqueueMountedPipelineStage0SubmissionNode(
+    pipeline_node,
+    inout_assembly_states,
+    owner_agent_name,
+    resource_bindings,
+    descriptor_values,
+    out_error_message,
+    load_reflector);
+}
+
 inline bool TickMountedPipeline(
   std::vector<::algorithmManager::AlgorithmObject>* mounted_objects,
   size_t begin_index,
@@ -2277,6 +2364,30 @@ inline bool TickMountedPipeline(
     out_error_message);
 }
 
+inline bool TickMountedPipelineNode(
+  ::algorithmManager::AlgorithmObject* pipeline_node,
+  ::algorithmManager::AgentAlgorithmRuntimeState* inout_runtime_state,
+  const std::string& owner_agent_name,
+  const ::agentmanager::agent::AgentTickContext& context,
+  bool allow_tick,
+  const ::algorithmManager::AlgorithmAssemblyState& assembly_state,
+  bool collect_pipeline_timing,
+  common_data::AlgorithmToAgentSignal* out_pipeline_signal,
+  bool* out_pipeline_processing_failed,
+  std::string* out_error_message = nullptr) {
+  return AlgorithmScheduler::Instance().TickMountedPipelineNode(
+    pipeline_node,
+    inout_runtime_state,
+    owner_agent_name,
+    context,
+    allow_tick,
+    assembly_state,
+    collect_pipeline_timing,
+    out_pipeline_signal,
+    out_pipeline_processing_failed,
+    out_error_message);
+}
+
 inline bool ReplayMountedPipelineDebug(
   std::vector<::algorithmManager::AlgorithmObject>* mounted_objects,
   size_t index,
@@ -2291,10 +2402,42 @@ inline bool ReplayMountedPipelineDebug(
     out_error_message);
 }
 
+inline bool ReplayMountedPipelineDebugNode(
+  ::algorithmManager::AlgorithmObject* pipeline_node,
+  ::algorithmManager::AgentAlgorithmRuntimeState* inout_runtime_state,
+  size_t child_index,
+  const ::agentmanager::agent::AgentTickContext& context,
+  std::string* out_error_message = nullptr) {
+  return AlgorithmScheduler::Instance().ReplayMountedPipelineDebugNode(
+    pipeline_node,
+    inout_runtime_state,
+    child_index,
+    context,
+    out_error_message);
+}
+
 inline void UnregisterMountedPipeline(
   const std::string& pipeline_name,
   const std::string& owner_agent_name) {
   AlgorithmScheduler::Instance().UnregisterPipeline(pipeline_name, owner_agent_name);
+}
+
+inline void UnregisterMountedPipelineObjects(
+  const std::vector<::algorithmManager::AlgorithmObject>& objects,
+  const std::string& owner_agent_name) {
+  for (const ::algorithmManager::AlgorithmObject& object : objects) {
+    if (!object.child_algorithm_objects.empty() && !object.pipeline_name.empty()) {
+      UnregisterMountedPipeline(object.pipeline_name, owner_agent_name);
+    }
+  }
+}
+
+inline void UnregisterMountedPipelineObject(
+  const ::algorithmManager::AlgorithmObject& object,
+  const std::string& owner_agent_name) {
+  if (!object.child_algorithm_objects.empty() && !object.pipeline_name.empty()) {
+    UnregisterMountedPipeline(object.pipeline_name, owner_agent_name);
+  }
 }
 
 inline bool TryGetMountedPipelineRuntime(
@@ -2346,9 +2489,24 @@ inline bool AlgorithmScheduler::SubmitAlgorithmObject(
   common_data::AlgorithmToAgentSignal* out_algorithm_to_agent_signal,
   ::agentmanager::agent::AlgorithmPackageDebugState* out_debug_state,
   std::string* out_error_message) {
-  if (!container_set || !out_algorithm_to_agent_signal || !out_debug_state) {
+  if (!out_algorithm_to_agent_signal || !out_debug_state) {
     if (out_error_message) {
       *out_error_message = "Algorithm submit output pointer is null.";
+    }
+    return false;
+  }
+  if (object.execution_preference == AlgorithmExecutionPreference::Compatibility) {
+    return ExecuteCompatibilityAlgorithmObject(
+      object,
+      context,
+      agent_to_algorithm_signal,
+      out_algorithm_to_agent_signal,
+      out_debug_state,
+      out_error_message);
+  }
+  if (!container_set) {
+    if (out_error_message) {
+      *out_error_message = "Algorithm container set is unavailable.";
     }
     return false;
   }
@@ -2359,7 +2517,8 @@ inline bool AlgorithmScheduler::SubmitAlgorithmObject(
       "scheduler_submit_probe.log",
       "submit.begin stage=" + object.algorithm_profile.algorithm_name +
       " exec=" + (object.execution_preference == AlgorithmExecutionPreference::Vk ? "vk" :
-        (object.execution_preference == AlgorithmExecutionPreference::Cuda ? "cuda" : "jobs")));
+        (object.execution_preference == AlgorithmExecutionPreference::Cuda ? "cuda" :
+          (object.execution_preference == AlgorithmExecutionPreference::Compatibility ? "compatibility" : "jobs"))));
   }
 
   const bool ok = ExecuteAlgorithmObjectStagePlan(
@@ -2909,21 +3068,70 @@ inline bool AlgorithmScheduler::MountPipelineAlgorithmObjects(
   const size_t pipeline_begin_index = mounted_objects->size();
   const size_t previous_runtime_state_count = inout_runtime_states->size();
   const size_t previous_assembly_state_count = inout_assembly_states->size();
+  auto pipeline_child_storage =
+    std::make_shared<::algorithmManager::scheduler::AlgorithmObjectChildStorage>();
+  pipeline_child_storage->children.reserve(built_stages.size());
   for (size_t stage_index = 0u; stage_index < built_stages.size(); ++stage_index) {
-    mounted_objects->push_back(std::move(built_stages[stage_index].object));
-    inout_runtime_states->push_back(::algorithmManager::AgentAlgorithmRuntimeState{
-      .algorithm_name = mounted_objects->back().algorithm_profile.algorithm_name,
-    });
+    pipeline_child_storage->children.push_back(std::move(built_stages[stage_index].object));
+  }
+
+  ::algorithmManager::AlgorithmObject pipeline_node{};
+  pipeline_node.algorithm_profile.algorithm_name = pipeline_name;
+  pipeline_node.runtime_package_root_path = root_package_location.runtime_package_root.string();
+  pipeline_node.shared_container_set = pipeline_standard_container_set;
+  pipeline_node.mount_mode = ::algorithmManager::AlgorithmMountMode::Pipeline;
+  pipeline_node.pipeline_stage = true;
+  pipeline_node.pipeline_name = pipeline_name;
+  pipeline_node.pipeline_stage_index = 0u;
+  pipeline_node.pipeline_stage_count = static_cast<uint32_t>(pipeline_total_stage_count);
+  pipeline_node.pipeline_topology = topology;
+  pipeline_node.pipeline_sync_mode = sync_mode;
+  pipeline_node.child_algorithm_object_storage = std::move(pipeline_child_storage);
+  pipeline_node.child_algorithm_objects.reserve(
+    pipeline_node.child_algorithm_object_storage->children.size());
+  for (::algorithmManager::AlgorithmObject& child :
+       pipeline_node.child_algorithm_object_storage->children) {
+    pipeline_node.child_algorithm_objects.emplace_back(
+      pipeline_node.child_algorithm_object_storage,
+      &child);
+  }
+
+  for (size_t stage_index = 0u; stage_index < pipeline_node.child_algorithm_object_storage->children.size(); ++stage_index) {
+    ::algorithmManager::AlgorithmObject& child =
+      pipeline_node.child_algorithm_object_storage->children[stage_index];
+    child.mount_mode = ::algorithmManager::AlgorithmMountMode::Pipeline;
+    child.pipeline_stage = true;
+    child.pipeline_name = pipeline_name;
+    child.pipeline_stage_index = static_cast<uint32_t>(stage_index);
+    child.pipeline_stage_count = static_cast<uint32_t>(pipeline_total_stage_count);
+    child.pipeline_topology = topology;
+    child.pipeline_sync_mode = sync_mode;
+  }
+  const ::algorithmManager::AlgorithmObject& pipeline_result_node =
+    *pipeline_node.child_algorithm_objects[pipeline_effective_tail_stage_index];
+  pipeline_node.intervention = pipeline_result_node.intervention;
+  pipeline_node.runtime_package_root_path = pipeline_result_node.runtime_package_root_path;
+  pipeline_node.resource_bindings = pipeline_result_node.resource_bindings;
+  pipeline_node.descriptor_values = pipeline_result_node.descriptor_values;
+  mounted_objects->push_back(std::move(pipeline_node));
+  inout_runtime_states->push_back(::algorithmManager::AgentAlgorithmRuntimeState{
+    .algorithm_name = pipeline_name,
+  });
+  inout_runtime_states->back().child_runtime_states.resize(pipeline_total_stage_count);
+  for (size_t stage_index = 0u; stage_index < pipeline_total_stage_count; ++stage_index) {
+    inout_runtime_states->back().child_runtime_states[stage_index].algorithm_name =
+      mounted_objects->back().child_algorithm_objects[stage_index]->algorithm_profile.algorithm_name;
     AlgorithmReflectionSnapshot stage_reflection_snapshot{};
     if (pipeline_scheduler_detail::CollectReflectionSnapshot(
-          mounted_objects->back(),
-          *mounted_objects->back().container_set(),
+          *mounted_objects->back().child_algorithm_objects[stage_index],
+          *mounted_objects->back().child_algorithm_objects[stage_index]->container_set(),
           &stage_reflection_snapshot)) {
-      inout_runtime_states->back().reflection_snapshot = std::move(stage_reflection_snapshot);
-      inout_runtime_states->back().reflection_snapshot_cached = true;
+      inout_runtime_states->back().child_runtime_states[stage_index].reflection_snapshot =
+        std::move(stage_reflection_snapshot);
+      inout_runtime_states->back().child_runtime_states[stage_index].reflection_snapshot_cached = true;
     }
-    inout_assembly_states->push_back(::algorithmManager::AlgorithmAssemblyState::Pending);
   }
+  inout_assembly_states->push_back(::algorithmManager::AlgorithmAssemblyState::Ready);
 
   const auto rollback_mount_vectors = [&]() {
     mounted_objects->resize(pipeline_begin_index);
@@ -2931,17 +3139,6 @@ inline bool AlgorithmScheduler::MountPipelineAlgorithmObjects(
     inout_assembly_states->resize(previous_assembly_state_count);
   };
 
-  for (size_t i = 0u; i < built_stages.size(); ++i) {
-    const size_t stage_index = pipeline_begin_index + i;
-    (*mounted_objects)[stage_index].mount_mode = ::algorithmManager::AlgorithmMountMode::Pipeline;
-    (*mounted_objects)[stage_index].pipeline_stage = true;
-    (*mounted_objects)[stage_index].pipeline_name = pipeline_name;
-    (*mounted_objects)[stage_index].pipeline_stage_index = static_cast<uint32_t>(i);
-    (*mounted_objects)[stage_index].pipeline_stage_count = static_cast<uint32_t>(pipeline_total_stage_count);
-    (*mounted_objects)[stage_index].pipeline_topology = topology;
-    (*mounted_objects)[stage_index].pipeline_sync_mode = sync_mode;
-    (*inout_assembly_states)[stage_index] = ::algorithmManager::AlgorithmAssemblyState::Ready;
-  }
 
   ::algorithmManager::JobsPipelineRuntimeState pipeline_runtime_state{};
   pipeline_runtime_state.owner_agent_name = owner_agent_name;
@@ -2960,7 +3157,7 @@ inline bool AlgorithmScheduler::MountPipelineAlgorithmObjects(
   pipeline_scheduler_detail::PipelineLaneRuntimeState initial_lane_state{};
   std::string lane_error_message;
   if (!pipeline_scheduler_detail::TryBuildInitialPipelineLaneRuntimeState(
-        (*mounted_objects)[pipeline_begin_index + pipeline_body_begin_stage_index],
+        *mounted_objects->at(pipeline_begin_index).child_algorithm_objects[pipeline_body_begin_stage_index],
         pipeline_total_stage_count,
         owner_agent_name,
         topology == ::algorithmManager::AlgorithmPipelineTopology::Circular,
@@ -2990,8 +3187,8 @@ inline bool AlgorithmScheduler::MountPipelineAlgorithmObjects(
   const bool registered = RegisterPipeline(
     ::algorithmManager::JobsPipelineRegistration{
       .pipeline_name = pipeline_name,
-      .root_stage_name = (*mounted_objects)[pipeline_begin_index + pipeline_body_begin_stage_index]
-        .algorithm_profile.algorithm_name,
+      .root_stage_name = mounted_objects->at(pipeline_begin_index)
+        .child_algorithm_objects[pipeline_body_begin_stage_index]->algorithm_profile.algorithm_name,
       .stage_count = static_cast<uint32_t>(pipeline_total_stage_count),
       .body_begin_stage_index = static_cast<uint32_t>(pipeline_body_begin_stage_index),
       .body_stage_count = static_cast<uint32_t>(pipeline_body_stage_count),
@@ -3065,6 +3262,32 @@ inline bool AlgorithmScheduler::EnqueueMountedPipelineStage0Submission(
   if (pipeline_name.empty()) {
     set_error("Pipeline name must not be empty.");
     return false;
+  }
+  for (size_t object_index = 0u; object_index < mounted_objects->size(); ++object_index) {
+    ::algorithmManager::AlgorithmObject& object = (*mounted_objects)[object_index];
+    if (object.child_algorithm_objects.empty() || object.pipeline_name != pipeline_name) {
+      continue;
+    }
+    std::vector<::algorithmManager::AlgorithmAssemblyState> node_assembly_states(
+      1u,
+      ::algorithmManager::AlgorithmAssemblyState::Pending);
+    if (!EnqueueMountedPipelineStage0SubmissionNode(
+          &object,
+          &node_assembly_states,
+          owner_agent_name,
+          resource_bindings,
+          descriptor_values,
+          out_error_message,
+          load_reflector)) {
+      return false;
+    }
+    if (inout_assembly_states->size() < mounted_objects->size()) {
+      inout_assembly_states->resize(
+        mounted_objects->size(),
+        ::algorithmManager::AlgorithmAssemblyState::Pending);
+    }
+    (*inout_assembly_states)[object_index] = ::algorithmManager::AlgorithmAssemblyState::Ready;
+    return true;
   }
   JobsPipelineRegistration registration{};
   if (!TryGetPipelineRegistration(pipeline_name, &registration)) {
@@ -3199,6 +3422,175 @@ inline bool AlgorithmScheduler::EnqueueMountedPipelineStage0Submission(
   return true;
 }
 
+inline bool AlgorithmScheduler::EnqueueMountedPipelineStage0SubmissionNode(
+  ::algorithmManager::AlgorithmObject* pipeline_node,
+  std::vector<::algorithmManager::AlgorithmAssemblyState>* inout_assembly_states,
+  const std::string& owner_agent_name,
+  const std::vector<AlgorithmResourceBinding>& resource_bindings,
+  const std::vector<AlgorithmDescriptorValue>& descriptor_values,
+  std::string* out_error_message,
+  bool load_reflector) {
+  if (!pipeline_node || pipeline_node->child_algorithm_objects.empty()) {
+    if (out_error_message) {
+      *out_error_message = "Pipeline submission node is unavailable.";
+    }
+    return false;
+  }
+
+  std::vector<::algorithmManager::AlgorithmObject>& child_objects =
+    pipeline_node->child_algorithm_object_storage->children;
+  std::vector<::algorithmManager::AlgorithmAssemblyState> child_assembly_states(
+    child_objects.size(),
+    ::algorithmManager::AlgorithmAssemblyState::Ready);
+  if (!EnqueueMountedPipelineStage0Submission(
+        &child_objects,
+        pipeline_node->pipeline_name,
+        owner_agent_name,
+        resource_bindings,
+        descriptor_values,
+        &child_assembly_states,
+        out_error_message,
+        load_reflector)) {
+    return false;
+  }
+  if (inout_assembly_states->empty()) {
+    inout_assembly_states->push_back(::algorithmManager::AlgorithmAssemblyState::Ready);
+  } else {
+    (*inout_assembly_states)[0] = ::algorithmManager::AlgorithmAssemblyState::Ready;
+  }
+  return true;
+}
+
+inline bool AlgorithmScheduler::TickMountedPipelineNode(
+  ::algorithmManager::AlgorithmObject* pipeline_node,
+  ::algorithmManager::AgentAlgorithmRuntimeState* inout_runtime_state,
+  const std::string& owner_agent_name,
+  const ::agentmanager::agent::AgentTickContext& context,
+  bool allow_tick,
+  const ::algorithmManager::AlgorithmAssemblyState& assembly_state,
+  bool collect_pipeline_timing,
+  common_data::AlgorithmToAgentSignal* out_pipeline_signal,
+  bool* out_pipeline_processing_failed,
+  std::string* out_error_message) {
+  if (!pipeline_node || pipeline_node->child_algorithm_objects.empty() || !inout_runtime_state) {
+    if (out_error_message) {
+      *out_error_message = "Pipeline node runtime is unavailable.";
+    }
+    return false;
+  }
+
+  std::vector<::algorithmManager::AlgorithmObject>& child_objects =
+    pipeline_node->child_algorithm_object_storage->children;
+  std::vector<::algorithmManager::AgentAlgorithmRuntimeState> child_runtime_states =
+    inout_runtime_state->child_runtime_states;
+  child_runtime_states.resize(child_objects.size());
+  for (size_t index = 0u; index < child_objects.size(); ++index) {
+    child_runtime_states[index].algorithm_name = child_objects[index].algorithm_profile.algorithm_name;
+  }
+  std::vector<::algorithmManager::AlgorithmAssemblyState> child_assembly_states(
+    child_objects.size(),
+    assembly_state);
+  std::vector<bool> child_allow_tick(child_objects.size(), allow_tick);
+  child_objects.front().pipeline_stage_debug_all = pipeline_node->pipeline_stage_debug_all;
+  child_objects.front().pipeline_stage_debug_index = pipeline_node->pipeline_stage_debug_index;
+
+  if (!TickMountedPipeline(
+        &child_objects,
+        0u,
+        child_objects.size(),
+        owner_agent_name,
+        context,
+        child_allow_tick,
+        child_assembly_states,
+        collect_pipeline_timing,
+        &child_runtime_states,
+        out_pipeline_signal,
+        out_pipeline_processing_failed,
+        out_error_message)) {
+    return false;
+  }
+  const std::string pipeline_name = pipeline_node->pipeline_name;
+  *inout_runtime_state = child_runtime_states.front();
+  inout_runtime_state->algorithm_name = pipeline_name;
+  inout_runtime_state->child_runtime_states = std::move(child_runtime_states);
+  return true;
+}
+
+inline void RefreshAlgorithmObjectSignals(
+  ::algorithmManager::AlgorithmObject& object,
+  ::algorithmManager::AgentAlgorithmRuntimeState& runtime_state,
+  const ::agentmanager::agent::AgentTickContext& context) {
+  runtime_state.agent_to_algorithm_signal = {};
+  if (object.intervention) {
+    object.intervention->FillAgentToAlgorithmSignal(
+      context,
+      &runtime_state.agent_to_algorithm_signal);
+  }
+  runtime_state.child_runtime_states.resize(object.child_algorithm_objects.size());
+  for (size_t child_index = 0u; child_index < object.child_algorithm_objects.size(); ++child_index) {
+    RefreshAlgorithmObjectSignals(
+      *object.child_algorithm_objects[child_index],
+      runtime_state.child_runtime_states[child_index],
+      context);
+  }
+}
+
+inline bool TickAlgorithmObject(
+  ::algorithmManager::AlgorithmObject& object,
+  ::algorithmManager::AgentAlgorithmRuntimeState& runtime_state,
+  const std::string& owner_agent_name,
+  const ::agentmanager::agent::AgentTickContext& context,
+  bool allow_tick,
+  const ::algorithmManager::AlgorithmAssemblyState& assembly_state,
+  bool collect_pipeline_timing,
+  std::string* out_error_message) {
+  if (!object.child_algorithm_objects.empty()) {
+    const auto pipeline_tick_begin = std::chrono::steady_clock::now();
+    common_data::AlgorithmToAgentSignal pipeline_signal{};
+    bool pipeline_processing_failed = false;
+    if (!TickMountedPipelineNode(
+          &object,
+          &runtime_state,
+          owner_agent_name,
+          context,
+          allow_tick,
+          assembly_state,
+          collect_pipeline_timing,
+          &pipeline_signal,
+          &pipeline_processing_failed,
+          out_error_message)) {
+      return false;
+    }
+    if (collect_pipeline_timing && runtime_state.pipeline_stage_runtime_stats.empty()) {
+      runtime_state.pipeline_total_elapsed_seconds =
+        std::chrono::duration<float>(std::chrono::steady_clock::now() - pipeline_tick_begin).count();
+      runtime_state.pipeline_stage_runtime_stats.reserve(object.child_algorithm_objects.size());
+      for (const std::shared_ptr<::algorithmManager::AlgorithmObject>& child : object.child_algorithm_objects) {
+        runtime_state.pipeline_stage_runtime_stats.push_back(
+          ::algorithmManager::AlgorithmPipelineStageRuntimeStat{
+            .stage_name = child->algorithm_profile.algorithm_name,
+            .elapsed_seconds = 0.0f,
+            .reason = {},
+          });
+      }
+    }
+    pipeline_scheduler_detail::MergeAlgorithmToAgentSignal(
+      pipeline_signal,
+      &runtime_state.algorithm_to_agent_signal);
+    return !pipeline_processing_failed;
+  }
+
+  const bool is_ready = assembly_state == ::algorithmManager::AlgorithmAssemblyState::Ready;
+  const bool execute_now = allow_tick && is_ready;
+  return pipeline_scheduler_detail::TickAlgorithmObject(
+    object,
+    context,
+    allow_tick,
+    is_ready,
+    execute_now,
+    &runtime_state);
+}
+
 inline bool AlgorithmScheduler::TickMountedPipeline(
   std::vector<::algorithmManager::AlgorithmObject>* mounted_objects,
   size_t begin_index,
@@ -3217,7 +3609,6 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
       *out_error_message = std::move(message);
     }
   };
-
   if (!mounted_objects || !inout_runtime_states || !out_pipeline_signal || !out_pipeline_processing_failed) {
     set_error("Mounted pipeline tick received a null output pointer.");
     return false;
@@ -3260,7 +3651,6 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
     }
     pipeline_state = owner_runtime_it->second;
   }
-
   const bool pipeline_stage_debug_all = root_object.pipeline_stage_debug_all;
   const uint32_t pipeline_stage_debug_index = root_object.pipeline_stage_debug_index;
   const size_t pipeline_stage_count = end_index - begin_index;
@@ -3308,7 +3698,6 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
     pipeline_state.lanes.push_back(std::move(fallback_lane_state));
     ++pipeline_state.next_lane_id;
   }
-
   pipeline_scheduler_detail::SyncPipelineLegacyStageStateFromPrimaryLane(&pipeline_state, pipeline_stage_count);
   if (pipeline_state.stage_has_data.size() != pipeline_stage_count) {
     pipeline_state.stage_has_data.assign(pipeline_stage_count, false);
@@ -3343,7 +3732,6 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
         updated_runtime_states[begin_index].pipeline_stage_runtime_stats;
     }
   }
-
   pipeline_scheduler_detail::PipelineGroupProgressState progress_state = previous_progress_state;
   progress_state.stall_reason.clear();
   std::vector<::algorithmManager::AlgorithmPipelineStageRuntimeStat>* pipeline_stage_runtime_stats =
@@ -3388,7 +3776,6 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
     return full_stage_has_data;
   };
   current_body_stage_has_data = build_body_stage_has_data(primary_lane_state->stage_has_data);
-
   body_stage0_object.resource_bindings = primary_lane_state->resource_bindings;
   body_stage0_object.descriptor_values = primary_lane_state->descriptor_values;
 
@@ -3533,7 +3920,6 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
   for (size_t index = begin_index; index < end_index; ++index) {
     algorithm_objects[index].SetContainerSet(primary_lane_state->standard_container_set);
   }
-
   body_stage0_object.resource_bindings = primary_lane_state->resource_bindings;
   body_stage0_object.descriptor_values = primary_lane_state->descriptor_values;
 
@@ -3554,7 +3940,6 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
     *out_pipeline_processing_failed = true;
     return false;
   }
-
   std::vector<size_t> executable_indices{};
   executable_indices.reserve(pipeline_stage_count);
   std::vector<bool> stage_allow_tick(pipeline_stage_count, false);
@@ -3590,7 +3975,6 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
     stage_launch_once_completed[stage_offset] =
       launch_once_then_hold && updated_runtime_states[index].launch_once_completed;
   }
-
   const bool forced_sync =
     pipeline_state.sync_mode == ::algorithmManager::AlgorithmPipelineSyncMode::Forced;
   std::vector<bool> next_body_stage_has_data(body_stage_count, false);
@@ -4224,6 +4608,39 @@ inline bool AlgorithmScheduler::TickMountedPipeline(
   if (out_error_message) {
     out_error_message->clear();
   }
+  return true;
+}
+
+inline bool AlgorithmScheduler::ReplayMountedPipelineDebugNode(
+  ::algorithmManager::AlgorithmObject* pipeline_node,
+  ::algorithmManager::AgentAlgorithmRuntimeState* inout_runtime_state,
+  size_t child_index,
+  const ::agentmanager::agent::AgentTickContext& context,
+  std::string* out_error_message) {
+  if (!pipeline_node || pipeline_node->child_algorithm_objects.empty() || !inout_runtime_state) {
+    if (out_error_message) {
+      *out_error_message = "Pipeline node replay runtime is unavailable.";
+    }
+    return false;
+  }
+  std::vector<::algorithmManager::AlgorithmObject>& child_objects =
+    pipeline_node->child_algorithm_object_storage->children;
+  std::vector<::algorithmManager::AgentAlgorithmRuntimeState> child_runtime_states =
+    inout_runtime_state->child_runtime_states;
+  child_runtime_states.resize(child_objects.size());
+  for (size_t index = 0u; index < child_objects.size(); ++index) {
+    child_runtime_states[index].algorithm_name = child_objects[index].algorithm_profile.algorithm_name;
+  }
+  if (!ReplayMountedPipelineDebug(
+        &child_objects,
+        child_index,
+        context,
+        &child_runtime_states,
+        out_error_message)) {
+    return false;
+  }
+  inout_runtime_state->child_runtime_states = child_runtime_states;
+  inout_runtime_state->bridge_debug_set = child_runtime_states[child_index].bridge_debug_set;
   return true;
 }
 

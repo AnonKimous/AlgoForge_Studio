@@ -78,6 +78,7 @@ enum class AlgorithmExecutionPreference {
   Jobs = 0,
   Vk = 1,
   Cuda = 2,
+  Compatibility = 3,
 };
 
 struct AlgorithmPipelineStageSubmission {
@@ -322,6 +323,8 @@ struct AgentAlgorithmRuntimeState {
   bool pipeline_active_bundle_valid{false};
   float pipeline_total_elapsed_seconds{0.0f};
   std::vector<AlgorithmPipelineStageRuntimeStat> pipeline_stage_runtime_stats;
+  // Runtime state for child algorithm objects when this object is a composite node.
+  std::vector<AgentAlgorithmRuntimeState> child_runtime_states;
   PipelineStageBridgeDebugSet bridge_debug_set{};
 };
 
@@ -342,8 +345,10 @@ class IAlgorithmPackageSupport;
 class IAlgorithmJobsExecutor;
 class IAlgorithmVkExecutor;
 class IAlgorithmCudaExecutor;
+class IAlgorithmCompatibilityExecutor;
 class IAlgorithmIntervention;
 class AlgorithmObject;
+struct AlgorithmObjectChildStorage;
 
 struct AlgorithmAssemblySlot {
   size_t index{0u};
@@ -389,13 +394,19 @@ class AlgorithmObject {
   bool jobs_symbol{true};
   bool vk_symbol{true};
   bool cuda_symbol{true};
+  bool compatibility_symbol{false};
   AlgorithmMountMode mount_mode{AlgorithmMountMode::Direct};
   AlgorithmExecutionPreference execution_preference{AlgorithmExecutionPreference::Vk};
   AlgorithmTickLifetime tick_lifetime{AlgorithmTickLifetime::Continuous};
   std::shared_ptr<IAlgorithmVkExecutor> vk_executor;
   std::shared_ptr<IAlgorithmCudaExecutor> cuda_executor;
+  std::shared_ptr<IAlgorithmCompatibilityExecutor> compatibility_executor;
   std::shared_ptr<IAlgorithmJobsExecutor> jobs_executor;
   std::shared_ptr<IAlgorithmIntervention> intervention;
+  // Every mounted algorithm is an AlgorithmObject. An object may contain
+  // executable AlgorithmObjects when its scheduler requires nesting.
+  std::vector<std::shared_ptr<AlgorithmObject>> child_algorithm_objects;
+  std::shared_ptr<AlgorithmObjectChildStorage> child_algorithm_object_storage;
 
  private:
   void EnsureContainerSet() {
@@ -403,6 +414,10 @@ class AlgorithmObject {
       shared_container_set = std::make_shared<algorithm::AlgorithmContainerSet>();
     }
   }
+};
+
+struct AlgorithmObjectChildStorage {
+  std::vector<AlgorithmObject> children;
 };
 
 struct AgentInitConfig {
@@ -483,6 +498,18 @@ class IAlgorithmCudaExecutor {
     const algorithm::AlgorithmProfile& algorithm_profile,
     const AgentToAlgorithmSignal& agent_to_algorithm_signal,
     algorithm::AlgorithmContainerSet* algorithm_container_set,
+    AlgorithmToAgentSignal* algorithm_to_agent_signal,
+    AlgorithmPackageDebugState* debug_state) = 0;
+};
+
+class IAlgorithmCompatibilityExecutor {
+ public:
+  virtual ~IAlgorithmCompatibilityExecutor() = default;
+
+  virtual bool ExecuteCompatibleAlgorithm(
+    const AgentTickContext& context,
+    const algorithm::AlgorithmProfile& algorithm_profile,
+    const AgentToAlgorithmSignal& agent_to_algorithm_signal,
     AlgorithmToAgentSignal* algorithm_to_agent_signal,
     AlgorithmPackageDebugState* debug_state) = 0;
 };
@@ -610,6 +637,7 @@ using ::algorithmManager::scheduler::IAlgorithmPackageSupport;
 using ::algorithmManager::scheduler::IAlgorithmJobsExecutor;
 using ::algorithmManager::scheduler::IAlgorithmVkExecutor;
 using ::algorithmManager::scheduler::IAlgorithmCudaExecutor;
+using ::algorithmManager::scheduler::IAlgorithmCompatibilityExecutor;
 using ::algorithmManager::scheduler::IComplexAlgorithmPackageSupport;
 using ::algorithmManager::scheduler::ISimpleAlgorithmPackageSupport;
 namespace catalog {}
@@ -664,6 +692,7 @@ using algorithmManager::scheduler::IAlgorithmPackageSupport;
 using algorithmManager::scheduler::IAlgorithmJobsExecutor;
 using algorithmManager::scheduler::IAlgorithmVkExecutor;
 using algorithmManager::scheduler::IAlgorithmCudaExecutor;
+using algorithmManager::scheduler::IAlgorithmCompatibilityExecutor;
 using algorithmManager::scheduler::IComplexAlgorithmPackageSupport;
 using algorithmManager::scheduler::ISimpleAlgorithmPackageSupport;
 }  // namespace agent

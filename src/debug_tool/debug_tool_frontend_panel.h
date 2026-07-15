@@ -105,6 +105,9 @@ class DebugToolFrontendPanel {
     std::string reflected_algorithm_name;
     std::string reflection_error;
     bool reflection_valid{false};
+    std::string pipeline_composition_algorithm_name;
+    debug_tool::AlgorithmPipelineCompositionSummary pipeline_composition{};
+    std::string pipeline_composition_error;
     bool preview_request_dirty{true};
     bool pipeline_run_from_stage0_to_end{true};
   };
@@ -137,6 +140,8 @@ class DebugToolFrontendPanel {
   void InitializeAgentComposerDefaults();
   void InitializeFileBrowserDefaults();
   bool RefreshAlgorithmComposerBindings(IDebugToolHost& host, const std::string& algorithm_name);
+  bool RefreshPipelineComposition(IDebugToolHost& host, const std::string& algorithm_name);
+  void DrawPipelineCompositionUi(const debug_tool::AlgorithmPipelineCompositionSummary& composition);
   void DrawCustomInterventionUi(
     IDebugToolHost& host,
     size_t agent_index,

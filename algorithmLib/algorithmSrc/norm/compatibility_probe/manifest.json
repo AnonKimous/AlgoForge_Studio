@@ -1,0 +1,44 @@
+{
+  "algorithm_name": "compatibility_probe",
+  "package_name": "compatibility_probe",
+  "build_finished": true,
+  "container": {
+    "variable": {},
+    "variableArray": 1
+  },
+  "containerElement": {
+    "items": []
+  },
+  "decomposer": {
+    "res": {},
+    "description": []
+  },
+  "res": {
+    "items": []
+  },
+  "intervention": {
+    "stage": {
+      "resultRender": {
+        "stage_name": "resultRender",
+        "stage_kind": "resultRender",
+        "functions": [],
+        "used_algorithm_containers": {
+          "variables": [],
+          "arrays": [
+            {
+              "name": "a1",
+              "kind": "array",
+              "tuple_width": 1,
+              "required": true
+            }
+          ]
+        },
+        "shader": {
+          "pipeline": "graphics",
+          "vertex": "compatibility_probe.vert",
+          "fragment": "compatibility_probe.frag"
+        }
+      }
+    }
+  }
+}

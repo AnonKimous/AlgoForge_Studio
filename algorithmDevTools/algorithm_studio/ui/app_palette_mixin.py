@@ -399,6 +399,8 @@ class AlgorithmStudioPaletteMixin:
             return "reflect"
         if normalized == "all_in_one":
             return "allinone"
+        if normalized == "pipeline_overview":
+            return "pipeline"
         if normalized == "container_overview":
             return "container"
         if normalized == "decomposer_overview":
@@ -834,6 +836,8 @@ class AlgorithmStudioPaletteMixin:
             return "d2c"
         if normalized == "all_in_one":
             return "allinone"
+        if normalized == "pipeline_overview":
+            return "pipeline"
         if normalized == "renderpreview":
             return "renderpreview"
         return "algorithmDevScene"
@@ -1134,8 +1138,8 @@ class AlgorithmStudioPaletteMixin:
     ) -> None:
         normalized_source_kind = str(source_kind or "").strip().lower()
         normalized_source_name = str(source_name or "").strip()
-        if self.canvas_view_mode == "all_in_one":
-            self._log("all_in_one scene is read-only.")
+        if self.canvas_view_mode in {"all_in_one", "pipeline_overview"}:
+            self._log(f"{self.canvas_view_mode} scene is read-only.")
             return
         d2c_only_kind = kind in {"container", "containerelement", "variable", "array", "microcontainer", "micronode", "resnode"}
         d2c_only_source = normalized_source_kind in {"container", "containerelement", "resnode"}

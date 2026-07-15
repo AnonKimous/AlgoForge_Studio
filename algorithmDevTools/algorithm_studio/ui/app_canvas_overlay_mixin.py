@@ -254,8 +254,8 @@ class AlgorithmStudioCanvasOverlayMixin:
         self.canvas.tag_raise("detail_panel")
 
     def _handle_canvas_node_body_double_click(self, kind: str, node_name: str, tags: tuple[str, ...] | None = None) -> None:
-        if self.canvas_view_mode == "all_in_one":
-            self._log("all_in_one scene is read-only.")
+        if self.canvas_view_mode in {"all_in_one", "pipeline_overview"}:
+            self._log(f"{self.canvas_view_mode} scene is read-only.")
             return
         resolved_tags = tags or ()
         if kind == "container":
@@ -381,6 +381,8 @@ class AlgorithmStudioCanvasOverlayMixin:
         if self.canvas_view_mode != "all_in_one":
             return
         for kind, name, item in self.project.iter_nodes():
+            if kind in {"interventioner", "stage"}:
+                continue
             if kind == "containerelement" and name in {"container", RESOURCE_ROOT_GROUP_NAME}:
                 continue
             positions = getattr(item, "scene_positions", {})

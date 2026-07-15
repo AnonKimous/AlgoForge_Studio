@@ -119,7 +119,7 @@ COMMAND_SPECS: tuple[AgentCommandSpec, ...] = (
     ),
     AgentCommandSpec(
         name="scene",
-        usage="scene algorithmDevScene | scene helperScene | scene exec | scene pretick | scene aftertick | scene renderresult | scene reflect | scene allinone | scene container | scene decomposer | scene d2c",
+        usage="scene algorithmDevScene | scene helperScene | scene exec | scene pretick | scene aftertick | scene renderresult | scene reflect | scene pipeline | scene allinone | scene container | scene decomposer | scene d2c",
         location="Canvas header > scene tabs",
         summary="Switch the current scene tab.",
     ),
@@ -163,6 +163,9 @@ SCENE_TARGETS: dict[str, tuple[str, str, str]] = {
     "render": ("interventioner_render", "renderresult", "renderresult"),
     "renderresult": ("interventioner_render", "renderresult", "renderresult"),
     "renderscene": ("interventioner_render", "renderresult", "renderresult"),
+    "pipeline": ("pipeline_overview", "pipeline", "pipeline"),
+    "pipelinescene": ("pipeline_overview", "pipeline", "pipeline"),
+    "pipeline_overview": ("pipeline_overview", "pipeline", "pipeline"),
     "all": ("all_in_one", "allinone", "allinone"),
     "allinone": ("all_in_one", "allinone", "allinone"),
     "all_in_one": ("all_in_one", "allinone", "allinone"),

@@ -225,6 +225,15 @@ class AlgorithmStudioContainerGroupMixin:
             return False
         if kind in {"container", "containerelement"} and self._node_has_collapsed_ancestor(kind, name):
             return False
+        if kind in {"interventioner", "stage"}:
+            return False
+        if self.canvas_view_mode == "graph" and kind == "container":
+            return self._find_container(name) is not None and any(
+                name in self._split_port_names(function.input_name, "in")
+                or name in self._split_port_names(function.output_name, "out")
+                for function in self.project.function_frames
+                if self._is_function_visible_in_current_view(function.name)
+            )
         if self.canvas_view_mode == "all_in_one":
             if kind == "containerelement":
                 return self._find_container_group(name) is not None
@@ -240,8 +249,8 @@ class AlgorithmStudioContainerGroupMixin:
                 return self._find_function_frame(name) is not None
             if kind == "functiontext":
                 return self._find_function_text_item(name) is not None
-            if kind in {"interventioner", "stage"}:
-                return self._find_stage(name) is not None
+            return False
+        if self.canvas_view_mode == "pipeline_overview":
             return False
         if self.canvas_view_mode == "graph":
             if kind == "resnode":
@@ -271,8 +280,6 @@ class AlgorithmStudioContainerGroupMixin:
                 return self._find_reflector(name) is not None
             return False
         if self.canvas_view_mode == "interventioner_overview":
-            if kind in {"interventioner", "stage"}:
-                return self._find_stage(name) is not None
             if kind == "function":
                 return self._find_function_frame(name) is not None
             if kind == "functiontext":

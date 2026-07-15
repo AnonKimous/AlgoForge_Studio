@@ -36,6 +36,10 @@ class DebugToolBackendRuntime : public IDebugToolHost {
     const std::string& algorithm_name,
     bool* out_is_pipeline,
     std::string* out_error_message = nullptr) const override;
+  bool LoadPipelineComposition(
+    const std::string& pipeline_algorithm_name,
+    debug_tool::AlgorithmPipelineCompositionSummary* out_summary,
+    std::string* out_error_message = nullptr) const override;
   void SetAlgorithmRuntimeBuildFlavor(debug_tool::AlgorithmRuntimeBuildFlavor build_flavor) override;
   bool AttachAlgorithmToAgent(
     size_t agent_index,

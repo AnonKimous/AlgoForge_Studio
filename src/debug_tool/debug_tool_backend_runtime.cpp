@@ -338,6 +338,7 @@ debug_tool::AlgorithmRuntimeSummary _ToDebugToolAlgorithmRuntimeSummary(
   }
   summary.jobs_symbol = object->jobs_symbol;
   summary.vk_symbol = object->vk_symbol;
+  summary.compatibility_symbol = object->compatibility_symbol;
   summary.has_reflector = object->algorithm_reflector != nullptr;
   summary.has_intervention = object->intervention != nullptr;
   summary.mount_mode = static_cast<debug_tool::AlgorithmMountMode>(static_cast<int>(object->mount_mode));
@@ -886,6 +887,138 @@ bool _IsPipelineAlgorithmByName(
   return false;
 }
 
+bool _LoadPipelineCompositionByName(
+  const std::string& pipeline_algorithm_name,
+  debug_tool::AlgorithmPipelineCompositionSummary* out_summary,
+  std::string* out_error_message) {
+  if (!out_summary) {
+    if (out_error_message) {
+      *out_error_message = "Pipeline composition output pointer is null.";
+    }
+    return false;
+  }
+
+  out_summary->Clear();
+  if (pipeline_algorithm_name.empty()) {
+    if (out_error_message) {
+      *out_error_message = "Pipeline algorithm name must not be empty.";
+    }
+    return false;
+  }
+
+  ::algorithm::AlgorithmPackageLocation package_location{};
+  std::string location_error_message;
+  if (!algorithm_manager_hooker::TryResolveAlgorithmPackageLocation(
+        pipeline_algorithm_name,
+        &package_location,
+        &location_error_message)) {
+    if (out_error_message) {
+      *out_error_message = location_error_message.empty()
+        ? ("Failed to resolve pipeline package for '" + pipeline_algorithm_name + "'.")
+        : std::move(location_error_message);
+    }
+    return false;
+  }
+
+  std::shared_ptr<algorithm::AlgorithmRuntimeTransferMap> transfer_map{};
+  bool has_transfer_map = false;
+  std::string transfer_map_error_message;
+  if (!algorithm_manager_hooker::LoadAlgorithmPackageTransferMapFromLocation(
+        package_location,
+        &transfer_map,
+        &has_transfer_map,
+        &transfer_map_error_message) ||
+      !has_transfer_map ||
+      !transfer_map ||
+      transfer_map->empty()) {
+    if (out_error_message) {
+      *out_error_message = transfer_map_error_message.empty()
+        ? ("Pipeline package has no runtime mapping: " + pipeline_algorithm_name)
+        : std::move(transfer_map_error_message);
+    }
+    return false;
+  }
+
+  algorithmManager::catalog::AlgorithmPipelineWrapperSpec wrapper_spec{};
+  std::string wrapper_error_message;
+  if (!algorithm_manager_hooker::LoadAlgorithmPipelineWrapperSpecFromLocation(
+        package_location,
+        &wrapper_spec,
+        &wrapper_error_message) ||
+      !wrapper_spec.declared ||
+      wrapper_spec.stage_begin.algorithm_name.empty() ||
+      wrapper_spec.stage_end.algorithm_name.empty()) {
+    if (out_error_message) {
+      *out_error_message = wrapper_error_message.empty()
+        ? ("Pipeline package must declare stageBegin and stageEnd: " + pipeline_algorithm_name)
+        : std::move(wrapper_error_message);
+    }
+    return false;
+  }
+
+  out_summary->pipeline_name = pipeline_algorithm_name;
+  out_summary->stage_begin_name = wrapper_spec.stage_begin.algorithm_name;
+  out_summary->stage_end_name = wrapper_spec.stage_end.algorithm_name;
+  out_summary->supports_circular_tick = transfer_map->SupportsCircularTick();
+
+  std::unordered_set<std::string> visited_stage_names{};
+  std::string stage_name = pipeline_algorithm_name;
+  uint32_t stage_index = 0u;
+  while (true) {
+    if (!visited_stage_names.insert(stage_name).second) {
+      if (out_error_message) {
+        *out_error_message =
+          "Pipeline composition contains a repeated stage: " + stage_name;
+      }
+      out_summary->Clear();
+      return false;
+    }
+
+    out_summary->body_stages.push_back(debug_tool::AlgorithmPipelineCompositionStage{
+      .stage_name = stage_name,
+      .stage_index = stage_index,
+    });
+
+    const std::vector<const algorithm::AlgorithmRuntimeTransferEdge*> outgoing_edges =
+      transfer_map->FindOutgoingEdges(stage_name);
+    if (outgoing_edges.empty()) {
+      break;
+    }
+    if (outgoing_edges.size() != 1u || !outgoing_edges.front()) {
+      if (out_error_message) {
+        *out_error_message =
+          "Pipeline composition is not linear at stage: " + stage_name;
+      }
+      out_summary->Clear();
+      return false;
+    }
+
+    const algorithm::AlgorithmRuntimeTransferEdge& edge = *outgoing_edges.front();
+    debug_tool::AlgorithmPipelineCompositionEdge composition_edge{};
+    composition_edge.source_stage_name = edge.source_stage_name;
+    composition_edge.target_stage_name = edge.target_stage_name;
+    composition_edge.bindings.reserve(edge.bindings.size());
+    for (const algorithm::AlgorithmRuntimeTransferBinding& binding : edge.bindings) {
+      composition_edge.bindings.push_back(debug_tool::PipelineStageBridgeDebugBinding{
+        .source_stage_name = edge.source_stage_name,
+        .target_stage_name = edge.target_stage_name,
+        .source_container_name = binding.from_name,
+        .target_container_name = binding.to_name,
+        .required = binding.required,
+      });
+    }
+    out_summary->edges.push_back(std::move(composition_edge));
+    stage_name = edge.target_stage_name;
+    ++stage_index;
+  }
+
+  out_summary->valid = true;
+  if (out_error_message) {
+    out_error_message->clear();
+  }
+  return true;
+}
+
 }  // namespace
 
 DebugToolBackendRuntime::~DebugToolBackendRuntime() {
@@ -1108,19 +1241,15 @@ bool DebugToolBackendRuntime::AttachPipelinePackageToAgent(
       }
       return false;
     }
-    const uint32_t pipeline_stage_count = root_stage->pipeline_stage_count;
-    for (uint32_t stage_offset = 0u; stage_offset < pipeline_stage_count; ++stage_offset) {
-      const size_t stage_index = attached_algorithm_index + static_cast<size_t>(stage_offset);
-      const bool marked_waiting = agent_hooker::BeginAlgorithmAssembly(*managed_agent, stage_index);
-      DEBUG_TOOL_ASSERT(
-        marked_waiting,
-        "Failed to mark mounted pipeline stage as waiting for resource submission.");
-      if (!marked_waiting) {
-        if (out_error_message) {
-          *out_error_message = "Failed to mark mounted pipeline stage as waiting for resource submission.";
-        }
-        return false;
+    const bool marked_waiting = agent_hooker::BeginAlgorithmAssembly(*managed_agent, attached_algorithm_index);
+    DEBUG_TOOL_ASSERT(
+      marked_waiting,
+      "Failed to mark mounted pipeline node as waiting for resource submission.");
+    if (!marked_waiting) {
+      if (out_error_message) {
+        *out_error_message = "Failed to mark mounted pipeline node as waiting for resource submission.";
       }
+      return false;
     }
   }
   return attached;
@@ -1145,6 +1274,16 @@ bool DebugToolBackendRuntime::IsPipelineAlgorithm(
   bool* out_is_pipeline,
   std::string* out_error_message) const {
   return _IsPipelineAlgorithmByName(algorithm_name, out_is_pipeline, out_error_message);
+}
+
+bool DebugToolBackendRuntime::LoadPipelineComposition(
+  const std::string& pipeline_algorithm_name,
+  debug_tool::AlgorithmPipelineCompositionSummary* out_summary,
+  std::string* out_error_message) const {
+  return _LoadPipelineCompositionByName(
+    pipeline_algorithm_name,
+    out_summary,
+    out_error_message);
 }
 
 void DebugToolBackendRuntime::SetAlgorithmRuntimeBuildFlavor(
@@ -1753,6 +1892,17 @@ bool DebugToolBackendRuntime::BuildRenderPreviewRequest(
       *out_error_message = "Preview source algorithm object is unavailable.";
     }
     return false;
+  }
+  if (!preview_object->child_algorithm_objects.empty()) {
+    for (const std::shared_ptr<agentmanager::agent::AlgorithmObject>& child :
+         preview_object->child_algorithm_objects) {
+      std::vector<agentmanager::agent::AlgorithmPhaseSpec> child_phase_specs;
+      if (_TryLoadInterventionPhaseSpecs(*child, &child_phase_specs) &&
+          _ContainsResultRenderPhase(child_phase_specs)) {
+        preview_object = child.get();
+        break;
+      }
+    }
   }
 
   if (phase_specs.empty()) {

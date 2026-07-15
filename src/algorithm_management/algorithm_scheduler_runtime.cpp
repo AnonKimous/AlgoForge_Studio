@@ -83,7 +83,6 @@ inline bool ExecuteJobsAlgorithmObject(
 
   std::shared_ptr<::algorithmManager::scheduler::IAlgorithmJobsExecutor> jobs_executor = object.jobs_executor;
   algorithm::AlgorithmProfile algorithm_profile = object.algorithm_profile;
-  std::shared_ptr<algorithm::AlgorithmContainerSet> container_set_handle = object.shared_container_set;
   const bool submit_ok = runtime_systems::SubmitBlockingJob(
     context.job_priority == AlgorithmJobPriority::High
       ? runtime_systems::RuntimeJobPriority::High
@@ -95,14 +94,14 @@ inline bool ExecuteJobsAlgorithmObject(
       algorithm_profile,
       &context,
       &agent_to_algorithm_signal,
-      container_set_handle,
+      container_set,
       out_algorithm_to_agent_signal,
       out_debug_state](std::string* out_job_error_message) {
       const bool ok = jobs_executor->ExecuteJobsAlgorithm(
         context,
         algorithm_profile,
         agent_to_algorithm_signal,
-        container_set_handle.get(),
+        container_set,
         out_algorithm_to_agent_signal,
         out_debug_state);
       if (!ok && out_job_error_message) {

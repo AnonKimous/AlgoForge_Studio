@@ -2422,11 +2422,13 @@ bool CreateAlgorithmObjectFromLocation(
     group.jobs_symbol = plugin_components.jobs_symbol;
     group.vk_symbol = plugin_components.vk_symbol;
     group.cuda_symbol = plugin_components.cuda_symbol;
+    group.compatibility_symbol = plugin_components.compatibility_symbol;
     group.jobs_executor = plugin_components.jobs_executor;
     group.vk_executor = plugin_components.vk_executor
       ? plugin_components.vk_executor
       : (plugin_components.vk_symbol ? package_vk_executor : std::shared_ptr<agentmanager::agent::IAlgorithmVkExecutor>{});
     group.cuda_executor = plugin_components.cuda_executor;
+    group.compatibility_executor = plugin_components.compatibility_executor;
     group.intervention = plugin_components.intervention
       ? package_intervention
       : std::shared_ptr<agentmanager::agent::IAlgorithmIntervention>{};
@@ -2735,6 +2737,7 @@ bool TryLoadAlgorithmPluginComponents(
   out_components->jobs_symbol = bundle.jobs_symbol;
   out_components->vk_symbol = bundle.vk_symbol;
   out_components->cuda_symbol = bundle.cuda_symbol;
+  out_components->compatibility_symbol = bundle.compatibility_symbol;
   out_components->reflector = bundle.reflector;
   out_components->intervention = bundle.intervention;
 
@@ -2748,6 +2751,12 @@ bool TryLoadAlgorithmPluginComponents(
     out_components->cuda_executor = _WrapPluginObject(
       bundle.cuda_executor,
       bundle.destroy_cuda_executor,
+      module_guard);
+  }
+  if (bundle.compatibility_executor && bundle.destroy_compatibility_executor) {
+    out_components->compatibility_executor = _WrapPluginObject(
+      bundle.compatibility_executor,
+      bundle.destroy_compatibility_executor,
       module_guard);
   }
   if (bundle.jobs_executor && bundle.destroy_jobs_executor) {

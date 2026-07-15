@@ -179,6 +179,46 @@ class InterventionStage:
 
 
 @dataclass
+class PipelineStageItem:
+    algorithm_name: str
+    stage_index: int
+    role: str = "body"
+    phase: str = ""
+
+
+@dataclass
+class PipelineMappingItem:
+    source_stage_name: str
+    target_stage_name: str
+    bindings: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class PipelineComposition:
+    pipeline_name: str
+    supports_circular_tick: bool = False
+    body_stages: list[PipelineStageItem] = field(default_factory=list)
+    mappings: list[PipelineMappingItem] = field(default_factory=list)
+    stage_begin_name: str = ""
+    stage_end_name: str = ""
+
+    def ordered_stages(self) -> list[PipelineStageItem]:
+        return [
+            PipelineStageItem(
+                algorithm_name=self.stage_begin_name,
+                stage_index=-1,
+                role="stageBegin",
+            ),
+            *self.body_stages,
+            PipelineStageItem(
+                algorithm_name=self.stage_end_name,
+                stage_index=len(self.body_stages),
+                role="stageEnd",
+            ),
+        ]
+
+
+@dataclass
 class ProjectState:
     algorithm_name: str = "new_algorithm"
     package_name: str = "new_algorithm"
@@ -195,6 +235,7 @@ class ProjectState:
     function_text_items: list[FunctionTextItem] = field(default_factory=list)
     connections: list[ConnectionItem] = field(default_factory=list)
     intervention_stages: list[InterventionStage] = field(default_factory=list)
+    pipeline: PipelineComposition | None = None
     notes: str = ""
     manifest_text: str = ""
 
@@ -751,6 +792,73 @@ class ProjectState:
                 f"Invalid target port {connection.target_kind}:{connection.target_name}:{connection.target_port}"
             )
 
+    def _infer_function_variable_connections(self) -> None:
+        variable_names = {
+            item.name
+            for item in self.containers
+            if item.kind == "variable"
+        }
+        existing = {
+            (
+                connection.source_kind,
+                connection.source_name,
+                connection.source_port,
+                connection.target_kind,
+                connection.target_name,
+                connection.target_port,
+            )
+            for connection in self.connections
+        }
+        for function in self.function_frames:
+            for input_port in self._split_port_names(function.input_name, "in"):
+                if input_port not in variable_names:
+                    continue
+                connection = ConnectionItem(
+                    source_kind="container",
+                    source_name=input_port,
+                    source_port="out",
+                    target_kind="function",
+                    target_name=function.name,
+                    target_port=input_port,
+                )
+                connection_key = (
+                    connection.source_kind,
+                    connection.source_name,
+                    connection.source_port,
+                    connection.target_kind,
+                    connection.target_name,
+                    connection.target_port,
+                )
+                if connection_key in existing:
+                    continue
+                self.validate_connection(connection)
+                self.connections.append(connection)
+                existing.add(connection_key)
+            for output_port in self._split_port_names(function.output_name, "out"):
+                if output_port not in variable_names:
+                    continue
+                connection = ConnectionItem(
+                    source_kind="function",
+                    source_name=function.name,
+                    source_port=output_port,
+                    target_kind="container",
+                    target_name=output_port,
+                    target_port="in",
+                )
+                connection_key = (
+                    connection.source_kind,
+                    connection.source_name,
+                    connection.source_port,
+                    connection.target_kind,
+                    connection.target_name,
+                    connection.target_port,
+                )
+                if connection_key in existing:
+                    continue
+                self.validate_connection(connection)
+                self.connections.append(connection)
+                existing.add(connection_key)
+
     def _ui_nodes(self) -> list[dict[str, Any]]:
         nodes: list[dict[str, Any]] = []
         for kind, name, item in self.iter_nodes():
@@ -822,6 +930,111 @@ class ProjectState:
                 }
             )
         return connections
+
+    def _pipeline_payload(self) -> dict[str, Any] | None:
+        if self.pipeline is None:
+            return None
+        mappings: dict[str, dict[str, str]] = {}
+        for mapping in self.pipeline.mappings:
+            key = f"{mapping.source_stage_name}->{mapping.target_stage_name}"
+            if key in mappings:
+                raise ValueError(f"Duplicate pipeline mapping: {key}")
+            mappings[key] = dict(mapping.bindings)
+        return {
+            "runtime": {
+                "pipeline": {
+                    "supportsCircularTick": bool(self.pipeline.supports_circular_tick),
+                    "mappings": mappings,
+                }
+            },
+            "wrapper": {
+                "stage": {
+                    "stageBegin": {"algorithm_name": self.pipeline.stage_begin_name},
+                    "stageEnd": {"algorithm_name": self.pipeline.stage_end_name},
+                }
+            },
+        }
+
+    @classmethod
+    def _parse_pipeline(cls, payload: dict[str, Any]) -> PipelineComposition | None:
+        runtime = payload.get("runtime")
+        if runtime is None:
+            return None
+        if not isinstance(runtime, dict):
+            raise ValueError("runtime must be an object when pipeline metadata is present.")
+        pipeline_section = runtime.get("pipeline")
+        if pipeline_section is None:
+            return None
+        if not isinstance(pipeline_section, dict):
+            raise ValueError("runtime.pipeline must be an object.")
+        raw_mappings = pipeline_section.get("mappings")
+        if not isinstance(raw_mappings, dict) or not raw_mappings:
+            raise ValueError("runtime.pipeline.mappings must be a non-empty object.")
+
+        mappings: list[PipelineMappingItem] = []
+        outgoing: dict[str, PipelineMappingItem] = {}
+        incoming: dict[str, PipelineMappingItem] = {}
+        for raw_key, raw_bindings in raw_mappings.items():
+            source_name, separator, target_name = str(raw_key).partition("->")
+            source_name = source_name.strip()
+            target_name = target_name.strip()
+            if separator != "->" or not source_name or not target_name:
+                raise ValueError(f"Invalid pipeline mapping key: {raw_key}")
+            if not isinstance(raw_bindings, dict):
+                raise ValueError(f"Pipeline mapping {raw_key} must be an object.")
+            mapping = PipelineMappingItem(
+                source_stage_name=source_name,
+                target_stage_name=target_name,
+                bindings={str(source): str(target) for source, target in raw_bindings.items()},
+            )
+            if source_name in outgoing:
+                raise ValueError(f"Pipeline stage has multiple outgoing mappings: {source_name}")
+            if target_name in incoming:
+                raise ValueError(f"Pipeline stage has multiple incoming mappings: {target_name}")
+            outgoing[source_name] = mapping
+            incoming[target_name] = mapping
+            mappings.append(mapping)
+
+        root_names = [name for name in outgoing if name not in incoming]
+        if len(root_names) != 1:
+            raise ValueError(f"Pipeline must have exactly one root stage, got {root_names}")
+        body_names: list[str] = [root_names[0]]
+        while body_names[-1] in outgoing:
+            target_name = outgoing[body_names[-1]].target_stage_name
+            if target_name in body_names:
+                raise ValueError(f"Pipeline mapping contains a cycle at {target_name}")
+            body_names.append(target_name)
+        if len(body_names) != len(outgoing) + 1:
+            raise ValueError("Pipeline mappings must form one linear chain.")
+
+        wrapper = payload.get("wrapper", {})
+        if not isinstance(wrapper, dict):
+            raise ValueError("wrapper must be an object when pipeline metadata is present.")
+        wrapper_stage = wrapper.get("stage", {})
+        if not isinstance(wrapper_stage, dict):
+            raise ValueError("wrapper.stage must be an object.")
+        stage_begin = wrapper_stage.get("stageBegin", {})
+        stage_end = wrapper_stage.get("stageEnd", {})
+        if not isinstance(stage_begin, dict) or not isinstance(stage_end, dict):
+            raise ValueError("Pipeline wrapper must define stageBegin and stageEnd objects.")
+        stage_begin_name = str(stage_begin.get("algorithm_name") or "").strip()
+        stage_end_name = str(stage_end.get("algorithm_name") or "").strip()
+        if not stage_begin_name or not stage_end_name:
+            raise ValueError("Pipeline wrapper must define stageBegin and stageEnd algorithm names.")
+        if stage_begin_name in body_names or stage_end_name in body_names or stage_begin_name == stage_end_name:
+            raise ValueError("Pipeline wrapper names must be distinct from body stage names and each other.")
+
+        return PipelineComposition(
+            pipeline_name=str(payload.get("algorithm_name") or payload.get("package_name") or body_names[0]),
+            supports_circular_tick=bool(pipeline_section.get("supportsCircularTick", False)),
+            body_stages=[
+                PipelineStageItem(algorithm_name=name, stage_index=index, role="body", phase="exec")
+                for index, name in enumerate(body_names)
+            ],
+            mappings=mappings,
+            stage_begin_name=stage_begin_name,
+            stage_end_name=stage_end_name,
+        )
 
     def has_explicit_layout(self) -> bool:
         for _kind, _name, item in self.iter_nodes():
@@ -1101,6 +1314,9 @@ class ProjectState:
             },
             "notes": self.notes,
         }
+        pipeline_payload = self._pipeline_payload()
+        if pipeline_payload is not None:
+            payload.update(pipeline_payload)
         if include_build_state:
             payload["build_finished"] = self.build_finished
             payload["doc"] = {
@@ -1131,6 +1347,7 @@ class ProjectState:
         doc_symbol = str(doc_section.get("symbol") or "").strip().lower()
         project.build_finished = bool(doc_section.get("build_finished", payload.get("build_finished", False))) or doc_symbol == "build"
         project.notes = str(payload.get("notes") or "")
+        project.pipeline = cls._parse_pipeline(payload)
 
         container_section = payload.get("container", {})
         variables = container_section.get("variable", {})
@@ -1523,6 +1740,7 @@ class ProjectState:
                     )
                     project.validate_connection(connection)
                     project.connections.append(connection)
+        project._infer_function_variable_connections()
         if not project.has_explicit_layout():
             project.apply_default_layout()
         project.rebuild_manifest_text()

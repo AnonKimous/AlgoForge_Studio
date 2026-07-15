@@ -1,8 +1,15 @@
 {
-  "algorithm_name": "temporary_test_line_motion",
+  "algorithm_name": "physx_lance_cuda_demo",
   "container": {
     "variable": {},
-    "variableArray": 1
+    "variableArray": {
+      "scene_data": {
+        "count": 12
+      },
+      "render_draw": {
+        "count": 4
+      }
+    }
   },
   "containerElement": {
     "items": []
@@ -20,8 +27,14 @@
     "used_algorithm_containers": {
       "arrays": [
         {
-          "name": "a1",
+          "name": "scene_data",
           "kind": "array",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "render_draw",
+          "kind": "draw_indirect",
           "tuple_width": 1,
           "required": true
         }
@@ -30,8 +43,8 @@
     },
     "shader": {
       "pipeline": "graphics",
-      "vertex": "temporary_test_line_motion_result_render.vert",
-      "fragment": "temporary_test_line_motion_result_render.frag"
+      "vertex": "physx_lance_cuda_demo_result_render.vert",
+      "fragment": "physx_lance_cuda_demo_result_render.frag"
     }
   },
   "intervention": {
@@ -42,8 +55,14 @@
         "used_algorithm_containers": {
           "arrays": [
             {
-              "name": "a1",
+              "name": "scene_data",
               "kind": "array",
+              "tuple_width": 1,
+              "required": true
+            },
+            {
+              "name": "render_draw",
+              "kind": "draw_indirect",
               "tuple_width": 1,
               "required": true
             }
@@ -52,8 +71,8 @@
         },
         "shader": {
           "pipeline": "graphics",
-          "vertex": "temporary_test_line_motion_result_render.vert",
-          "fragment": "temporary_test_line_motion_result_render.frag"
+          "vertex": "physx_lance_cuda_demo_result_render.vert",
+          "fragment": "physx_lance_cuda_demo_result_render.frag"
         }
       }
     }

@@ -142,6 +142,63 @@ inline bool EnqueueMountedPipelineStage0Submission(
     load_reflector);
 }
 
+inline bool EnqueueMountedPipelineStage0SubmissionNode(
+  ::agentmanager::agent::AlgorithmObject* pipeline_node,
+  std::vector<scheduler::AlgorithmAssemblyState>* inout_assembly_states,
+  const std::string& agent_name,
+  const std::vector<scheduler::AlgorithmResourceBinding>& resource_bindings,
+  const std::vector<scheduler::AlgorithmDescriptorValue>& descriptor_values,
+  std::string* out_error_message = nullptr,
+  bool load_reflector = true) {
+  return scheduler::EnqueueMountedPipelineStage0SubmissionNode(
+    pipeline_node,
+    inout_assembly_states,
+    agent_name,
+    resource_bindings,
+    descriptor_values,
+    out_error_message,
+    load_reflector);
+}
+
+inline void UnregisterMountedPipelineObjects(
+  const std::vector<::agentmanager::agent::AlgorithmObject>& objects,
+  const std::string& agent_name) {
+  scheduler::UnregisterMountedPipelineObjects(objects, agent_name);
+}
+
+inline void UnregisterMountedPipelineObject(
+  const ::agentmanager::agent::AlgorithmObject& object,
+  const std::string& agent_name) {
+  scheduler::UnregisterMountedPipelineObject(object, agent_name);
+}
+
+inline void RefreshAlgorithmObjectSignals(
+  ::agentmanager::agent::AlgorithmObject& object,
+  ::agentmanager::agent::AgentAlgorithmRuntimeState& runtime_state,
+  const ::agentmanager::agent::AgentTickContext& context) {
+  scheduler::RefreshAlgorithmObjectSignals(object, runtime_state, context);
+}
+
+inline bool TickAlgorithmObject(
+  ::agentmanager::agent::AlgorithmObject& object,
+  ::agentmanager::agent::AgentAlgorithmRuntimeState& runtime_state,
+  const std::string& agent_name,
+  const ::agentmanager::agent::AgentTickContext& context,
+  bool allow_tick,
+  const scheduler::AlgorithmAssemblyState& assembly_state,
+  bool collect_timing_log,
+  std::string* out_error_message = nullptr) {
+  return scheduler::TickAlgorithmObject(
+    object,
+    runtime_state,
+    agent_name,
+    context,
+    allow_tick,
+    assembly_state,
+    collect_timing_log,
+    out_error_message);
+}
+
 inline bool ExecuteJobsAlgorithmObject(
   const ::agentmanager::agent::AlgorithmObject& object,
   const ::agentmanager::agent::AgentTickContext& context,
@@ -350,6 +407,60 @@ inline bool TickMountedPipeline(
     assembly_states,
     collect_timing_log,
     out_updated_runtime_states,
+    out_pipeline_signal,
+    out_mounted_pipeline_processing_failed,
+    out_error_message);
+}
+
+inline bool ExecuteCompatibilityAlgorithmObject(
+  const ::agentmanager::agent::AlgorithmObject& object,
+  const ::agentmanager::agent::AgentTickContext& context,
+  const common_data::AgentToAlgorithmSignal& agent_to_algorithm_signal,
+  common_data::AlgorithmToAgentSignal* out_algorithm_to_agent_signal,
+  ::agentmanager::agent::AlgorithmPackageDebugState* out_debug_state,
+  std::string* out_error_message = nullptr) {
+  return scheduler::ExecuteCompatibilityAlgorithmObject(
+    object,
+    context,
+    agent_to_algorithm_signal,
+    out_algorithm_to_agent_signal,
+    out_debug_state,
+    out_error_message);
+}
+
+inline bool ReplayMountedPipelineDebugNode(
+  ::agentmanager::agent::AlgorithmObject* pipeline_node,
+  ::agentmanager::agent::AgentAlgorithmRuntimeState* inout_runtime_state,
+  size_t child_index,
+  const ::agentmanager::agent::AgentTickContext& context,
+  std::string* out_error_message = nullptr) {
+  return scheduler::ReplayMountedPipelineDebugNode(
+    pipeline_node,
+    inout_runtime_state,
+    child_index,
+    context,
+    out_error_message);
+}
+
+inline bool TickMountedPipelineNode(
+  ::agentmanager::agent::AlgorithmObject* pipeline_node,
+  ::agentmanager::agent::AgentAlgorithmRuntimeState* inout_runtime_state,
+  const std::string& agent_name,
+  const ::agentmanager::agent::AgentTickContext& context,
+  bool allow_tick,
+  const scheduler::AlgorithmAssemblyState& assembly_state,
+  bool collect_timing_log,
+  common_data::AlgorithmToAgentSignal* out_pipeline_signal,
+  bool* out_mounted_pipeline_processing_failed,
+  std::string* out_error_message = nullptr) {
+  return scheduler::TickMountedPipelineNode(
+    pipeline_node,
+    inout_runtime_state,
+    agent_name,
+    context,
+    allow_tick,
+    assembly_state,
+    collect_timing_log,
     out_pipeline_signal,
     out_mounted_pipeline_processing_failed,
     out_error_message);

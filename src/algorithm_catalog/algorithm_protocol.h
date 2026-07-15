@@ -45,6 +45,11 @@ struct AlgorithmPluginBundle {
   agentmanager::agent::IAlgorithmJobsExecutor* jobs_executor{nullptr};
   void (*destroy_jobs_executor)(agentmanager::agent::IAlgorithmJobsExecutor*){nullptr};
 
+  // ABI-tail extension: old version-4 plugins keep the field layout above.
+  bool compatibility_symbol{false};
+  agentmanager::agent::IAlgorithmCompatibilityExecutor* compatibility_executor{nullptr};
+  void (*destroy_compatibility_executor)(agentmanager::agent::IAlgorithmCompatibilityExecutor*){nullptr};
+
   void Clear() {
     api_version = kAlgorithmPluginApiVersion;
     jobs_symbol = true;
@@ -58,6 +63,9 @@ struct AlgorithmPluginBundle {
     destroy_cuda_executor = nullptr;
     jobs_executor = nullptr;
     destroy_jobs_executor = nullptr;
+    compatibility_symbol = false;
+    compatibility_executor = nullptr;
+    destroy_compatibility_executor = nullptr;
   }
 };
 
@@ -74,6 +82,7 @@ struct AlgorithmPluginComponents {
   bool jobs_symbol{true};
   bool vk_symbol{true};
   bool cuda_symbol{true};
+  bool compatibility_symbol{false};
   // Optional package-side systems that the mainline may load.
   bool reflector{true};
   bool intervention{true};
@@ -81,6 +90,7 @@ struct AlgorithmPluginComponents {
   std::shared_ptr<algorithm::AlgorithmReflector> runtime_reflector{};
   std::shared_ptr<agentmanager::agent::IAlgorithmVkExecutor> vk_executor{};
   std::shared_ptr<agentmanager::agent::IAlgorithmCudaExecutor> cuda_executor{};
+  std::shared_ptr<agentmanager::agent::IAlgorithmCompatibilityExecutor> compatibility_executor{};
   std::shared_ptr<agentmanager::agent::IAlgorithmJobsExecutor> jobs_executor{};
 };
 

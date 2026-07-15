@@ -72,7 +72,8 @@ AlgorithmExecutionPreference _NormalizeExecutionPreference(
   AlgorithmExecutionPreference requested_preference,
   bool jobs_symbol,
   bool vk_symbol,
-  bool cuda_symbol) {
+  bool cuda_symbol,
+  bool compatibility_symbol) {
   switch (requested_preference) {
     case AlgorithmExecutionPreference::Jobs:
       if (jobs_symbol) {
@@ -89,6 +90,11 @@ AlgorithmExecutionPreference _NormalizeExecutionPreference(
         return AlgorithmExecutionPreference::Cuda;
       }
       break;
+    case AlgorithmExecutionPreference::Compatibility:
+      if (compatibility_symbol) {
+        return AlgorithmExecutionPreference::Compatibility;
+      }
+      return requested_preference;
   }
 
   if (jobs_symbol) {
@@ -835,7 +841,9 @@ void _AppendAlgorithmTimingLogLine(
           << " | ready=" << (is_ready ? "true" : "false")
           << " | execution=" << (object.execution_preference == AlgorithmExecutionPreference::Jobs
             ? "jobs"
-            : (object.execution_preference == AlgorithmExecutionPreference::Vk ? "vk" : "cuda"))
+            : (object.execution_preference == AlgorithmExecutionPreference::Vk
+              ? "vk"
+              : (object.execution_preference == AlgorithmExecutionPreference::Cuda ? "cuda" : "compatibility")))
           << " | elapsed_seconds=" << elapsed_seconds << '\n';
 }
 
@@ -1388,7 +1396,8 @@ BuiltAlgorithmMount _BuildAlgorithmMount(
     execution_preference,
     object.jobs_symbol,
     object.vk_symbol,
-    object.cuda_symbol);
+    object.cuda_symbol,
+    object.compatibility_symbol);
 
   std::shared_ptr<algorithm::AlgorithmContainerSet> container_set_handle = object.shared_container_set;
   if (!container_set_handle) {
@@ -1703,30 +1712,15 @@ bool Agent::RemoveAlgorithm(size_t index) {
     return false;
   }
 
-  size_t erase_begin = index;
-  size_t erase_end = index + 1u;
-  std::string pipeline_name_to_remove{};
-  if (_IsPipelineStage(algorithm_objects_[index])) {
-    pipeline_name_to_remove = algorithm_objects_[index].pipeline_name;
-    if (!_FindPipelineGroupRange(algorithm_objects_, index, &erase_begin, &erase_end)) {
-      return false;
-    }
-  }
+  const AlgorithmObject object_to_remove = algorithm_objects_[index];
 
   algorithm_objects_.erase(
-    algorithm_objects_.begin() + static_cast<std::ptrdiff_t>(erase_begin),
-    algorithm_objects_.begin() + static_cast<std::ptrdiff_t>(erase_end));
+    algorithm_objects_.begin() + static_cast<std::ptrdiff_t>(index));
   algorithm_runtime_states_.erase(
-    algorithm_runtime_states_.begin() + static_cast<std::ptrdiff_t>(erase_begin),
-    algorithm_runtime_states_.begin() + static_cast<std::ptrdiff_t>(erase_end));
+    algorithm_runtime_states_.begin() + static_cast<std::ptrdiff_t>(index));
   algorithm_assembly_states_.erase(
-    algorithm_assembly_states_.begin() + static_cast<std::ptrdiff_t>(erase_begin),
-    algorithm_assembly_states_.begin() + static_cast<std::ptrdiff_t>(erase_end));
-  if (!pipeline_name_to_remove.empty()) {
-  algorithmManager::UnregisterMountedPipeline(
-          pipeline_name_to_remove,
-          agent_name_);
-  }
+    algorithm_assembly_states_.begin() + static_cast<std::ptrdiff_t>(index));
+  algorithmManager::UnregisterMountedPipelineObject(object_to_remove, agent_name_);
   return true;
 }
 
@@ -1745,12 +1739,10 @@ void Agent::RefreshInterventionSignals(const AgentTickContext& context) {
       continue;
     }
     AgentAlgorithmRuntimeState& runtime_state = algorithm_runtime_states_[i];
-    runtime_state.agent_to_algorithm_signal = {};
-    if (algorithm_objects_[i].intervention) {
-      algorithm_objects_[i].intervention->FillAgentToAlgorithmSignal(
-        context,
-        &runtime_state.agent_to_algorithm_signal);
-    }
+    algorithmManager::RefreshAlgorithmObjectSignals(
+      algorithm_objects_[i],
+      runtime_state,
+      context);
   }
 }
 
@@ -1782,7 +1774,6 @@ bool Agent::SubmitAlgorithm(
   for (size_t index = algorithm_runtime_states_.size(); index < updated_runtime_states.size(); ++index) {
     updated_runtime_states[index].algorithm_name = algorithm_objects_[index].algorithm_profile.algorithm_name;
   }
-  bool pipeline_processing_failed = false;
 
   auto process_algorithm_index = [&](size_t index) {
     AlgorithmObject& object = algorithm_objects_[index];
@@ -1798,121 +1789,50 @@ bool Agent::SubmitAlgorithm(
     const bool is_ready =
       index < algorithm_assembly_states_.size() && algorithm_assembly_states_[index] == AlgorithmAssemblyState::Ready;
     const bool execute_now = allow_tick && is_ready;
-    if (!_TickAlgorithmObject(object, context, allow_tick, is_ready, execute_now, &runtime_state)) {
+    std::string algorithm_error_message;
+    if (!algorithmManager::TickAlgorithmObject(
+          object,
+          runtime_state,
+          agent_name_,
+          context,
+          allow_tick,
+          index < algorithm_assembly_states_.size()
+            ? algorithm_assembly_states_[index]
+            : AlgorithmAssemblyState::Failed,
+          collect_timing_log,
+          &algorithm_error_message)) {
+      if (!algorithm_error_message.empty()) {
+        std::cerr
+          << "algorithm_tick_failed algorithm=" << object.algorithm_profile.algorithm_name
+          << " error=" << algorithm_error_message << '\n';
+      }
       runtime_state.algorithm_to_agent_signal.stop_requested = true;
     }
     if (collect_timing_log) {
-      _AppendAlgorithmTimingLogLine(
-        &timing_log_stream,
-        object,
-        execute_now,
-        allow_tick,
-        is_ready,
-        runtime_state.algorithm_exec_elapsed_seconds);
+      if (runtime_state.pipeline_stage_runtime_stats.empty()) {
+        _AppendAlgorithmTimingLogLine(
+          &timing_log_stream,
+          object,
+          execute_now,
+          allow_tick,
+          is_ready,
+          runtime_state.algorithm_exec_elapsed_seconds);
+      } else {
+        _AppendPipelineTimingLog(
+          &timing_log_stream,
+          object.pipeline_name.empty() ? object.algorithm_profile.algorithm_name : object.pipeline_name,
+          runtime_state);
+      }
     }
 
     _MergeAlgorithmToAgentSignal(runtime_state.algorithm_to_agent_signal, &out_result->algorithm_to_agent_signal);
     updated_runtime_states[index] = std::move(runtime_state);
   };
 
-  auto process_pipeline_stage_group = [&](size_t begin_index, size_t end_index) {
-    AlgorithmToAgentSignal pipeline_signal{};
-    std::string pipeline_error_message;
-    bool mounted_pipeline_processing_failed = false;
-    const auto pipeline_tick_begin = std::chrono::steady_clock::now();
-    if (!algorithmManager::TickMountedPipeline(
-          &algorithm_objects_,
-          begin_index,
-          end_index,
-          agent_name_,
-          context,
-          allow_tick_mask,
-          algorithm_assembly_states_,
-          collect_timing_log,
-          &updated_runtime_states,
-          &pipeline_signal,
-          &mounted_pipeline_processing_failed,
-          &pipeline_error_message)) {
-      const std::string failure_message = pipeline_error_message.empty()
-        ? std::string("Mounted pipeline tick failed.")
-        : std::move(pipeline_error_message);
-      std::cerr
-        << "pipeline_tick_failed pipeline="
-        << (algorithm_objects_[begin_index].pipeline_name.empty()
-              ? algorithm_objects_[begin_index].algorithm_profile.algorithm_name
-              : algorithm_objects_[begin_index].pipeline_name)
-        << " error=" << failure_message << '\n';
-      DEBUG_TOOL_ASSERT(false, failure_message.c_str());
-      out_result->algorithm_to_agent_signal.stop_requested = true;
-      pipeline_processing_failed = true;
-      return;
-    }
-    if (collect_timing_log && begin_index < updated_runtime_states.size()) {
-      const std::string pipeline_name = algorithm_objects_[begin_index].pipeline_name.empty()
-        ? algorithm_objects_[begin_index].algorithm_profile.algorithm_name
-        : algorithm_objects_[begin_index].pipeline_name;
-      if (updated_runtime_states[begin_index].pipeline_stage_runtime_stats.empty()) {
-        const float group_elapsed_seconds =
-          std::chrono::duration<float>(std::chrono::steady_clock::now() - pipeline_tick_begin).count();
-        updated_runtime_states[begin_index].pipeline_total_elapsed_seconds = group_elapsed_seconds;
-        updated_runtime_states[begin_index].pipeline_stage_runtime_stats.clear();
-        updated_runtime_states[begin_index].pipeline_stage_runtime_stats.reserve(end_index - begin_index);
-        timing_log_stream
-          << "pipeline " << pipeline_name
-          << " | group_elapsed_seconds="
-          << group_elapsed_seconds
-          << '\n';
-        for (size_t stage_index = begin_index; stage_index < end_index; ++stage_index) {
-          updated_runtime_states[begin_index].pipeline_stage_runtime_stats.push_back(
-            AlgorithmPipelineStageRuntimeStat{
-              .stage_name = algorithm_objects_[stage_index].algorithm_profile.algorithm_name,
-              .elapsed_seconds = updated_runtime_states[stage_index].algorithm_exec_elapsed_seconds,
-              .reason = {},
-            });
-          timing_log_stream
-            << "  stage " << algorithm_objects_[stage_index].algorithm_profile.algorithm_name
-            << " | execution_elapsed_seconds="
-            << updated_runtime_states[stage_index].algorithm_exec_elapsed_seconds
-            << '\n';
-        }
-      }
-      _AppendPipelineTimingLog(
-        &timing_log_stream,
-        pipeline_name,
-        updated_runtime_states[begin_index]);
-    }
-    _MergeAlgorithmToAgentSignal(pipeline_signal, &out_result->algorithm_to_agent_signal);
-    if (mounted_pipeline_processing_failed) {
-      pipeline_processing_failed = true;
-    }
-  };
-
   size_t index = 0u;
   while (index < algorithm_objects_.size()) {
-    const AlgorithmObject& object = algorithm_objects_[index];
-    if (!object.pipeline_stage) {
-      process_algorithm_index(index);
-      ++index;
-      continue;
-    }
-
-    size_t pipeline_begin_index = 0u;
-    size_t pipeline_end_index = 0u;
-    if (!_FindPipelineGroupRange(algorithm_objects_, index, &pipeline_begin_index, &pipeline_end_index)) {
-      DEBUG_TOOL_ASSERT(false, "Failed to resolve pipeline stage range.");
-      out_result->algorithm_to_agent_signal.stop_requested = true;
-      break;
-    }
-    if (pipeline_begin_index != index) {
-      ++index;
-      continue;
-    }
-
-    process_pipeline_stage_group(pipeline_begin_index, pipeline_end_index);
-    if (pipeline_processing_failed) {
-      break;
-    }
-    index = pipeline_end_index;
+    process_algorithm_index(index);
+    ++index;
   }
 
   for (const AgentAlgorithmRuntimeState& runtime_state : updated_runtime_states) {
@@ -1960,11 +1880,17 @@ bool Agent::ReplayPipelineStageBridgeDebug(
   size_t index,
   const AgentTickContext& context,
   std::string* out_error_message) {
-  return algorithmManager::ReplayMountedPipelineDebug(
-    &algorithm_objects_,
-    index,
+  if (index >= algorithm_objects_.size()) {
+    if (out_error_message) {
+      *out_error_message = "Selected algorithm object is unavailable.";
+    }
+    return false;
+  }
+  return algorithmManager::ReplayMountedPipelineDebugNode(
+    &algorithm_objects_[index],
+    &algorithm_runtime_states_[index],
+    algorithm_objects_[index].pipeline_stage_debug_index,
     context,
-    &algorithm_runtime_states_,
     out_error_message);
 }
 
@@ -2018,15 +1944,7 @@ bool Agent::CollectAlgorithmReflection(size_t index, AlgorithmReflectionSnapshot
 }
 
 void Agent::Destroy() {
-  for (const AlgorithmObject& object : algorithm_objects_) {
-    if (object.pipeline_stage &&
-        object.pipeline_stage_index == 0u &&
-        !object.pipeline_name.empty()) {
-  algorithmManager::UnregisterMountedPipeline(
-        object.pipeline_name,
-        agent_name_);
-    }
-  }
+  algorithmManager::UnregisterMountedPipelineObjects(algorithm_objects_, agent_name_);
   initialized_ = false;
   agent_name_.clear();
   algorithm_objects_.clear();

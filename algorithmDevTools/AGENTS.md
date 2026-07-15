@@ -53,6 +53,7 @@ Use the current scene names exposed by `interface4agents`:
 - `scene render`
 - `scene d2c`
 - `scene all`
+- `scene pipeline`
 
 For teaching, refer to the visible UI names such as `containerScene`, `decomposerScene`, `reflectorScene`, and the intervention sub-tabs.
 

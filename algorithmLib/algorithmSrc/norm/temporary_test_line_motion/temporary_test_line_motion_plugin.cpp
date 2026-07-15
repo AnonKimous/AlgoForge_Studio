@@ -92,7 +92,7 @@ extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateBundle(
   out_bundle->jobs_symbol = true;
   out_bundle->vk_symbol = false;
   out_bundle->cuda_symbol = false;
-  out_bundle->reflector = true;
+  out_bundle->reflector = false;
   out_bundle->intervention = true;
   out_bundle->jobs_executor = new LineMotionJobsExecutor();
   out_bundle->destroy_jobs_executor = &DestroyJobsExecutor;

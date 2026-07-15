@@ -75,6 +75,7 @@ enum class AlgorithmExecutionPreference {
   Jobs = 0,
   Vk = 1,
   Cuda = 2,
+  Compatibility = 3,
 };
 
 struct AlgorithmPipelineStageSubmission {
@@ -209,6 +210,37 @@ struct PipelineStageBridgeDebugSummary {
   }
 };
 
+struct AlgorithmPipelineCompositionStage {
+  std::string stage_name;
+  uint32_t stage_index{0u};
+};
+
+struct AlgorithmPipelineCompositionEdge {
+  std::string source_stage_name;
+  std::string target_stage_name;
+  std::vector<PipelineStageBridgeDebugBinding> bindings;
+};
+
+struct AlgorithmPipelineCompositionSummary {
+  std::string pipeline_name;
+  std::string stage_begin_name;
+  std::string stage_end_name;
+  bool supports_circular_tick{false};
+  std::vector<AlgorithmPipelineCompositionStage> body_stages;
+  std::vector<AlgorithmPipelineCompositionEdge> edges;
+  bool valid{false};
+
+  void Clear() {
+    pipeline_name.clear();
+    stage_begin_name.clear();
+    stage_end_name.clear();
+    supports_circular_tick = false;
+    body_stages.clear();
+    edges.clear();
+    valid = false;
+  }
+};
+
 struct AlgorithmRuntimeSummary {
   std::string algorithm_name;
   AlgorithmAssemblyState assembly_state{AlgorithmAssemblyState::Failed};
@@ -236,6 +268,7 @@ struct AlgorithmRuntimeSummary {
   std::vector<AlgorithmDescriptorValue> descriptor_values;
   bool jobs_symbol{true};
   bool vk_symbol{true};
+  bool compatibility_symbol{false};
   bool has_reflector{false};
   bool has_intervention{false};
   AlgorithmMountMode mount_mode{AlgorithmMountMode::Direct};
@@ -266,6 +299,10 @@ class IDebugToolHost {
   virtual bool IsPipelineAlgorithm(
     const std::string& algorithm_name,
     bool* out_is_pipeline,
+    std::string* out_error_message = nullptr) const = 0;
+  virtual bool LoadPipelineComposition(
+    const std::string& pipeline_algorithm_name,
+    AlgorithmPipelineCompositionSummary* out_summary,
     std::string* out_error_message = nullptr) const = 0;
   virtual void SetAlgorithmRuntimeBuildFlavor(AlgorithmRuntimeBuildFlavor build_flavor) = 0;
 

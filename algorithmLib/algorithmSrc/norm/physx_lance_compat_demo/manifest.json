@@ -1,0 +1,47 @@
+{
+  "algorithm_name": "physx_lance_compat_demo",
+  "package_name": "physx_lance_compat_demo",
+  "build_finished": true,
+  "container": {
+    "variable": {},
+    "variableArray": {
+      "a1": {
+        "count": 1
+      }
+    }
+  },
+  "containerElement": {
+    "items": []
+  },
+  "decomposer": {
+    "res": {},
+    "description": []
+  },
+  "res": {
+    "items": []
+  },
+  "intervention": {
+    "stages": {
+      "resultRender": {
+        "stage_name": "resultRender",
+        "stage_kind": "resultRender",
+        "used_algorithm_containers": {
+          "variables": [],
+          "arrays": [
+            {
+              "name": "a1",
+              "kind": "array",
+              "tuple_width": 1,
+              "required": true
+            }
+          ]
+        },
+        "shader": {
+          "pipeline": "graphics",
+          "vertex": "physx_lance_compat_demo.vert",
+          "fragment": "physx_lance_compat_demo.frag"
+        }
+      }
+    }
+  }
+}

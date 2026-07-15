@@ -454,6 +454,28 @@ inline bool TryResolveRenderPreviewSource(
     return true;
   }
 
+  if (!selected_object->child_algorithm_objects.empty()) {
+    for (const std::shared_ptr<agentmanager::agent::AlgorithmObject>& child :
+         selected_object->child_algorithm_objects) {
+      std::vector<agentmanager::agent::AlgorithmPhaseSpec> child_phase_specs;
+      if (!TryLoadInterventionPhaseSpecs(*child, &child_phase_specs) || child_phase_specs.empty()) {
+        continue;
+      }
+      if (ContainsResultRenderPhase(child_phase_specs)) {
+        *out_source_index = selected_index;
+        *out_phase_specs = std::move(child_phase_specs);
+        if (out_error_message) {
+          out_error_message->clear();
+        }
+        return true;
+      }
+    }
+    if (out_error_message) {
+      *out_error_message = "Pipeline node children did not expose a result-render stage.";
+    }
+    return false;
+  }
+
   size_t pipeline_begin_index = 0u;
   size_t pipeline_end_index = 0u;
   if (!TryFindPipelineGroupRange(managed_agent, selected_index, &pipeline_begin_index, &pipeline_end_index)) {

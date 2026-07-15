@@ -22,6 +22,7 @@ class AlgorithmStudioCanvasViewportMixin:
             "interventioner_pretick",
             "interventioner_aftertick",
             "interventioner_render",
+            "pipeline_overview",
             "decomposer2container_overview",
             "all_in_one",
             "renderpreview",
@@ -47,6 +48,8 @@ class AlgorithmStudioCanvasViewportMixin:
             if normalized in {"interventioner_overview", "interventioner_pretick", "interventioner_aftertick", "interventioner_render"}:
                 fallback_keys.append("graph")
             if normalized == "renderpreview":
+                fallback_keys.append("graph")
+            if normalized == "pipeline_overview":
                 fallback_keys.append("graph")
             fallback_keys.append("graph")
             for fallback_key in fallback_keys:
