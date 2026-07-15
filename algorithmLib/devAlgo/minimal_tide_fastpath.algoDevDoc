@@ -120,6 +120,35 @@
   "functionText": {
     "items": []
   },
+  "exec": {
+    "stage_name": "exec",
+    "stage_kind": "exec",
+    "functions": [
+      "fun"
+    ],
+    "used_algorithm_containers": {
+      "variables": [
+        {
+          "name": "v1",
+          "kind": "variable",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "v2",
+          "kind": "variable",
+          "tuple_width": 1,
+          "required": true
+        }
+      ],
+      "arrays": []
+    },
+    "x": 120.0,
+    "y": 140.0,
+    "width": 420.0,
+    "height": 220.0,
+    "expand": true
+  },
   "intervention": {
     "stage": {
       "resultRender": {

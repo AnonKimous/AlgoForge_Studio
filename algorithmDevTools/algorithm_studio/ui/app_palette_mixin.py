@@ -928,7 +928,9 @@ class AlgorithmStudioPaletteMixin:
         self._reset_canvas_interaction_states()
         preserve_selected_stage_name = self.selected_stage_name if self._is_interventioner_view_mode(normalized) else None
         self.canvas_view_mode = normalized
-        if normalized != "all_in_one":
+        if normalized == "all_in_one":
+            self._arrange_all_in_one_nodes()
+        else:
             self._restore_scene_positions_for_view(normalized)
         self._restore_canvas_viewport_state(normalized)
         if normalized != "graph":

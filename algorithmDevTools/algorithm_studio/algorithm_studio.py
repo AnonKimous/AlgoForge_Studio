@@ -1644,6 +1644,51 @@ class AlgorithmStudioApp(
             return "decomposer_overview"
         return "graph"
 
+    def _arrange_all_in_one_nodes(self) -> None:
+        lane_kinds = (
+            "containerelement",
+            "container",
+            "decomposer",
+            "resnode",
+            "reflector",
+            "function",
+            "functiontext",
+            "interventioner",
+        )
+        column_gap = 40.0
+        row_gap = 48.0
+        left = 48.0
+        top = 48.0
+        column_count = 2
+        for kind in lane_kinds:
+            items = [
+                item
+                for node_kind, _name, item in self.project.iter_nodes()
+                if node_kind == kind
+            ]
+            if not items:
+                continue
+            column_width = max(
+                520.0,
+                max(float(getattr(item, "width", 420.0) or 420.0) for item in items),
+            )
+            row_height = max(
+                260.0,
+                max(float(getattr(item, "height", 220.0) or 220.0) for item in items),
+            )
+            for index, item in enumerate(items):
+                if kind == "containerelement" and self._is_hidden_root_group_name(item.name):
+                    continue
+                column = index % column_count
+                row = index // column_count
+                self._set_project_node_position(
+                    item,
+                    left + column * (column_width + column_gap),
+                    top + row * (row_height + row_gap),
+                    view_mode="all_in_one",
+                )
+            top += ((len(items) + column_count - 1) // column_count) * (row_height + row_gap) + 72.0
+
     def _load_package(self) -> None:
         path = filedialog.askopenfilename(
             title="Load algoDevDoc project",

@@ -225,6 +225,24 @@ class AlgorithmStudioContainerGroupMixin:
             return False
         if kind in {"container", "containerelement"} and self._node_has_collapsed_ancestor(kind, name):
             return False
+        if self.canvas_view_mode == "all_in_one":
+            if kind == "containerelement":
+                return self._find_container_group(name) is not None
+            if kind == "container":
+                return self._find_container(name) is not None
+            if kind == "decomposer":
+                return self._find_rule(name) is not None
+            if kind == "reflector":
+                return self._find_reflector(name) is not None
+            if kind == "resnode":
+                return self._find_res_node(name) is not None
+            if kind == "function":
+                return self._find_function_frame(name) is not None
+            if kind == "functiontext":
+                return self._find_function_text_item(name) is not None
+            if kind in {"interventioner", "stage"}:
+                return self._find_stage(name) is not None
+            return False
         if self.canvas_view_mode == "graph":
             if kind == "resnode":
                 return False
@@ -244,19 +262,6 @@ class AlgorithmStudioContainerGroupMixin:
             return self._find_container_group(name) is not None and self._scene_consumes_node_zone(kind, name)
         if kind == "container":
             return self._find_container(name) is not None and self._scene_consumes_node_zone(kind, name)
-        if self.canvas_view_mode == "all_in_one":
-            if kind == "decomposer":
-                return self._find_rule(name) is not None
-            if kind == "reflector":
-                return self._find_reflector(name) is not None
-            if kind == "resnode":
-                return self._find_res_node(name) is not None
-            if kind == "function":
-                return self._find_function_frame(name) is not None
-            if kind == "functiontext":
-                return self._find_function_text_item(name) is not None
-            if kind in {"interventioner", "stage"}:
-                return self._find_stage(name) is not None
         if self.canvas_view_mode == "decomposer_overview":
             if kind == "resnode":
                 return self._find_res_node(name) is not None
