@@ -66,7 +66,7 @@ class LineMotionCudaExecutor final : public agent::IAlgorithmCudaExecutor {
       *algorithm_to_agent_signal = {};
     }
     if (debug_state) {
-      debug_state->signals.push_back(algorithm_management::AdvancedAlgorithmDebugSignal{
+      debug_state->signals.push_back(algomanager::algoscheduler::AdvancedAlgorithmDebugSignal{
         .name = "temporary_test_line_motion.cuda",
         .payload = "CUDA kernel advanced its private scalar.",
       });

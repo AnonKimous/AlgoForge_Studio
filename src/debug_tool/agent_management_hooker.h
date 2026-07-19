@@ -1,7 +1,7 @@
 #pragma once
 
 #define AGENT_MANAGEMENT_LAYER_INTERNAL_BUILD 1
-#include "agent_management/agent_management.h"
+#include "agentmanager/agent_management.h"
 #undef AGENT_MANAGEMENT_LAYER_INTERNAL_BUILD
 #include "common_data/input_state.h"
 #include "common_data/vector_types.h"
@@ -15,17 +15,7 @@ namespace debug_tool_backend::agent_management_hooker {
 
 class AgentManagementHooker {
  public:
-  void SetAlgorithmLibraryRuntimeBuildFlavor(algorithm::library_paths::AlgorithmLibraryRuntimeBuildFlavor flavor) {
-    algorithm::library_paths::SetAlgorithmLibraryRuntimeBuildFlavor(flavor);
-    algorithm_library_runtime_build_flavor_ = flavor;
-  }
-
-  algorithm::library_paths::AlgorithmLibraryRuntimeBuildFlavor algorithm_library_runtime_build_flavor() const {
-    return algorithm_library_runtime_build_flavor_;
-  }
-
   bool CreateAgent(agentmanager::AgentCreateSpec spec, size_t* out_agent_index = nullptr) {
-    algorithm::library_paths::SetAlgorithmLibraryRuntimeBuildFlavor(algorithm_library_runtime_build_flavor_);
     return agent_manager_.CreateAgent(std::move(spec), out_agent_index);
   }
 
@@ -39,7 +29,6 @@ class AgentManagementHooker {
     agentmanager::agent::AlgorithmMountMode mount_mode = agentmanager::agent::AlgorithmMountMode::Direct,
     agentmanager::agent::AlgorithmExecutionPreference execution_preference = agentmanager::agent::AlgorithmExecutionPreference::Vk,
     bool load_reflector = true) {
-    algorithm::library_paths::SetAlgorithmLibraryRuntimeBuildFlavor(algorithm_library_runtime_build_flavor_);
     return agent_manager_.AttachAlgorithmToAgent(
       agent_index,
       algorithm_name,
@@ -62,7 +51,6 @@ class AgentManagementHooker {
     agentmanager::agent::AlgorithmPipelineTopology topology = agentmanager::agent::AlgorithmPipelineTopology::NonCircular,
     agentmanager::agent::AlgorithmPipelineSyncMode sync_mode = agentmanager::agent::AlgorithmPipelineSyncMode::Forced,
     bool load_reflector = true) {
-    algorithm::library_paths::SetAlgorithmLibraryRuntimeBuildFlavor(algorithm_library_runtime_build_flavor_);
     return agent_manager_.AttachPipelineAlgorithmToAgent(
       agent_index,
       pipeline_name,
@@ -170,8 +158,6 @@ class AgentManagementHooker {
 
  private:
   agentmanager::AgentManager agent_manager_{};
-  algorithm::library_paths::AlgorithmLibraryRuntimeBuildFlavor algorithm_library_runtime_build_flavor_{
-    algorithm::library_paths::AlgorithmLibraryRuntimeBuildFlavor::Debug};
 };
 
 }  // namespace debug_tool_backend::agent_management_hooker

@@ -144,12 +144,13 @@ set(CORE_DEBUG_DIR "${CORE_BUILD_DIR}/Debug")
 if(BUILD_ALGORITHM_SAMPLE_PLUGIN)
   set(ALGORITHM_PLUGIN_MIRROR_SRC_ROOT "${CMAKE_CURRENT_BINARY_DIR}/plugin_support_mirror/src")
   file(MAKE_DIRECTORY "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}")
-  file(COPY "${REPO_ROOT}/src/algorithm_catalog" DESTINATION "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}")
+  file(COPY "${REPO_ROOT}/src/algomanager/bridge" DESTINATION "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}/algomanager")
+  file(COPY "${REPO_ROOT}/src/algomanager/catalog" DESTINATION "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}")
   file(COPY "${REPO_ROOT}/src/common_data" DESTINATION "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}")
 
   add_library(algorithm_plugin_support_mirror STATIC
-    "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}/algorithm_catalog/algorithm_package_location.cpp"
-    "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}/algorithm_catalog/algorithm_plugin_support_minimal.cpp"
+    "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}/algomanager/catalog/algorithm_package_location.cpp"
+    "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}/algomanager/catalog/algorithm_plugin_support_minimal.cpp"
     "${CJSON_SOURCE_DIR}/cJSON.c"
   )
   target_include_directories(algorithm_plugin_support_mirror PUBLIC

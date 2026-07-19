@@ -18,15 +18,17 @@ class CompatibilityProbeExecutor final : public agent::IAlgorithmCompatibilityEx
     const agent::AgentTickContext& context,
     const algorithm::AlgorithmProfile& algorithm_profile,
     const AgentToAlgorithmSignal& agent_to_algorithm_signal,
+    const agent::AlgorithmCompatibilityContainerWriter* container_writer,
     AlgorithmToAgentSignal* algorithm_to_agent_signal,
     agent::AlgorithmPackageDebugState* debug_state) override {
     (void)context;
     (void)algorithm_profile;
     (void)agent_to_algorithm_signal;
+    (void)container_writer;
 
     state_.tick_count += 1u;
     algorithm_to_agent_signal->control_bits = static_cast<uint32_t>(state_.tick_count);
-    debug_state->signals.push_back(algorithm_management::AdvancedAlgorithmDebugSignal{
+      debug_state->signals.push_back(algomanager::algoscheduler::AdvancedAlgorithmDebugSignal{
       .name = "compatibility_probe.opaque_state",
       .payload = "tick=" + std::to_string(state_.tick_count),
     });
@@ -44,8 +46,8 @@ void DestroyCompatibilityProbeExecutor(agent::IAlgorithmCompatibilityExecutor* e
 }  // namespace
 
 extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateBundle(
-  const algorithmManager::support::AlgorithmPluginRequest* request,
-  algorithmManager::support::AlgorithmPluginBundle* out_bundle) {
+  const algomanager::support::AlgorithmPluginRequest* request,
+  algomanager::support::AlgorithmPluginBundle* out_bundle) {
   (void)request;
   assert(out_bundle && "Algorithm plugin bundle output must be valid.");
 

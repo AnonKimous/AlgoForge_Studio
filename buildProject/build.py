@@ -17,9 +17,9 @@ from toolchain import ensure_windows_clang_toolchain
 ROOT = Path(__file__).resolve().parent.parent
 ALGORITHM_ROOT = ROOT / "algorithmLib"
 SOURCE_ROOT = ALGORITHM_ROOT / "algorithmSrc"
-RUNTIME_ROOT = ALGORITHM_ROOT / "algorithmruntimeLib" / "releaseWithDebugInfo"
+RUNTIME_ROOT = ALGORITHM_ROOT / "algorithmruntimeLib"
+BUILD_CONFIGURATION = os.environ.get("ALGOFORGE_ALGORITHM_CONFIGURATION", "RelWithDebInfo")
 SDK_ROOT = ROOT / "sdk"
-BOOT_ROOT = ROOT / "boot"
 
 
 def set_environment_value(environment: dict[str, str], name: str, value: str) -> None:
@@ -118,23 +118,8 @@ def run(command: list[str], environment: dict[str, str]) -> None:
     subprocess.run(command, cwd=ROOT, env=environment, check=True)
 
 
-def replace_link(link: Path, target: Path) -> None:
-    if link.is_symlink() or link.is_file():
-        link.unlink()
-    elif link.is_dir():
-        shutil.rmtree(link)
-    link.symlink_to(os.path.relpath(target, link.parent), target_is_directory=target.is_dir())
-
-
-def refresh_boot_links(toolchain: str) -> None:
-    debug_tool = ROOT / "build" / toolchain / "Debug" / ("debugTool.exe" if os.name == "nt" else "debugTool")
-    replace_link(BOOT_ROOT / ("debugTool.exe" if os.name == "nt" else "debugTool"), debug_tool)
-    replace_link(BOOT_ROOT / "devTools", ROOT / "algorithmDevTools")
-    replace_link(BOOT_ROOT / "devTools.py", BOOT_ROOT / "launch_devTools.py")
-
-
 def export_sdk(toolchain: str) -> None:
-    build_debug = ROOT / "build" / toolchain / "Debug"
+    build_debug = ROOT / "build" / toolchain / BUILD_CONFIGURATION
     python_sdk = SDK_ROOT / "python"
     cpp_sdk = SDK_ROOT / "cpp"
     shutil.rmtree(python_sdk, ignore_errors=True)
@@ -145,7 +130,7 @@ def export_sdk(toolchain: str) -> None:
     sdk_library = next(build_debug.glob("sdk*.lib"), SDK_ROOT / "sdk.lib")
     (cpp_sdk / "lib").mkdir(parents=True, exist_ok=True)
     shutil.copy2(sdk_library, cpp_sdk / "lib" / sdk_library.name)
-    dll_sources = list(build_debug.glob("*.dll")) + list((ROOT / "build" / toolchain / "assimp-build" / "bin" / "Debug").glob("*.dll"))
+    dll_sources = list(build_debug.glob("*.dll")) + list((ROOT / "build" / toolchain / "assimp-build" / "bin" / BUILD_CONFIGURATION).glob("*.dll"))
     (cpp_sdk / "bin").mkdir(parents=True, exist_ok=True)
     for dll in dll_sources:
         shutil.copy2(dll, cpp_sdk / "bin" / dll.name)
@@ -182,10 +167,9 @@ def build_mainline(toolchain: str) -> None:
         configure.append(f"-DCMAKE_MAKE_PROGRAM={environment['NINJA_EXE']}")
         configure.append(f"-DALGOFORGE_CLANG_CL={environment['CXX']}")
     run(configure, environment)
-    run(["cmake", "--build", str(build_root), "--config", "Debug", "--target", "debugTool", "--parallel"], environment)
-    run(["cmake", "--build", str(build_root), "--config", "Debug", "--target", "sdk", "--parallel"], environment)
+    run(["cmake", "--build", str(build_root), "--config", BUILD_CONFIGURATION, "--target", "debugTool", "--parallel"], environment)
+    run(["cmake", "--build", str(build_root), "--config", BUILD_CONFIGURATION, "--target", "sdk", "--parallel"], environment)
     export_sdk(toolchain)
-    refresh_boot_links(toolchain)
 
 
 def c_identifier(text: str) -> str:
@@ -268,6 +252,10 @@ def package_runtime(source_root: Path, runtime_root: Path, configuration: str, a
                 shutil.copy2(default_json, runtime_dir / "default.json")
                 shutil.copy2(default_json, staging_dir / "default.json")
 
+            for dependency in source_dir.glob("*.dll"):
+                shutil.copy2(dependency, runtime_dir / dependency.name)
+                shutil.copy2(dependency, staging_dir / dependency.name)
+
             dll_candidates = [runtime_dir / "Debug" / f"{package_name}.dll", runtime_dir / "RelWithDebInfo" / f"{package_name}.dll", runtime_dir / f"{package_name}.dll"]
             next(path for path in dll_candidates if path.is_file())
             nested_dirs = [path for path in all_runtime_dirs if path != runtime_dir and path_is_under(path, runtime_dir)]
@@ -289,6 +277,15 @@ def package_runtime(source_root: Path, runtime_root: Path, configuration: str, a
             write_algo_package(archive_path, staging_dir)
         finally:
             shutil.rmtree(staging_dir)
+
+
+def flatten_runtime_configuration(runtime_dir: Path) -> None:
+    configuration_dir = runtime_dir / BUILD_CONFIGURATION
+    if not configuration_dir.is_dir():
+        return
+    for path in configuration_dir.iterdir():
+        shutil.move(str(path), str(runtime_dir / path.name))
+    configuration_dir.rmdir()
 
 
 def build_algorithm(toolchain: str, algorithm_name: str) -> None:
@@ -315,15 +312,18 @@ def build_algorithm(toolchain: str, algorithm_name: str) -> None:
         configure.append(f"-DALGOFORGE_CLANG_CL={environment['CXX']}")
     run(configure, environment)
     for target in targets:
-        run(["cmake", "--build", str(build_dir), "--config", "RelWithDebInfo", "--target", target, "--parallel"], environment)
+        run(["cmake", "--build", str(build_dir), "--config", BUILD_CONFIGURATION, "--target", target, "--parallel"], environment)
+    runtime_algorithm_root = RUNTIME_ROOT / algorithm_dir.relative_to(SOURCE_ROOT)
+    for manifest in sorted(algorithm_dir.rglob("manifest.json")):
+        runtime_directory = runtime_algorithm_root / manifest.parent.relative_to(algorithm_dir)
+        flatten_runtime_configuration(runtime_directory)
     package_runtime(
-        algorithm_dir,
-        RUNTIME_ROOT / algorithm_dir.relative_to(SOURCE_ROOT),
-        "RelWithDebInfo",
+      algorithm_dir,
+      runtime_algorithm_root,
+        BUILD_CONFIGURATION,
         SOURCE_ROOT,
     )
     export_sdk(toolchain)
-    refresh_boot_links(toolchain)
     shutil.rmtree(build_dir)
 
 

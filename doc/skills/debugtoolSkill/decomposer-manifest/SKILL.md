@@ -7,10 +7,10 @@ description: Work with the current algorithm package manifest schema, package lo
 
 Read the current source before editing a package schema:
 
-- `src/algorithm_catalog/algorithm_package_loader.cpp`
-- `src/algorithm_catalog/algorithm_package_decomposer.cpp`
-- `src/algorithm_catalog/algorithm_protocol.h`
-- `src/algorithm_catalog/algorithm_types.h`
+- `src/algomanager/catalog/algorithm_package_loader.cpp`
+- `src/algomanager/catalog/algorithm_package_decomposer.cpp`
+- `src/algomanager/catalog/algorithm_protocol.h`
+- `src/algomanager/catalog/algorithm_types.h`
 - `algorithmLib\algorithmSrc\pipeline\v4a16_fireworks_pipeline_demo\manifest.json`
 - One stage manifest under the same pipeline directory
 

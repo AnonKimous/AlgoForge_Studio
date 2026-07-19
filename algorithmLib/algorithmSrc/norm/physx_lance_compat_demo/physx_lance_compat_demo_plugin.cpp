@@ -98,7 +98,7 @@ class PhysXLanceState final {
            << " z=" << pose.p.z
            << " vx=" << velocity.x
            << " impact=" << impact_ << "\n";
-    debug_state->signals.push_back(algorithm_management::AdvancedAlgorithmDebugSignal{
+    debug_state->signals.push_back(algomanager::algoscheduler::AdvancedAlgorithmDebugSignal{
       .name = "physx_lance_compat.step",
       .payload = "tick=" + std::to_string(tick_count_) +
         ",x=" + std::to_string(pose.p.x) +
@@ -156,11 +156,13 @@ class PhysXLanceCompatibilityExecutor final : public agent::IAlgorithmCompatibil
       const agent::AgentTickContext& context,
       const algorithm::AlgorithmProfile& algorithm_profile,
       const AgentToAlgorithmSignal& agent_to_algorithm_signal,
+      const agent::AlgorithmCompatibilityContainerWriter* container_writer,
       AlgorithmToAgentSignal* algorithm_to_agent_signal,
       agent::AlgorithmPackageDebugState* debug_state) override {
     (void)context;
     (void)algorithm_profile;
     (void)agent_to_algorithm_signal;
+    (void)container_writer;
     state_.Step(debug_state, algorithm_to_agent_signal);
     return true;
   }
@@ -176,8 +178,8 @@ void DestroyPhysXLanceCompatibilityExecutor(agent::IAlgorithmCompatibilityExecut
 }  // namespace
 
 extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateBundle(
-    const algorithmManager::support::AlgorithmPluginRequest* request,
-    algorithmManager::support::AlgorithmPluginBundle* out_bundle) {
+    const algomanager::support::AlgorithmPluginRequest* request,
+    algomanager::support::AlgorithmPluginBundle* out_bundle) {
   (void)request;
   assert(out_bundle && "Algorithm plugin bundle output must be valid.");
   out_bundle->Clear();

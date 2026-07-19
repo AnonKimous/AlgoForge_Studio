@@ -16,6 +16,8 @@ def main() -> int:
     subprocess.run([python, str(ROOT / "buildProject" / "Microsoft" / "build_mainline.py")], cwd=ROOT, check=True)
     if len(sys.argv) > 1:
         subprocess.run([python, str(ROOT / "buildProject" / "Microsoft" / "build_algorithm.py"), sys.argv[1]], cwd=ROOT, check=True)
+    else:
+        subprocess.run([python, str(ROOT / "buildProject" / "build_all_algorithms.py"), "Microsoft"], cwd=ROOT, check=True)
     return 0
 
 

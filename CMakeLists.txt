@@ -318,35 +318,34 @@ target_link_libraries(capabilities_sidecar PUBLIC common_data ${ASSIMP_LINK_LIBS
 add_library(debug_tool_hooks INTERFACE)
 target_sources(debug_tool_hooks INTERFACE
   src/debug_tool/debug_tool_hooker.h
-  src/debug_tool/algorithm_manager_hooker.h
+  src/debug_tool/algomanager_hooker.h
   src/debug_tool/agent_hooker.h
   src/debug_tool/agent_management_hooker.h
-  src/debug_tool/runtime_systems_hooker.h
+  src/debug_tool/runtimesys_hooker.h
 )
 target_include_directories(debug_tool_hooks INTERFACE ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(debug_tool_hooks INTERFACE common_data agentmanager runtime_systems)
+target_link_libraries(debug_tool_hooks INTERFACE common_data agentmanager)
 
-add_library(algorithm_management STATIC
-  src/algorithm_catalog/algorithm_package_location.cpp
-  src/algorithm_catalog/algorithm_package_decomposer.cpp
-  src/algorithm_catalog/algorithm_package_loader.cpp
+add_library(algomanager STATIC
+  src/algomanager/catalog/algorithm_package_location.cpp
+  src/algomanager/catalog/algorithm_package_decomposer.cpp
+  src/algomanager/catalog/algorithm_package_loader.cpp
   ${CJSON_SOURCE_DIR}/cJSON.c
 )
-target_include_directories(algorithm_management PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_compile_definitions(algorithm_management PRIVATE
-  ALGORITHM_MANAGEMENT_LAYER_INTERNAL_BUILD=1
+target_include_directories(algomanager PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_compile_definitions(algomanager PRIVATE
 )
-target_link_libraries(algorithm_management PUBLIC common_data runtime_systems capabilities_sidecar)
+target_link_libraries(algomanager PUBLIC common_data runtimesys capabilities_sidecar)
 
-add_library(runtime_systems STATIC
-  src/runtime_systems/window/sdl_window.cpp
-  src/runtime_systems/algorithm_gpu_context.cpp
-  src/runtime_systems/gpu_job_system.cpp
-  src/runtime_systems/job_system.cpp
-  src/runtime_systems/render/preview_renderer.cpp
-  src/runtime_systems/render/imgui_vulkan_runtime.cpp
-  src/runtime_systems/runtime_environment.cpp
-  src/runtime_systems/memory_manager.cpp
+add_library(runtimesys STATIC
+  src/runtimesys/window/sdl_window.cpp
+  src/runtimesys/algorithm_gpu_context.cpp
+  src/runtimesys/gpu_job_system.cpp
+  src/runtimesys/job_system.cpp
+  src/runtimesys/render/preview_renderer.cpp
+  src/runtimesys/render/imgui_vulkan_runtime.cpp
+  src/runtimesys/runtime_environment.cpp
+  src/runtimesys/memory_manager.cpp
   ${VKB_SOURCE_DIR}/src/VkBootstrap.cpp
   ${IMGUI_SOURCE_DIR}/imgui.cpp
   ${IMGUI_SOURCE_DIR}/imgui_draw.cpp
@@ -355,18 +354,17 @@ add_library(runtime_systems STATIC
   ${IMGUI_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp
   ${IMGUI_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp
 )
-target_include_directories(runtime_systems PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_compile_definitions(runtime_systems PRIVATE RUNTIME_SYSTEMS_LAYER_INTERNAL_BUILD=1)
-target_link_libraries(runtime_systems PUBLIC common_data Vulkan::Vulkan ${SDL3_LINK_LIBS} ${MIMALLOC_TARGET})
-target_link_libraries(algorithm_management PUBLIC runtime_systems)
+target_include_directories(runtimesys PUBLIC ${PROJECT_INCLUDE_DIRS})
+target_compile_definitions(runtimesys PRIVATE RUNTIME_SYSTEMS_LAYER_INTERNAL_BUILD=1)
+target_link_libraries(runtimesys PUBLIC common_data Vulkan::Vulkan ${SDL3_LINK_LIBS} ${MIMALLOC_TARGET})
 
 add_library(agentmanager STATIC
-  src/agent_management/agent.cpp
-  src/agent_management/agent_manager.cpp
+  src/agentmanager/agent/agent.cpp
+  src/agentmanager/agent_manager.cpp
 )
 target_include_directories(agentmanager PUBLIC ${PROJECT_INCLUDE_DIRS})
 target_compile_definitions(agentmanager PRIVATE AGENT_MANAGEMENT_LAYER_INTERNAL_BUILD=1)
-target_link_libraries(agentmanager PUBLIC common_data algorithm_management)
+target_link_libraries(agentmanager PUBLIC common_data algomanager)
 
 add_library(agent_management ALIAS agentmanager)
 
@@ -383,7 +381,7 @@ target_include_directories(debug_tool_frontend PUBLIC ${PROJECT_INCLUDE_DIRS})
 target_compile_definitions(debug_tool_frontend PRIVATE
   PROJECT_DATA_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/data"
 )
-target_link_libraries(debug_tool_frontend PUBLIC runtime_systems)
+target_link_libraries(debug_tool_frontend PUBLIC runtimesys)
 
 add_library(sdk STATIC
   src/sdk/sdk_runtime_system.cpp

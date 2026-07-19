@@ -13,9 +13,9 @@ Use the repository runner as the completion check for changes that affect algori
 2. Start a runner server and keep it alive while the client runs. From the repository root:
 
    ```powershell
-   cmd /c start "" /b build\Debug\debugTool.exe --runner-server --runner-server-once --runner-endpoint 127.0.0.1:0
+   cmd /c start "" /b build\Microsoft\RelWithDebInfo\debugTool.exe --runner-server --runner-server-once --runner-endpoint 127.0.0.1:0
    Start-Sleep -Seconds 2
-   cmd /c build\Debug\debugTool.exe --pipeline-runner --algorithm <algorithm> --ticks 1 --execution jobs --preview-output testData\runner_preview.ppm
+   cmd /c build\Microsoft\RelWithDebInfo\debugTool.exe --pipeline-runner --algorithm <algorithm> --ticks 1 --execution jobs --preview-output testData\runner_preview.png
    ```
 
    Use `--algorithm-runner` for a non-pipeline algorithm. The client discovers the server endpoint from `testData\runner_control\endpoint.txt`.
@@ -37,19 +37,19 @@ python boot\booterMSVC.py
 python boot\booterNinjaClang.py <algorithm>
 
 # Run one ordinary algorithm tick.
-cmd /c start "" /b build\Debug\debugTool.exe --runner-server --runner-server-once --runner-endpoint 127.0.0.1:0
+cmd /c start "" /b build\Microsoft\RelWithDebInfo\debugTool.exe --runner-server --runner-server-once --runner-endpoint 127.0.0.1:0
 Start-Sleep -Seconds 2
-cmd /c build\Debug\debugTool.exe --algorithm-runner --algorithm <algorithm> --ticks 1 --execution jobs --preview-output testData\algorithm_preview.ppm
+cmd /c build\Microsoft\RelWithDebInfo\debugTool.exe --algorithm-runner --algorithm <algorithm> --ticks 1 --execution jobs --preview-output testData\algorithm_preview.png
 
 # Run one pipeline tick.
-cmd /c start "" /b build\Debug\debugTool.exe --runner-server --runner-server-once --runner-endpoint 127.0.0.1:0
+cmd /c start "" /b build\Microsoft\RelWithDebInfo\debugTool.exe --runner-server --runner-server-once --runner-endpoint 127.0.0.1:0
 Start-Sleep -Seconds 2
-cmd /c build\Debug\debugTool.exe --pipeline-runner --algorithm <pipeline> --ticks 1 --execution jobs --preview-output testData\pipeline_preview.ppm
+cmd /c build\Microsoft\RelWithDebInfo\debugTool.exe --pipeline-runner --algorithm <pipeline> --ticks 1 --execution jobs --preview-output testData\pipeline_preview.png
 
 # Exercise the VK path for repeated ticks.
-cmd /c start "" /b build\Debug\debugTool.exe --runner-server --runner-server-once --runner-endpoint 127.0.0.1:0
+cmd /c start "" /b build\Microsoft\RelWithDebInfo\debugTool.exe --runner-server --runner-server-once --runner-endpoint 127.0.0.1:0
 Start-Sleep -Seconds 2
-cmd /c build\Debug\debugTool.exe --pipeline-runner --algorithm <pipeline> --ticks 12 --execution vk --preview-output testData\pipeline_vk_preview.ppm
+cmd /c build\Microsoft\RelWithDebInfo\debugTool.exe --pipeline-runner --algorithm <pipeline> --ticks 12 --execution vk --preview-output testData\pipeline_vk_preview.png
 ```
 
 Do not run only the client command. If the output stops at `runner_client.begin`, the server was not connected and the test did not run.

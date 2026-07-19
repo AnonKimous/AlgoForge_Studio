@@ -1,0 +1,84 @@
+{
+  "algorithm_name": "physics_sdk_compat_demo",
+  "package_name": "physics_sdk_compat_demo",
+  "build_finished": true,
+  "container": {
+    "variable": {},
+    "variableArray": {
+      "a1": {
+        "count": 14
+      },
+      "render_draw": {
+        "count": 4
+      }
+    }
+  },
+  "containerElement": {
+    "items": []
+  },
+  "decomposer": {
+    "res": {},
+    "description": []
+  },
+  "res": {
+    "items": []
+  },
+  "exec": {
+    "stage_name": "exec",
+    "stage_kind": "exec",
+    "execution_preference": "compatibility",
+    "used_algorithm_containers": {
+      "variables": [],
+      "arrays": [
+        {
+          "name": "a1",
+          "kind": "array",
+          "tuple_width": 1,
+          "required": true
+        },
+        {
+          "name": "render_draw",
+          "kind": "draw_indirect",
+          "tuple_width": 1,
+          "required": true
+        }
+      ]
+    },
+    "shader": {
+      "pipeline": "graphics",
+      "vertex": "physx_compatibility_demo_result_render.vert",
+      "fragment": "physx_compatibility_demo_result_render.frag"
+    }
+  },
+  "intervention": {
+    "stage": {
+      "resultRender": {
+        "stage_name": "resultRender",
+        "stage_kind": "resultRender",
+        "functions": [],
+        "used_algorithm_containers": {
+          "variables": [],
+          "arrays": [
+            {
+              "name": "a1",
+              "kind": "array",
+              "tuple_width": 1,
+              "required": true
+            },
+            {
+              "name": "render_draw",
+              "kind": "draw_indirect",
+              "tuple_width": 1,
+              "required": true
+            }
+          ]
+        },
+        "shader": {
+          "pipeline": "graphics",
+          "vertex": "physx_compatibility_demo_result_render.vert",
+          "fragment": "physx_compatibility_demo_result_render.frag"
+        }
+      }
+    }
+  }
+}

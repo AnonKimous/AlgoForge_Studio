@@ -11,7 +11,7 @@ $controlDir = Join-Path $testDataRoot 'runner_control'
 $endpointFile = Join-Path $controlDir 'endpoint.txt'
 $serverStdout = Join-Path $controlDir 'debugtool_cli_bridge_server_stdout.txt'
 $serverStderr = Join-Path $controlDir 'debugtool_cli_bridge_server_stderr.txt'
-$debugTool = Join-Path $root 'build\Debug\debugTool.exe'
+$debugTool = Join-Path $root 'build\Microsoft\RelWithDebInfo\debugTool.exe'
 $buildScript = Join-Path $root 'boot\booterMSVC.py'
 
 New-Item -ItemType Directory -Force -Path $controlDir | Out-Null

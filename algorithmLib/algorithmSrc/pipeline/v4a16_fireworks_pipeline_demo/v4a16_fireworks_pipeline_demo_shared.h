@@ -596,8 +596,8 @@ void DestroyJobsExecutor(agent::IAlgorithmJobsExecutor* executor) {
 }  // namespace
 
 inline bool CreateBundle(
-  const algorithmManager::support::AlgorithmPluginRequest* request,
-  algorithmManager::support::AlgorithmPluginBundle* out_bundle) {
+  const algomanager::support::AlgorithmPluginRequest* request,
+  algomanager::support::AlgorithmPluginBundle* out_bundle) {
   out_bundle->Clear();
   out_bundle->jobs_symbol = true;
   out_bundle->vk_symbol = true;
@@ -609,7 +609,7 @@ inline bool CreateBundle(
 }
 
 inline bool CreateRuntimeReflector(
-  const algorithmManager::support::AlgorithmPluginRequest* request,
+  const algomanager::support::AlgorithmPluginRequest* request,
   algorithm::AlgorithmReflector* out_reflector) {
   std::shared_ptr<algorithm::AlgorithmReflector> runtime_reflector{};
   algorithm::AlgorithmPackageLocation package_location{};
@@ -619,7 +619,7 @@ inline bool CreateRuntimeReflector(
         nullptr)) {
     return false;
   }
-  if (!algorithmManager::support::LoadAlgorithmPackageReflectorFromLocation(
+  if (!algomanager::support::LoadAlgorithmPackageReflectorFromLocation(
         package_location,
         &runtime_reflector,
         nullptr) || !runtime_reflector) {

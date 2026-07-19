@@ -19,8 +19,8 @@
 // hooker calls through the single unified facade.
 namespace hook = debug_tool_backend::hooker;
 using namespace hook;
-namespace agent_hooker = hook;
-namespace algorithm_manager_hooker = hook;
+namespace agent_hooker = debug_tool_backend::agent_hooker;
+namespace algomanager_hooker = debug_tool_backend::algomanager_hooker;
 
 namespace debug_tool_backend {
 
@@ -231,7 +231,7 @@ debug_tool::PipelineStageBridgeDebugSummary _ToDebugToolPipelineStageBridgeDebug
 
 bool _TryGetMountedPipelineRegistration(
   const agentmanager::agent::AlgorithmObject& object,
-  algorithmManager::JobsPipelineRegistration* out_registration) {
+  algomanager::JobsPipelineRegistration* out_registration) {
   return hook::TryGetMountedPipelineRegistration(object.pipeline_name, out_registration);
 }
 
@@ -263,7 +263,7 @@ void _AppendUniquePipelineStageIndex(
 void _AppendPipelineSummaryInterventionPhases(
   const agentmanager::agent::Agent& managed_agent,
   size_t stage_index,
-  const algorithmManager::JobsPipelineRegistration& registration,
+  const algomanager::JobsPipelineRegistration& registration,
   std::vector<agentmanager::agent::AlgorithmPhaseSpec>* out_phase_specs) {
   hook::AppendPipelineSummaryInterventionPhases(managed_agent, stage_index, registration, out_phase_specs);
 }
@@ -298,7 +298,7 @@ debug_tool::AlgorithmRuntimeSummary _ToDebugToolAlgorithmRuntimeSummary(
   if (summary.runtime_package_root_path.empty()) {
     ::algorithm::AlgorithmPackageLocation package_location{};
     std::string location_error_message;
-    if (algorithm_manager_hooker::TryResolveAlgorithmPackageLocation(
+    if (algomanager_hooker::TryResolveAlgorithmPackageLocation(
           summary.algorithm_name,
           &package_location,
           &location_error_message)) {
@@ -344,7 +344,7 @@ debug_tool::AlgorithmRuntimeSummary _ToDebugToolAlgorithmRuntimeSummary(
   summary.mount_mode = static_cast<debug_tool::AlgorithmMountMode>(static_cast<int>(object->mount_mode));
   summary.execution_preference =
     static_cast<debug_tool::AlgorithmExecutionPreference>(static_cast<int>(object->execution_preference));
-  algorithmManager::JobsPipelineRegistration registration{};
+  algomanager::JobsPipelineRegistration registration{};
   const bool has_registration = _TryGetMountedPipelineRegistration(*object, &registration);
   if (has_registration) {
     summary.pipeline_root_stage_name = registration.root_stage_name.empty()
@@ -368,11 +368,11 @@ debug_tool::AlgorithmRuntimeSummary _ToDebugToolAlgorithmRuntimeSummary(
     summary.pipeline_stage_runtime_stats = runtime_state->pipeline_stage_runtime_stats;
   }
   const agentmanager::agent::AlgorithmReflectionSnapshot* reflection_snapshot = nullptr;
-  algorithmManager::JobsPipelineRuntimeState pipeline_runtime_state{};
+  algomanager::JobsPipelineRuntimeState pipeline_runtime_state{};
   if (object->pipeline_stage &&
       object->pipeline_stage_index == 0u &&
       !object->pipeline_name.empty() &&
-      algorithm_manager_hooker::TryGetMountedPipelineRuntime(
+      algomanager_hooker::TryGetMountedPipelineRuntime(
         object->pipeline_name,
         agent_hooker::AgentName(managed_agent),
         &pipeline_runtime_state) &&
@@ -384,7 +384,7 @@ debug_tool::AlgorithmRuntimeSummary _ToDebugToolAlgorithmRuntimeSummary(
   if (reflection_snapshot) {
     summary.reflection_snapshot = _ToDebugToolReflectionSnapshot(*reflection_snapshot);
   }
-  std::vector<algorithmManager::AlgorithmPhaseSpec> phase_specs;
+  std::vector<algomanager::AlgorithmPhaseSpec> phase_specs;
   const bool primary_pipeline_stage =
     object->pipeline_stage &&
     !object->pipeline_name.empty() &&
@@ -401,7 +401,7 @@ debug_tool::AlgorithmRuntimeSummary _ToDebugToolAlgorithmRuntimeSummary(
   summary.has_intervention = !phase_specs.empty();
   if (!phase_specs.empty()) {
     summary.intervention_phase_summaries.reserve(phase_specs.size());
-    for (const algorithmManager::AlgorithmPhaseSpec& phase_spec : phase_specs) {
+    for (const algomanager::AlgorithmPhaseSpec& phase_spec : phase_specs) {
       debug_tool::AlgorithmPhaseSummary phase_summary{};
       phase_summary.phase_name = phase_spec.stage_name;
       phase_summary.phase_kind = phase_spec.stage_kind;
@@ -518,7 +518,7 @@ bool _FindMountedPipelineInstanceName(
       continue;
     }
 
-    algorithmManager::JobsPipelineRegistration registration{};
+    algomanager::JobsPipelineRegistration registration{};
     if (!_TryGetMountedPipelineRegistration(*object, &registration)) {
       DEBUG_TOOL_ASSERT(false, "Mounted pipeline registration is unavailable.");
       if (out_error_message) {
@@ -610,7 +610,7 @@ bool _BuildPipelineStageSubmissionsFromPackage(
 
   ::algorithm::AlgorithmPackageLocation package_location{};
   std::string location_error_message;
-  if (!algorithm_manager_hooker::TryResolveAlgorithmPackageLocation(
+  if (!algomanager_hooker::TryResolveAlgorithmPackageLocation(
         pipeline_algorithm_name,
         &package_location,
         &location_error_message)) {
@@ -625,7 +625,7 @@ bool _BuildPipelineStageSubmissionsFromPackage(
   std::shared_ptr<algorithm::AlgorithmRuntimeTransferMap> transfer_map{};
   bool has_transfer_map = false;
   std::string transfer_map_error_message;
-  if (!algorithm_manager_hooker::LoadAlgorithmPackageTransferMapFromLocation(
+  if (!algomanager_hooker::LoadAlgorithmPackageTransferMapFromLocation(
         package_location,
         &transfer_map,
         &has_transfer_map,
@@ -638,9 +638,9 @@ bool _BuildPipelineStageSubmissionsFromPackage(
     return false;
   }
 
-  algorithmManager::catalog::AlgorithmPipelineWrapperSpec wrapper_spec{};
+  algomanager::AlgorithmPipelineWrapperSpec wrapper_spec{};
   std::string wrapper_error_message;
-  if (!algorithm_manager_hooker::LoadAlgorithmPipelineWrapperSpecFromLocation(
+  if (!algomanager_hooker::LoadAlgorithmPipelineWrapperSpecFromLocation(
         package_location,
         &wrapper_spec,
         &wrapper_error_message)) {
@@ -709,7 +709,7 @@ bool _BuildPipelineStageSubmissionsFromPackage(
     }
     ::algorithm::AlgorithmPackageLocation next_package_location{};
     std::string next_location_error_message;
-    if (!algorithm_manager_hooker::TryResolveAlgorithmPackageLocation(
+    if (!algomanager_hooker::TryResolveAlgorithmPackageLocation(
           next_stage_name,
           &next_package_location,
           &next_location_error_message)) {
@@ -724,7 +724,7 @@ bool _BuildPipelineStageSubmissionsFromPackage(
     std::vector<agentmanager::agent::AlgorithmDescriptorValue> default_descriptor_values{};
     bool has_default_file = false;
     std::string default_error_message;
-    if (!algorithm_manager_hooker::LoadAlgorithmPackageDefaultBindingsFromLocation(
+    if (!algomanager_hooker::LoadAlgorithmPackageDefaultBindingsFromLocation(
           next_package_location,
           &default_resource_bindings,
           &default_descriptor_values,
@@ -833,7 +833,7 @@ bool _IsPipelineAlgorithmByName(
   *out_is_pipeline = false;
   ::algorithm::AlgorithmPackageLocation package_location{};
   std::string location_error_message;
-  if (!algorithm_manager_hooker::TryResolveAlgorithmPackageLocation(
+  if (!algomanager_hooker::TryResolveAlgorithmPackageLocation(
         algorithm_name,
         &package_location,
         &location_error_message)) {
@@ -908,7 +908,7 @@ bool _LoadPipelineCompositionByName(
 
   ::algorithm::AlgorithmPackageLocation package_location{};
   std::string location_error_message;
-  if (!algorithm_manager_hooker::TryResolveAlgorithmPackageLocation(
+  if (!algomanager_hooker::TryResolveAlgorithmPackageLocation(
         pipeline_algorithm_name,
         &package_location,
         &location_error_message)) {
@@ -923,7 +923,7 @@ bool _LoadPipelineCompositionByName(
   std::shared_ptr<algorithm::AlgorithmRuntimeTransferMap> transfer_map{};
   bool has_transfer_map = false;
   std::string transfer_map_error_message;
-  if (!algorithm_manager_hooker::LoadAlgorithmPackageTransferMapFromLocation(
+  if (!algomanager_hooker::LoadAlgorithmPackageTransferMapFromLocation(
         package_location,
         &transfer_map,
         &has_transfer_map,
@@ -939,9 +939,9 @@ bool _LoadPipelineCompositionByName(
     return false;
   }
 
-  algorithmManager::catalog::AlgorithmPipelineWrapperSpec wrapper_spec{};
+  algomanager::AlgorithmPipelineWrapperSpec wrapper_spec{};
   std::string wrapper_error_message;
-  if (!algorithm_manager_hooker::LoadAlgorithmPipelineWrapperSpecFromLocation(
+  if (!algomanager_hooker::LoadAlgorithmPipelineWrapperSpecFromLocation(
         package_location,
         &wrapper_spec,
         &wrapper_error_message) ||
@@ -1028,9 +1028,11 @@ DebugToolBackendRuntime::~DebugToolBackendRuntime() {
 bool DebugToolBackendRuntime::Init(const char* window_title, int width, int height) {
   agent_manager_.Destroy();
   ui_status_message_.clear();
-  agent_manager_.SetAlgorithmLibraryRuntimeBuildFlavor(
+  algomanager::SetAlgorithmLibraryRuntimeBuildFlavor(
     static_cast<algorithm::library_paths::AlgorithmLibraryRuntimeBuildFlavor>(
       debug_tool::AlgorithmRuntimeBuildFlavor::Debug));
+  runtime_environment_.SetDebugInfoRoot(
+    algomanager_hooker::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot());
   try {
     if (!runtime_environment_.Init(window_title ? window_title : "debugTool", width, height)) {
       return false;
@@ -1071,6 +1073,18 @@ bool DebugToolBackendRuntime::Tick() {
   }
   const bool runtime_tick_ok = runtime_environment_.Tick();
   return runtime_tick_ok;
+}
+
+void DebugToolBackendRuntime::BeginDebugToolRecording() {
+  algomanager_hooker::BeginDebugToolRecording();
+  runtime_environment_.BeginDebugToolRecording();
+}
+
+std::vector<DebugToolRecordedFrame>
+DebugToolBackendRuntime::EndDebugToolRecording() {
+  runtime_environment_.EndDebugToolRecording();
+  algomanager_hooker::EndDebugToolRecording();
+  return runtime_environment_.TakeDebugToolRecording();
 }
 
 void DebugToolBackendRuntime::Destroy() {
@@ -1137,7 +1151,9 @@ bool DebugToolBackendRuntime::AttachAlgorithmToAgent(
     return false;
   }
 
-  const bool load_reflector = true;
+  const bool load_reflector =
+    algomanager::GetAlgorithmLibraryRuntimeBuildFlavor() !=
+    algorithm::library_paths::AlgorithmLibraryRuntimeBuildFlavor::ReleaseWithDebugInfo;
   const bool attached = agent_manager_.AttachAlgorithmToAgent(
     agent_index,
     algorithm_name,
@@ -1288,7 +1304,7 @@ bool DebugToolBackendRuntime::LoadPipelineComposition(
 
 void DebugToolBackendRuntime::SetAlgorithmRuntimeBuildFlavor(
   debug_tool::AlgorithmRuntimeBuildFlavor build_flavor) {
-  agent_manager_.SetAlgorithmLibraryRuntimeBuildFlavor(
+  algomanager::SetAlgorithmLibraryRuntimeBuildFlavor(
     static_cast<algorithm::library_paths::AlgorithmLibraryRuntimeBuildFlavor>(build_flavor));
 }
 
@@ -1356,7 +1372,9 @@ bool DebugToolBackendRuntime::AttachPipelineAlgorithmToAgent(
   size_t* out_algorithm_index,
   std::string* out_error_message,
   debug_tool::AlgorithmExecutionPreference execution_preference) {
-  const bool load_reflector = true;
+  const bool load_reflector =
+    algomanager::GetAlgorithmLibraryRuntimeBuildFlavor() !=
+    algorithm::library_paths::AlgorithmLibraryRuntimeBuildFlavor::ReleaseWithDebugInfo;
   const bool attached = agent_manager_.AttachPipelineAlgorithmToAgent(
     agent_index,
     pipeline_name,
@@ -1488,7 +1506,7 @@ bool DebugToolBackendRuntime::HotReloadAlgorithmPackage(
       &restore_error_message,
       target_mount_mode,
       static_cast<agentmanager::agent::AlgorithmExecutionPreference>(static_cast<int>(algorithm_summary.execution_preference)),
-      algorithmManager::GetAlgorithmLibraryRuntimeBuildFlavor() !=
+      algomanager::GetAlgorithmLibraryRuntimeBuildFlavor() !=
         algorithm::library_paths::AlgorithmLibraryRuntimeBuildFlavor::ReleaseWithDebugInfo);
     if (!restored) {
       if (out_error_message) {
@@ -1542,7 +1560,7 @@ bool DebugToolBackendRuntime::HotReloadAlgorithmPackage(
     &attach_error_message,
     target_mount_mode,
     static_cast<agentmanager::agent::AlgorithmExecutionPreference>(static_cast<int>(algorithm_summary.execution_preference)),
-    algorithmManager::GetAlgorithmLibraryRuntimeBuildFlavor() !=
+    algomanager::GetAlgorithmLibraryRuntimeBuildFlavor() !=
       algorithm::library_paths::AlgorithmLibraryRuntimeBuildFlavor::ReleaseWithDebugInfo);
   if (!rebuilt) {
     if (out_error_message) {
@@ -1628,7 +1646,7 @@ bool DebugToolBackendRuntime::LoadAlgorithmCatalog(
   }
 
   out_entries->clear();
-  const std::filesystem::path runtime_root = algorithm_manager_hooker::ResolveAlgorithmLibraryRuntimeRoot();
+  const std::filesystem::path runtime_root = algomanager_hooker::ResolveAlgorithmLibraryRuntimeRoot();
   const std::filesystem::path category_roots[] = {
     runtime_root / "norm",
     runtime_root / "pipeline",
@@ -1644,13 +1662,25 @@ bool DebugToolBackendRuntime::LoadAlgorithmCatalog(
       if (ec) {
         break;
       }
-      if (!category_entry.is_directory(ec)) {
+      std::error_code category_entry_ec;
+      if (!category_entry.is_directory(category_entry_ec)) {
         continue;
       }
 
       const std::filesystem::path algorithm_folder_path = category_entry.path();
       const std::string algorithm_name = algorithm_folder_path.filename().string();
       if (algorithm_name.empty()) {
+        continue;
+      }
+
+      const std::filesystem::path algorithm_package_path =
+        algorithm_folder_path / (algorithm_name + ".algo");
+      const std::filesystem::path algorithm_manifest_path =
+        algorithm_folder_path / "manifest.json";
+      std::error_code algorithm_package_ec;
+      std::error_code algorithm_manifest_ec;
+      if (!std::filesystem::is_regular_file(algorithm_package_path, algorithm_package_ec) ||
+          !std::filesystem::is_regular_file(algorithm_manifest_path, algorithm_manifest_ec)) {
         continue;
       }
 
@@ -1671,7 +1701,11 @@ bool DebugToolBackendRuntime::LoadAlgorithmCatalog(
 
   if (out_entries->empty()) {
     if (out_error_message) {
-      *out_error_message = "No runtime algorithm folders were found under algorithmruntimeLib/norm or algorithmruntimeLib/pipeline.";
+      *out_error_message =
+        "No valid runtime algorithm packages were found. Runtime root: " +
+        runtime_root.string() +
+        "; searched: " + (runtime_root / "norm").string() +
+        " and " + (runtime_root / "pipeline").string() + ".";
     }
     return false;
   }
@@ -1697,10 +1731,10 @@ bool DebugToolBackendRuntime::QueryAlgorithmRequestedBindings(
   out_resources->clear();
   out_descriptors->clear();
 
-  algorithmManager::AlgorithmRequestedResources requested_resources{};
-  algorithmManager::AlgorithmRequestedDescriptorBindings requested_descriptor_bindings{};
+  algomanager::AlgorithmRequestedResources requested_resources{};
+  algomanager::AlgorithmRequestedDescriptorBindings requested_descriptor_bindings{};
   std::string reflection_error_message;
-  if (!algorithm_manager_hooker::QueryAlgorithmRequestedBindings(
+  if (!algomanager_hooker::QueryAlgorithmRequestedBindings(
         algorithm_name,
         &requested_resources,
         &requested_descriptor_bindings,
@@ -1713,7 +1747,7 @@ bool DebugToolBackendRuntime::QueryAlgorithmRequestedBindings(
     return false;
   }
 
-  for (const algorithmManager::AlgorithmRequestedResources::RequiredResource& resource :
+  for (const algomanager::AlgorithmRequestedResources::RequiredResource& resource :
         requested_resources.required_resources) {
     if (resource.resource_name.empty()) {
       DEBUG_TOOL_ASSERT(false, "Requested resource entry is missing a resource name.");
@@ -1739,7 +1773,7 @@ bool DebugToolBackendRuntime::QueryAlgorithmRequestedBindings(
       .required = resource.required,
     });
   }
-  for (const algorithmManager::AlgorithmRequestedDescriptorBindings::DescriptorSlot& descriptor :
+  for (const algomanager::AlgorithmRequestedDescriptorBindings::DescriptorSlot& descriptor :
         requested_descriptor_bindings.descriptor_slots) {
     if (descriptor.descriptor_name.empty()) {
       DEBUG_TOOL_ASSERT(false, "Requested descriptor entry is missing a descriptor name.");
@@ -1791,11 +1825,11 @@ bool DebugToolBackendRuntime::LoadAlgorithmPackageDefaultBindings(
     *out_has_default_file = false;
   }
 
-  std::vector<algorithmManager::AlgorithmResourceBinding> package_resource_bindings;
-  std::vector<algorithmManager::AlgorithmDescriptorValue> package_descriptor_values;
+  std::vector<algomanager::AlgorithmResourceBinding> package_resource_bindings;
+  std::vector<algomanager::AlgorithmDescriptorValue> package_descriptor_values;
   bool has_default_file = false;
   std::string default_error_message;
-  if (!algorithm_manager_hooker::LoadAlgorithmPackageDefaultBindings(
+  if (!algomanager_hooker::LoadAlgorithmPackageDefaultBindings(
         algorithm_name,
         &package_resource_bindings,
         &package_descriptor_values,
@@ -1817,7 +1851,7 @@ bool DebugToolBackendRuntime::LoadAlgorithmPackageDefaultBindings(
   }
 
   out_resource_bindings->reserve(package_resource_bindings.size());
-  for (const algorithmManager::AlgorithmResourceBinding& binding : package_resource_bindings) {
+  for (const algomanager::AlgorithmResourceBinding& binding : package_resource_bindings) {
     out_resource_bindings->push_back(debug_tool::AlgorithmResourceBinding{
       .resource_name = binding.resource_name,
       .resource_kind = binding.resource_kind,
@@ -1826,7 +1860,7 @@ bool DebugToolBackendRuntime::LoadAlgorithmPackageDefaultBindings(
     });
   }
   out_descriptor_values->reserve(package_descriptor_values.size());
-  for (const algorithmManager::AlgorithmDescriptorValue& value : package_descriptor_values) {
+  for (const algomanager::AlgorithmDescriptorValue& value : package_descriptor_values) {
     out_descriptor_values->push_back(debug_tool::AlgorithmDescriptorValue{
       .descriptor_name = value.descriptor_name,
       .scalar_value = value.scalar_value,
@@ -1993,6 +2027,7 @@ bool DebugToolBackendRuntime::BuildRenderPreviewRequest(
     RenderPreviewBuffer preview_buffer{};
     preview_buffer.binding_name = binding.container_name;
     preview_buffer.element_stride = container->element_stride;
+    preview_buffer.draw_indirect = binding.container_kind == "draw_indirect";
     preview_buffer.bytes.assign(container->bytes.begin(), container->bytes.end());
     out_request->storage_buffers.push_back(std::move(preview_buffer));
   }

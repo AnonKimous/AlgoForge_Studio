@@ -661,7 +661,10 @@ inline bool BuildMeshCache(
     const std::vector<Vec3> positions = ReadPackArray<Vec3>(positions_container);
     const std::vector<Vec3> normals = ReadPackArray<Vec3>(normals_container);
     const std::vector<Vec2> uvs = ReadPackArray<Vec2>(uvs_container);
-    const std::vector<std::array<uint32_t, 3>> triangle_indices = ReadPackArray<std::array<uint32_t, 3>>(triangles_container);
+    std::vector<std::array<uint32_t, 3>> triangle_indices = ReadPackArray<std::array<uint32_t, 3>>(triangles_container);
+    while (!triangle_indices.empty() && triangle_indices.back() == std::array<uint32_t, 3>{0u, 0u, 0u}) {
+      triangle_indices.pop_back();
+    }
 
     ParsedMaterial material{};
     std::vector<ParsedTriangle> triangles{};
@@ -812,7 +815,7 @@ class TeapotJobsExecutor final : public agent::IAlgorithmJobsExecutor {
       *algorithm_to_agent_signal = {};
     }
     if (debug_state) {
-      debug_state->signals.push_back(algorithm_management::AdvancedAlgorithmDebugSignal{
+      debug_state->signals.push_back(algomanager::algoscheduler::AdvancedAlgorithmDebugSignal{
         .name = "v4a10_teapot_pbr_demo.jobs",
         .payload = "triangles=" + std::to_string(cache.triangles.size()) +
           ", nodes=" + std::to_string(cache.bvh_nodes.size()) +
@@ -831,8 +834,8 @@ inline void DestroyJobsExecutor(agent::IAlgorithmJobsExecutor* executor) {
 }
 
 inline bool CreateBundle(
-  const algorithmManager::support::AlgorithmPluginRequest* request,
-  algorithmManager::support::AlgorithmPluginBundle* out_bundle) {
+  const algomanager::support::AlgorithmPluginRequest* request,
+  algomanager::support::AlgorithmPluginBundle* out_bundle) {
   if (!request || !out_bundle) {
     return false;
   }
@@ -850,7 +853,7 @@ inline bool CreateBundle(
 }
 
 inline bool CreateRuntimeReflector(
-  const algorithmManager::support::AlgorithmPluginRequest* request,
+  const algomanager::support::AlgorithmPluginRequest* request,
   algorithm::AlgorithmReflector* out_reflector) {
   if (!request || !out_reflector) {
     return false;
@@ -864,7 +867,7 @@ inline bool CreateRuntimeReflector(
         nullptr)) {
     return false;
   }
-  if (!algorithmManager::support::LoadAlgorithmPackageReflectorFromLocation(
+  if (!algomanager::support::LoadAlgorithmPackageReflectorFromLocation(
         package_location,
         &runtime_reflector,
         nullptr) || !runtime_reflector) {

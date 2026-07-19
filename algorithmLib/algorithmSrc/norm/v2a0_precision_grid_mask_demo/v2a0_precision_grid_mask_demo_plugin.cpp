@@ -85,7 +85,7 @@ class PrecisionGridMaskJobsExecutor final : public agent::IAlgorithmJobsExecutor
     if (debug_state) {
       const uint32_t high_mask = grid_mask >> 16u;
       const uint32_t low_mask = grid_mask & 0xFFFFu;
-      debug_state->signals.push_back(algorithm_management::AdvancedAlgorithmDebugSignal{
+      debug_state->signals.push_back(algomanager::algoscheduler::AdvancedAlgorithmDebugSignal{
         .name = "v2a0_precision_grid_mask_demo.jobs",
         .payload = "tick=" + std::to_string(tick_counter) +
           ", grid_mask=" + std::to_string(grid_mask) +
@@ -105,8 +105,8 @@ void DestroyJobsExecutor(agent::IAlgorithmJobsExecutor* executor) {
 }  // namespace
 
 extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateBundle(
-  const algorithmManager::support::AlgorithmPluginRequest* request,
-  algorithmManager::support::AlgorithmPluginBundle* out_bundle) {
+  const algomanager::support::AlgorithmPluginRequest* request,
+  algomanager::support::AlgorithmPluginBundle* out_bundle) {
   if (!request || !out_bundle) {
     return false;
   }
@@ -122,7 +122,7 @@ extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateBundle(
 }
 
 extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateRuntimeReflector(
-  const algorithmManager::support::AlgorithmPluginRequest* request,
+  const algomanager::support::AlgorithmPluginRequest* request,
   algorithm::AlgorithmReflector* out_reflector) {
   if (!request || !out_reflector) {
     return false;
@@ -136,7 +136,7 @@ extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateRuntimeReflec
         nullptr)) {
     return false;
   }
-  if (!algorithmManager::support::LoadAlgorithmPackageReflectorFromLocation(
+  if (!algomanager::support::LoadAlgorithmPackageReflectorFromLocation(
         package_location,
         &runtime_reflector,
         nullptr) || !runtime_reflector) {

@@ -2,7 +2,7 @@
 #include "sdk_decomposer.h"
 #undef SDK_LAYER_INTERNAL_BUILD
 
-#include "agent_management/agent_management.h"
+#include "agentmanager/agent_management.h"
 
 #include <utility>
 

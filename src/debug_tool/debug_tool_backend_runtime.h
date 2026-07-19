@@ -15,10 +15,11 @@ namespace debug_tool_backend {
 
 using debug_tool::IDebugToolHost;
 using AgentManager = hooker::AgentManagementHooker;
-using RuntimeSystemsHooker = hooker::RuntimeSystemsHooker;
+using RuntimesysHooker = hooker::RuntimesysHooker;
 using RuntimeEnvironment = hooker::RuntimeEnvironment;
 using RenderPreviewRequest = hooker::RenderPreviewRequest;
 using RenderPreviewBuffer = hooker::RenderPreviewBuffer;
+using DebugToolRecordedFrame = hooker::DebugToolRecordedFrame;
 
 class DebugToolBackendRuntime : public IDebugToolHost {
  public:
@@ -27,6 +28,11 @@ class DebugToolBackendRuntime : public IDebugToolHost {
   bool Init(const char* window_title, int width, int height);
   bool Tick();
   void Destroy();
+  void BeginDebugToolRecording();
+  std::vector<DebugToolRecordedFrame> EndDebugToolRecording();
+  uint64_t DebugToolRecordingTickCount() const {
+    return algomanager_hooker::DebugToolRecordingTickCount();
+  }
 
   bool has_agents() const override;
   size_t agent_count() const override;
@@ -41,6 +47,7 @@ class DebugToolBackendRuntime : public IDebugToolHost {
     debug_tool::AlgorithmPipelineCompositionSummary* out_summary,
     std::string* out_error_message = nullptr) const override;
   void SetAlgorithmRuntimeBuildFlavor(debug_tool::AlgorithmRuntimeBuildFlavor build_flavor) override;
+
   bool AttachAlgorithmToAgent(
     size_t agent_index,
     const std::string& algorithm_name,
@@ -167,7 +174,7 @@ class DebugToolBackendRuntime : public IDebugToolHost {
 
  private:
   bool CreateAgent(const char* agent_name, uint32_t limit_fps_flag, size_t* out_agent_index = nullptr);
-  RuntimeSystemsHooker runtime_environment_{}; 
+  RuntimesysHooker runtime_environment_{};
   AgentManager agent_manager_{}; 
   std::string ui_status_message_{}; 
   std::chrono::steady_clock::time_point last_frame_time_{}; 

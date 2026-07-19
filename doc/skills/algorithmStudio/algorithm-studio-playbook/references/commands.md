@@ -34,7 +34,7 @@
   - builds the generated algorithm package
 - `python boot\booterMSVC.py`
   - builds the debug window application
-- `build\Debug\debugTool.exe`
+- `build\Microsoft\RelWithDebInfo\debugTool.exe`
   - launches the debug window for preview observation; Algorithm Studio invokes it directly
 
 Use the repository Python launchers and the direct debugTool executable instead of legacy batch wrappers.

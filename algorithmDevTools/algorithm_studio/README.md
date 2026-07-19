@@ -119,5 +119,5 @@ This is a UI-first prototype.
 - The repository launcher is `python boot\launch_devTools.py`.
 - The direct script entry point is the stable cross-device launch path.
 - Render Preview starts the matching DebugTool runtime window as the rendering backend and embeds that native Vulkan/ImGui window inside the DevTools Render Preview view.
-- The Render Preview path does not read back a PPM frame or use a TCP image endpoint.
-- The `releaseWithDebugInfo` algorithm runtime must be launched by a matching `RelWithDebInfo` DebugTool build; the launcher prefers that configuration automatically.
+- The Render Preview path exports PNG frames and does not use a TCP image endpoint.
+- The algorithm runtime is built under `algorithmLib/algorithmruntimeLib` and is launched by the matching `RelWithDebInfo` DebugTool build.

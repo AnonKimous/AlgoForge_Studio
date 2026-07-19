@@ -3,7 +3,7 @@
 #undef SDK_LAYER_INTERNAL_BUILD
 
 #define AGENT_MANAGEMENT_LAYER_INTERNAL_BUILD 1
-#include "agent_management/agent_management.h"
+#include "agentmanager/agent_management.h"
 #undef AGENT_MANAGEMENT_LAYER_INTERNAL_BUILD
 #include "common_data/kernel_cfg.h"
 

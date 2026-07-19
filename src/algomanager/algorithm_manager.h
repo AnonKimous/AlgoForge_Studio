@@ -1,0 +1,522 @@
+#pragma once
+
+#include <chrono>
+#include <cassert>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <utility>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
+#include "algomanager/catalog/algorithm_catalog.h"
+#include "algomanager/catalog/algorithm_library_paths.h"
+#include "common_data/kernel_cfg.h"
+
+#include "algomanager/scheduler/algorithm_scheduler_runtime.h"
+
+namespace algomanager {
+using AlgorithmPipelineWrapperSpec = algocatalog::AlgorithmPipelineWrapperSpec;
+
+inline void SetAlgorithmLibraryRuntimeBuildFlavor(
+  algorithm::library_paths::AlgorithmLibraryRuntimeBuildFlavor flavor) {
+  algorithm::library_paths::SetAlgorithmLibraryRuntimeBuildFlavor(flavor);
+}
+
+inline algorithm::library_paths::AlgorithmLibraryRuntimeBuildFlavor GetAlgorithmLibraryRuntimeBuildFlavor() {
+  return algorithm::library_paths::GetAlgorithmLibraryRuntimeBuildFlavor();
+}
+
+inline std::filesystem::path ResolveAlgorithmLibrarySourceRoot() {
+  return algorithm::library_paths::ResolveAlgorithmLibrarySourceRoot();
+}
+
+inline std::filesystem::path ResolveProjectRootFromAlgorithmLibraryRoot(
+  const std::filesystem::path& algorithm_library_root) {
+  return algorithm::library_paths::ResolveProjectRootFromAlgorithmLibraryRoot(algorithm_library_root);
+}
+
+inline std::filesystem::path ResolveAlgorithmLibraryRuntimeRoot() {
+  return algorithm::library_paths::ResolveAlgorithmLibraryRuntimeRoot();
+}
+
+inline std::filesystem::path ResolveAlgorithmLibraryRuntimeNormDebugInfoRoot() {
+  return algorithm::library_paths::ResolveAlgorithmLibraryRuntimeNormDebugInfoRoot();
+}
+
+inline std::filesystem::path ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot() {
+  return algorithm::library_paths::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot();
+}
+
+inline std::filesystem::path ResolvePipelineRunnerArtifactRoot() {
+  return algorithm::library_paths::ResolvePipelineRunnerArtifactRoot();
+}
+
+inline bool CreateAlgorithmObjectFromLocation(
+  const algorithm::AlgorithmPackageLocation& package_location,
+  ::algomanager::algoscheduler::AlgorithmObject* out_group,
+  std::string* out_error_message = nullptr,
+  bool load_reflector = true) {
+  return catalog::CreateAlgorithmObjectFromLocation(
+    package_location,
+    out_group,
+    out_error_message,
+    load_reflector);
+}
+
+inline bool LoadAlgorithmPackageDefaultBindingsFromLocation(
+  const algorithm::AlgorithmPackageLocation& package_location,
+  std::vector<scheduler::AlgorithmResourceBinding>* out_resource_bindings,
+  std::vector<scheduler::AlgorithmDescriptorValue>* out_descriptor_values,
+  bool* out_has_default_file = nullptr,
+  std::string* out_error_message = nullptr) {
+  return catalog::LoadAlgorithmPackageDefaultBindingsFromLocation(
+    package_location,
+    out_resource_bindings,
+    out_descriptor_values,
+    out_has_default_file,
+    out_error_message);
+}
+
+inline bool LoadAlgorithmPackageTransferMapFromLocation(
+  const algorithm::AlgorithmPackageLocation& package_location,
+  std::shared_ptr<algorithm::AlgorithmRuntimeTransferMap>* out_transfer_map,
+  bool* out_has_transfer_map = nullptr,
+  std::string* out_error_message = nullptr) {
+  return catalog::LoadAlgorithmPackageTransferMapFromLocation(
+    package_location,
+    out_transfer_map,
+    out_has_transfer_map,
+    out_error_message);
+}
+
+inline bool LoadAlgorithmPipelineWrapperSpecFromLocation(
+  const algorithm::AlgorithmPackageLocation& package_location,
+  catalog::AlgorithmPipelineWrapperSpec* out_wrapper_spec,
+  std::string* out_error_message = nullptr) {
+  return catalog::LoadAlgorithmPipelineWrapperSpecFromLocation(
+    package_location,
+    out_wrapper_spec,
+    out_error_message);
+}
+
+inline bool QueryAlgorithmPackageRequestedBindingsFromLocation(
+  const algorithm::AlgorithmPackageLocation& package_location,
+  scheduler::AlgorithmRequestedResources* out_requested_resources,
+  scheduler::AlgorithmRequestedDescriptorBindings* out_requested_descriptor_bindings,
+  std::string* out_error_message = nullptr) {
+  return catalog::QueryAlgorithmPackageRequestedBindingsFromLocation(
+    package_location,
+    out_requested_resources,
+    out_requested_descriptor_bindings,
+    out_error_message);
+}
+
+inline void ClearAlgorithmExecutionCaches() {
+  scheduler::ClearAlgorithmExecutionCaches();
+}
+
+inline void ClearAlgorithmScheduler() {
+  scheduler::ClearAlgorithmScheduler();
+}
+
+inline void BeginDebugToolRecording() {
+  scheduler::AlgorithmScheduler::Instance().BeginDebugToolRecording();
+}
+
+inline void EndDebugToolRecording() {
+  scheduler::AlgorithmScheduler::Instance().EndDebugToolRecording();
+}
+
+inline bool DebugToolRecording() {
+  return scheduler::AlgorithmScheduler::Instance().DebugToolRecording();
+}
+
+inline uint64_t DebugToolRecordingTickCount() {
+  return scheduler::AlgorithmScheduler::Instance().DebugToolRecordingTickCount();
+}
+
+inline void RecordDebugToolTick() {
+  scheduler::AlgorithmScheduler::Instance().RecordDebugToolTick();
+}
+
+inline bool EnqueueMountedPipelineStage0Submission(
+  std::vector<scheduler::AlgorithmObject>* algorithm_objects,
+  const std::string& pipeline_name,
+  const std::string& agent_name,
+  const std::vector<scheduler::AlgorithmResourceBinding>& resource_bindings,
+  const std::vector<scheduler::AlgorithmDescriptorValue>& descriptor_values,
+  std::vector<scheduler::AlgorithmAssemblyState>* algorithm_assembly_states,
+  std::string* out_error_message = nullptr,
+  bool load_reflector = true) {
+  return scheduler::EnqueueMountedPipelineStage0Submission(
+    algorithm_objects,
+    pipeline_name,
+    agent_name,
+    resource_bindings,
+    descriptor_values,
+    algorithm_assembly_states,
+    out_error_message,
+    load_reflector);
+}
+
+inline bool EnqueueMountedPipelineStage0SubmissionNode(
+  ::algomanager::algoscheduler::AlgorithmObject* pipeline_node,
+  std::vector<scheduler::AlgorithmAssemblyState>* inout_assembly_states,
+  const std::string& agent_name,
+  const std::vector<scheduler::AlgorithmResourceBinding>& resource_bindings,
+  const std::vector<scheduler::AlgorithmDescriptorValue>& descriptor_values,
+  std::string* out_error_message = nullptr,
+  bool load_reflector = true) {
+  return scheduler::EnqueueMountedPipelineStage0SubmissionNode(
+    pipeline_node,
+    inout_assembly_states,
+    agent_name,
+    resource_bindings,
+    descriptor_values,
+    out_error_message,
+    load_reflector);
+}
+
+inline void UnregisterMountedPipelineObjects(
+  const std::vector<::algomanager::algoscheduler::AlgorithmObject>& objects,
+  const std::string& agent_name) {
+  scheduler::UnregisterMountedPipelineObjects(objects, agent_name);
+}
+
+inline void UnregisterMountedPipelineObject(
+  const ::algomanager::algoscheduler::AlgorithmObject& object,
+  const std::string& agent_name) {
+  scheduler::UnregisterMountedPipelineObject(object, agent_name);
+}
+
+inline void RefreshAlgorithmObjectSignals(
+  ::algomanager::algoscheduler::AlgorithmObject& object,
+  ::algomanager::algoscheduler::AgentAlgorithmRuntimeState& runtime_state,
+  const ::algomanager::algoscheduler::AgentTickContext& context) {
+  scheduler::RefreshAlgorithmObjectSignals(object, runtime_state, context);
+}
+
+inline bool TickAlgorithmObject(
+  ::algomanager::algoscheduler::AlgorithmObject& object,
+  ::algomanager::algoscheduler::AgentAlgorithmRuntimeState& runtime_state,
+  const std::string& agent_name,
+  const ::algomanager::algoscheduler::AgentTickContext& context,
+  bool allow_tick,
+  const scheduler::AlgorithmAssemblyState& assembly_state,
+  bool collect_timing_log,
+  std::string* out_error_message = nullptr) {
+  return scheduler::TickAlgorithmObject(
+    object,
+    runtime_state,
+    agent_name,
+    context,
+    allow_tick,
+    assembly_state,
+    collect_timing_log,
+    out_error_message);
+}
+
+inline bool ExecuteJobsAlgorithmObject(
+  const ::algomanager::algoscheduler::AlgorithmObject& object,
+  const ::algomanager::algoscheduler::AgentTickContext& context,
+  const common_data::AgentToAlgorithmSignal& agent_to_algorithm_signal,
+  ::algorithm::AlgorithmContainerSet* container_set,
+  common_data::AlgorithmToAgentSignal* out_algorithm_to_agent_signal,
+  ::algomanager::algoscheduler::AlgorithmPackageDebugState* out_debug_state,
+  std::string* out_error_message = nullptr) {
+  return scheduler::ExecuteJobsAlgorithmObject(
+    object,
+    context,
+    agent_to_algorithm_signal,
+    container_set,
+    out_algorithm_to_agent_signal,
+    out_debug_state,
+    out_error_message);
+}
+
+inline bool ExecuteVkAlgorithmObject(
+  const ::algomanager::algoscheduler::AlgorithmObject& object,
+  ::algorithm::AlgorithmContainerSet* container_set,
+  const ::algomanager::algoscheduler::AgentTickContext& context,
+  std::string* out_error_message = nullptr) {
+  return scheduler::ExecuteVkAlgorithmObject(
+    object,
+    container_set,
+    context,
+    out_error_message);
+}
+
+inline bool ExecuteCudaAlgorithmObject(
+  const ::algomanager::algoscheduler::AlgorithmObject& object,
+  ::algorithm::AlgorithmContainerSet* container_set,
+  const ::algomanager::algoscheduler::AgentTickContext& context,
+  const common_data::AgentToAlgorithmSignal& agent_to_algorithm_signal,
+  common_data::AlgorithmToAgentSignal* out_algorithm_to_agent_signal,
+  ::algomanager::algoscheduler::AlgorithmPackageDebugState* out_debug_state,
+  std::string* out_error_message = nullptr) {
+  return scheduler::ExecuteCudaAlgorithmObject(
+    object,
+    container_set,
+    context,
+    agent_to_algorithm_signal,
+    out_algorithm_to_agent_signal,
+    out_debug_state,
+    out_error_message);
+}
+
+inline bool FinalizeAlgorithmObject(
+  const ::algomanager::algoscheduler::AlgorithmObject& object,
+  ::algorithm::AlgorithmContainerSet* container_set,
+  std::string* out_error_message = nullptr) {
+  return scheduler::FinalizeAlgorithmObject(object, container_set, out_error_message);
+}
+
+inline bool HasExecutableVkAlgorithmStage(const ::algomanager::algoscheduler::AlgorithmObject& object) {
+  return scheduler::HasExecutableVkAlgorithmStage(object);
+}
+
+inline bool HasExecutableCudaAlgorithmStage(const ::algomanager::algoscheduler::AlgorithmObject& object) {
+  return scheduler::HasExecutableCudaAlgorithmStage(object);
+}
+
+inline bool LoadAlgorithmPackageDefaultBindings(
+  const std::string& algorithm_name,
+  std::vector<scheduler::AlgorithmResourceBinding>* out_resource_bindings,
+  std::vector<scheduler::AlgorithmDescriptorValue>* out_descriptor_values,
+  bool* out_has_default_file = nullptr,
+  std::string* out_error_message = nullptr) {
+  return scheduler::LoadAlgorithmPackageDefaultBindings(
+    algorithm_name,
+    out_resource_bindings,
+    out_descriptor_values,
+    out_has_default_file,
+    out_error_message);
+}
+
+inline bool MountPipelineAlgorithmObjects(
+  std::vector<scheduler::AlgorithmObject>* algorithm_objects,
+  std::vector<scheduler::AgentAlgorithmRuntimeState>* inout_runtime_states,
+  std::vector<scheduler::AlgorithmAssemblyState>* algorithm_assembly_states,
+  std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>* standard_shared_container_sets,
+  const std::string& agent_name,
+  const std::string& pipeline_name,
+  const std::vector<scheduler::AlgorithmPipelineStageSubmission>& stage_submissions,
+  scheduler::AlgorithmExecutionPreference execution_preference,
+  scheduler::AlgorithmPipelineTopology topology,
+  scheduler::AlgorithmPipelineSyncMode sync_mode,
+  size_t* out_index = nullptr,
+  std::string* out_error_message = nullptr,
+  bool load_reflector = true) {
+  return scheduler::MountPipelineAlgorithmObjects(
+    algorithm_objects,
+    inout_runtime_states,
+    algorithm_assembly_states,
+    standard_shared_container_sets,
+    agent_name,
+    pipeline_name,
+    stage_submissions,
+    execution_preference,
+    topology,
+    sync_mode,
+    out_index,
+    out_error_message,
+    load_reflector);
+}
+
+inline bool PrepareAlgorithmObjectByName(
+  const std::string& algorithm_name,
+  const std::vector<scheduler::AlgorithmResourceBinding>& resource_bindings,
+  const std::vector<scheduler::AlgorithmDescriptorValue>& descriptor_values,
+  ::algomanager::algoscheduler::AlgorithmObject* out_group,
+  std::string* out_error_message = nullptr,
+  bool load_reflector = true) {
+  return scheduler::PrepareAlgorithmObjectByName(
+    algorithm_name,
+    resource_bindings,
+    descriptor_values,
+    out_group,
+    out_error_message,
+    load_reflector);
+}
+
+inline bool QueryAlgorithmRequestedBindings(
+  const std::string& algorithm_name,
+  scheduler::AlgorithmRequestedResources* out_requested_resources,
+  scheduler::AlgorithmRequestedDescriptorBindings* out_requested_descriptor_bindings,
+  std::string* out_error_message = nullptr) {
+  return scheduler::QueryAlgorithmRequestedBindings(
+    algorithm_name,
+    out_requested_resources,
+    out_requested_descriptor_bindings,
+    out_error_message);
+}
+
+inline bool ReplayMountedPipelineDebug(
+  std::vector<scheduler::AlgorithmObject>* algorithm_objects,
+  size_t index,
+  const ::algomanager::algoscheduler::AgentTickContext& context,
+  std::vector<scheduler::AgentAlgorithmRuntimeState>* algorithm_runtime_states,
+  std::string* out_error_message = nullptr) {
+  return scheduler::ReplayMountedPipelineDebug(
+    algorithm_objects,
+    index,
+    context,
+    algorithm_runtime_states,
+    out_error_message);
+}
+
+inline void SetAlgorithmRuntimeShutdownHook() {
+  scheduler::SetAlgorithmRuntimeShutdownHook();
+}
+
+inline bool SubmitAlgorithmObject(
+  const ::algomanager::algoscheduler::AlgorithmObject& object,
+  const ::algomanager::algoscheduler::AgentTickContext& context,
+  const common_data::AgentToAlgorithmSignal& agent_to_algorithm_signal,
+  ::algorithm::AlgorithmContainerSet* container_set,
+  common_data::AlgorithmToAgentSignal* out_algorithm_to_agent_signal,
+  ::algomanager::algoscheduler::AlgorithmPackageDebugState* out_debug_state,
+  std::string* out_error_message = nullptr) {
+  return scheduler::SubmitAlgorithmObject(
+    object,
+    context,
+    agent_to_algorithm_signal,
+    container_set,
+    out_algorithm_to_agent_signal,
+    out_debug_state,
+    out_error_message);
+}
+
+inline bool SynchronizeVkAlgorithmObject(
+  const ::algomanager::algoscheduler::AlgorithmObject& object,
+  ::algorithm::AlgorithmContainerSet* container_set,
+  std::string* out_error_message = nullptr) {
+  return scheduler::SynchronizeVkAlgorithmObject(object, container_set, out_error_message);
+}
+
+inline bool SynchronizeCudaAlgorithmObject(
+  const ::algomanager::algoscheduler::AlgorithmObject& object,
+  ::algorithm::AlgorithmContainerSet* container_set,
+  std::string* out_error_message = nullptr) {
+  return scheduler::SynchronizeCudaAlgorithmObject(object, container_set, out_error_message);
+}
+
+inline bool TickMountedPipeline(
+  std::vector<scheduler::AlgorithmObject>* algorithm_objects,
+  size_t begin_index,
+  size_t end_index,
+  const std::string& agent_name,
+  const ::algomanager::algoscheduler::AgentTickContext& context,
+  const std::vector<bool>& allow_tick_mask,
+  const std::vector<scheduler::AlgorithmAssemblyState>& assembly_states,
+  bool collect_timing_log,
+  std::vector<scheduler::AgentAlgorithmRuntimeState>* out_updated_runtime_states,
+  common_data::AlgorithmToAgentSignal* out_pipeline_signal,
+  bool* out_mounted_pipeline_processing_failed,
+  std::string* out_error_message = nullptr) {
+  return scheduler::TickMountedPipeline(
+    algorithm_objects,
+    begin_index,
+    end_index,
+    agent_name,
+    context,
+    allow_tick_mask,
+    assembly_states,
+    collect_timing_log,
+    out_updated_runtime_states,
+    out_pipeline_signal,
+    out_mounted_pipeline_processing_failed,
+    out_error_message);
+}
+
+inline bool ExecuteCompatibilityAlgorithmObject(
+  const ::algomanager::algoscheduler::AlgorithmObject& object,
+  const ::algomanager::algoscheduler::AgentTickContext& context,
+  const common_data::AgentToAlgorithmSignal& agent_to_algorithm_signal,
+  ::algorithm::AlgorithmContainerSet* container_set,
+  common_data::AlgorithmToAgentSignal* out_algorithm_to_agent_signal,
+  ::algomanager::algoscheduler::AlgorithmPackageDebugState* out_debug_state,
+  std::string* out_error_message = nullptr) {
+  return scheduler::ExecuteCompatibilityAlgorithmObject(
+    object,
+    context,
+    agent_to_algorithm_signal,
+    container_set,
+    out_algorithm_to_agent_signal,
+    out_debug_state,
+    out_error_message);
+}
+
+inline bool ReplayMountedPipelineDebugNode(
+  ::algomanager::algoscheduler::AlgorithmObject* pipeline_node,
+  ::algomanager::algoscheduler::AgentAlgorithmRuntimeState* inout_runtime_state,
+  size_t child_index,
+  const ::algomanager::algoscheduler::AgentTickContext& context,
+  std::string* out_error_message = nullptr) {
+  return scheduler::ReplayMountedPipelineDebugNode(
+    pipeline_node,
+    inout_runtime_state,
+    child_index,
+    context,
+    out_error_message);
+}
+
+inline bool TickMountedPipelineNode(
+  ::algomanager::algoscheduler::AlgorithmObject* pipeline_node,
+  ::algomanager::algoscheduler::AgentAlgorithmRuntimeState* inout_runtime_state,
+  const std::string& agent_name,
+  const ::algomanager::algoscheduler::AgentTickContext& context,
+  bool allow_tick,
+  const scheduler::AlgorithmAssemblyState& assembly_state,
+  bool collect_timing_log,
+  common_data::AlgorithmToAgentSignal* out_pipeline_signal,
+  bool* out_mounted_pipeline_processing_failed,
+  std::string* out_error_message = nullptr) {
+  return scheduler::TickMountedPipelineNode(
+    pipeline_node,
+    inout_runtime_state,
+    agent_name,
+    context,
+    allow_tick,
+    assembly_state,
+    collect_timing_log,
+    out_pipeline_signal,
+    out_mounted_pipeline_processing_failed,
+    out_error_message);
+}
+
+inline bool TryGetMountedPipelineRuntime(
+  const std::string& pipeline_name,
+  const std::string& agent_name,
+  scheduler::JobsPipelineRuntimeState* out_runtime_state) {
+  return scheduler::TryGetMountedPipelineRuntime(pipeline_name, agent_name, out_runtime_state);
+}
+
+inline bool TryGetMountedPipelineRegistration(
+  const std::string& pipeline_name,
+  scheduler::JobsPipelineRegistration* out_registration) {
+  return scheduler::AlgorithmScheduler::Instance().TryGetPipelineRegistration(
+    pipeline_name,
+    out_registration);
+}
+
+inline void UnregisterMountedPipeline(
+  const std::string& pipeline_name,
+  const std::string& agent_name) {
+  scheduler::UnregisterMountedPipeline(pipeline_name, agent_name);
+}
+
+// Public facade only.
+// Upper layers must only consume symbols exported from this root node.
+// Public facade declarations must be explicit; do not use `using` or
+// `typedef` in this header to re-export symbols.
+// Do not use `using namespace algomanager` or reach into
+// `algomanager::algoscheduler` / `algomanager::algocatalog` from outside
+// the algorithm management implementation subtree.
+}  // namespace algomanager
+

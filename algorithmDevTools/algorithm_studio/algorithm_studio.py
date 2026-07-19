@@ -1769,11 +1769,6 @@ class AlgorithmStudioApp(
 
     def _existing_algorithm_runtime_folder(self, algorithm_name: str) -> Path:
         root = PROJECT_ROOT.parent / "algorithmLib" / "algorithmruntimeLib"
-        for build_flavor in ("releaseWithDebugInfo", ""):
-            flavor_root = root / build_flavor if build_flavor else root
-            norm_path = flavor_root / "norm" / algorithm_name
-            if norm_path.exists():
-                return norm_path
         return root / "norm" / algorithm_name
 
     def _existing_debug_tool_path(self) -> Path:
@@ -1781,16 +1776,12 @@ class AlgorithmStudioApp(
         candidates = (
             build_root / "Microsoft" / "RelWithDebInfo" / "debugTool.exe",
             build_root / "OpenSource" / "RelWithDebInfo" / "debugTool.exe",
-            build_root / "Microsoft" / "Debug" / "debugTool.exe",
-            build_root / "OpenSource" / "Debug" / "debugTool.exe",
-            build_root / "RelWithDebInfo" / "debugTool.exe",
-            build_root / "Debug" / "debugTool.exe",
         )
         for candidate in candidates:
             if candidate.exists():
                 return candidate
         raise RuntimeError(
-            "No compiled debugTool.exe was found in build/Microsoft, build/OpenSource, or the legacy build folders.")
+            "No compiled RelWithDebInfo debugTool.exe was found in build/Microsoft or build/OpenSource.")
 
     def _current_algorithm_name_for_preview(self) -> str:
         algorithm_name = self.project.algorithm_name.strip() or self.project.package_name.strip()
@@ -2053,8 +2044,6 @@ class AlgorithmStudioApp(
                 algorithm_name,
                 "--ticks",
                 "12",
-                "--runtime-build",
-                "releaseWithDebugInfo",
                 "--execution",
                 "vk",
             ],

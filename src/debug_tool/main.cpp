@@ -2,6 +2,8 @@
 #include "debug_tool/debug_tool_backend_runtime.h"
 #include "debug_tool/debug_cmd.h"
 #include "debug_tool/debug_tool_frontend_panel.h"
+#include "debug_tool/gif_writer.h"
+#include "common_data/kernel_cfg.h"
 
 #include <SDL3/SDL_main.h>
 
@@ -44,11 +46,12 @@ struct PipelineRunnerOptions {
   uint32_t preview_height{480u};
   std::string runner_endpoint{"127.0.0.1:0"};
   std::string render_preview_output_path{
-    algorithmManager::ResolvePipelineRunnerArtifactRoot().string() + "/render_preview.ppm"};
+    algomanager::ResolvePipelineRunnerArtifactRoot().string() + "/render_preview.png"};
   debug_tool::AlgorithmExecutionPreference execution_preference{
     debug_tool::AlgorithmExecutionPreference::Vk};
-  debug_tool::AlgorithmRuntimeBuildFlavor runtime_build_flavor{
-    debug_tool::AlgorithmRuntimeBuildFlavor::Debug};
+  bool export_swapchain_gif{false};
+  std::string swapchain_gif_output_path{};
+  double swapchain_gif_duration_seconds{20.0};
 };
 
 struct AlgorithmRunnerOptions {
@@ -60,12 +63,13 @@ struct AlgorithmRunnerOptions {
   uint32_t preview_height{480u};
   std::string runner_endpoint{"127.0.0.1:0"};
   std::string render_preview_output_path{
-    algorithmManager::ResolveAlgorithmLibraryRuntimeNormDebugInfoRoot().string() +
-      "/render_preview.ppm"};
+    algomanager::ResolveAlgorithmLibraryRuntimeNormDebugInfoRoot().string() +
+      "/render_preview.png"};
   debug_tool::AlgorithmExecutionPreference execution_preference{
     debug_tool::AlgorithmExecutionPreference::Vk};
-  debug_tool::AlgorithmRuntimeBuildFlavor runtime_build_flavor{
-    debug_tool::AlgorithmRuntimeBuildFlavor::Debug};
+  bool export_swapchain_gif{false};
+  std::string swapchain_gif_output_path{};
+  double swapchain_gif_duration_seconds{20.0};
 };
 
 struct PreviewRenderServerOptions {
@@ -77,12 +81,10 @@ struct PreviewRenderServerOptions {
   uint32_t preview_height{480u};
   std::string runner_endpoint{"127.0.0.1:0"};
   std::string render_preview_output_path{
-    algorithmManager::ResolveAlgorithmLibraryRuntimeNormDebugInfoRoot().string() +
-      "/render_preview.ppm"};
+    algomanager::ResolveAlgorithmLibraryRuntimeNormDebugInfoRoot().string() +
+      "/render_preview.png"};
   debug_tool::AlgorithmExecutionPreference execution_preference{
     debug_tool::AlgorithmExecutionPreference::Vk};
-  debug_tool::AlgorithmRuntimeBuildFlavor runtime_build_flavor{
-    debug_tool::AlgorithmRuntimeBuildFlavor::Debug};
 };
 
 struct RunnerServerOptions {
@@ -96,6 +98,20 @@ struct PositionSample {
   float x{0.0f};
   float y{0.0f};
 };
+
+double _MeasureGifSamplingFrequency(debug_tool_backend::DebugToolBackendRuntime& runtime) {
+  constexpr uint32_t probe_tick_count = 8u;
+  const auto probe_begin = std::chrono::steady_clock::now();
+  for (uint32_t probe_index = 0u; probe_index < probe_tick_count; ++probe_index) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(12));
+    if (!runtime.Tick()) {
+      throw std::runtime_error("Runtime environment failed during GIF sampling frequency measurement.");
+    }
+  }
+  const double elapsed_seconds = std::chrono::duration<double>(
+    std::chrono::steady_clock::now() - probe_begin).count();
+  return static_cast<double>(probe_tick_count) / elapsed_seconds;
+}
 
 #ifdef _WIN32
 LONG WINAPI _WriteCrashDump(EXCEPTION_POINTERS* exception_pointers) {
@@ -178,24 +194,24 @@ const char* _ExecutionPreferenceName(debug_tool::AlgorithmExecutionPreference pr
   return "unknown";
 }
 
-const char* _ExecutionPreferenceName(algorithmManager::AlgorithmExecutionPreference preference) {
+const char* _ExecutionPreferenceName(algomanager::AlgorithmExecutionPreference preference) {
   switch (preference) {
-    case algorithmManager::AlgorithmExecutionPreference::Jobs: return "jobs";
-    case algorithmManager::AlgorithmExecutionPreference::Vk: return "vk";
-    case algorithmManager::AlgorithmExecutionPreference::Cuda: return "cuda";
-    case algorithmManager::AlgorithmExecutionPreference::Compatibility: return "compatibility";
+    case algomanager::AlgorithmExecutionPreference::Jobs: return "jobs";
+    case algomanager::AlgorithmExecutionPreference::Vk: return "vk";
+    case algomanager::AlgorithmExecutionPreference::Cuda: return "cuda";
+    case algomanager::AlgorithmExecutionPreference::Compatibility: return "compatibility";
   }
   return "unknown";
 }
 
-const char* _PhaseKindName(algorithmManager::AlgorithmPhaseKind phase_kind) {
+const char* _PhaseKindName(algomanager::AlgorithmPhaseKind phase_kind) {
   switch (phase_kind) {
-    case algorithmManager::AlgorithmPhaseKind::Pretick: return "pretick";
-    case algorithmManager::AlgorithmPhaseKind::Exec: return "exec";
-    case algorithmManager::AlgorithmPhaseKind::AfterTick: return "aftertick";
-    case algorithmManager::AlgorithmPhaseKind::RenderResult: return "renderresult";
-    case algorithmManager::AlgorithmPhaseKind::Reflect: return "reflect";
-    case algorithmManager::AlgorithmPhaseKind::Custom: return "custom";
+    case algomanager::AlgorithmPhaseKind::Pretick: return "pretick";
+    case algomanager::AlgorithmPhaseKind::Exec: return "exec";
+    case algomanager::AlgorithmPhaseKind::AfterTick: return "aftertick";
+    case algomanager::AlgorithmPhaseKind::RenderResult: return "renderresult";
+    case algomanager::AlgorithmPhaseKind::Reflect: return "reflect";
+    case algomanager::AlgorithmPhaseKind::Custom: return "custom";
   }
   return "custom";
 }
@@ -483,6 +499,19 @@ bool _ParseUInt32(const char* text, uint32_t* out_value) {
   return true;
 }
 
+bool _ParsePositiveDouble(const char* text, double* out_value) {
+  if (!text || !*text || !out_value) {
+    return false;
+  }
+  char* end = nullptr;
+  const double parsed = std::strtod(text, &end);
+  if (!end || *end != '\0' || !std::isfinite(parsed) || parsed <= 0.0) {
+    return false;
+  }
+  *out_value = parsed;
+  return true;
+}
+
 bool _ParseExecutionPreference(
   const char* text,
   debug_tool::AlgorithmExecutionPreference* out_preference) {
@@ -504,24 +533,6 @@ bool _ParseExecutionPreference(
   }
   if (value == "compat" || value == "compatibility") {
     *out_preference = debug_tool::AlgorithmExecutionPreference::Compatibility;
-    return true;
-  }
-  return false;
-}
-
-bool _ParseRuntimeBuildFlavor(
-  const char* text,
-  debug_tool::AlgorithmRuntimeBuildFlavor* out_flavor) {
-  if (!text || !out_flavor) {
-    return false;
-  }
-  const std::string value(text);
-  if (value == "Debug" || value == "debug") {
-    *out_flavor = debug_tool::AlgorithmRuntimeBuildFlavor::Debug;
-    return true;
-  }
-  if (value == "releaseWithDebugInfo" || value == "relwithdebinfo") {
-    *out_flavor = debug_tool::AlgorithmRuntimeBuildFlavor::ReleaseWithDebugInfo;
     return true;
   }
   return false;
@@ -572,7 +583,57 @@ bool _IsRunnerServerInvocation(int argc, char** argv) {
   return false;
 }
 
-bool _WritePpmImage(
+void _WritePngBigEndianU32(std::ofstream& output, uint32_t value) {
+  output.put(static_cast<char>((value >> 24u) & 0xFFu));
+  output.put(static_cast<char>((value >> 16u) & 0xFFu));
+  output.put(static_cast<char>((value >> 8u) & 0xFFu));
+  output.put(static_cast<char>(value & 0xFFu));
+}
+
+uint32_t _PngCrc32(const std::vector<uint8_t>& bytes) {
+  uint32_t crc = 0xFFFFFFFFu;
+  for (const uint8_t byte : bytes) {
+    crc ^= byte;
+    for (uint32_t bit = 0u; bit < 8u; ++bit) {
+      crc = (crc & 1u) != 0u ? (crc >> 1u) ^ 0xEDB88320u : (crc >> 1u);
+    }
+  }
+  return ~crc;
+}
+
+uint32_t _PngAdler32(const std::vector<uint8_t>& bytes) {
+  constexpr uint32_t modulo = 65521u;
+  uint32_t first = 1u;
+  uint32_t second = 0u;
+  for (const uint8_t byte : bytes) {
+    first = (first + byte) % modulo;
+    second = (second + first) % modulo;
+  }
+  return (second << 16u) | first;
+}
+
+bool _WritePngChunk(
+  std::ofstream& output,
+  const char type[4],
+  const std::vector<uint8_t>& data) {
+  _WritePngBigEndianU32(output, static_cast<uint32_t>(data.size()));
+  output.write(type, 4);
+  if (!data.empty()) {
+    output.write(
+      reinterpret_cast<const char*>(data.data()),
+      static_cast<std::streamsize>(data.size()));
+  }
+  std::vector<uint8_t> crc_input;
+  crc_input.reserve(4u + data.size());
+  for (size_t index = 0u; index < 4u; ++index) {
+    crc_input.push_back(static_cast<uint8_t>(type[index]));
+  }
+  crc_input.insert(crc_input.end(), data.begin(), data.end());
+  _WritePngBigEndianU32(output, _PngCrc32(crc_input));
+  return static_cast<bool>(output);
+}
+
+bool _WritePngImage(
   const std::filesystem::path& output_path,
   const std::vector<std::byte>& rgba_bytes,
   uint32_t width,
@@ -598,25 +659,72 @@ bool _WritePpmImage(
     return false;
   }
 
-  output << "P6\n" << width << ' ' << height << "\n255\n";
+  std::vector<uint8_t> raw_scanlines;
+  raw_scanlines.reserve(static_cast<size_t>(height) * (1u + static_cast<size_t>(width) * 4u));
   for (uint32_t y = 0u; y < height; ++y) {
     const uint32_t source_y = height - 1u - y;
+    raw_scanlines.push_back(0u);
     for (uint32_t x = 0u; x < width; ++x) {
       const size_t pixel_index =
         (static_cast<size_t>(source_y) * static_cast<size_t>(width) + static_cast<size_t>(x)) * 4u;
-      const char rgb[3]{
-        static_cast<char>(rgba_bytes[pixel_index + 0u]),
-        static_cast<char>(rgba_bytes[pixel_index + 1u]),
-        static_cast<char>(rgba_bytes[pixel_index + 2u]),
-      };
-      output.write(rgb, sizeof(rgb));
-      if (!output) {
-        return false;
-      }
+      raw_scanlines.push_back(std::to_integer<uint8_t>(rgba_bytes[pixel_index + 0u]));
+      raw_scanlines.push_back(std::to_integer<uint8_t>(rgba_bytes[pixel_index + 1u]));
+      raw_scanlines.push_back(std::to_integer<uint8_t>(rgba_bytes[pixel_index + 2u]));
+      raw_scanlines.push_back(std::to_integer<uint8_t>(rgba_bytes[pixel_index + 3u]));
     }
   }
 
-  return true;
+  std::vector<uint8_t> compressed;
+  compressed.reserve(raw_scanlines.size() + (raw_scanlines.size() / 65535u + 1u) * 5u + 6u);
+  compressed.push_back(0x78u);
+  compressed.push_back(0x01u);
+  size_t raw_offset = 0u;
+  while (raw_offset < raw_scanlines.size()) {
+    const size_t block_size = std::min<size_t>(65535u, raw_scanlines.size() - raw_offset);
+    const bool final_block = raw_offset + block_size == raw_scanlines.size();
+    compressed.push_back(final_block ? 0x01u : 0x00u);
+    const uint16_t length = static_cast<uint16_t>(block_size);
+    compressed.push_back(static_cast<uint8_t>(length & 0xFFu));
+    compressed.push_back(static_cast<uint8_t>((length >> 8u) & 0xFFu));
+    const uint16_t inverse_length = static_cast<uint16_t>(~length);
+    compressed.push_back(static_cast<uint8_t>(inverse_length & 0xFFu));
+    compressed.push_back(static_cast<uint8_t>((inverse_length >> 8u) & 0xFFu));
+    compressed.insert(
+      compressed.end(),
+      raw_scanlines.begin() + static_cast<std::ptrdiff_t>(raw_offset),
+      raw_scanlines.begin() + static_cast<std::ptrdiff_t>(raw_offset + block_size));
+    raw_offset += block_size;
+  }
+  const uint32_t adler = _PngAdler32(raw_scanlines);
+  compressed.push_back(static_cast<uint8_t>((adler >> 24u) & 0xFFu));
+  compressed.push_back(static_cast<uint8_t>((adler >> 16u) & 0xFFu));
+  compressed.push_back(static_cast<uint8_t>((adler >> 8u) & 0xFFu));
+  compressed.push_back(static_cast<uint8_t>(adler & 0xFFu));
+
+  output.write("\x89PNG\r\n\x1A\n", 8);
+  const std::vector<uint8_t> header{
+    static_cast<uint8_t>((width >> 24u) & 0xFFu),
+    static_cast<uint8_t>((width >> 16u) & 0xFFu),
+    static_cast<uint8_t>((width >> 8u) & 0xFFu),
+    static_cast<uint8_t>(width & 0xFFu),
+    static_cast<uint8_t>((height >> 24u) & 0xFFu),
+    static_cast<uint8_t>((height >> 16u) & 0xFFu),
+    static_cast<uint8_t>((height >> 8u) & 0xFFu),
+    static_cast<uint8_t>(height & 0xFFu),
+    8u,
+    6u,
+    0u,
+    0u,
+    0u,
+  };
+  if (!output ||
+      !_WritePngChunk(output, "IHDR", header) ||
+      !_WritePngChunk(output, "IDAT", compressed) ||
+      !_WritePngChunk(output, "IEND", {})) {
+    return false;
+  }
+  output.flush();
+  return static_cast<bool>(output);
 }
 
 std::filesystem::path _BuildPipelineFramePreviewPath(
@@ -667,16 +775,6 @@ bool _ParsePipelineRunnerOptions(
     }
     if (argument == "--preview-window") {
       options.display_window = true;
-      continue;
-    }
-    if (argument == "--runtime-build") {
-      if (i + 1 >= argc || !_ParseRuntimeBuildFlavor(argv[i + 1], &options.runtime_build_flavor)) {
-        if (out_error_message) {
-          *out_error_message = "--runtime-build requires 'Debug' or 'releaseWithDebugInfo'.";
-        }
-        return false;
-      }
-      ++i;
       continue;
     }
     if (argument == "--algorithm") {
@@ -739,10 +837,31 @@ bool _ParsePipelineRunnerOptions(
       options.render_preview_output_path = argv[++i];
       continue;
     }
+    if (argument == "--preview-gif") {
+      if (i + 1 >= argc || !argv[i + 1] || !*argv[i + 1]) {
+        if (out_error_message) {
+          *out_error_message = "--preview-gif requires a non-empty output path.";
+        }
+        return false;
+      }
+      options.export_swapchain_gif = true;
+      options.swapchain_gif_output_path = argv[++i];
+      continue;
+    }
+    if (argument == "--gif-duration") {
+      if (i + 1 >= argc || !_ParsePositiveDouble(argv[i + 1], &options.swapchain_gif_duration_seconds)) {
+        if (out_error_message) {
+          *out_error_message = "--gif-duration requires a positive number of seconds.";
+        }
+        return false;
+      }
+      ++i;
+      continue;
+    }
     if (argument == "--execution") {
       if (i + 1 >= argc || !_ParseExecutionPreference(argv[i + 1], &options.execution_preference)) {
         if (out_error_message) {
-          *out_error_message = "--execution requires 'jobs', 'vk', or 'cuda'.";
+          *out_error_message = "--execution requires 'jobs', 'vk', 'cuda', or 'compatibility'.";
         }
         return false;
       }
@@ -765,12 +884,13 @@ bool _ParsePipelineRunnerOptions(
         << "  debugTool.exe --algorithm-runner "
         << "[--algorithm <name>] [--ticks <count>] "
         << "[--preview-width <px>] [--preview-height <px>] [--preview-output <path>] "
-        << "[--execution jobs|vk|cuda] [--runtime-build Debug|releaseWithDebugInfo] "
+        << "[--execution jobs|vk|cuda|compatibility] "
         << "[--runner-endpoint <host:port>]\n"
         << "  debugTool.exe --pipeline-runner "
         << "[--algorithm <name>] [--pipeline-name <name>] [--ticks <count>] "
         << "[--preview-width <px>] [--preview-height <px>] [--preview-output <path>] "
-        << "[--execution jobs|vk|cuda] [--runtime-build Debug|releaseWithDebugInfo] "
+        << "[--preview-gif <path>] [--gif-duration <seconds>] "
+        << "[--execution jobs|vk|cuda|compatibility] "
         << "[--runner-endpoint <host:port>]\n"
         << "  debugTool.exe --runner-server [--runner-endpoint <host:port>] [--runner-server-once]\n";
       return false;
@@ -807,16 +927,6 @@ bool _ParseAlgorithmRunnerOptions(
       options.display_window = true;
       continue;
     }
-    if (argument == "--runtime-build") {
-      if (i + 1 >= argc || !_ParseRuntimeBuildFlavor(argv[i + 1], &options.runtime_build_flavor)) {
-        if (out_error_message) {
-          *out_error_message = "--runtime-build requires 'Debug' or 'releaseWithDebugInfo'.";
-        }
-        return false;
-      }
-      ++i;
-      continue;
-    }
     if (argument == "--algorithm") {
       if (i + 1 >= argc || !argv[i + 1] || !*argv[i + 1]) {
         if (out_error_message) {
@@ -867,10 +977,31 @@ bool _ParseAlgorithmRunnerOptions(
       options.render_preview_output_path = argv[++i];
       continue;
     }
+    if (argument == "--preview-gif") {
+      if (i + 1 >= argc || !argv[i + 1] || !*argv[i + 1]) {
+        if (out_error_message) {
+          *out_error_message = "--preview-gif requires a non-empty output path.";
+        }
+        return false;
+      }
+      options.export_swapchain_gif = true;
+      options.swapchain_gif_output_path = argv[++i];
+      continue;
+    }
+    if (argument == "--gif-duration") {
+      if (i + 1 >= argc || !_ParsePositiveDouble(argv[i + 1], &options.swapchain_gif_duration_seconds)) {
+        if (out_error_message) {
+          *out_error_message = "--gif-duration requires a positive number of seconds.";
+        }
+        return false;
+      }
+      ++i;
+      continue;
+    }
     if (argument == "--execution") {
       if (i + 1 >= argc || !_ParseExecutionPreference(argv[i + 1], &options.execution_preference)) {
         if (out_error_message) {
-          *out_error_message = "--execution requires 'jobs', 'vk', or 'cuda'.";
+          *out_error_message = "--execution requires 'jobs', 'vk', 'cuda', or 'compatibility'.";
         }
         return false;
       }
@@ -893,7 +1024,9 @@ bool _ParseAlgorithmRunnerOptions(
         << "  debugTool.exe --algorithm-runner "
         << "[--algorithm <name>] [--ticks <count>] "
         << "[--preview-width <px>] [--preview-height <px>] [--preview-output <path>] "
-        << "[--execution jobs|vk|cuda] [--runner-endpoint <host:port>]\n";
+        << "[--preview-gif <path>] [--gif-duration <seconds>] "
+        << "[--execution jobs|vk|cuda|compatibility] "
+        << "[--runner-endpoint <host:port>]\n";
       return false;
     }
   }
@@ -929,16 +1062,6 @@ bool _ParsePreviewRenderServerOptions(
       options.display_window = true;
       continue;
     }
-    if (argument == "--runtime-build") {
-      if (i + 1 >= argc || !_ParseRuntimeBuildFlavor(argv[i + 1], &options.runtime_build_flavor)) {
-        if (out_error_message) {
-          *out_error_message = "--runtime-build requires 'Debug' or 'releaseWithDebugInfo'.";
-        }
-        return false;
-      }
-      ++i;
-      continue;
-    }
     if (argument == "--algorithm") {
       if (i + 1 >= argc || !argv[i + 1] || !*argv[i + 1]) {
         if (out_error_message) {
@@ -992,7 +1115,7 @@ bool _ParsePreviewRenderServerOptions(
     if (argument == "--execution") {
       if (i + 1 >= argc || !_ParseExecutionPreference(argv[i + 1], &options.execution_preference)) {
         if (out_error_message) {
-          *out_error_message = "--execution requires 'jobs', 'vk', or 'cuda'.";
+          *out_error_message = "--execution requires 'jobs', 'vk', 'cuda', or 'compatibility'.";
         }
         return false;
       }
@@ -1015,7 +1138,7 @@ bool _ParsePreviewRenderServerOptions(
         << "  debugTool.exe --preview-window "
         << "[--algorithm <name>] [--ticks <count>] "
         << "[--preview-width <px>] [--preview-height <px>] [--preview-output <path>] "
-        << "[--execution jobs|vk|cuda] [--runtime-build Debug|releaseWithDebugInfo]\n";
+        << "[--execution jobs|vk|cuda|compatibility]\n";
       return false;
     }
   }
@@ -1167,7 +1290,7 @@ void _PrintBridgeDebugSummary(const debug_tool::PipelineStageBridgeDebugSummary&
 
 bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
   const std::filesystem::path log_directory =
-    algorithmManager::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot();
+    algomanager::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot();
   std::error_code ec;
   std::filesystem::create_directories(log_directory, ec);
   if (ec) {
@@ -1218,7 +1341,6 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
   if (!runtime.Init("debugToolRunner", 1280, 720)) {
     throw std::runtime_error("DebugToolBackendRuntime init failed in pipeline runner mode.");
   }
-  runtime.SetAlgorithmRuntimeBuildFlavor(options.runtime_build_flavor);
   append_progress("runtime_init_end");
   append_progress("runtime.initialized");
 
@@ -1310,7 +1432,7 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
   }
   append_progress("preview_extent_set");
 
-  runtime_systems::RenderPreviewRequest preview_request{};
+  runtimesys::RenderPreviewRequest preview_request{};
   if (!runtime.BuildRenderPreviewRequest(
         0u,
         mounted_pipeline_index,
@@ -1344,6 +1466,37 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
   append_progress("start_ticking_end");
   append_progress("ticking_started");
 
+  double gif_engine_frequency_hz = static_cast<double>(common_data::DefaultAgentLimitFpsFlag());
+  if (options.export_swapchain_gif) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(12));
+    if (!runtime.Tick()) {
+      throw std::runtime_error("Runtime environment failed during pipeline GIF sampling warm-up tick.");
+    }
+    append_progress("gif_sampling_warmup_complete");
+    gif_engine_frequency_hz = _MeasureGifSamplingFrequency(runtime);
+    append_progress("gif_sampling_frequency_measured");
+    runtimesys::RenderPreviewRequest gif_preview_request{};
+    if (!runtime.BuildRenderPreviewRequest(
+          0u,
+          mounted_pipeline_index,
+          &gif_preview_request,
+          &error_message) ||
+        !gif_preview_request.valid) {
+      throw std::runtime_error(
+        error_message.empty()
+          ? "Render preview request is invalid after pipeline GIF sampling warm-up."
+          : error_message);
+    }
+    if (!debug_tool::DebugCmd::Execute(runtime, debug_tool::DebugCommand{
+          .id = debug_tool::DebugCommandId::SetRenderPreviewRequest,
+          .preview_request = std::move(gif_preview_request),
+        }, nullptr)) {
+      throw std::runtime_error("Failed to update pipeline render preview request before GIF recording.");
+    }
+    runtime.BeginDebugToolRecording();
+    append_progress("debug_tool_recording_started");
+  }
+
   if (options.display_window) {
     DebugToolFrontendPanel ui_panel;
     runtime.runtime_environment().SetDrawCallback([&]() {
@@ -1364,9 +1517,12 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
     << "pipeline_runner.begin algorithm=" << options.algorithm_name
     << " pipeline=" << mounted_pipeline_name
     << " execution=" << _ExecutionPreferenceName(options.execution_preference)
-    << " ticks=" << options.ticks
+    << " ticks=" << (options.export_swapchain_gif ? 0u : options.ticks)
     << " preview=" << options.preview_width << 'x' << options.preview_height
-    << " defaults=" << (has_default_file ? "true" : "false") << '\n';
+    << " defaults=" << (has_default_file ? "true" : "false")
+    << " swapchain_gif=" << (options.export_swapchain_gif ? "true" : "false")
+    << " gif_duration_seconds=" << (options.export_swapchain_gif ? options.swapchain_gif_duration_seconds : 0.0)
+    << '\n';
 
   std::optional<PositionSample> first_valid_position{};
   PositionSample last_valid_position{};
@@ -1377,7 +1533,18 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
   uint64_t first_preview_hash = 0u;
   uint64_t last_preview_hash = 0u;
 
-  for (uint32_t tick_index = 0u; tick_index < options.ticks; ++tick_index) {
+  const uint32_t runner_tick_count = options.ticks;
+  uint32_t gif_total_tick_count = static_cast<uint32_t>(std::ceil(
+    options.swapchain_gif_duration_seconds * gif_engine_frequency_hz));
+  if (gif_total_tick_count == 0u) {
+    gif_total_tick_count = 1u;
+  }
+
+  for (uint32_t tick_index = 0u;
+       options.export_swapchain_gif
+         ? tick_index < gif_total_tick_count
+         : tick_index < runner_tick_count;
+       ++tick_index) {
     debug_tool::DebugCommandResult timing_request_result{};
     if (!debug_tool::DebugCmd::Execute(
           runtime,
@@ -1401,11 +1568,36 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
     }
     append_progress("tick_complete_" + std::to_string(tick_index + 1u));
 
+    if (options.export_swapchain_gif) {
+      runtimesys::RenderPreviewRequest gif_preview_request{};
+      if (!runtime.BuildRenderPreviewRequest(
+            0u,
+            mounted_pipeline_index,
+            &gif_preview_request,
+            &error_message) ||
+          !gif_preview_request.valid) {
+        throw std::runtime_error(
+          error_message.empty()
+            ? "Render preview request is invalid during pipeline GIF recording."
+            : error_message);
+      }
+      if (!debug_tool::DebugCmd::Execute(runtime, debug_tool::DebugCommand{
+            .id = debug_tool::DebugCommandId::SetRenderPreviewRequest,
+            .preview_request = std::move(gif_preview_request),
+          }, nullptr)) {
+        throw std::runtime_error("Failed to update pipeline render preview request during GIF recording.");
+      }
+    }
+
     std::vector<std::byte> frame_rgba{};
     ImVec2 frame_size{};
-    if (!runtime.runtime_environment().ReadbackRenderPreviewTexture(&frame_rgba, &frame_size)) {
+    if (!options.export_swapchain_gif &&
+        !runtime.runtime_environment().ReadbackRenderPreviewTexture(&frame_rgba, &frame_size)) {
       throw std::runtime_error(
         "Failed to read back pipeline preview frame " + std::to_string(tick_index + 1u) + ".");
+    }
+    if (options.export_swapchain_gif) {
+      continue;
     }
     const uint32_t frame_width = static_cast<uint32_t>(frame_size.x);
     const uint32_t frame_height = static_cast<uint32_t>(frame_size.y);
@@ -1430,7 +1622,7 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
     last_preview_size = frame_size;
     last_preview_hash = frame_hash;
     if (tick_index < 2u &&
-        !_WritePpmImage(
+        !_WritePngImage(
           _BuildPipelineFramePreviewPath(render_preview_output_path, tick_index + 1u),
           tick_index == 0u ? first_preview_rgba : last_preview_rgba,
           frame_width,
@@ -1528,6 +1720,46 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
     throw std::runtime_error("Failed to pause pipeline ticking.");
   }
   append_progress("ticking_paused");
+  if (options.export_swapchain_gif) {
+    std::vector<runtimesys::DebugToolRecordedFrame> recorded_frames =
+      runtime.EndDebugToolRecording();
+    append_progress("debug_tool_recording_stopped");
+    const uint64_t recorded_tick_count = runtime.DebugToolRecordingTickCount();
+    debug_tool::GifWriter gif_writer{};
+    uint32_t gif_frame_count = 0u;
+    const uint16_t frame_delay_centiseconds = static_cast<uint16_t>(std::clamp(
+      static_cast<long>(std::lround(100.0 / gif_engine_frequency_hz)),
+      1l,
+      65535l));
+    for (runtimesys::DebugToolRecordedFrame& frame : recorded_frames) {
+      if (gif_frame_count == 0u) {
+        gif_writer.Open(
+          options.swapchain_gif_output_path,
+          frame.width,
+          frame.height,
+          frame_delay_centiseconds);
+      }
+      gif_writer.WriteRgbaFrame(frame.rgba, frame_delay_centiseconds);
+      ++gif_frame_count;
+    }
+    if (gif_frame_count > 0u) {
+      gif_writer.Close();
+      last_preview_rgba = std::move(recorded_frames.back().rgba);
+      last_preview_size = ImVec2(
+        static_cast<float>(recorded_frames.back().width),
+        static_cast<float>(recorded_frames.back().height));
+    }
+    std::cout
+      << "swapchain_gif.end path=" << options.swapchain_gif_output_path
+      << " frames=" << gif_frame_count
+      << " scheduler_ticks=" << recorded_tick_count
+      << " duration_seconds=" << (
+        static_cast<double>(gif_frame_count) *
+        std::max(0.01, 1.0 / gif_engine_frequency_hz))
+      << " effective_frequency_hz=" << gif_engine_frequency_hz
+      << " source=backend.offscreen_preview_texture.recording_buffer\n";
+    append_progress("swapchain_gif_closed");
+  }
   if (options.ticks >= 2u && first_preview_hash == last_preview_hash) {
     throw std::runtime_error(
       "VK/pipeline preview frames are identical; pipeline execution did not advance the image.");
@@ -1555,7 +1787,7 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
       ++non_empty_pixel_count;
     }
   }
-  if (!_WritePpmImage(render_preview_output_path, preview_rgba, preview_width, preview_height)) {
+  if (!_WritePngImage(render_preview_output_path, preview_rgba, preview_width, preview_height)) {
     throw std::runtime_error(
       "Failed to write render preview image: " + render_preview_output_path.string());
   }
@@ -1609,7 +1841,7 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
 
 bool _RunAlgorithmRunner(const AlgorithmRunnerOptions& options) {
   const std::filesystem::path log_directory =
-    algorithmManager::ResolveAlgorithmLibraryRuntimeNormDebugInfoRoot();
+    algomanager::ResolveAlgorithmLibraryRuntimeNormDebugInfoRoot();
   std::error_code ec;
   std::filesystem::create_directories(log_directory, ec);
   if (ec) {
@@ -1655,16 +1887,28 @@ bool _RunAlgorithmRunner(const AlgorithmRunnerOptions& options) {
   std::streambuf* const original_cerr_buffer = std::cerr.rdbuf(log_file.rdbuf());
 
   DebugToolBackendRuntime runtime;
+  std::vector<std::byte> last_recorded_preview_rgba{};
+  ImVec2 last_recorded_preview_size{};
   append_progress("runtime.created");
   append_progress("runtime_init_begin");
   if (!runtime.Init("debugToolRunner", 1280, 720)) {
     throw std::runtime_error("DebugToolBackendRuntime init failed in algorithm runner mode.");
   }
-  runtime.SetAlgorithmRuntimeBuildFlavor(options.runtime_build_flavor);
   append_progress("runtime_init_end");
   append_progress("runtime.initialized");
 
-  runtime.runtime_environment().SetDrawCallback([]() {});
+  if (options.export_swapchain_gif) {
+    runtime.runtime_environment().SetDrawCallback([&runtime]() {
+      if (runtime.has_render_preview_texture()) {
+        ImGui::GetBackgroundDrawList()->AddImage(
+          runtime.render_preview_texture_id(),
+          ImVec2(0.0f, 0.0f),
+          ImVec2(1280.0f, 720.0f));
+      }
+    });
+  } else {
+    runtime.runtime_environment().SetDrawCallback([]() {});
+  }
   append_progress("draw_callback_set");
 
   bool is_pipeline = false;
@@ -1730,7 +1974,7 @@ bool _RunAlgorithmRunner(const AlgorithmRunnerOptions& options) {
   }
   append_progress("preview_extent_set");
 
-  runtime_systems::RenderPreviewRequest tick_preview_request{};
+  runtimesys::RenderPreviewRequest tick_preview_request{};
   if (!runtime.BuildRenderPreviewRequest(
         0u,
         mounted_algorithm_index,
@@ -1764,14 +2008,60 @@ bool _RunAlgorithmRunner(const AlgorithmRunnerOptions& options) {
   append_progress("start_ticking_end");
   append_progress("ticking_started");
 
+  double gif_engine_frequency_hz = static_cast<double>(common_data::DefaultAgentLimitFpsFlag());
+  if (options.export_swapchain_gif) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(12));
+    if (!runtime.Tick()) {
+      throw std::runtime_error("Runtime environment failed during GIF sampling warm-up tick.");
+    }
+    append_progress("gif_sampling_warmup_complete");
+    gif_engine_frequency_hz = _MeasureGifSamplingFrequency(runtime);
+    append_progress("gif_sampling_frequency_measured");
+    runtimesys::RenderPreviewRequest gif_preview_request{};
+    if (!runtime.BuildRenderPreviewRequest(
+          0u,
+          mounted_algorithm_index,
+          &gif_preview_request,
+          &error_message) ||
+        !gif_preview_request.valid) {
+      throw std::runtime_error(
+        error_message.empty()
+          ? "Render preview request is invalid after GIF sampling warm-up."
+          : error_message);
+    }
+    if (!debug_tool::DebugCmd::Execute(runtime, debug_tool::DebugCommand{
+          .id = debug_tool::DebugCommandId::SetRenderPreviewRequest,
+          .preview_request = std::move(gif_preview_request),
+        }, nullptr)) {
+      throw std::runtime_error("Failed to update render preview request before GIF recording.");
+    }
+    runtime.BeginDebugToolRecording();
+    append_progress("debug_tool_recording_started");
+  }
+
   std::cout
     << "algorithm_runner.begin algorithm=" << options.algorithm_name
     << " execution=" << _ExecutionPreferenceName(options.execution_preference)
-    << " ticks=" << options.ticks
+    << " ticks=" << (options.export_swapchain_gif ? 0u : options.ticks)
     << " preview=" << options.preview_width << 'x' << options.preview_height
-    << " defaults=" << (has_default_file ? "true" : "false") << '\n';
+    << " defaults=" << (has_default_file ? "true" : "false")
+    << " swapchain_gif=" << (options.export_swapchain_gif ? "true" : "false")
+    << " gif_duration_seconds=" << (options.export_swapchain_gif ? options.swapchain_gif_duration_seconds : 0.0)
+    << '\n';
 
-  for (uint32_t tick_index = 0u; tick_index < options.ticks; ++tick_index) {
+  const uint32_t runner_tick_count = options.ticks;
+  uint32_t gif_total_tick_count = static_cast<uint32_t>(std::ceil(
+    options.swapchain_gif_duration_seconds *
+    gif_engine_frequency_hz));
+  if (gif_total_tick_count == 0u) {
+    gif_total_tick_count = 1u;
+  }
+
+  for (uint32_t tick_index = 0u;
+       options.export_swapchain_gif
+         ? tick_index < gif_total_tick_count
+         : tick_index < runner_tick_count;
+       ++tick_index) {
     append_progress("tick_loop_begin_" + std::to_string(tick_index + 1u));
     std::this_thread::sleep_for(std::chrono::milliseconds(12));
     if (!runtime.Tick()) {
@@ -1782,43 +2072,66 @@ bool _RunAlgorithmRunner(const AlgorithmRunnerOptions& options) {
     }
     append_progress("tick_complete_" + std::to_string(tick_index + 1u));
 
-    std::vector<std::byte> frame_rgba{};
-    ImVec2 frame_size{};
-    if (!runtime.runtime_environment().ReadbackRenderPreviewTexture(&frame_rgba, &frame_size)) {
-      throw std::runtime_error(
-        "Failed to read back algorithm preview frame " + std::to_string(tick_index + 1u) + ".");
-    }
-    const uint32_t frame_width = static_cast<uint32_t>(frame_size.x);
-    const uint32_t frame_height = static_cast<uint32_t>(frame_size.y);
-    const uint64_t frame_hash = _HashBytes(frame_rgba);
-    const size_t frame_pixel_count =
-      static_cast<size_t>(frame_width) * static_cast<size_t>(frame_height);
-    size_t frame_non_empty_pixel_count = 0u;
-    for (size_t pixel_index = 0u; pixel_index < frame_pixel_count; ++pixel_index) {
-      const size_t byte_index = pixel_index * 4u;
-      if (frame_rgba[byte_index + 0u] != std::byte{0} ||
-          frame_rgba[byte_index + 1u] != std::byte{0} ||
-          frame_rgba[byte_index + 2u] != std::byte{0} ||
-          frame_rgba[byte_index + 3u] != std::byte{0}) {
-        ++frame_non_empty_pixel_count;
+    if (options.export_swapchain_gif) {
+      runtimesys::RenderPreviewRequest gif_preview_request{};
+      if (!runtime.BuildRenderPreviewRequest(
+            0u,
+            mounted_algorithm_index,
+            &gif_preview_request,
+            &error_message) ||
+          !gif_preview_request.valid) {
+        throw std::runtime_error(
+          error_message.empty()
+            ? "Render preview request is invalid during GIF recording."
+            : error_message);
+      }
+      if (!debug_tool::DebugCmd::Execute(runtime, debug_tool::DebugCommand{
+            .id = debug_tool::DebugCommandId::SetRenderPreviewRequest,
+            .preview_request = std::move(gif_preview_request),
+          }, nullptr)) {
+        throw std::runtime_error("Failed to update render preview request during GIF recording.");
       }
     }
-    if (tick_index < 2u &&
-        !_WritePpmImage(
-          _BuildPipelineFramePreviewPath(render_preview_output_path, tick_index + 1u),
-          frame_rgba,
-          frame_width,
-          frame_height)) {
-      throw std::runtime_error(
-        "Failed to write algorithm preview frame " + std::to_string(tick_index + 1u) + ".");
+
+    if (!options.export_swapchain_gif) {
+      std::vector<std::byte> frame_rgba{};
+      ImVec2 frame_size{};
+      if (!runtime.runtime_environment().ReadbackRenderPreviewTexture(&frame_rgba, &frame_size)) {
+        throw std::runtime_error(
+          "Failed to read back algorithm preview frame " + std::to_string(tick_index + 1u) + ".");
+      }
+      const uint32_t frame_width = static_cast<uint32_t>(frame_size.x);
+      const uint32_t frame_height = static_cast<uint32_t>(frame_size.y);
+      const uint64_t frame_hash = _HashBytes(frame_rgba);
+      const size_t frame_pixel_count =
+        static_cast<size_t>(frame_width) * static_cast<size_t>(frame_height);
+      size_t frame_non_empty_pixel_count = 0u;
+      for (size_t pixel_index = 0u; pixel_index < frame_pixel_count; ++pixel_index) {
+        const size_t byte_index = pixel_index * 4u;
+        if (frame_rgba[byte_index + 0u] != std::byte{0} ||
+            frame_rgba[byte_index + 1u] != std::byte{0} ||
+            frame_rgba[byte_index + 2u] != std::byte{0} ||
+            frame_rgba[byte_index + 3u] != std::byte{0}) {
+          ++frame_non_empty_pixel_count;
+        }
+      }
+      if (tick_index < 2u &&
+          !_WritePngImage(
+            _BuildPipelineFramePreviewPath(render_preview_output_path, tick_index + 1u),
+            frame_rgba,
+            frame_width,
+            frame_height)) {
+        throw std::runtime_error(
+          "Failed to write algorithm preview frame " + std::to_string(tick_index + 1u) + ".");
+      }
+      std::cout
+        << "  frame[" << (tick_index + 1u) << "] hash=0x"
+        << std::hex << frame_hash << std::dec
+        << " pixels=" << frame_non_empty_pixel_count
+        << " output="
+        << _BuildPipelineFramePreviewPath(render_preview_output_path, tick_index + 1u).string()
+        << '\n';
     }
-    std::cout
-      << "  frame[" << (tick_index + 1u) << "] hash=0x"
-      << std::hex << frame_hash << std::dec
-      << " pixels=" << frame_non_empty_pixel_count
-      << " output="
-      << _BuildPipelineFramePreviewPath(render_preview_output_path, tick_index + 1u).string()
-      << '\n';
 
     debug_tool::AgentRuntimeSummary agent_summary{};
     if (!runtime.GetAgentSummary(0u, &agent_summary)) {
@@ -1864,7 +2177,7 @@ bool _RunAlgorithmRunner(const AlgorithmRunnerOptions& options) {
           }
           if (!phase_summary.used_algorithm_containers.empty()) {
             std::cout << "        containers=" << phase_summary.used_algorithm_containers.size() << '\n';
-            for (const algorithmManager::AlgorithmPhaseContainerBinding& binding :
+            for (const algomanager::AlgorithmPhaseContainerBinding& binding :
                  phase_summary.used_algorithm_containers) {
               std::cout
                 << "          " << binding.container_name
@@ -1894,7 +2207,48 @@ bool _RunAlgorithmRunner(const AlgorithmRunnerOptions& options) {
   }
   append_progress("ticking_paused");
 
-  runtime_systems::RenderPreviewRequest preview_request{};
+  if (options.export_swapchain_gif) {
+    std::vector<runtimesys::DebugToolRecordedFrame> recorded_frames =
+      runtime.EndDebugToolRecording();
+    append_progress("debug_tool_recording_stopped");
+    const uint64_t recorded_tick_count = runtime.DebugToolRecordingTickCount();
+    debug_tool::GifWriter gif_writer{};
+    uint32_t gif_frame_count = 0u;
+    const uint16_t frame_delay_centiseconds = static_cast<uint16_t>(std::clamp(
+      static_cast<long>(std::lround(100.0 / gif_engine_frequency_hz)),
+      1l,
+      65535l));
+    for (runtimesys::DebugToolRecordedFrame& frame : recorded_frames) {
+      if (gif_frame_count == 0u) {
+        gif_writer.Open(
+          options.swapchain_gif_output_path,
+          frame.width,
+          frame.height,
+          frame_delay_centiseconds);
+      }
+      gif_writer.WriteRgbaFrame(frame.rgba, frame_delay_centiseconds);
+      ++gif_frame_count;
+    }
+    if (gif_frame_count > 0u) {
+      gif_writer.Close();
+      last_recorded_preview_rgba = std::move(recorded_frames.back().rgba);
+      last_recorded_preview_size = ImVec2(
+        static_cast<float>(recorded_frames.back().width),
+        static_cast<float>(recorded_frames.back().height));
+    }
+    std::cout
+      << "swapchain_gif.end path=" << options.swapchain_gif_output_path
+      << " frames=" << gif_frame_count
+      << " scheduler_ticks=" << recorded_tick_count
+      << " duration_seconds=" << (
+        static_cast<double>(gif_frame_count) *
+        std::max(0.01, 1.0 / gif_engine_frequency_hz))
+      << " effective_frequency_hz=" << gif_engine_frequency_hz
+      << " source=backend.offscreen_preview_texture.recording_buffer\n";
+    append_progress("swapchain_gif_closed");
+  }
+
+  runtimesys::RenderPreviewRequest preview_request{};
   if (!runtime.BuildRenderPreviewRequest(0u, mounted_algorithm_index, &preview_request, &error_message)) {
     throw std::runtime_error(
       error_message.empty()
@@ -1946,9 +2300,14 @@ bool _RunAlgorithmRunner(const AlgorithmRunnerOptions& options) {
 
   std::vector<std::byte> preview_rgba{};
   ImVec2 preview_size{};
-  if (!runtime.runtime_environment().ReadbackRenderPreviewTexture(&preview_rgba, &preview_size)) {
-    throw std::runtime_error(
-      "Failed to read back render preview texture. summary=" + runtime.render_preview_debug_summary());
+  if (options.export_swapchain_gif && !last_recorded_preview_rgba.empty()) {
+    preview_rgba = std::move(last_recorded_preview_rgba);
+    preview_size = last_recorded_preview_size;
+  } else {
+    if (!runtime.runtime_environment().ReadbackRenderPreviewTexture(&preview_rgba, &preview_size)) {
+      throw std::runtime_error(
+        "Failed to read back render preview texture. summary=" + runtime.render_preview_debug_summary());
+    }
   }
   append_progress("preview_readback_complete");
 
@@ -1973,7 +2332,7 @@ bool _RunAlgorithmRunner(const AlgorithmRunnerOptions& options) {
       ++non_empty_pixel_count;
     }
   }
-  if (!_WritePpmImage(render_preview_output_path, preview_rgba, preview_width, preview_height)) {
+  if (!_WritePngImage(render_preview_output_path, preview_rgba, preview_width, preview_height)) {
     throw std::runtime_error(
       "Failed to write render preview image: " + render_preview_output_path.string());
   }
@@ -2261,7 +2620,7 @@ std::filesystem::path _PreviewRenderEndpointFilePath() {
 
 bool _RunPreviewRenderServer(const PreviewRenderServerOptions& options) {
   const std::filesystem::path preview_render_probe_path =
-    algorithmManager::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot() / "preview_render_server_probe.log";
+    algomanager::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot() / "preview_render_server_probe.log";
   std::error_code probe_ec{};
   std::filesystem::create_directories(preview_render_probe_path.parent_path(), probe_ec);
   const auto append_preview_render_probe = [&](const std::string& line) {
@@ -2274,7 +2633,6 @@ bool _RunPreviewRenderServer(const PreviewRenderServerOptions& options) {
   bool is_pipeline = false;
   std::string query_error_message;
   DebugToolBackendRuntime type_probe_runtime;
-  type_probe_runtime.SetAlgorithmRuntimeBuildFlavor(options.runtime_build_flavor);
   append_preview_render_probe("preview_render_server.type_probe.begin");
   if (!type_probe_runtime.IsPipelineAlgorithm(
         options.algorithm_name,
@@ -2301,7 +2659,6 @@ bool _RunPreviewRenderServer(const PreviewRenderServerOptions& options) {
           .runner_endpoint = options.runner_endpoint,
           .render_preview_output_path = options.render_preview_output_path,
           .execution_preference = options.execution_preference,
-          .runtime_build_flavor = options.runtime_build_flavor,
         })
     : _RunAlgorithmRunner(
         AlgorithmRunnerOptions{
@@ -2314,7 +2671,6 @@ bool _RunPreviewRenderServer(const PreviewRenderServerOptions& options) {
           .runner_endpoint = options.runner_endpoint,
           .render_preview_output_path = options.render_preview_output_path,
           .execution_preference = options.execution_preference,
-          .runtime_build_flavor = options.runtime_build_flavor,
         });
   append_preview_render_probe(
     std::string("preview_render_server.run.end rendered=") + (rendered ? "true" : "false"));
@@ -2400,7 +2756,7 @@ int main(int argc, char** argv) {
 #endif
     {
       const std::filesystem::path main_entry_probe_path =
-        algorithmManager::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot() / "main_entry_probe.log";
+        algomanager::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot() / "main_entry_probe.log";
       std::error_code ec;
       std::filesystem::create_directories(main_entry_probe_path.parent_path(), ec);
       std::ofstream probe_file(main_entry_probe_path, std::ios::binary | std::ios::app);
@@ -2442,13 +2798,13 @@ int main(int argc, char** argv) {
 
     {
       std::filesystem::create_directories(
-        algorithmManager::ResolveAlgorithmLibraryRuntimeNormDebugInfoRoot());
+        algomanager::ResolveAlgorithmLibraryRuntimeNormDebugInfoRoot());
       std::filesystem::create_directories(
-        algorithmManager::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot());
+        algomanager::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot());
       const std::filesystem::path argv_probe_root =
         _IsPipelineRunnerInvocation(argc, argv)
-          ? algorithmManager::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot()
-          : algorithmManager::ResolveAlgorithmLibraryRuntimeNormDebugInfoRoot();
+          ? algomanager::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot()
+          : algomanager::ResolveAlgorithmLibraryRuntimeNormDebugInfoRoot();
       std::filesystem::create_directories(argv_probe_root);
       std::ofstream probe_file(
         (argv_probe_root / "argv_probe.log"),

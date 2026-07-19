@@ -19,23 +19,23 @@ When code and docs disagree, follow the code and update the docs.
 - Lower layers do not depend upward.
 - `common_data` is shared in-memory data only.
 - `common_data` is the one exception to the single-facade header rule.
-- `runtime_systems` owns the SDL, ImGui, and Vulkan runtime shell and exposes one facade header.
-- `algorithm_catalog` is the catalog subtree for package support, manifest assembly, and reflection helpers.
-- `algorithm_catalog` only consumes resolved algorithm package locations and performs assembly/loading; it does not search for packages.
-- `agent_management` and `debug_tool_backend` should reach algorithm loading through `algorithmManager`, not by treating `algorithm_catalog` as a public root.
-- `algorithmManager` is the strict main-trunk root interface for the algorithm layer.
-- `algorithmManager` exposes only the root orchestration surface to upper layers.
-- Upper layers must not use `using namespace algorithmManager` and must not
+- `runtimesys` owns the SDL, ImGui, and Vulkan runtime shell and exposes one facade header.
+- `catalog` is the catalog subtree for package support, manifest assembly, and reflection helpers.
+- `catalog` only consumes resolved algorithm package locations and performs assembly/loading; it does not search for packages.
+- `agentmanager` and `debug_tool_backend` should reach algorithm loading through `algomanager`, not by treating `catalog` as a public root.
+- `algomanager` is the strict main-trunk root interface for the algorithm layer.
+- `algomanager` exposes only the root orchestration surface to upper layers.
+- Upper layers must not use `using namespace algomanager` and must not
   import child namespaces directly; they may only consume symbols that the
-  root `algorithmManager` node re-exports.
-- The public `algorithmManager` facade must not use `using` declarations to
+  root `algomanager` node re-exports.
+- The public `algomanager` facade must not use `using` declarations to
   re-export symbols; it should use explicit declarations, typedefs, or inline
   forwarding wrappers instead.
 - `scheduler` and `catalog` are internal implementation subtrees behind that root interface.
-- `algorithmManager` owns the top-level orchestration entrypoints only.
+- `algomanager` owns the top-level orchestration entrypoints only.
 - `debug_tool_backend` owns the non-UI debug host backend and agent/runtime wiring.
 - `debug_tool_frontend` is the editor-facing debug surface.
-- `sdk` is the external agent/algorithm submission surface and depends on `agent_management`.
+- `sdk` is the external agent/algorithm submission surface and depends on `agentmanager`.
 - `debugTool` owns startup wiring for the debug executable only.
 - Modules under `src/capabilities` are capability modules, not strict main-trunk hops.
 - Capability modules may aggregate lower-level contracts, but they must not introduce upward dependencies into strict trunk layers.
@@ -49,20 +49,20 @@ Compile dependency graph:
 ```mermaid
 graph LR
   mesh_io --> common_data
-  runtime_systems --> common_data
-  algorithm_catalog --> common_data
-  algorithm_management --> common_data
-  algorithm_management --> runtime_systems
-  algorithm_management --> algorithm_catalog
-  agent_management --> common_data
-  agent_management --> algorithm_management
+  runtimesys --> common_data
+  catalog --> common_data
+  algomanager --> common_data
+  algomanager --> runtimesys
+  algomanager --> catalog
+  agentmanager --> common_data
+  agentmanager --> algomanager
   debug_tool_backend --> common_data
-  debug_tool_backend --> agent_management
-  debug_tool_backend --> runtime_systems
-  debug_tool_backend --> algorithm_management
-  debug_tool_backend --> algorithm_catalog
-  debug_tool_frontend --> runtime_systems
-  sdk --> agent_management
+  debug_tool_backend --> agentmanager
+  debug_tool_backend --> runtimesys
+  debug_tool_backend --> algomanager
+  debug_tool_backend --> catalog
+  debug_tool_frontend --> runtimesys
+  sdk --> agentmanager
   debugTool --> common_data
   debugTool --> debug_tool_backend
   debugTool --> debug_tool_frontend
@@ -70,11 +70,11 @@ graph LR
 
 Runtime shell support path:
 
-`debug_tool_backend -> runtime_systems -> common_data`
+`debug_tool_backend -> runtimesys -> common_data`
 
 UI path:
 
-`debug_tool_frontend -> runtime_systems -> common_data`
+`debug_tool_frontend -> runtimesys -> common_data`
 
 Capability modules grouped under `src/capabilities`:
 
@@ -84,30 +84,30 @@ Capability modules grouped under `src/capabilities`:
 Current project-library dependency graph from `CMakeLists.txt`:
 
 - `mesh_io -> common_data`
-- `algorithm_catalog -> common_data`
-- `algorithm_management -> common_data + runtime_systems + algorithm_catalog`
-- `runtime_systems -> common_data`
-- `agent_management -> common_data + algorithm_management`
-- `debug_tool_backend -> common_data + agent_management + runtime_systems + algorithm_management + algorithm_catalog`
-- `debug_tool_frontend -> runtime_systems`
-- `sdk -> agent_management`
+- `catalog -> common_data`
+- `algomanager -> common_data + runtimesys + catalog`
+- `runtimesys -> common_data`
+- `agentmanager -> common_data + algomanager`
+- `debug_tool_backend -> common_data + agentmanager + runtimesys + algomanager + catalog`
+- `debug_tool_frontend -> runtimesys`
+- `sdk -> agentmanager`
 - `debugTool -> debug_tool_backend + debug_tool_frontend + common_data`
 
 Important note:
 
-`algorithm_catalog` still exists as a helper bundle, but it is meant to remain a
-peer subtree of `algorithmManager`, not a child of `scheduler`.
+`catalog` still exists as a helper bundle, but it is meant to remain a
+peer subtree of `algomanager`, not a child of `scheduler`.
 
 `capabilities/agent` is intentionally different: it is consumed by trunk code,
 but it is a capability carrier rather than one strict hop in the layering path.
 
-## Ideal `algorithmManager` Tree
+## Ideal `algomanager` Tree
 
-The intended public shape of `algorithmManager` is:
+The intended public shape of `algomanager` is:
 
 ```mermaid
 graph TD
-  ROOT["algorithmManager"]
+  ROOT["algomanager"]
   ROOT --> API["public build / submit / schedule / execute APIs"]
   ROOT --> OWNED["returned owned algorithm object"]
 
@@ -128,16 +128,16 @@ graph TD
 
 Rules for this tree:
 
-- Upper layers only depend on the root `algorithmManager`.
+- Upper layers only depend on the root `algomanager`.
 - `scheduler` and `catalog` are internal implementation subtrees.
 - `scheduler` and `catalog` must not depend on each other directly.
-- After execution, `algorithmManager` returns the algorithm object structure it owns.
+- After execution, `algomanager` returns the algorithm object structure it owns.
 
 ## Current Tree
 
 ```text
 src/
-├─ algorithm_management/
+├─ algomanager/
 │  ├─ algorithm_manager.h
 │  ├─ algorithm_container_manifest.h/.cpp
 │  ├─ algorithm_package_location.h
@@ -152,10 +152,10 @@ src/
 │     ├─ mesh_io.h/.cpp
 │     └─ README.md
 ├─ common_data/
-├─ algorithm_catalog/
+├─ algomanager/catalog/
 │  ├─ algorithm_interaction_protocol.h
 │  └─ algorithm_protocol.h
-├─ runtime_systems/
+├─ runtimesys/
 ├─ sdk/
 └─ debug_tool/
 ```
@@ -163,24 +163,24 @@ src/
 ## Public Interfaces
 
 - `common_data`: specific headers or `common_data/common_data.h`
-- `algorithm_catalog`: internal helper bundle under the `algorithmManager` root interface
-- `algorithm_management`: `algorithm_management/algorithm_manager.h`
-- `algorithm_management` package-location helper: `algorithm_management/algorithm_package_location.h`
-- `runtime_systems`: `runtime_systems/runtime_systems.h`
+- `catalog`: internal helper bundle under the `algomanager` root interface
+- `algomanager`: `algomanager/algorithm_manager.h`
+- `algomanager` package-location helper: `algomanager/catalog/algorithm_package_location.h`
+- `runtimesys`: `runtimesys/runtime_systems.h`
 - `debug_tool_backend`: no public interface; it is an internal debug backend target
 - `debug_tool`: `debug_tool/debug_tool_host.h`, `debug_tool/debug_tool_backend_runtime.h`, and `debug_tool/debug_tool_frontend_panel.h`
-- `agent_management`: `agent_management/agent_management.h`
+- `agentmanager`: `agentmanager/agent_management.h`
 - `sdk`: `sdk/sdk.h`
 
 ## Module Roles
 
-### `algorithm_management`
+### `algomanager`
 
 Strict trunk layer for algorithm orchestration.
 
 It should:
 
-- expose the algorithm orchestration API from the root `algorithmManager`
+- expose the algorithm orchestration API from the root `algomanager`
 - keep top-level orchestration entrypoints thin
 - keep downstream execution and package assembly in the right subtree
 - provide the build interfaces at the root level, not as child modules
@@ -194,8 +194,8 @@ It should not:
 - turn back into a full algorithm runtime
 - become a storage owner for algorithm objects at the root layer
 
-Code outside `src/algorithm_management` should include only
-`algorithm_management/algorithm_manager.h`.
+Code outside `src/algomanager` should include only
+`algomanager/algorithm_manager.h`.
 
 ### `capabilities/agent`
 
@@ -276,9 +276,9 @@ When changing code:
 
 1. Start from this file and `src/README.md`.
 2. Decide whether the new behavior belongs in the strict trunk or under `src/capabilities`.
-3. Keep `runtime_systems` behind `RuntimeEnvironment`.
+3. Keep `runtimesys` behind `RuntimeEnvironment`.
 4. Keep packet transport as shared packet structs in `common_data`.
-5. Keep manifest loading and runtime container creation helpers in `algorithm_management`.
+5. Keep manifest loading and runtime container creation helpers in `algomanager`.
 6. Keep cross-layer package hooks in `capabilities/agent`.
 7. Keep optional adapters in `capabilities/sidecar`.
 8. Keep runtime binding in `debug_tool_backend`.

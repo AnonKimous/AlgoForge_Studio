@@ -12,7 +12,7 @@ The CLI frontend is implemented in `src/debug_tool/main.cpp`. It talks to the sa
 Start the server from the repository root:
 
 ```powershell
-cmd /c start "" /b build\Debug\debugTool.exe --runner-server --runner-server-once --runner-endpoint 127.0.0.1:0
+cmd /c start "" /b build\Microsoft\RelWithDebInfo\debugTool.exe --runner-server --runner-server-once --runner-endpoint 127.0.0.1:0
 Start-Sleep -Seconds 2
 ```
 
@@ -46,17 +46,17 @@ Run from the repository root and keep outputs under `testData`:
 
 ```powershell
 python boot\booterMSVC.py
-cmd /c start "" /b build\Debug\debugTool.exe --runner-server --runner-server-once --runner-endpoint 127.0.0.1:0
+cmd /c start "" /b build\Microsoft\RelWithDebInfo\debugTool.exe --runner-server --runner-server-once --runner-endpoint 127.0.0.1:0
 Start-Sleep -Seconds 2
-cmd /c build\Debug\debugTool.exe --algorithm-runner --algorithm <name> --ticks 1 --execution jobs --preview-output testData\algorithm_preview.ppm
+cmd /c build\Microsoft\RelWithDebInfo\debugTool.exe --algorithm-runner --algorithm <name> --ticks 1 --execution jobs --preview-output testData\algorithm_preview.png
 ```
 
 For a pipeline:
 
 ```powershell
-cmd /c start "" /b build\Debug\debugTool.exe --runner-server --runner-server-once --runner-endpoint 127.0.0.1:0
+cmd /c start "" /b build\Microsoft\RelWithDebInfo\debugTool.exe --runner-server --runner-server-once --runner-endpoint 127.0.0.1:0
 Start-Sleep -Seconds 2
-cmd /c build\Debug\debugTool.exe --pipeline-runner --algorithm <pipeline> --ticks 1 --execution vk --preview-output testData\pipeline_vk_preview.ppm
+cmd /c build\Microsoft\RelWithDebInfo\debugTool.exe --pipeline-runner --algorithm <pipeline> --ticks 1 --execution vk --preview-output testData\pipeline_vk_preview.png
 ```
 
 Inspect `testData\pipeline\debugInfo\last_run.log` or `testData\norm\debugInfo\last_run.log`. For preview work require the exported file, nonzero `preview_pixels`, and a ready preview pipeline/target. Inspect the newest CSV in `testData\pipeline_timing` for stage timings. `OK` alone proves execution returned, not that a preview was visible.
@@ -76,8 +76,8 @@ with DebugToolRunner(repo_root) as runner:
     result = runner.run_pipeline(
         "v4a16_fireworks_pipeline_demo",
         execution="vk",
-        preview_output=repo_root / "testData" / "python_preview.ppm",
+        preview_output=repo_root / "testData" / "python_preview.png",
     ).require_ok()
 ```
 
-Use `aglopy\README.md` for the public API. The package uses the configured `build\Debug\debugTool.exe`, keeps the server alive for multiple requests, and returns the runner response, log path, preview path, and parsed preview pixel count.
+Use `aglopy\README.md` for the public API. The package uses the configured `build\Microsoft\RelWithDebInfo\debugTool.exe`, keeps the server alive for multiple requests, and returns the runner response, log path, preview path, and parsed preview pixel count.

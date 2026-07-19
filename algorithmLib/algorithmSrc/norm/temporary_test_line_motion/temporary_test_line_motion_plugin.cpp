@@ -66,7 +66,7 @@ class LineMotionJobsExecutor final : public agent::IAlgorithmJobsExecutor {
       *algorithm_to_agent_signal = {};
     }
     if (debug_state) {
-      debug_state->signals.push_back(algorithm_management::AdvancedAlgorithmDebugSignal{
+      debug_state->signals.push_back(algomanager::algoscheduler::AdvancedAlgorithmDebugSignal{
         .name = "temporary_test_line_motion.body",
         .payload = "Moved point_x/point_y toward the upper-left corner.",
       });
@@ -82,8 +82,8 @@ void DestroyJobsExecutor(agent::IAlgorithmJobsExecutor* executor) {
 }  // namespace
 
 extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateBundle(
-  const algorithmManager::support::AlgorithmPluginRequest* request,
-  algorithmManager::support::AlgorithmPluginBundle* out_bundle) {
+  const algomanager::support::AlgorithmPluginRequest* request,
+  algomanager::support::AlgorithmPluginBundle* out_bundle) {
   if (!request || !out_bundle) {
     return false;
   }
@@ -105,7 +105,7 @@ extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateBundle(
 }
 
 extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateRuntimeReflector(
-  const algorithmManager::support::AlgorithmPluginRequest* request,
+  const algomanager::support::AlgorithmPluginRequest* request,
   algorithm::AlgorithmReflector* out_reflector) {
   if (!request || !out_reflector) {
     return false;
@@ -119,7 +119,7 @@ extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateRuntimeReflec
         nullptr)) {
     return false;
   }
-  if (!algorithmManager::support::LoadAlgorithmPackageReflectorFromLocation(
+  if (!algomanager::support::LoadAlgorithmPackageReflectorFromLocation(
         package_location,
         &runtime_reflector,
         nullptr) || !runtime_reflector) {

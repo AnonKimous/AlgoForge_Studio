@@ -11,7 +11,8 @@
 ## Project Constraints
 
 - Do not modify `CMakeLists.txt` unless the user explicitly approves that change in the current turn.
-- Keep the call chain aligned with `sdk -> agent_management -> agent -> algorithm_management -> runtime_systems`.
+- Keep the call chain aligned with `sdk -> agentmanager -> agent -> algomanager -> runtimesys`.
+- Users may use shorthand names in conversation for convenience, but code must always use the full project names. Use `algomanager` consistently in namespaces, directories, include paths, CMake targets, symbols, and new file names. Do not introduce `algorithmManager`, `algorithm_management`, or other abbreviated variants.
 - Build algorithms through the repository's dedicated batch tools. Do not modify build scripts to work around an algorithm build.
 - Preserve the existing file encoding. This repository uses UTF-8 for source files, comments, UI text, and build output.
 - Do not modify third-party libraries.
@@ -24,7 +25,7 @@
 - Algorithms own their data, object counts, particle counts, fireworks counts, and rendering submissions.
 - Keep bridge rules separate from mapping rules. A bridge is not a mapping table.
 - Do not copy complete algorithm containers through a bridge when the standard container slot can be used directly.
-- Keep the call chain aligned with `sdk -> agent_management -> agent -> algorithm_management -> runtime_systems`.
+- Keep the call chain aligned with `sdk -> agentmanager -> agent -> algomanager -> runtimesys`.
 
 ## Coordinate Convention
 

@@ -248,6 +248,11 @@ function(resolve_mimalloc_dependency repo_root)
 endfunction()
 
 function(resolve_assimp_dependency repo_root)
+  # Keep Assimp inside the main executable. DebugTool is launched directly
+  # from Visual Studio and must not depend on a DLL living below assimp-build.
+  # This changes only the third-party target's build mode; no third-party
+  # source is modified.
+  set(BUILD_SHARED_LIBS OFF)
   set(ASSIMP_SOURCE_DIR "" CACHE PATH "Assimp source directory")
   set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "Build Assimp tests" FORCE)
   set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "Build Assimp command line tools" FORCE)

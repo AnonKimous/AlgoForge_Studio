@@ -13,6 +13,12 @@ python -m pip install -r requirements.txt
 python boot/quick_begin.py
 ```
 
+`quick_begin.py` installs the Python requirements and automatically builds the mainline, SDK, and every algorithm package. Windows uses MSVC by default; pass `OpenSource` for the LLVM/Ninja route. Other supported platforms use LLVM/Ninja by default.
+
+```text
+python boot/quick_begin.py OpenSource
+```
+
 If the `algoforge` environment already exists, start with `conda activate algoforge`.
 
 Compile with Microsoft Visual C++:
@@ -31,10 +37,8 @@ python boot/booterNinjaClang.py v6a6_pbd_ball_collision_demo
 
 On Windows, the OpenSource build still uses the installed Windows SDK for `rc.exe` and `winres.h`; the Python build entry point locates that SDK and configures its include paths automatically. The SDK is not downloaded into the repository.
 
-The algorithm argument is optional. Without it, only the mainline and SDK are built.
+The algorithm argument is optional. Without it, the mainline, SDK, and every algorithm package are built. Pass one algorithm name when you want to build only that package.
 
-After a successful build, `boot/debugTool.exe` and `boot/devTools.py` are refreshed as links to the selected build and the Algorithm Studio launcher.
-
-Open those shortcuts directly from the `boot` directory after the build.
+After a successful build, launch the real executable at `build/Microsoft/RelWithDebInfo/debugTool.exe` on Windows. Launch Algorithm Studio with `python boot/launch_devTools.py`.
 
 The generated SDK is under `sdk/python` and `sdk/cpp`. Use `sdk/python/aglopy` from Python to submit algorithms and pipelines through the debugTool runner.

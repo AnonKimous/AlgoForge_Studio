@@ -141,17 +141,17 @@ The exact lifetime, Jobs, Vulkan, CUDA, intervention, reflection, and container 
 Build the final package first, then use the runner from the repository root. Keep logs and preview files under `testData`:
 
 ```powershell
-cmd /c start "" /b build\Debug\debugTool.exe --runner-server --runner-server-once --runner-endpoint 127.0.0.1:0
+cmd /c start "" /b build\Microsoft\RelWithDebInfo\debugTool.exe --runner-server --runner-server-once --runner-endpoint 127.0.0.1:0
 Start-Sleep -Seconds 2
-cmd /c build\Debug\debugTool.exe --algorithm-runner --algorithm <ordinary-algorithm> --ticks 1 --execution jobs --preview-output testData\algorithm_preview.ppm
+cmd /c build\Microsoft\RelWithDebInfo\debugTool.exe --algorithm-runner --algorithm <ordinary-algorithm> --ticks 1 --execution jobs --preview-output testData\algorithm_preview.png
 ```
 
 For a pipeline:
 
 ```powershell
-cmd /c start "" /b build\Debug\debugTool.exe --runner-server --runner-server-once --runner-endpoint 127.0.0.1:0
+cmd /c start "" /b build\Microsoft\RelWithDebInfo\debugTool.exe --runner-server --runner-server-once --runner-endpoint 127.0.0.1:0
 Start-Sleep -Seconds 2
-cmd /c build\Debug\debugTool.exe --pipeline-runner --algorithm <pipeline-name> --ticks 1 --execution jobs --preview-output testData\pipeline_preview.ppm
+cmd /c build\Microsoft\RelWithDebInfo\debugTool.exe --pipeline-runner --algorithm <pipeline-name> --ticks 1 --execution jobs --preview-output testData\pipeline_preview.png
 ```
 
 When Vulkan is in scope, repeat with `--execution vk`. Require `OK algorithm_runner` or `OK pipeline_runner`; output ending at `runner_client.begin` is not a test result.

@@ -127,7 +127,7 @@ class PhysXLanceGpuState final {
     const uint32_t draw_command[4] = {4u, 2u, 0u, 0u};
     std::memcpy(scene_data->bytes.data(), render_scene, sizeof(render_scene));
     std::memcpy(render_draw->bytes.data(), draw_command, sizeof(draw_command));
-    debug_state->signals.push_back(algorithm_management::AdvancedAlgorithmDebugSignal{
+      debug_state->signals.push_back(algomanager::algoscheduler::AdvancedAlgorithmDebugSignal{
       .name = "physx_lance_cuda.step",
       .payload = "tick=" + std::to_string(tick_count_) +
         ",x=" + std::to_string(pose.p.x) +
@@ -213,8 +213,8 @@ void DestroyPhysXLanceCudaExecutor(agent::IAlgorithmCudaExecutor* executor) {
 }  // namespace
 
 extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateBundle(
-    const algorithmManager::support::AlgorithmPluginRequest* request,
-    algorithmManager::support::AlgorithmPluginBundle* out_bundle) {
+    const algomanager::support::AlgorithmPluginRequest* request,
+    algomanager::support::AlgorithmPluginBundle* out_bundle) {
   (void)request;
   assert(out_bundle && "Algorithm plugin bundle output must be valid.");
   out_bundle->Clear();

@@ -9,7 +9,7 @@
 
 #include "capabilities/sidecar/mesh_io.h"
 
-#include "algorithm_catalog/algorithm_library_paths.h"
+#include "algomanager/catalog/algorithm_library_paths.h"
 #include "common_data/common_data.h"
 
 #include <assimp/Importer.hpp>

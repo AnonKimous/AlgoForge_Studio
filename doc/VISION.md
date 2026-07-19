@@ -22,5 +22,5 @@ Near-term priorities are:
 
 The project is early-stage. Compatibility and reproducibility take priority
 over preserving every experimental capability, so changes should keep the
-`sdk -> agent_management -> agent -> algorithm_management -> runtime_systems`
+`sdk -> agentmanager -> agent -> algomanager -> runtimesys`
 chain explicit and validate representative algorithms through the runner.

@@ -1,8 +1,8 @@
 #pragma once
 
-#include "algorithm_management/algorithm_manager.h"
+#include "algomanager/algorithm_manager.h"
 #include "common_data/common_data.h"
-#include "runtime_systems/runtime_systems.h"
+#include "runtimesys/runtime_systems.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -54,12 +54,12 @@ struct AlgorithmDescriptorValue {
 
 struct AlgorithmPhaseSummary {
   std::string phase_name;
-  algorithmManager::AlgorithmPhaseKind phase_kind{
-    algorithmManager::AlgorithmPhaseKind::Custom};
-  algorithmManager::AlgorithmExecutionPreference execution_preference{
-    algorithmManager::AlgorithmExecutionPreference::Jobs};
+  algomanager::AlgorithmPhaseKind phase_kind{
+    algomanager::AlgorithmPhaseKind::Custom};
+  algomanager::AlgorithmExecutionPreference execution_preference{
+    algomanager::AlgorithmExecutionPreference::Jobs};
   std::vector<std::string> functions;
-  std::vector<algorithmManager::AlgorithmPhaseContainerBinding> used_algorithm_containers;
+  std::vector<algomanager::AlgorithmPhaseContainerBinding> used_algorithm_containers;
   std::string vertex_shader_path;
   std::string fragment_shader_path;
   std::string pipeline_kind;
@@ -253,8 +253,8 @@ struct AlgorithmRuntimeSummary {
   uint32_t pipeline_body_stage_count{0u};
   uint32_t pipeline_effective_tail_stage_index{0u};
   bool pipeline_stage{false};
-  algorithmManager::AlgorithmPipelineWrapperRole pipeline_wrapper_role{
-    algorithmManager::AlgorithmPipelineWrapperRole::None};
+  algomanager::AlgorithmPipelineWrapperRole pipeline_wrapper_role{
+    algomanager::AlgorithmPipelineWrapperRole::None};
   bool pipeline_wrapper_empty{false};
   AlgorithmPipelineTopology pipeline_topology{AlgorithmPipelineTopology::NonCircular};
   AlgorithmPipelineSyncMode pipeline_sync_mode{AlgorithmPipelineSyncMode::Forced};
@@ -278,7 +278,7 @@ struct AlgorithmRuntimeSummary {
   AlgorithmReflectionSnapshot reflection_snapshot{};
   std::vector<AlgorithmPhaseSummary> intervention_phase_summaries;
   float pipeline_total_elapsed_seconds{0.0f};
-  std::vector<algorithmManager::AlgorithmPipelineStageRuntimeStat> pipeline_stage_runtime_stats;
+  std::vector<algomanager::AlgorithmPipelineStageRuntimeStat> pipeline_stage_runtime_stats;
   PipelineStageBridgeDebugSummary bridge_debug_set{};
 };
 
@@ -382,7 +382,7 @@ class IDebugToolHost {
   virtual bool BuildRenderPreviewRequest(
     size_t agent_index,
     size_t algorithm_index,
-    runtime_systems::RenderPreviewRequest* out_request,
+    runtimesys::RenderPreviewRequest* out_request,
     std::string* out_error_message = nullptr) const = 0;
 
   virtual const InputState& input() const = 0;
@@ -393,7 +393,7 @@ class IDebugToolHost {
   virtual ImTextureID render_preview_texture_id() const = 0;
   virtual ImVec2 render_preview_texture_size() const = 0;
   virtual void SetRenderPreviewExtent(ImVec2 extent) = 0;
-  virtual void SetRenderPreviewRequest(runtime_systems::RenderPreviewRequest request) = 0;
+  virtual void SetRenderPreviewRequest(runtimesys::RenderPreviewRequest request) = 0;
 
   virtual std::string& ui_status_message() = 0;
   virtual const std::string& ui_status_message() const = 0;

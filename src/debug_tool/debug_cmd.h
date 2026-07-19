@@ -45,7 +45,7 @@ struct DebugCommand {
   std::vector<AlgorithmResourceBinding> resource_bindings{};
   std::vector<AlgorithmDescriptorValue> descriptor_values{};
   std::vector<AlgorithmPipelineStageSubmission> stage_submissions{};
-  runtime_systems::RenderPreviewRequest preview_request{};
+  runtimesys::RenderPreviewRequest preview_request{};
   ImVec2 preview_extent{};
 };
 

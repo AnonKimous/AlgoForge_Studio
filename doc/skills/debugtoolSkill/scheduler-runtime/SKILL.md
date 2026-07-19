@@ -7,18 +7,18 @@ description: Explain and safely modify the current algorithm scheduler runtime, 
 
 Use the current source as the authority. Read these files before changing scheduler behavior:
 
-- `src/algorithm_management/algorithm_scheduler_runtime.h`
-- `src/algorithm_management/algorithm_scheduler_runtime.cpp`
-- `src/agent_management/agent.cpp`
-- `src/agent_management/agent_manager.cpp`
-- `src/algorithm_management/algorithm_manager.h`
-- `src/algorithm_catalog/algorithm_protocol.h`
+- `src/algomanager/scheduler/algorithm_scheduler_runtime.h`
+- `src/algomanager/scheduler/algorithm_scheduler_runtime.cpp`
+- `src/agentmanager/agent/agent.cpp`
+- `src/agentmanager/agent_manager.cpp`
+- `src/algomanager/algorithm_manager.h`
+- `src/algomanager/catalog/algorithm_protocol.h`
 
 ## Current ownership model
 
 The public call path is:
 
-`sdk -> agent_management -> agent -> algorithm_management -> runtime_systems`
+`sdk -> agentmanager -> agent -> algomanager -> runtimesys`
 
 `Agent::SubmitAlgorithm` groups mounted pipeline stages and calls `TickMountedPipeline`. The scheduler owns pipeline registration and runtime state. The agent owns the mounted algorithm objects and presents stage groups to the scheduler. Runtime systems execute jobs, Vulkan, or CUDA work after the scheduler has built the stage work.
 

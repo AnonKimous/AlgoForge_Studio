@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Sequence
 
-Execution = Literal["jobs", "vk", "cuda"]
+Execution = Literal["jobs", "vk", "cuda", "compatibility"]
 
 
 class AglopyError(RuntimeError):
@@ -72,7 +72,9 @@ class RunnerServer:
         startup_timeout: float = 15.0,
     ) -> None:
         self.root = Path(root).resolve()
-        default_debugtool = self.root / "boot" / ("debugTool.exe" if os.name == "nt" else "debugTool")
+        toolchain = "Microsoft" if os.name == "nt" else "OpenSource"
+        default_debugtool = self.root / "build" / toolchain / "RelWithDebInfo" / (
+            "debugTool.exe" if os.name == "nt" else "debugTool")
         self.debugtool = Path(debugtool).resolve() if debugtool else default_debugtool.resolve()
         self.endpoint = endpoint
         self.startup_timeout = startup_timeout
@@ -83,8 +85,8 @@ class RunnerServer:
         environment = dict(os.environ)
         path_name = next(name for name in environment if name.lower() == "path")
         runtime_paths = [self.debugtool.parent]
-        build_root = self.debugtool.parent.parent.parent
-        runtime_paths.append(build_root / "assimp-build" / "bin" / "Debug")
+        toolchain_root = self.debugtool.parent.parent
+        runtime_paths.append(toolchain_root / "assimp-build" / "bin" / "RelWithDebInfo")
         runtime_paths_text = os.pathsep.join(str(path) for path in runtime_paths)
         environment[path_name] = runtime_paths_text + os.pathsep + environment[path_name]
         return environment
@@ -264,7 +266,7 @@ class DebugToolRunner:
     ) -> RunnerResult:
         if ticks <= 0:
             raise ValueError("ticks must be positive")
-        if execution not in ("jobs", "vk", "cuda"):
+        if execution not in ("jobs", "vk", "cuda", "compatibility"):
             raise ValueError(f"unsupported execution backend: {execution}")
 
         output_path = Path(preview_output).resolve() if preview_output else None

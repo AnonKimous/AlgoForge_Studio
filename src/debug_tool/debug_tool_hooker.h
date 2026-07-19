@@ -2,8 +2,8 @@
 
 #include "debug_tool/agent_hooker.h"
 #include "debug_tool/agent_management_hooker.h"
-#include "debug_tool/algorithm_manager_hooker.h"
-#include "debug_tool/runtime_systems_hooker.h"
+#include "debug_tool/algomanager_hooker.h"
+#include "debug_tool/runtimesys_hooker.h"
 
 #include <algorithm>
 #include <cassert>
@@ -20,10 +20,11 @@
 namespace debug_tool_backend::hooker {
 
 using AgentManagementHooker = agent_management_hooker::AgentManagementHooker;
-using RuntimeSystemsHooker = runtime_systems_hooker::RuntimeSystemsHooker;
-using RuntimeEnvironment = runtime_systems_hooker::RuntimeEnvironment;
-using RenderPreviewRequest = runtime_systems_hooker::RenderPreviewRequest;
-using RenderPreviewBuffer = runtime_systems_hooker::RenderPreviewBuffer;
+using RuntimesysHooker = runtimesys_hooker::RuntimesysHooker;
+using RuntimeEnvironment = runtimesys_hooker::RuntimeEnvironment;
+using RenderPreviewRequest = runtimesys_hooker::RenderPreviewRequest;
+using RenderPreviewBuffer = runtimesys_hooker::RenderPreviewBuffer;
+using DebugToolRecordedFrame = runtimesys_hooker::DebugToolRecordedFrame;
 
 using agent_hooker::AlgorithmCount;
 using agent_hooker::AlgorithmObjectAt;
@@ -33,30 +34,30 @@ using agent_hooker::BeginAlgorithmAssembly;
 using agent_hooker::ContainerSet;
 
 inline std::string ProjectRootPath() {
-  return algorithm_manager_hooker::ProjectRootPath();
+  return algomanager_hooker::ProjectRootPath();
 }
 
 inline std::filesystem::path ResolveAlgorithmLibrarySourceRoot() {
-  return algorithm_manager_hooker::ResolveAlgorithmLibrarySourceRoot();
+  return algomanager_hooker::ResolveAlgorithmLibrarySourceRoot();
 }
 
 inline std::filesystem::path ResolveAlgorithmLibraryRuntimeRoot() {
-  return algorithm_manager_hooker::ResolveAlgorithmLibraryRuntimeRoot();
+  return algomanager_hooker::ResolveAlgorithmLibraryRuntimeRoot();
 }
 
 inline std::filesystem::path ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot() {
-  return algorithm_manager_hooker::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot();
+  return algomanager_hooker::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot();
 }
 
 inline std::string HotReloadBuildCommand(const std::string& algorithm_name) {
-  return algorithm_manager_hooker::HotReloadBuildCommand(algorithm_name);
+  return algomanager_hooker::HotReloadBuildCommand(algorithm_name);
 }
 
 inline bool TryResolveAlgorithmPackageLocation(
   const std::string& algorithm_name,
   ::algorithm::AlgorithmPackageLocation* out_location,
   std::string* out_error_message = nullptr) {
-  return algorithm_manager_hooker::TryResolveAlgorithmPackageLocation(
+  return algomanager_hooker::TryResolveAlgorithmPackageLocation(
     algorithm_name,
     out_location,
     out_error_message);
@@ -67,7 +68,7 @@ inline bool LoadAlgorithmPackageTransferMapFromLocation(
   std::shared_ptr<algorithm::AlgorithmRuntimeTransferMap>* out_transfer_map,
   bool* out_has_transfer_map = nullptr,
   std::string* out_error_message = nullptr) {
-  return algorithm_manager_hooker::LoadAlgorithmPackageTransferMapFromLocation(
+  return algomanager_hooker::LoadAlgorithmPackageTransferMapFromLocation(
     package_location,
     out_transfer_map,
     out_has_transfer_map,
@@ -76,11 +77,11 @@ inline bool LoadAlgorithmPackageTransferMapFromLocation(
 
 inline bool LoadAlgorithmPackageDefaultBindingsFromLocation(
   const ::algorithm::AlgorithmPackageLocation& package_location,
-  std::vector<algorithmManager::AlgorithmResourceBinding>* out_resource_bindings,
-  std::vector<algorithmManager::AlgorithmDescriptorValue>* out_descriptor_values,
+  std::vector<algomanager::AlgorithmResourceBinding>* out_resource_bindings,
+  std::vector<algomanager::AlgorithmDescriptorValue>* out_descriptor_values,
   bool* out_has_default_file = nullptr,
   std::string* out_error_message = nullptr) {
-  return algorithm_manager_hooker::LoadAlgorithmPackageDefaultBindingsFromLocation(
+  return algomanager_hooker::LoadAlgorithmPackageDefaultBindingsFromLocation(
     package_location,
     out_resource_bindings,
     out_descriptor_values,
@@ -90,11 +91,11 @@ inline bool LoadAlgorithmPackageDefaultBindingsFromLocation(
 
 inline bool LoadAlgorithmPackageDefaultBindings(
   const std::string& algorithm_name,
-  std::vector<algorithmManager::AlgorithmResourceBinding>* out_resource_bindings,
-  std::vector<algorithmManager::AlgorithmDescriptorValue>* out_descriptor_values,
+  std::vector<algomanager::AlgorithmResourceBinding>* out_resource_bindings,
+  std::vector<algomanager::AlgorithmDescriptorValue>* out_descriptor_values,
   bool* out_has_default_file = nullptr,
   std::string* out_error_message = nullptr) {
-  return algorithm_manager_hooker::LoadAlgorithmPackageDefaultBindings(
+  return algomanager_hooker::LoadAlgorithmPackageDefaultBindings(
     algorithm_name,
     out_resource_bindings,
     out_descriptor_values,
@@ -104,10 +105,10 @@ inline bool LoadAlgorithmPackageDefaultBindings(
 
 inline bool QueryAlgorithmRequestedBindings(
   const std::string& algorithm_name,
-  algorithmManager::AlgorithmRequestedResources* out_resources,
-  algorithmManager::AlgorithmRequestedDescriptorBindings* out_descriptors,
+  algomanager::AlgorithmRequestedResources* out_resources,
+  algomanager::AlgorithmRequestedDescriptorBindings* out_descriptors,
   std::string* out_error_message = nullptr) {
-  return algorithm_manager_hooker::QueryAlgorithmRequestedBindings(
+  return algomanager_hooker::QueryAlgorithmRequestedBindings(
     algorithm_name,
     out_resources,
     out_descriptors,
@@ -117,8 +118,8 @@ inline bool QueryAlgorithmRequestedBindings(
 inline bool TryGetMountedPipelineRuntime(
   const std::string& pipeline_name,
   const std::string& agent_name,
-  algorithmManager::JobsPipelineRuntimeState* out_runtime_state) {
-  return algorithm_manager_hooker::TryGetMountedPipelineRuntime(
+  algomanager::JobsPipelineRuntimeState* out_runtime_state) {
+  return algomanager_hooker::TryGetMountedPipelineRuntime(
     pipeline_name,
     agent_name,
     out_runtime_state);
@@ -126,22 +127,22 @@ inline bool TryGetMountedPipelineRuntime(
 
 inline bool TryGetMountedPipelineRegistration(
   const std::string& pipeline_name,
-  algorithmManager::JobsPipelineRegistration* out_registration) {
-  return algorithm_manager_hooker::TryGetMountedPipelineRegistration(
+  algomanager::JobsPipelineRegistration* out_registration) {
+  return algomanager_hooker::TryGetMountedPipelineRegistration(
     pipeline_name,
     out_registration);
 }
 
 inline void ClearAlgorithmScheduler() {
-  algorithm_manager_hooker::ClearAlgorithmScheduler();
+  algomanager_hooker::ClearAlgorithmScheduler();
 }
 
 inline void SetAlgorithmRuntimeShutdownHook() {
-  algorithm_manager_hooker::SetAlgorithmRuntimeShutdownHook();
+  algomanager_hooker::SetAlgorithmRuntimeShutdownHook();
 }
 
 inline void ClearAlgorithmExecutionCaches() {
-  algorithm_manager_hooker::ClearAlgorithmExecutionCaches();
+  algomanager_hooker::ClearAlgorithmExecutionCaches();
 }
 
 inline bool ExecuteJobsAlgorithmObject(
@@ -152,7 +153,7 @@ inline bool ExecuteJobsAlgorithmObject(
   common_data::AlgorithmToAgentSignal* out_algorithm_to_agent_signal,
   ::agentmanager::agent::AlgorithmPackageDebugState* out_debug_state,
   std::string* out_error_message = nullptr) {
-  return algorithm_manager_hooker::ExecuteJobsAlgorithmObject(
+  return algomanager_hooker::ExecuteJobsAlgorithmObject(
     object,
     context,
     agent_to_algorithm_signal,
@@ -167,7 +168,7 @@ inline bool ExecuteVkAlgorithmObject(
   ::algorithm::AlgorithmContainerSet* container_set,
   const ::agentmanager::agent::AgentTickContext& context,
   std::string* out_error_message = nullptr) {
-  return algorithm_manager_hooker::ExecuteVkAlgorithmObject(
+  return algomanager_hooker::ExecuteVkAlgorithmObject(
     object,
     container_set,
     context,
@@ -175,14 +176,14 @@ inline bool ExecuteVkAlgorithmObject(
 }
 
 inline bool HasExecutableVkAlgorithmStage(const ::agentmanager::agent::AlgorithmObject& object) {
-  return algorithm_manager_hooker::HasExecutableVkAlgorithmStage(object);
+  return algomanager_hooker::HasExecutableVkAlgorithmStage(object);
 }
 
 inline bool SynchronizeVkAlgorithmObject(
   const ::agentmanager::agent::AlgorithmObject& object,
   ::algorithm::AlgorithmContainerSet* container_set,
   std::string* out_error_message = nullptr) {
-  return algorithm_manager_hooker::SynchronizeVkAlgorithmObject(
+  return algomanager_hooker::SynchronizeVkAlgorithmObject(
     object,
     container_set,
     out_error_message);
@@ -219,7 +220,7 @@ inline std::string ResolveAlgorithmShaderPath(
   if (runtime_package_root.empty()) {
     ::algorithm::AlgorithmPackageLocation package_location{};
     std::string error_message;
-    const bool resolved = algorithm_manager_hooker::TryResolveAlgorithmPackageLocation(
+    const bool resolved = algomanager_hooker::TryResolveAlgorithmPackageLocation(
       object.algorithm_profile.algorithm_name,
       &package_location,
       &error_message);
@@ -371,7 +372,7 @@ inline void AppendUniquePipelineStageIndex(
 inline void AppendPipelineSummaryInterventionPhases(
   const agentmanager::agent::Agent& managed_agent,
   size_t stage_index,
-  const algorithmManager::JobsPipelineRegistration& registration,
+  const algomanager::JobsPipelineRegistration& registration,
   std::vector<agentmanager::agent::AlgorithmPhaseSpec>* out_phase_specs) {
   size_t pipeline_begin_index = 0u;
   size_t pipeline_end_index = 0u;
@@ -485,7 +486,7 @@ inline bool TryResolveRenderPreviewSource(
     return false;
   }
 
-  algorithmManager::JobsPipelineRegistration registration{};
+  algomanager::JobsPipelineRegistration registration{};
   const bool has_registration = TryGetMountedPipelineRegistration(selected_object->pipeline_name, &registration);
   std::unordered_set<size_t> seen_indices{};
   std::vector<size_t> candidate_indices{};
