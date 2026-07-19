@@ -12,7 +12,7 @@
 #include <utility>
 #include <vector>
 
-namespace algomanager { namespace algocatalog {
+namespace algomanager { namespace bridge {
 
 inline constexpr const char* kAlgorithmInterventionIoProtocolName = "algorithm_intervention_v2";
 
@@ -264,16 +264,5 @@ inline bool DecodeAlgorithmInterventionPacket(
   return true;
 }
 
-}  // namespace catalog
-}  // namespace algomanager
-
-using algomanager::algocatalog::AlgorithmInterventionDescriptor;
-using algomanager::algocatalog::AlgorithmInterventionMode;
-using algomanager::algocatalog::DecodedAlgorithmIntervention;
-
-namespace algomanager { namespace algoscheduler {
-using algomanager::algocatalog::AlgorithmInterventionDescriptor;
-using algomanager::algocatalog::AlgorithmInterventionMode;
-using algomanager::algocatalog::DecodedAlgorithmIntervention;
-}  // namespace scheduler
+}  // namespace bridge
 }  // namespace algomanager

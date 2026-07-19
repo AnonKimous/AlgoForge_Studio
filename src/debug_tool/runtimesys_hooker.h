@@ -8,11 +8,6 @@
 
 namespace debug_tool_backend::runtimesys_hooker {
 
-using RuntimeEnvironment = runtimesys::RuntimeEnvironment;
-using RenderPreviewRequest = runtimesys::RenderPreviewRequest;
-using RenderPreviewBuffer = runtimesys::RenderPreviewBuffer;
-using DebugToolRecordedFrame = runtimesys::DebugToolRecordedFrame;
-
 class RuntimesysHooker {
  public:
   bool Init(const char* window_title, int width, int height) {
@@ -56,7 +51,7 @@ class RuntimesysHooker {
     runtime_environment_.EndDebugToolRecording();
   }
 
-  std::vector<DebugToolRecordedFrame> TakeDebugToolRecording() {
+  std::vector<runtimesys::DebugToolRecordedFrame> TakeDebugToolRecording() {
     return runtime_environment_.TakeDebugToolRecording();
   }
 
@@ -80,22 +75,22 @@ class RuntimesysHooker {
     runtime_environment_.SetRenderPreviewExtent(extent);
   }
 
-  void SetRenderPreviewRequest(RenderPreviewRequest request) {
+  void SetRenderPreviewRequest(runtimesys::RenderPreviewRequest request) {
     render_preview_request_ = std::move(request);
     runtime_environment_.SetRenderPreviewRequest(render_preview_request_);
   }
 
-  RuntimeEnvironment& runtime_environment() {
+  runtimesys::RuntimeEnvironment& runtime_environment() {
     return runtime_environment_;
   }
 
-  const RuntimeEnvironment& runtime_environment() const {
+  const runtimesys::RuntimeEnvironment& runtime_environment() const {
     return runtime_environment_;
   }
 
  private:
-  RuntimeEnvironment runtime_environment_{};
-  RenderPreviewRequest render_preview_request_{};
+  runtimesys::RuntimeEnvironment runtime_environment_{};
+  runtimesys::RenderPreviewRequest render_preview_request_{};
 };
 
 }  // namespace debug_tool_backend::runtimesys_hooker

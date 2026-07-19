@@ -1,5 +1,5 @@
 #include "algomanager/bridge/algorithm_package_location.h"
-#include "algomanager/catalog/algorithm_library_paths.h"
+#include "algomanager/bridge/algorithm_library_paths.h"
 
 #include <algorithm>
 #include <chrono>

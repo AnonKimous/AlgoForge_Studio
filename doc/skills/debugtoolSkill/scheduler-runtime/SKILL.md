@@ -7,8 +7,8 @@ description: Explain and safely modify the current algorithm scheduler runtime, 
 
 Use the current source as the authority. Read these files before changing scheduler behavior:
 
-- `src/algomanager/scheduler/algorithm_scheduler_runtime.h`
-- `src/algomanager/scheduler/algorithm_scheduler_runtime.cpp`
+- `src/algomanager/scheduler/algorithm_scheduler.h`
+- `src/algomanager/scheduler/algorithm_scheduler.cpp`
 - `src/agentmanager/agent/agent.cpp`
 - `src/agentmanager/agent_manager.cpp`
 - `src/algomanager/algorithm_manager.h`
@@ -58,7 +58,7 @@ Package loading supplies an algorithm tick lifetime. The loader defaults to cont
 When a scheduler change behaves unexpectedly:
 
 1. Inspect the mounted stage group in `agent.cpp`.
-2. Inspect pipeline registration and lane lookup in `algorithm_scheduler_runtime.h`.
+2. Inspect pipeline registration and lane lookup in `algorithm_scheduler.h`.
 3. Inspect the runtime transfer map separately through the decomposer/manifest skill.
 4. Check `testData\pipeline\debugInfo\last_run.log` and the newest file in `testData\pipeline_timing`.
 5. Run the matching runner after the final build. A compile-only check is not sufficient.

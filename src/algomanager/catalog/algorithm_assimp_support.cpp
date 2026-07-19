@@ -7,16 +7,15 @@
 #define FASTFLOAT_IS_CONSTEXPR 0
 #define FASTFLOAT_DETAIL_MUST_DEFINE_CONSTEXPR_VARIABLE 0
 
-#include "capabilities/sidecar/mesh_io.h"
+#include "algomanager/catalog/algorithm_assimp_support.h"
 
-#include "algomanager/catalog/algorithm_library_paths.h"
+#include "algomanager/bridge/algorithm_library_paths.h"
 #include "common_data/common_data.h"
 
 #include <assimp/Importer.hpp>
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
 
-#include <algorithm>
 #include <array>
 #include <cmath>
 #include <filesystem>
@@ -25,20 +24,12 @@
 #include <stdexcept>
 #include <string>
 
-namespace mesh_io {
+namespace algomanager { namespace algocatalog {
 
 namespace {
 
 Vec3 MakeVec3(float x, float y, float z) {
   return Vec3{x, y, z};
-}
-
-Vec3 Midpoint(const Vec3& a, const Vec3& b) {
-  return Vec3{
-    (a.x + b.x) * 0.5f,
-    (a.y + b.y) * 0.5f,
-    (a.z + b.z) * 0.5f,
-  };
 }
 
 Vec3 Subtract(const Vec3& a, const Vec3& b) {
@@ -142,18 +133,12 @@ Mesh BuildMeshFromAssimpScene(const aiScene& scene, const ProbeFn& append_probe)
       }
       mesh.uvs.push_back(ReadVertexUv(*assimp_mesh, i));
     }
-    append_probe(
-      "build.mesh.vertices.end index=" + std::to_string(mesh_index) +
-      " positions=" + std::to_string(mesh.positions.size()) +
-      " normals=" + std::to_string(mesh.normals.size()) +
-      " uvs=" + std::to_string(mesh.uvs.size()));
 
     for (unsigned int i = 0; i < assimp_mesh->mNumFaces; ++i) {
       const aiFace& face = assimp_mesh->mFaces[i];
       if (face.mNumIndices != 3u) {
         throw std::runtime_error("Imported mesh face is not triangulated");
       }
-
       mesh.triangles.push_back(std::array<uint32_t, 3>{
         vertex_base + static_cast<uint32_t>(face.mIndices[0]),
         vertex_base + static_cast<uint32_t>(face.mIndices[1]),
@@ -161,17 +146,8 @@ Mesh BuildMeshFromAssimpScene(const aiScene& scene, const ProbeFn& append_probe)
       });
       mesh.triangle_material_gpa.push_back(std::numeric_limits<float>::quiet_NaN());
     }
-    append_probe(
-      "build.mesh.faces.end index=" + std::to_string(mesh_index) +
-      " triangles=" + std::to_string(mesh.triangles.size()) +
-      " triangle_material_gpa=" + std::to_string(mesh.triangle_material_gpa.size()));
   }
 
-  append_probe(
-    "build.before_normals missing_normals=" + std::string(missing_normals ? "true" : "false") +
-    " positions=" + std::to_string(mesh.positions.size()) +
-    " normals=" + std::to_string(mesh.normals.size()) +
-    " triangles=" + std::to_string(mesh.triangles.size()));
   if (missing_normals || mesh.normals.size() != mesh.positions.size()) {
     ComputeVertexNormals(&mesh);
   } else {
@@ -179,90 +155,17 @@ Mesh BuildMeshFromAssimpScene(const aiScene& scene, const ProbeFn& append_probe)
       normal = NormalizeOrFallback(normal);
     }
   }
-  append_probe(
-    "build.after_normals positions=" + std::to_string(mesh.positions.size()) +
-    " normals=" + std::to_string(mesh.normals.size()));
-
-  append_probe("build.before_rebuild_edges");
   RebuildEdges(mesh);
-  append_probe(
-    "build.after_rebuild_edges edges=" + std::to_string(mesh.edges.size()) +
-    " positions=" + std::to_string(mesh.positions.size()) +
-    " triangles=" + std::to_string(mesh.triangles.size()));
-  append_probe("build.before_normalize_triangle_materials");
   NormalizeTriangleMaterials(mesh);
-  append_probe(
-    "build.after_normalize_triangle_materials triangle_material_gpa=" +
-    std::to_string(mesh.triangle_material_gpa.size()));
-  append_probe("build.end");
   return mesh;
-}
-
-Mesh PrepareMeshForObjExport(const Mesh& input_mesh) {
-  Mesh mesh = input_mesh;
-  if (mesh.positions.empty()) {
-    return mesh;
-  }
-  if (mesh.normals.size() != mesh.positions.size()) {
-    ComputeVertexNormals(&mesh);
-  } else {
-    for (Vec3& normal : mesh.normals) {
-      normal = NormalizeOrFallback(normal);
-    }
-  }
-  if (mesh.triangle_material_gpa.size() != mesh.triangles.size()) {
-    NormalizeTriangleMaterials(mesh);
-  }
-  if (mesh.uvs.size() != mesh.positions.size()) {
-    mesh.uvs.assign(mesh.positions.size(), Vec2{0.0f, 0.0f});
-  }
-  RebuildEdges(mesh);
-  return mesh;
-}
-
-void WriteObjVertex(const Mesh& mesh, std::ofstream& file) {
-  for (const Vec3& position : mesh.positions) {
-    file << "v " << position.x << ' ' << position.y << ' ' << position.z << '\n';
-  }
-}
-
-void WriteObjNormals(const Mesh& mesh, std::ofstream& file) {
-  for (const Vec3& normal : mesh.normals) {
-    file << "vn " << normal.x << ' ' << normal.y << ' ' << normal.z << '\n';
-  }
-}
-
-void WriteObjUvs(const Mesh& mesh, std::ofstream& file) {
-  for (const Vec2& uv : mesh.uvs) {
-    file << "vt " << uv.x << ' ' << uv.y << '\n';
-  }
-}
-
-void WriteObjFaces(const Mesh& mesh, std::ofstream& file) {
-  const bool has_uvs = mesh.uvs.size() == mesh.positions.size();
-  for (const auto& triangle : mesh.triangles) {
-    file << "f ";
-    for (size_t i = 0; i < 3u; ++i) {
-      const uint32_t index = triangle[i] + 1u;
-      file << index << '/';
-      if (has_uvs) {
-        file << index;
-      }
-      file << '/' << index;
-      if (i + 1u < 3u) {
-        file << ' ';
-      }
-    }
-    file << '\n';
-  }
 }
 
 }  // namespace
 
-Mesh LoadMeshFile(const std::string& path) {
+common_data::Mesh LoadAssimpMeshFile(const std::string& path) {
   const auto append_probe = [&](const std::string& line) {
     const std::filesystem::path probe_path =
-      algorithm::library_paths::ResolveAlgorithmLibraryRuntimeNormDebugInfoRoot() / "mesh_io_probe.log";
+      algorithm::library_paths::ResolveAlgorithmLibraryRuntimeNormDebugInfoRoot() / "assimp_probe.log";
     std::error_code ec;
     std::filesystem::create_directories(probe_path.parent_path(), ec);
     std::ofstream file(probe_path, std::ios::binary | std::ios::app);
@@ -270,6 +173,7 @@ Mesh LoadMeshFile(const std::string& path) {
       file << line << '\n';
     }
   };
+
   append_probe("load.begin path=" + path);
   Assimp::Importer importer;
   const aiScene* scene = importer.ReadFile(
@@ -289,30 +193,5 @@ Mesh LoadMeshFile(const std::string& path) {
   return mesh;
 }
 
-Mesh LoadMeshObjFile(const std::string& path) {
-  return LoadMeshFile(path);
-}
-
-void SaveMeshObjFile(const Mesh& input_mesh, const std::string& path) {
-  Mesh mesh = PrepareMeshForObjExport(input_mesh);
-
-  std::ofstream file(path);
-  if (!file) {
-    throw std::runtime_error("Failed to write OBJ file: " + path);
-  }
-
-  file << "# generated mesh\n";
-  file << "o mesh\n";
-  WriteObjVertex(mesh, file);
-  if (mesh.uvs.size() == mesh.positions.size()) {
-    WriteObjUvs(mesh, file);
-  }
-  WriteObjNormals(mesh, file);
-  WriteObjFaces(mesh, file);
-}
-
-void GenerateDefaultTriangleObjFile(const std::string& path) {
-  SaveMeshObjFile(common_data::BuildDefaultTriangleMesh(), path);
-}
-
-}  // namespace mesh_io
+}  // namespace algocatalog
+}  // namespace algomanager

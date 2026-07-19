@@ -1,10 +1,13 @@
 #include "algomanager/bridge/algorithm_protocol.h"
+#include "algomanager/catalog/algorithm_catalog.h"
 #include "algomanager/catalog/algorithm_vk_exec_support_detail.h"
 #include "algomanager/catalog/algorithm_intervention_support_detail.h"
+#include "algomanager/catalog/algorithm_package_precision.h"
 #include "algomanager/bridge/algorithm_package_location.h"
 #include "algomanager/catalog/algorithm_package_paths.h"
 #include "algomanager/bridge/algorithm_types.h"
 #include "algomanager/catalog/algorithm_json_utils.h"
+#include "algomanager/catalog/algorithm_package_loader_detail.h"
 #define RUNTIME_SYSTEMS_LAYER_PUBLIC_FACADE_INCLUDE 1
 #include "runtimesys/runtime_environment.h"
 #undef RUNTIME_SYSTEMS_LAYER_PUBLIC_FACADE_INCLUDE
@@ -42,7 +45,7 @@ namespace fs = std::filesystem;
 
 struct AlgorithmObjectMountMetadataCacheEntry {
   std::shared_ptr<algorithm::AlgorithmContainerSet> container_template{};
-  algomanager::AlgorithmTickLifetime tick_lifetime{algomanager::AlgorithmTickLifetime::Continuous};
+  algomanager::bridge::AlgorithmTickLifetime tick_lifetime{algomanager::bridge::AlgorithmTickLifetime::Continuous};
   std::shared_ptr<algorithm::AlgorithmRuntimeTransferMap> runtime_transfer_map{};
   bool has_runtime_transfer_map{false};
   std::vector<std::string> pipeline_external_write_reset_container_names{};
@@ -64,7 +67,7 @@ bool _ResolveSingleRuntimeContainerReferenceName(
 
 bool _LoadPackageRuntimeLifetime(
   const algorithm::AlgorithmPackageLocation& package_location,
-  algomanager::AlgorithmTickLifetime* out_tick_lifetime,
+  algomanager::bridge::AlgorithmTickLifetime* out_tick_lifetime,
   std::string* out_error_message);
 
 bool _LoadPackageRuntimePipelineExternalWriteResetContainers(
@@ -84,8 +87,7 @@ bool _HasDeclaredContainerNameConflict(
   const std::string& container_name);
 
 bool _ShouldEmitPipelineRunnerProbe(const std::string& algorithm_name) {
-  return algorithm_name.find("v4a10_teapot_pbr_demo") != std::string::npos ||
-    algorithm_name.find("v4a16_fireworks_pipeline_demo") != std::string::npos;
+  return loader_detail::ShouldEmitPipelineRunnerProbe(algorithm_name);
 }
 
 bool _HasDeclaredContainerNameConflict(
@@ -95,14 +97,7 @@ bool _HasDeclaredContainerNameConflict(
 }
 
 void _AppendPipelineRunnerProbe(const std::string& file_name, const std::string& line) {
-  const fs::path path = algorithm::library_paths::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot() /
-    file_name;
-  std::error_code ec;
-  fs::create_directories(path.parent_path(), ec);
-  std::ofstream file(path, std::ios::binary | std::ios::app);
-  if (file) {
-    file << line << '\n';
-  }
+  loader_detail::AppendPipelineRunnerProbe(file_name, line);
 }
 
 std::string _BuildAlgorithmObjectMountMetadataCacheKey(
@@ -205,44 +200,6 @@ bool _LoadAlgorithmObjectMountMetadata(
   return true;
 }
 
-bool _TryParseScalarPrecisionBits(std::string_view text, uint32_t* out_bits) {
-  if (!out_bits) {
-    return false;
-  }
-  if (text == "8" || text == "i8" || text == "u8") {
-    *out_bits = 8u;
-    return true;
-  }
-  if (text == "16" || text == "i16" || text == "u16" || text == "fp16" || text == "float16") {
-    *out_bits = 16u;
-    return true;
-  }
-  if (text == "32" || text == "i32" || text == "u32" || text == "fp32" || text == "float32" || text == "float") {
-    *out_bits = 32u;
-    return true;
-  }
-  if (text == "64" || text == "i64" || text == "u64" || text == "fp64" || text == "float64" || text == "double") {
-    *out_bits = 64u;
-    return true;
-  }
-  return false;
-}
-
-bool _ParseScalarPrecisionBits(
-  std::string_view text,
-  const std::string& package_path,
-  uint32_t* out_bits,
-  std::string* out_error_message) {
-  if (_TryParseScalarPrecisionBits(text, out_bits)) {
-    return true;
-  }
-  if (out_error_message) {
-    *out_error_message =
-      "Unsupported precision '" + std::string(text) + "' in package JSON: " + package_path;
-  }
-  return false;
-}
-
 bool _ResolveContainerScalarBits(
   const cJSON* root,
   const cJSON* container_item,
@@ -274,7 +231,7 @@ bool _ResolveContainerScalarBits(
         }
         return false;
       }
-      if (!_ParseScalarPrecisionBits(
+      if (!package_precision_detail::ParseScalarPrecisionBits(
             default_precision_item->valuestring,
             package_path,
             &default_bits,
@@ -302,7 +259,7 @@ bool _ResolveContainerScalarBits(
     }
     return false;
   }
-  return _ParseScalarPrecisionBits(
+  return package_precision_detail::ParseScalarPrecisionBits(
     precision_item->valuestring,
     package_path,
     out_bits,
@@ -311,7 +268,7 @@ bool _ResolveContainerScalarBits(
 
 bool _LoadPackageRuntimeLifetime(
   const algorithm::AlgorithmPackageLocation& package_location,
-  algomanager::AlgorithmTickLifetime* out_tick_lifetime,
+  algomanager::bridge::AlgorithmTickLifetime* out_tick_lifetime,
   std::string* out_error_message) {
   if (!out_tick_lifetime) {
     if (out_error_message) {
@@ -320,7 +277,7 @@ bool _LoadPackageRuntimeLifetime(
     return false;
   }
 
-  *out_tick_lifetime = algomanager::AlgorithmTickLifetime::Continuous;
+  *out_tick_lifetime = algomanager::bridge::AlgorithmTickLifetime::Continuous;
 
   const std::string algorithm_name = package_location.algorithm_name.empty()
     ? package_location.manifest_name
@@ -372,7 +329,7 @@ bool _LoadPackageRuntimeLifetime(
         return false;
       }
       if (cJSON_IsTrue(launch_once)) {
-        *out_tick_lifetime = algomanager::AlgorithmTickLifetime::LaunchOnceThenHold;
+        *out_tick_lifetime = algomanager::bridge::AlgorithmTickLifetime::LaunchOnceThenHold;
       }
     }
   }
@@ -2115,7 +2072,7 @@ PackageDefaultSchema _LoadPackageDefaultSchema(
 
 bool LoadAlgorithmInterventionFromLocation(
   const algorithm::AlgorithmPackageLocation& package_location,
-  std::shared_ptr<algomanager::algoscheduler::IAlgorithmIntervention>* out_intervention,
+  std::shared_ptr<algomanager::bridge::IAlgorithmIntervention>* out_intervention,
   std::string* out_error_message) {
   return intervention_detail::LoadAlgorithmInterventionFromLocationImpl(
     package_location,
@@ -2125,7 +2082,7 @@ bool LoadAlgorithmInterventionFromLocation(
 
 bool LoadAlgorithmVkExecutorFromLocation(
   const algorithm::AlgorithmPackageLocation& package_location,
-  std::shared_ptr<algomanager::algoscheduler::IAlgorithmVkExecutor>* out_vk_executor,
+  std::shared_ptr<algomanager::bridge::IAlgorithmVkExecutor>* out_vk_executor,
   std::string* out_error_message) {
   const bool loaded = vk_exec_detail::LoadAlgorithmVkExecutorFromLocationImpl(
     package_location,
@@ -2296,7 +2253,7 @@ bool LoadAlgorithmPackageTransferMapFromLocation(
 
 bool CreateAlgorithmObjectFromLocation(
   const algorithm::AlgorithmPackageLocation& package_location,
-  algomanager::algoscheduler::AlgorithmObject* out_group,
+  algomanager::bridge::AlgorithmObject* out_group,
   std::string* out_error_message,
   bool load_reflector) {
   const std::string probe_algorithm_name = package_location.algorithm_name.empty()
@@ -2317,7 +2274,7 @@ bool CreateAlgorithmObjectFromLocation(
     return false;
   }
 
-  algomanager::algoscheduler::AlgorithmObject group{};
+  algomanager::bridge::AlgorithmObject group{};
   group.algorithm_profile.algorithm_name = package_location.algorithm_name;
   group.algorithm_profile.container_manifest_name = package_location.manifest_name.empty()
     ? package_location.algorithm_name
@@ -2354,14 +2311,14 @@ bool CreateAlgorithmObjectFromLocation(
         std::string(mount_metadata.has_runtime_transfer_map ? "true" : "false"));
   }
 
-  std::shared_ptr<algomanager::algoscheduler::IAlgorithmIntervention> package_intervention{};
+  std::shared_ptr<algomanager::bridge::IAlgorithmIntervention> package_intervention{};
   if (!LoadAlgorithmInterventionFromLocation(
         package_location,
         &package_intervention,
         out_error_message)) {
     return false;
   }
-  std::shared_ptr<algomanager::algoscheduler::IAlgorithmVkExecutor> package_vk_executor{};
+  std::shared_ptr<algomanager::bridge::IAlgorithmVkExecutor> package_vk_executor{};
   if (!LoadAlgorithmVkExecutorFromLocation(
         package_location,
         &package_vk_executor,
@@ -2381,7 +2338,7 @@ bool CreateAlgorithmObjectFromLocation(
   }
 
   auto _ApplyLaunchOnceReflectionPolicy = [&group]() {
-    if (group.tick_lifetime == algomanager::AlgorithmTickLifetime::LaunchOnceThenHold &&
+    if (group.tick_lifetime == algomanager::bridge::AlgorithmTickLifetime::LaunchOnceThenHold &&
         group.algorithm_reflector &&
         group.algorithm_reflector->refresh_mode == algorithm::AlgorithmReflectionRefreshMode::EveryTick) {
       group.algorithm_reflector->refresh_mode = algorithm::AlgorithmReflectionRefreshMode::CaptureOnceAfterCompletion;
@@ -2425,12 +2382,12 @@ bool CreateAlgorithmObjectFromLocation(
     group.jobs_executor = plugin_components.jobs_executor;
     group.vk_executor = plugin_components.vk_executor
       ? plugin_components.vk_executor
-      : (plugin_components.vk_symbol ? package_vk_executor : std::shared_ptr<algomanager::algoscheduler::IAlgorithmVkExecutor>{});
+      : (plugin_components.vk_symbol ? package_vk_executor : std::shared_ptr<algomanager::bridge::IAlgorithmVkExecutor>{});
     group.cuda_executor = plugin_components.cuda_executor;
     group.compatibility_executor = plugin_components.compatibility_executor;
     group.intervention = plugin_components.intervention
       ? package_intervention
-      : std::shared_ptr<algomanager::algoscheduler::IAlgorithmIntervention>{};
+      : std::shared_ptr<algomanager::bridge::IAlgorithmIntervention>{};
     if (allow_reflector &&
         plugin_components.runtime_reflector &&
         !plugin_components.runtime_reflector->empty()) {
@@ -2477,8 +2434,8 @@ bool CreateAlgorithmObjectFromLocation(
 
 bool LoadAlgorithmPackageDefaultBindingsFromLocation(
   const algorithm::AlgorithmPackageLocation& package_location,
-  std::vector<algomanager::AlgorithmResourceBinding>* out_resource_bindings,
-  std::vector<algomanager::AlgorithmDescriptorValue>* out_descriptor_values,
+  std::vector<algomanager::bridge::AlgorithmResourceBinding>* out_resource_bindings,
+  std::vector<algomanager::bridge::AlgorithmDescriptorValue>* out_descriptor_values,
   bool* out_has_default_file,
   std::string* out_error_message) {
   if (!out_resource_bindings || !out_descriptor_values) {
@@ -2527,7 +2484,7 @@ bool LoadAlgorithmPackageDefaultBindingsFromLocation(
 
   out_resource_bindings->reserve(schema.resource_bindings.size());
   for (const PackageDefaultResourceBinding& binding : schema.resource_bindings) {
-    out_resource_bindings->push_back(algomanager::AlgorithmResourceBinding{
+    out_resource_bindings->push_back(algomanager::bridge::AlgorithmResourceBinding{
       .resource_name = binding.resource_name,
       .resource_kind = binding.resource_kind,
       .source_path = binding.source_path,
@@ -2535,7 +2492,7 @@ bool LoadAlgorithmPackageDefaultBindingsFromLocation(
   }
   out_descriptor_values->reserve(schema.descriptor_values.size());
   for (const PackageDefaultDescriptorValue& value : schema.descriptor_values) {
-    out_descriptor_values->push_back(algomanager::AlgorithmDescriptorValue{
+    out_descriptor_values->push_back(algomanager::bridge::AlgorithmDescriptorValue{
       .descriptor_name = value.descriptor_name,
       .scalar_value = value.scalar_value,
     });
@@ -2550,461 +2507,6 @@ bool LoadAlgorithmPackageDefaultBindingsFromLocation(
   return true;
 }
 
-namespace {
-
-using CreateBundleFn = bool (*)(
-  const algomanager::algocatalog::AlgorithmPluginRequest* request,
-  algomanager::algocatalog::AlgorithmPluginBundle* out_bundle);
-
-using CreateRuntimeReflectorFn = bool (*)(
-  const algomanager::algocatalog::AlgorithmPluginRequest* request,
-  algorithm::AlgorithmReflector* out_reflector);
-void _SetErrorMessage(std::string* out_error_message, std::string message) {
-  if (out_error_message) {
-    *out_error_message = std::move(message);
-  }
-}
-
-std::shared_ptr<void> _LoadModule(
-  const std::filesystem::path& path,
-  std::string* out_error_message) {
-  const fs::path absolute_path = fs::absolute(path).lexically_normal();
-  const std::wstring wide_path = absolute_path.wstring();
-  HMODULE module = LoadLibraryExW(
-    wide_path.c_str(),
-    nullptr,
-    LOAD_WITH_ALTERED_SEARCH_PATH);
-  if (!module) {
-    if (out_error_message) {
-      *out_error_message =
-        "LoadLibraryExW failed for " + absolute_path.string() +
-        " (GetLastError=" + std::to_string(static_cast<unsigned long>(GetLastError())) + ")";
-    }
-    return {};
-  }
-
-  return std::shared_ptr<void>(
-    module,
-    [](void* handle) {
-      if (handle) {
-        FreeLibrary(static_cast<HMODULE>(handle));
-      }
-    });
-}
-
-template <typename T>
-std::shared_ptr<T> _WrapPluginObject(
-  T* object,
-  void (*destroy_fn)(T*),
-  const std::shared_ptr<void>& module_guard) {
-  if (!object || !destroy_fn) {
-    return {};
-  }
-  return std::shared_ptr<T>(
-    object,
-    [module_guard, destroy_fn](T* ptr) {
-      (void)module_guard;
-      if (ptr) {
-        destroy_fn(ptr);
-      }
-    });
-}
-
-}  // namespace
-
-bool TryLoadAlgorithmPluginComponents(
-  const algorithm::AlgorithmPackageLocation& package_location,
-  AlgorithmPluginComponents* out_components,
-  std::string* out_error_message) {
-  if (!out_components) {
-    _SetErrorMessage(out_error_message, "AlgorithmPluginComponents output pointer is null.");
-    return false;
-  }
-
-  *out_components = {};
-  if (!package_location.valid) {
-    _SetErrorMessage(out_error_message, "Algorithm package location is invalid.");
-    return false;
-  }
-
-  const std::filesystem::path plugin_path = package_location.plugin_module_path;
-  if (plugin_path.empty()) {
-    return false;
-  }
-
-  std::string load_error_message{};
-  if (_ShouldEmitPipelineRunnerProbe(package_location.algorithm_name.empty()
-        ? package_location.manifest_name
-        : package_location.algorithm_name)) {
-    _AppendPipelineRunnerProbe(
-      "cache_loader_probe.log",
-      "create_from_location.plugin_load.module.begin path=" +
-        std::filesystem::absolute(plugin_path).lexically_normal().string());
-  }
-  const std::shared_ptr<void> module_guard = _LoadModule(plugin_path, &load_error_message);
-  if (!module_guard) {
-    if (_ShouldEmitPipelineRunnerProbe(package_location.algorithm_name.empty()
-          ? package_location.manifest_name
-          : package_location.algorithm_name)) {
-      _AppendPipelineRunnerProbe(
-        "cache_loader_probe.log",
-        "create_from_location.plugin_load.module.end failed error=" + load_error_message);
-    }
-    _SetErrorMessage(
-      out_error_message,
-      load_error_message.empty()
-        ? "Failed to load algorithm plugin module: " +
-          std::filesystem::absolute(plugin_path).lexically_normal().string()
-        : load_error_message);
-    return false;
-  }
-  if (_ShouldEmitPipelineRunnerProbe(package_location.algorithm_name.empty()
-        ? package_location.manifest_name
-        : package_location.algorithm_name)) {
-    _AppendPipelineRunnerProbe("cache_loader_probe.log", "create_from_location.plugin_load.module.end success");
-  }
-
-  if (_ShouldEmitPipelineRunnerProbe(package_location.algorithm_name.empty()
-        ? package_location.manifest_name
-        : package_location.algorithm_name)) {
-    _AppendPipelineRunnerProbe("cache_loader_probe.log", "create_from_location.plugin_load.proc.begin");
-  }
-  const auto create_bundle_fn = reinterpret_cast<CreateBundleFn>(
-    GetProcAddress(static_cast<HMODULE>(module_guard.get()), "AlgorithmPlugin_CreateBundle"));
-  if (!create_bundle_fn) {
-    if (_ShouldEmitPipelineRunnerProbe(package_location.algorithm_name.empty()
-          ? package_location.manifest_name
-          : package_location.algorithm_name)) {
-      _AppendPipelineRunnerProbe("cache_loader_probe.log", "create_from_location.plugin_load.proc.end missing");
-    }
-    _SetErrorMessage(out_error_message, "Algorithm plugin is missing AlgorithmPlugin_CreateBundle: " + plugin_path.string());
-    return false;
-  }
-  if (_ShouldEmitPipelineRunnerProbe(package_location.algorithm_name.empty()
-        ? package_location.manifest_name
-        : package_location.algorithm_name)) {
-    _AppendPipelineRunnerProbe("cache_loader_probe.log", "create_from_location.plugin_load.proc.end success");
-  }
-
-  algomanager::algocatalog::AlgorithmPluginRequest request{};
-  const std::filesystem::path plugin_request_package_root =
-    package_location.source_package_root.empty()
-      ? package_location.package_root
-      : package_location.source_package_root;
-  const std::string algorithm_library_root = plugin_request_package_root.has_parent_path()
-    ? plugin_request_package_root.parent_path().generic_string()
-    : plugin_request_package_root.generic_string();
-  const std::string algorithm_folder = plugin_request_package_root.filename().generic_string();
-  request.algorithm_name = package_location.algorithm_name.c_str();
-  request.algorithm_library_root = algorithm_library_root.c_str();
-  request.algorithm_folder = algorithm_folder.c_str();
-
-  algomanager::algocatalog::AlgorithmPluginBundle bundle{};
-  if (_ShouldEmitPipelineRunnerProbe(package_location.algorithm_name.empty()
-        ? package_location.manifest_name
-        : package_location.algorithm_name)) {
-    _AppendPipelineRunnerProbe("cache_loader_probe.log", "create_from_location.plugin_bundle.begin");
-  }
-  if (!create_bundle_fn(&request, &bundle)) {
-    if (_ShouldEmitPipelineRunnerProbe(package_location.algorithm_name.empty()
-          ? package_location.manifest_name
-          : package_location.algorithm_name)) {
-      _AppendPipelineRunnerProbe("cache_loader_probe.log", "create_from_location.plugin_bundle.end failed");
-    }
-    _SetErrorMessage(out_error_message, "Algorithm plugin rejected bundle creation: " + plugin_path.string());
-    return false;
-  }
-  if (_ShouldEmitPipelineRunnerProbe(package_location.algorithm_name.empty()
-        ? package_location.manifest_name
-        : package_location.algorithm_name)) {
-    _AppendPipelineRunnerProbe("cache_loader_probe.log", "create_from_location.plugin_bundle.end success");
-  }
-
-  if (request.api_version != algomanager::algocatalog::kAlgorithmPluginApiVersion) {
-    _SetErrorMessage(
-      out_error_message,
-      "Algorithm plugin request ABI version mismatch for: " + plugin_path.string());
-    return false;
-  }
-  if (bundle.api_version != algomanager::algocatalog::kAlgorithmPluginApiVersion) {
-    _SetErrorMessage(
-      out_error_message,
-      "Algorithm plugin bundle ABI version mismatch for: " + plugin_path.string());
-    return false;
-  }
-
-  out_components->jobs_symbol = bundle.jobs_symbol;
-  out_components->vk_symbol = bundle.vk_symbol;
-  out_components->cuda_symbol = bundle.cuda_symbol;
-  out_components->compatibility_symbol = bundle.compatibility_symbol;
-  out_components->reflector = bundle.reflector;
-  out_components->intervention = bundle.intervention;
-
-  if (bundle.vk_executor && bundle.destroy_vk_executor) {
-    out_components->vk_executor = _WrapPluginObject(
-      bundle.vk_executor,
-      bundle.destroy_vk_executor,
-      module_guard);
-  }
-  if (bundle.cuda_executor && bundle.destroy_cuda_executor) {
-    out_components->cuda_executor = _WrapPluginObject(
-      bundle.cuda_executor,
-      bundle.destroy_cuda_executor,
-      module_guard);
-  }
-  if (bundle.compatibility_executor && bundle.destroy_compatibility_executor) {
-    out_components->compatibility_executor = _WrapPluginObject(
-      bundle.compatibility_executor,
-      bundle.destroy_compatibility_executor,
-      module_guard);
-  }
-  if (bundle.jobs_executor && bundle.destroy_jobs_executor) {
-    out_components->jobs_executor = _WrapPluginObject(
-      bundle.jobs_executor,
-      bundle.destroy_jobs_executor,
-      module_guard);
-  }
-
-  if (_ShouldEmitPipelineRunnerProbe(package_location.algorithm_name.empty()
-        ? package_location.manifest_name
-        : package_location.algorithm_name) &&
-      bundle.reflector) {
-    _AppendPipelineRunnerProbe("cache_loader_probe.log", "create_from_location.reflector.skipped");
-  }
-  _SetErrorMessage(out_error_message, {});
-  return true;
-}
-
 }  // namespace catalog
 
-namespace bridge { namespace runtime_bridge_support {
-
-std::string ResolveAlgorithmVkShaderPath(
-  const ::algomanager::algoscheduler::AlgorithmObject& object,
-  const std::string& shader_path,
-  std::string* out_error_message) {
-  if (shader_path.empty()) {
-    if (out_error_message) {
-      *out_error_message = "VK shader path must not be empty.";
-    }
-    return {};
-  }
-
-  const std::filesystem::path path(shader_path);
-  if (path.is_absolute()) {
-    if (out_error_message) {
-      out_error_message->clear();
-    }
-    return path.string();
-  }
-
-  std::filesystem::path runtime_package_root(object.runtime_package_root_path);
-  if (runtime_package_root.empty()) {
-    ::algorithm::AlgorithmPackageLocation package_location{};
-    std::string resolve_error_message;
-    if (!::algorithm::TryResolveAlgorithmPackageLocation(
-          object.algorithm_profile.algorithm_name,
-          &package_location,
-          &resolve_error_message)) {
-      if (out_error_message) {
-        *out_error_message = resolve_error_message.empty()
-          ? ("Failed to resolve algorithm package location for '" + object.algorithm_profile.algorithm_name + "'.")
-          : std::move(resolve_error_message);
-      }
-      return {};
-    }
-    runtime_package_root = package_location.runtime_package_root;
-  }
-  if (runtime_package_root.empty()) {
-    if (out_error_message) {
-      *out_error_message =
-        "Algorithm runtime package root is empty for '" + object.algorithm_profile.algorithm_name + "'.";
-    }
-    return {};
-  }
-
-  const std::filesystem::path resolved_path = (runtime_package_root / path).lexically_normal();
-  if (resolved_path.empty()) {
-    if (out_error_message) {
-      *out_error_message =
-        "Failed to resolve VK shader path for '" + object.algorithm_profile.algorithm_name + "'.";
-    }
-    return {};
-  }
-  if (out_error_message) {
-    out_error_message->clear();
-  }
-  return resolved_path.string();
-}
-
-bool TryBuildAlgorithmInterventionVkPhaseSubJob(
-  const ::algomanager::algoscheduler::AlgorithmObject& object,
-  const ::algomanager::algoscheduler::AlgorithmPhaseSpec& phase_spec,
-  ::algorithm::AlgorithmContainerSet* container_set,
-  runtimesys::RuntimeVkStageSubJob* out_stage_job,
-  std::string* out_error_message) {
-  if (!container_set || !out_stage_job) {
-    if (out_error_message) {
-      *out_error_message = "VK stage sub-job output pointer is null.";
-    }
-    return false;
-  }
-  if (phase_spec.shader.vertex_shader_path.empty() || phase_spec.shader.fragment_shader_path.empty()) {
-    if (out_error_message) {
-      *out_error_message = "VK phase is missing shader paths.";
-    }
-    return false;
-  }
-  if (phase_spec.used_algorithm_containers.empty()) {
-    if (out_error_message) {
-      *out_error_message = "VK phase does not bind any containers.";
-    }
-    return false;
-  }
-
-  out_stage_job->debug_name = object.algorithm_profile.algorithm_name + "::" + phase_spec.stage_name;
-  out_stage_job->stage_name = phase_spec.stage_name;
-  out_stage_job->vertex_shader_path = ResolveAlgorithmVkShaderPath(
-    object,
-    phase_spec.shader.vertex_shader_path,
-    out_error_message);
-  if (out_stage_job->vertex_shader_path.empty()) {
-    return false;
-  }
-  out_stage_job->fragment_shader_path = ResolveAlgorithmVkShaderPath(
-    object,
-    phase_spec.shader.fragment_shader_path,
-    out_error_message);
-  if (out_stage_job->fragment_shader_path.empty()) {
-    return false;
-  }
-
-  out_stage_job->buffer_bindings.reserve(phase_spec.used_algorithm_containers.size());
-  for (const ::algomanager::algoscheduler::AlgorithmPhaseContainerBinding& binding : phase_spec.used_algorithm_containers) {
-    ::algorithm::AlgorithmContainer* container =
-      ::algorithm::FindAlgorithmContainer(container_set, binding.container_name);
-    if (!container) {
-      if (out_error_message) {
-        *out_error_message = binding.required
-          ? ("VK phase is missing container '" + binding.container_name + "'.")
-          : ("VK optional container '" + binding.container_name +
-              "' is not supported because runtime VK bindings must stay positional.");
-      }
-      return false;
-    }
-    if (container->element_stride == 0u || container->bytes.empty()) {
-      if (out_error_message) {
-        *out_error_message = binding.required
-          ? ("VK phase container '" + binding.container_name + "' has no data.")
-          : ("VK optional container '" + binding.container_name +
-              "' has no data, and sparse VK bindings are not supported.");
-      }
-      return false;
-    }
-
-    runtimesys::RuntimeVkBufferBindingView binding_view{};
-    binding_view.binding_name = binding.container_name;
-    binding_view.bytes = container->bytes.data();
-    binding_view.size_bytes = container->bytes.size();
-    binding_view.element_stride = container->element_stride;
-    binding_view.array_like = binding.container_kind == "array";
-    binding_view.draw_indirect = binding.container_kind == "draw_indirect";
-    binding_view.required = binding.required;
-    out_stage_job->buffer_bindings.push_back(std::move(binding_view));
-  }
-
-  if (out_error_message) {
-    out_error_message->clear();
-  }
-  return true;
-}
-
-bool TryBuildAlgorithmVkExecStageSubJob(
-  const ::algomanager::algoscheduler::AlgorithmObject& object,
-  const ::algomanager::algoscheduler::AlgorithmVkExecSpec& vk_exec_spec,
-  ::algorithm::AlgorithmContainerSet* container_set,
-  runtimesys::RuntimeVkStageSubJob* out_stage_job,
-  std::string* out_error_message) {
-  if (!container_set || !out_stage_job) {
-    if (out_error_message) {
-      *out_error_message = "VK exec stage sub-job output pointer is null.";
-    }
-    return false;
-  }
-  if (vk_exec_spec.shader.vertex_shader_path.empty() || vk_exec_spec.shader.fragment_shader_path.empty()) {
-    if (out_error_message) {
-      *out_error_message = "VK exec stage is missing shader paths.";
-    }
-    return false;
-  }
-  if (vk_exec_spec.used_algorithm_containers.empty()) {
-    if (out_error_message) {
-      *out_error_message = "VK exec stage does not bind any containers.";
-    }
-    return false;
-  }
-
-  out_stage_job->debug_name = object.algorithm_profile.algorithm_name + "::" + vk_exec_spec.stage_name;
-  out_stage_job->stage_name = vk_exec_spec.stage_name;
-  out_stage_job->vertex_shader_path = ResolveAlgorithmVkShaderPath(
-    object,
-    vk_exec_spec.shader.vertex_shader_path,
-    out_error_message);
-  if (out_stage_job->vertex_shader_path.empty()) {
-    return false;
-  }
-  out_stage_job->fragment_shader_path = ResolveAlgorithmVkShaderPath(
-    object,
-    vk_exec_spec.shader.fragment_shader_path,
-    out_error_message);
-  if (out_stage_job->fragment_shader_path.empty()) {
-    return false;
-  }
-
-  out_stage_job->buffer_bindings.reserve(vk_exec_spec.used_algorithm_containers.size());
-  for (const ::algomanager::algoscheduler::AlgorithmVkExecContainerBinding& binding : vk_exec_spec.used_algorithm_containers) {
-    ::algorithm::AlgorithmContainer* container =
-      ::algorithm::FindAlgorithmContainer(container_set, binding.container_name);
-    if (!container) {
-      if (out_error_message) {
-        *out_error_message = binding.required
-          ? ("VK exec stage is missing container '" + binding.container_name + "'.")
-          : ("VK exec optional container '" + binding.container_name +
-              "' is not supported because runtime VK bindings must stay positional.");
-      }
-      return false;
-    }
-    if (container->element_stride == 0u || container->bytes.empty()) {
-      if (out_error_message) {
-        *out_error_message = binding.required
-          ? ("VK exec stage container '" + binding.container_name + "' has no data.")
-          : ("VK exec optional container '" + binding.container_name +
-              "' has no data, and sparse VK bindings are not supported.");
-      }
-      return false;
-    }
-
-    runtimesys::RuntimeVkBufferBindingView binding_view{};
-    binding_view.binding_name = binding.container_name;
-    binding_view.bytes = container->bytes.data();
-    binding_view.size_bytes = container->bytes.size();
-    binding_view.element_stride = container->element_stride;
-    binding_view.array_like = binding.container_kind == "array";
-    binding_view.draw_indirect = binding.container_kind == "draw_indirect";
-    binding_view.required = binding.required;
-    out_stage_job->buffer_bindings.push_back(std::move(binding_view));
-  }
-
-  if (out_error_message) {
-    out_error_message->clear();
-  }
-  return true;
-}
-
-}  // namespace runtime_bridge_support
-}  // namespace bridge
-
 }  // namespace algomanager
-
-#include "algomanager/algorithm_manager.cpp"
-

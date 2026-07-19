@@ -2,18 +2,14 @@
 
 #include "../algorithm_plugin_api.h"
 
-#include "D:/relyingResourse/physx_dev/physx_5_5_0/install/vc17win64/PhysX/include/PxPhysicsAPI.h"
-#include "D:/relyingResourse/physx_dev/physx_5_5_0/install/vc17win64/PhysX/include/gpu/PxGpu.h"
+#include <PxPhysicsAPI.h>
+#include <gpu/PxGpu.h>
 
 #include <cassert>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <string>
-
-#pragma comment(lib, "D:\\relyingResourse\\physx_dev\\physx_5_5_0\\install\\vc17win64\\PhysX\\bin\\win.x86_64.vc143.md\\checked\\PhysX_64.lib")
-#pragma comment(lib, "D:\\relyingResourse\\physx_dev\\physx_5_5_0\\install\\vc17win64\\PhysX\\bin\\win.x86_64.vc143.md\\checked\\PhysXCommon_64.lib")
-#pragma comment(lib, "D:\\relyingResourse\\physx_dev\\physx_5_5_0\\install\\vc17win64\\PhysX\\bin\\win.x86_64.vc143.md\\checked\\PhysXFoundation_64.lib")
 
 using namespace physx;
 
@@ -93,7 +89,7 @@ class PhysXLanceGpuState final {
   void Step(
       algorithm::AlgorithmContainerSet* algorithm_container_set,
       AlgorithmToAgentSignal* algorithm_to_agent_signal,
-      agent::AlgorithmPackageDebugState* debug_state) {
+      algomanager::bridge::AlgorithmPackageDebugState* debug_state) {
     scene_->simulate(1.0f / 60.0f);
     scene_->fetchResults(true);
     const PxTransform pose = lance_->getGlobalPose();
@@ -127,7 +123,7 @@ class PhysXLanceGpuState final {
     const uint32_t draw_command[4] = {4u, 2u, 0u, 0u};
     std::memcpy(scene_data->bytes.data(), render_scene, sizeof(render_scene));
     std::memcpy(render_draw->bytes.data(), draw_command, sizeof(draw_command));
-      debug_state->signals.push_back(algomanager::algoscheduler::AdvancedAlgorithmDebugSignal{
+      debug_state->signals.push_back(algomanager::bridge::AdvancedAlgorithmDebugSignal{
       .name = "physx_lance_cuda.step",
       .payload = "tick=" + std::to_string(tick_count_) +
         ",x=" + std::to_string(pose.p.x) +
@@ -186,15 +182,15 @@ class PhysXLanceGpuState final {
   bool impact_{false};
 };
 
-class PhysXLanceCudaExecutor final : public agent::IAlgorithmCudaExecutor {
+class PhysXLanceCudaExecutor final : public algomanager::bridge::IAlgorithmCudaExecutor {
  public:
   bool ExecuteCudaAlgorithm(
-      const agent::AgentTickContext& context,
+      const algomanager::bridge::AgentTickContext& context,
       const algorithm::AlgorithmProfile& algorithm_profile,
       const AgentToAlgorithmSignal& agent_to_algorithm_signal,
       algorithm::AlgorithmContainerSet* algorithm_container_set,
       AlgorithmToAgentSignal* algorithm_to_agent_signal,
-      agent::AlgorithmPackageDebugState* debug_state) override {
+      algomanager::bridge::AlgorithmPackageDebugState* debug_state) override {
     (void)context;
     (void)algorithm_profile;
     (void)agent_to_algorithm_signal;
@@ -206,15 +202,15 @@ class PhysXLanceCudaExecutor final : public agent::IAlgorithmCudaExecutor {
   PhysXLanceGpuState state_{};
 };
 
-void DestroyPhysXLanceCudaExecutor(agent::IAlgorithmCudaExecutor* executor) {
+void DestroyPhysXLanceCudaExecutor(algomanager::bridge::IAlgorithmCudaExecutor* executor) {
   delete executor;
 }
 
 }  // namespace
 
 extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateBundle(
-    const algomanager::support::AlgorithmPluginRequest* request,
-    algomanager::support::AlgorithmPluginBundle* out_bundle) {
+    const algomanager::algocatalog::AlgorithmPluginRequest* request,
+    algomanager::algocatalog::AlgorithmPluginBundle* out_bundle) {
   (void)request;
   assert(out_bundle && "Algorithm plugin bundle output must be valid.");
   out_bundle->Clear();

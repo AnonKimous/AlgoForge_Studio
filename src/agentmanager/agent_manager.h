@@ -14,28 +14,28 @@
 #include <vector>
 
 namespace agentmanager {
-using algomanager::AlgorithmAssemblyState;
-using algomanager::AlgorithmContainerStorageKind;
-using algomanager::AlgorithmDescriptorValue;
-using algomanager::AlgorithmExecutionPreference;
-using algomanager::AlgorithmInterventionContainerBinding;
-using algomanager::AlgorithmInterventionStageKind;
-using algomanager::AlgorithmInterventionStageSpec;
-using algomanager::AlgorithmMountMode;
-using algomanager::AlgorithmPipelineStageRuntimeStat;
-using algomanager::AlgorithmPipelineStageSubmission;
-using algomanager::AlgorithmPipelineSyncMode;
-using algomanager::AlgorithmPipelineTopology;
-using algomanager::AlgorithmRequestedDescriptorBindings;
-using algomanager::AlgorithmRequestedResources;
-using algomanager::AlgorithmResourceBinding;
-using algomanager::AlgorithmTickLifetime;
-using algomanager::JobsPipelineRegistration;
-using algomanager::JobsPipelineRuntimeState;
-using algomanager::AgentAlgorithmRuntimeState;
-using algomanager::AgentInitConfig;
-using algomanager::AgentTickContext;
-using algomanager::AgentTickResult;
+using algomanager::bridge::AlgorithmAssemblyState;
+using algorithm::AlgorithmContainerStorageKind;
+using algomanager::bridge::AlgorithmDescriptorValue;
+using algomanager::bridge::AlgorithmExecutionPreference;
+using algomanager::bridge::AlgorithmInterventionContainerBinding;
+using algomanager::bridge::AlgorithmInterventionStageKind;
+using algomanager::bridge::AlgorithmInterventionStageSpec;
+using algomanager::bridge::AlgorithmMountMode;
+using algomanager::bridge::AlgorithmPipelineStageRuntimeStat;
+using algomanager::bridge::AlgorithmPipelineStageSubmission;
+using algomanager::bridge::AlgorithmPipelineSyncMode;
+using algomanager::bridge::AlgorithmPipelineTopology;
+using algomanager::bridge::AlgorithmRequestedDescriptorBindings;
+using algomanager::bridge::AlgorithmRequestedResources;
+using algomanager::bridge::AlgorithmResourceBinding;
+using algomanager::bridge::AlgorithmTickLifetime;
+using algomanager::bridge::JobsPipelineRegistration;
+using algomanager::bridge::JobsPipelineRuntimeState;
+using algomanager::bridge::AgentAlgorithmRuntimeState;
+using algomanager::bridge::AgentInitConfig;
+using algomanager::bridge::AgentTickContext;
+using algomanager::bridge::AgentTickResult;
 
 struct AgentCreateSpec {
   std::string agent_name;
@@ -82,7 +82,7 @@ struct AlgorithmPipelineStallReport {
   std::string algorithm_name;
   float stalled_seconds{0.0f};
   std::string reason;
-  std::vector<algomanager::AlgorithmPipelineStageRuntimeStat> stage_runtime_stats;
+  std::vector<algomanager::bridge::AlgorithmPipelineStageRuntimeStat> stage_runtime_stats;
 };
 
 bool ReportAlgorithmPipelineStall(

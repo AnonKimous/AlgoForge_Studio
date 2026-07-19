@@ -34,15 +34,15 @@ void WriteFloat(algorithm::AlgorithmContainer* container, float value) {
   std::memcpy(container->bytes.data(), &value, sizeof(value));
 }
 
-class TideFastPathJobsExecutor final : public agent::IAlgorithmJobsExecutor {
+class TideFastPathJobsExecutor final : public algomanager::bridge::IAlgorithmJobsExecutor {
  public:
   bool ExecuteJobsAlgorithm(
-    const agent::AgentTickContext& context,
+    const algomanager::bridge::AgentTickContext& context,
     const algorithm::AlgorithmProfile& algorithm_profile,
     const AgentToAlgorithmSignal& agent_to_algorithm_signal,
     algorithm::AlgorithmContainerSet* algorithm_container_set,
     AlgorithmToAgentSignal* algorithm_to_agent_signal,
-    agent::AlgorithmPackageDebugState* debug_state) override {
+    algomanager::bridge::AlgorithmPackageDebugState* debug_state) override {
     (void)context;
     (void)algorithm_profile;
     (void)agent_to_algorithm_signal;
@@ -59,7 +59,7 @@ class TideFastPathJobsExecutor final : public agent::IAlgorithmJobsExecutor {
       *algorithm_to_agent_signal = {};
     }
     if (debug_state) {
-      debug_state->signals.push_back(algomanager::algoscheduler::AdvancedAlgorithmDebugSignal{
+      debug_state->signals.push_back(algomanager::bridge::AdvancedAlgorithmDebugSignal{
         .name = "v2a0minimal_tide_fastpath.jobs",
         .payload = "v1=" + std::to_string(next_wave) + ", v2=" + std::to_string(std::sinf(next_wave)),
       });
@@ -68,15 +68,15 @@ class TideFastPathJobsExecutor final : public agent::IAlgorithmJobsExecutor {
   }
 };
 
-void DestroyJobsExecutor(agent::IAlgorithmJobsExecutor* executor) {
+void DestroyJobsExecutor(algomanager::bridge::IAlgorithmJobsExecutor* executor) {
   delete executor;
 }
 
 }  // namespace
 
 extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateBundle(
-  const algomanager::support::AlgorithmPluginRequest* request,
-  algomanager::support::AlgorithmPluginBundle* out_bundle) {
+  const algomanager::algocatalog::AlgorithmPluginRequest* request,
+  algomanager::algocatalog::AlgorithmPluginBundle* out_bundle) {
   (void)request;
   assert(out_bundle && "Algorithm plugin bundle output must be valid.");
 
@@ -92,7 +92,7 @@ extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateBundle(
 }
 
 extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateRuntimeReflector(
-  const algomanager::support::AlgorithmPluginRequest* request,
+  const algomanager::algocatalog::AlgorithmPluginRequest* request,
   algorithm::AlgorithmReflector* out_reflector) {
   assert(request && "Algorithm plugin request must be valid.");
   assert(out_reflector && "Runtime reflector output must be valid.");
@@ -105,7 +105,7 @@ extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateRuntimeReflec
         nullptr)) {
     return false;
   }
-  if (!algomanager::support::LoadAlgorithmPackageReflectorFromLocation(
+  if (!algomanager::algocatalog::LoadAlgorithmPackageReflectorFromLocation(
         package_location,
         &runtime_reflector,
         nullptr) || !runtime_reflector) {

@@ -2,11 +2,13 @@
 #include "algomanager/bridge/algorithm_abi.h"
 
 #include "algomanager/catalog/algorithm_container_manifest.h"
-#include "algomanager/catalog/algorithm_library_paths.h"
+#include "algomanager/catalog/algorithm_assimp_support.h"
+#include "algomanager/catalog/algorithm_package_descriptor_detail.h"
+#include "algomanager/catalog/algorithm_package_precision.h"
+#include "algomanager/bridge/algorithm_library_paths.h"
 #include "algomanager/catalog/algorithm_json_utils.h"
 #include "algomanager/bridge/algorithm_package_location.h"
 #include "algomanager/catalog/algorithm_package_paths.h"
-#include "capabilities/sidecar/mesh_io.h"
 
 #include "cJSON.h"
 
@@ -38,43 +40,6 @@ void _SetErrorMessage(std::string* out_error_message, std::string message) {
   }
 }
 
-bool _TryParseScalarPrecisionBits(std::string_view text, uint32_t* out_bits) {
-  if (!out_bits) {
-    return false;
-  }
-  if (text == "8" || text == "i8" || text == "u8") {
-    *out_bits = 8u;
-    return true;
-  }
-  if (text == "16" || text == "i16" || text == "u16" || text == "fp16" || text == "float16") {
-    *out_bits = 16u;
-    return true;
-  }
-  if (text == "32" || text == "i32" || text == "u32" || text == "fp32" || text == "float32" || text == "float") {
-    *out_bits = 32u;
-    return true;
-  }
-  if (text == "64" || text == "i64" || text == "u64" || text == "fp64" || text == "float64" || text == "double") {
-    *out_bits = 64u;
-    return true;
-  }
-  return false;
-}
-
-bool _ParseScalarPrecisionBits(
-  std::string_view text,
-  const std::string& package_path,
-  uint32_t* out_bits,
-  std::string* out_error_message) {
-  if (_TryParseScalarPrecisionBits(text, out_bits)) {
-    return true;
-  }
-  _SetErrorMessage(
-    out_error_message,
-    "Unsupported precision '" + std::string(text) + "' in package JSON: " + package_path);
-  return false;
-}
-
 bool _NormalizeDescriptorValueCodec(
   std::string_view text,
   std::string* out_codec) {
@@ -99,14 +64,6 @@ bool _NormalizeDescriptorValueCodec(
   }
   return false;
 }
-
-bool _WriteDescriptorScalarValue(
-  algorithm::AlgorithmContainer* container,
-  size_t byte_offset,
-  uint32_t scalar_bits,
-  const std::string& value_codec,
-  double value,
-  std::string* out_error_message);
 
 struct PackageDecomposerMeshBinding {
   std::string resource_kind;
@@ -270,7 +227,7 @@ bool _LoadContainerInfos(
         _SetErrorMessage(out_error_message, "Package defaultPrecision must be a string: " + package_path);
         return false;
       }
-      if (!_ParseScalarPrecisionBits(
+  if (!package_precision_detail::ParseScalarPrecisionBits(
             default_precision_item->valuestring,
             package_path,
             &default_bits,
@@ -323,7 +280,7 @@ bool _LoadContainerInfos(
             _SetErrorMessage(out_error_message, "Container precision must be a string: " + package_path);
             return false;
           }
-          if (!_ParseScalarPrecisionBits(
+          if (!package_precision_detail::ParseScalarPrecisionBits(
                 precision_item->valuestring,
                 package_path,
                 &scalar_bits,
@@ -1439,10 +1396,10 @@ bool _WriteMeshResourceField(
   return false;
 }
 
-const algomanager::algoscheduler::AlgorithmDescriptorValue* _FindDescriptorValue(
-  const std::vector<algomanager::algoscheduler::AlgorithmDescriptorValue>& descriptor_values,
+const algomanager::bridge::AlgorithmDescriptorValue* _FindDescriptorValue(
+  const std::vector<algomanager::bridge::AlgorithmDescriptorValue>& descriptor_values,
   std::string_view descriptor_name) {
-  for (const algomanager::algoscheduler::AlgorithmDescriptorValue& value : descriptor_values) {
+  for (const algomanager::bridge::AlgorithmDescriptorValue& value : descriptor_values) {
     if (value.descriptor_name == descriptor_name) {
       return &value;
     }
@@ -1451,7 +1408,7 @@ const algomanager::algoscheduler::AlgorithmDescriptorValue* _FindDescriptorValue
 }
 
 bool _ExtractPackedDescriptorSegments(
-  const algomanager::algoscheduler::AlgorithmDescriptorValue& descriptor_value,
+  const algomanager::bridge::AlgorithmDescriptorValue& descriptor_value,
   uint32_t source_scalar_bits,
   const std::vector<uint32_t>& packed_segment_bits,
   std::vector<double>* out_segment_values,
@@ -1527,10 +1484,10 @@ bool _ExtractPackedDescriptorSegments(
   return true;
 }
 
-const algomanager::algoscheduler::AlgorithmResourceBinding* _FindResourceBinding(
-  const std::vector<algomanager::algoscheduler::AlgorithmResourceBinding>& resource_bindings,
+const algomanager::bridge::AlgorithmResourceBinding* _FindResourceBinding(
+  const std::vector<algomanager::bridge::AlgorithmResourceBinding>& resource_bindings,
   std::string_view resource_name) {
-  for (const algomanager::algoscheduler::AlgorithmResourceBinding& binding : resource_bindings) {
+  for (const algomanager::bridge::AlgorithmResourceBinding& binding : resource_bindings) {
     if (binding.resource_name == resource_name) {
       return &binding;
     }
@@ -1538,10 +1495,10 @@ const algomanager::algoscheduler::AlgorithmResourceBinding* _FindResourceBinding
   return nullptr;
 }
 
-const algomanager::algoscheduler::AlgorithmResourceBinding* _FindResourceBindingByKind(
-  const std::vector<algomanager::algoscheduler::AlgorithmResourceBinding>& resource_bindings,
+const algomanager::bridge::AlgorithmResourceBinding* _FindResourceBindingByKind(
+  const std::vector<algomanager::bridge::AlgorithmResourceBinding>& resource_bindings,
   std::string_view resource_kind) {
-  for (const algomanager::algoscheduler::AlgorithmResourceBinding& binding : resource_bindings) {
+  for (const algomanager::bridge::AlgorithmResourceBinding& binding : resource_bindings) {
     if (binding.resource_kind == resource_kind) {
       return &binding;
     }
@@ -1567,7 +1524,7 @@ class PackageResourceDecomposer final {
 
   bool GetRequestedResources(
     const algorithm::AlgorithmProfile& algorithm_profile,
-    algomanager::AlgorithmRequestedResources* out_requested_resources) const {
+    algomanager::bridge::AlgorithmRequestedResources* out_requested_resources) const {
     if (!out_requested_resources) {
       return false;
     }
@@ -1575,7 +1532,7 @@ class PackageResourceDecomposer final {
     out_requested_resources->algorithm_name = algorithm_profile.algorithm_name;
     out_requested_resources->required_resources.reserve(schema_.mesh_bindings.size() + (schema_.mesh_field_bindings.empty() ? 0u : 1u));
     for (const PackageDecomposerMeshBinding& binding : schema_.mesh_bindings) {
-      out_requested_resources->required_resources.push_back(algomanager::algoscheduler::AlgorithmRequestedResources::RequiredResource{
+      out_requested_resources->required_resources.push_back(algomanager::bridge::AlgorithmRequestedResources::RequiredResource{
         .resource_name = binding.resource_name,
         .resource_kind = binding.resource_kind,
         .required = true,
@@ -1583,7 +1540,7 @@ class PackageResourceDecomposer final {
     }
     if (!schema_.mesh_field_bindings.empty()) {
       const std::string requested_kind = schema_.semantic_resource_kind.empty() ? "mesh" : schema_.semantic_resource_kind;
-      out_requested_resources->required_resources.push_back(algomanager::algoscheduler::AlgorithmRequestedResources::RequiredResource{
+      out_requested_resources->required_resources.push_back(algomanager::bridge::AlgorithmRequestedResources::RequiredResource{
         .resource_name = requested_kind,
         .resource_kind = requested_kind,
         .required = true,
@@ -1595,7 +1552,7 @@ class PackageResourceDecomposer final {
 
   bool DecomposeResources(
     const algorithm::AlgorithmProfile& algorithm_profile,
-    const std::vector<algomanager::AlgorithmResourceBinding>& resource_bindings,
+    const std::vector<algomanager::bridge::AlgorithmResourceBinding>& resource_bindings,
     algorithm::AlgorithmContainerSet* container_set,
     std::string* out_error_message) const {
     if (!container_set) {
@@ -1614,7 +1571,7 @@ class PackageResourceDecomposer final {
       }
     };
 
-    const algomanager::algoscheduler::AlgorithmResourceBinding* mesh_resource_binding = nullptr;
+    const algomanager::bridge::AlgorithmResourceBinding* mesh_resource_binding = nullptr;
     if (!schema_.mesh_field_bindings.empty()) {
       append_probe("decompose.resources.mesh_field.begin algorithm=" + algorithm_profile.algorithm_name);
       if (!schema_.semantic_resource_kind.empty()) {
@@ -1624,7 +1581,7 @@ class PackageResourceDecomposer final {
         }
       }
       if (!mesh_resource_binding) {
-        for (const algomanager::algoscheduler::AlgorithmResourceBinding& binding : resource_bindings) {
+        for (const algomanager::bridge::AlgorithmResourceBinding& binding : resource_bindings) {
           if (_IsMeshLikeResourceKind(binding.resource_kind)) {
             mesh_resource_binding = &binding;
             break;
@@ -1667,7 +1624,7 @@ class PackageResourceDecomposer final {
         " path=" + absolute_mesh_source_path.generic_string());
       common_data::Mesh mesh{};
       try {
-        mesh = mesh_io::LoadMeshFile(absolute_mesh_source_path.generic_string());
+        mesh = algomanager::algocatalog::LoadAssimpMeshFile(absolute_mesh_source_path.generic_string());
       } catch (const std::exception& e) {
         _SetErrorMessage(
           out_error_message,
@@ -1703,7 +1660,7 @@ class PackageResourceDecomposer final {
         " resource=" + binding.resource_name +
         " kind=" + binding.resource_kind +
         " container=" + binding.container_name);
-      const algomanager::algoscheduler::AlgorithmResourceBinding* resource_binding =
+      const algomanager::bridge::AlgorithmResourceBinding* resource_binding =
         _FindResourceBinding(resource_bindings, binding.resource_name);
       if (!resource_binding) {
         _SetErrorMessage(
@@ -1757,7 +1714,7 @@ class PackageResourceDecomposer final {
       if (binding.resource_kind == "mesh") {
         common_data::Mesh mesh{};
         try {
-          mesh = mesh_io::LoadMeshFile(absolute_source_path.generic_string());
+          mesh = algomanager::algocatalog::LoadAssimpMeshFile(absolute_source_path.generic_string());
         } catch (const std::exception& e) {
           _SetErrorMessage(
             out_error_message,
@@ -1804,7 +1761,7 @@ class PackageDescriptorDecomposer final {
 
   bool GetRequestedDescriptorBindings(
     const algorithm::AlgorithmProfile& algorithm_profile,
-    algomanager::AlgorithmRequestedDescriptorBindings* out_requested_descriptor_bindings) const {
+    algomanager::bridge::AlgorithmRequestedDescriptorBindings* out_requested_descriptor_bindings) const {
     if (!out_requested_descriptor_bindings) {
       return false;
     }
@@ -1821,7 +1778,7 @@ class PackageDescriptorDecomposer final {
           for (size_t i = 0; i < binding.target_refs.size(); ++i) {
             const size_t from_index = binding.from_names.size() == 1u ? 0u : i;
             out_requested_descriptor_bindings->descriptor_slots.push_back(
-              algomanager::algoscheduler::AlgorithmRequestedDescriptorBindings::DescriptorSlot{
+              algomanager::bridge::AlgorithmRequestedDescriptorBindings::DescriptorSlot{
                 .descriptor_name = binding.from_names[from_index],
                 .container_name = binding.target_refs[i].target_name,
                 .array_index = 0u,
@@ -1843,7 +1800,7 @@ class PackageDescriptorDecomposer final {
               return false;
             }
             out_requested_descriptor_bindings->descriptor_slots.push_back(
-              algomanager::algoscheduler::AlgorithmRequestedDescriptorBindings::DescriptorSlot{
+              algomanager::bridge::AlgorithmRequestedDescriptorBindings::DescriptorSlot{
                 .descriptor_name = binding.from_names[from_index],
                 .container_name = binding.target_container_names[i],
                 .array_index = 0u,
@@ -1868,7 +1825,7 @@ class PackageDescriptorDecomposer final {
             return false;
           }
           out_requested_descriptor_bindings->descriptor_slots.push_back(
-            algomanager::algoscheduler::AlgorithmRequestedDescriptorBindings::DescriptorSlot{
+            algomanager::bridge::AlgorithmRequestedDescriptorBindings::DescriptorSlot{
               .descriptor_name = binding.from_names[from_index],
               .container_name = binding.target_container_name,
               .array_index = target_index - 1u,
@@ -1883,7 +1840,7 @@ class PackageDescriptorDecomposer final {
 
   bool DecomposeDescriptors(
     const algorithm::AlgorithmProfile& algorithm_profile,
-    const std::vector<algomanager::AlgorithmDescriptorValue>& descriptor_values,
+    const std::vector<algomanager::bridge::AlgorithmDescriptorValue>& descriptor_values,
     algorithm::AlgorithmContainerSet* container_set,
     std::string* out_error_message) const {
     if (!container_set) {
@@ -1938,7 +1895,7 @@ class PackageDescriptorDecomposer final {
     const algorithm::AlgorithmProfile& algorithm_profile,
     const PackageDecomposerDescriptionEntry& entry,
     const PackageDecomposerDescriptionBinding& binding,
-    const std::vector<algomanager::AlgorithmDescriptorValue>& descriptor_values,
+    const std::vector<algomanager::bridge::AlgorithmDescriptorValue>& descriptor_values,
     algorithm::AlgorithmContainerSet* container_set,
     std::string* out_error_message) const {
     const size_t from_count = binding.from_names.size();
@@ -1965,7 +1922,7 @@ class PackageDescriptorDecomposer final {
 
     for (size_t i = 0; i < target_count; ++i) {
       const size_t from_index = from_count == 1u ? 0u : i;
-      const algomanager::algoscheduler::AlgorithmDescriptorValue* value =
+      const algomanager::bridge::AlgorithmDescriptorValue* value =
         binding.packed_segment_bits.empty()
           ? _FindDescriptorValue(descriptor_values, binding.from_names[from_index])
           : nullptr;
@@ -2000,7 +1957,7 @@ class PackageDescriptorDecomposer final {
             algorithm_profile.algorithm_name + "'.");
         return false;
       }
-      if (!_WriteDescriptorScalarValue(
+      if (!descriptor_detail::WriteDescriptorScalarValue(
             container,
             0u,
             container_info->scalar_bits,
@@ -2024,7 +1981,7 @@ class PackageDescriptorDecomposer final {
     const algorithm::AlgorithmProfile& algorithm_profile,
     const PackageDecomposerDescriptionEntry& entry,
     const PackageDecomposerDescriptionBinding& binding,
-    const std::vector<algomanager::AlgorithmDescriptorValue>& descriptor_values,
+    const std::vector<algomanager::bridge::AlgorithmDescriptorValue>& descriptor_values,
     algorithm::AlgorithmContainerSet* container_set,
     std::string* out_error_message) const {
     const size_t from_count = binding.from_names.size();
@@ -2051,7 +2008,7 @@ class PackageDescriptorDecomposer final {
 
     for (size_t i = 0; i < target_count; ++i) {
       const size_t from_index = from_count == 1u ? 0u : i;
-      const algomanager::algoscheduler::AlgorithmDescriptorValue* value =
+      const algomanager::bridge::AlgorithmDescriptorValue* value =
         binding.packed_segment_bits.empty()
           ? _FindDescriptorValue(descriptor_values, binding.from_names[from_index])
           : nullptr;
@@ -2087,7 +2044,7 @@ class PackageDescriptorDecomposer final {
         return false;
       }
       const uint32_t scalar_bits = target_ref.scalar_bits == 0u ? container_info->scalar_bits : target_ref.scalar_bits;
-      if (!_WriteDescriptorScalarValue(
+      if (!descriptor_detail::WriteDescriptorScalarValue(
             container,
             static_cast<size_t>(target_ref.byte_offset),
             scalar_bits,
@@ -2111,7 +2068,7 @@ class PackageDescriptorDecomposer final {
     const algorithm::AlgorithmProfile& algorithm_profile,
     const PackageDecomposerDescriptionEntry& entry,
     const PackageDecomposerDescriptionBinding& binding,
-    const std::vector<algomanager::AlgorithmDescriptorValue>& descriptor_values,
+    const std::vector<algomanager::bridge::AlgorithmDescriptorValue>& descriptor_values,
     algorithm::AlgorithmContainerSet* container_set,
     std::string* out_error_message) const {
     const size_t from_count = binding.from_names.size();
@@ -2164,7 +2121,7 @@ class PackageDescriptorDecomposer final {
     for (size_t i = 0; i < target_count; ++i) {
       const uint32_t target_index = binding.target_indices[i];
       const size_t from_index = from_count == 1u ? 0u : i;
-      const algomanager::algoscheduler::AlgorithmDescriptorValue* value =
+      const algomanager::bridge::AlgorithmDescriptorValue* value =
         binding.packed_segment_bits.empty()
           ? _FindDescriptorValue(descriptor_values, binding.from_names[from_index])
           : nullptr;
@@ -2191,7 +2148,7 @@ class PackageDescriptorDecomposer final {
 
       const size_t byte_offset =
         static_cast<size_t>(target_index - 1u) * static_cast<size_t>(container->element_stride);
-      if (!_WriteDescriptorScalarValue(
+      if (!descriptor_detail::WriteDescriptorScalarValue(
             container,
             byte_offset,
             container_info->scalar_bits,
@@ -2214,7 +2171,7 @@ class PackageDescriptorDecomposer final {
   bool PreparePackedSegmentValues(
     const algorithm::AlgorithmProfile& algorithm_profile,
     const PackageDecomposerDescriptionBinding& binding,
-    const std::vector<algomanager::AlgorithmDescriptorValue>& descriptor_values,
+    const std::vector<algomanager::bridge::AlgorithmDescriptorValue>& descriptor_values,
     size_t target_count,
     const std::string& target_count_label,
     std::vector<double>* out_packed_segment_values,
@@ -2228,7 +2185,7 @@ class PackageDescriptorDecomposer final {
       return true;
     }
 
-    const algomanager::algoscheduler::AlgorithmDescriptorValue* source_value =
+    const algomanager::bridge::AlgorithmDescriptorValue* source_value =
       _FindDescriptorValue(descriptor_values, binding.from_names.front());
     if (!source_value) {
       _SetErrorMessage(
@@ -2270,22 +2227,22 @@ class PackageSchemaDecomposer final {
 
   bool GetRequestedResources(
     const algorithm::AlgorithmProfile& algorithm_profile,
-    algomanager::AlgorithmRequestedResources* out_requested_resources) const {
+    algomanager::bridge::AlgorithmRequestedResources* out_requested_resources) const {
     return schema_.valid &&
       resource_decomposer_.GetRequestedResources(algorithm_profile, out_requested_resources);
   }
 
   bool GetRequestedDescriptorBindings(
     const algorithm::AlgorithmProfile& algorithm_profile,
-    algomanager::AlgorithmRequestedDescriptorBindings* out_requested_descriptor_bindings) const {
+    algomanager::bridge::AlgorithmRequestedDescriptorBindings* out_requested_descriptor_bindings) const {
     return schema_.valid &&
       descriptor_decomposer_.GetRequestedDescriptorBindings(algorithm_profile, out_requested_descriptor_bindings);
   }
 
   bool Decompose(
     const algorithm::AlgorithmProfile& algorithm_profile,
-    const std::vector<algomanager::AlgorithmResourceBinding>& resource_bindings,
-    const std::vector<algomanager::AlgorithmDescriptorValue>& descriptor_values,
+    const std::vector<algomanager::bridge::AlgorithmResourceBinding>& resource_bindings,
+    const std::vector<algomanager::bridge::AlgorithmDescriptorValue>& descriptor_values,
     algorithm::AlgorithmContainerSet* container_set,
     std::string* out_error_message) const {
     if (!container_set) {
@@ -2328,467 +2285,12 @@ class PackageSchemaDecomposer final {
   PackageDescriptorDecomposer descriptor_decomposer_;
 };
 
-void _CopyBridgeDebugBindings(
-  const algorithm::AlgorithmRuntimeTransferEdge* edge,
-  std::vector<algomanager::algoscheduler::PipelineStageBridgeDebugBinding>* out_bindings) {
-  if (!out_bindings) {
-    return;
-  }
-  out_bindings->clear();
-  if (!edge) {
-    return;
-  }
-  out_bindings->reserve(edge->bindings.size());
-  for (const algorithm::AlgorithmRuntimeTransferBinding& binding : edge->bindings) {
-    out_bindings->push_back(algomanager::algoscheduler::PipelineStageBridgeDebugBinding{
-      .source_stage_name = edge->source_stage_name,
-      .target_stage_name = edge->target_stage_name,
-      .source_container_name = binding.from_name,
-      .target_container_name = binding.to_name,
-      .required = binding.required,
-    });
-  }
-}
-
-const algorithm::AlgorithmRuntimeTransferStageLayout* _FindRuntimeTransferStageLayout(
-  const algorithm::AlgorithmRuntimeTransferMap& transfer_map,
-  const std::string& stage_name) {
-  return transfer_map.FindStageLayout(stage_name);
-}
-
-bool _ReadArrayScalarAt(
-  const algorithm::AlgorithmContainer& container,
-  uint32_t index,
-  float* out_value,
-  std::string* out_error_message) {
-  if (!out_value) {
-    _SetErrorMessage(out_error_message, "Pipeline stage buffer read output pointer is null.");
-    return false;
-  }
-  if (container.storage_kind != algorithm::AlgorithmContainerStorageKind::Array) {
-    _SetErrorMessage(out_error_message, "Pipeline stage buffer must be an array container.");
-    return false;
-  }
-  if (container.element_stride < sizeof(float) || index >= container.element_count) {
-    _SetErrorMessage(out_error_message, "Pipeline stage buffer scalar read is out of range.");
-    return false;
-  }
-  const size_t byte_offset = static_cast<size_t>(index) * static_cast<size_t>(container.element_stride);
-  if (byte_offset + sizeof(float) > container.bytes.size()) {
-    _SetErrorMessage(out_error_message, "Pipeline stage buffer scalar read exceeds container storage.");
-    return false;
-  }
-  std::memcpy(out_value, container.bytes.data() + byte_offset, sizeof(float));
-  return true;
-}
-
-bool _WriteArrayScalarAt(
-  algorithm::AlgorithmContainer* container,
-  uint32_t index,
-  float value,
-  std::string* out_error_message) {
-  if (!container) {
-    _SetErrorMessage(out_error_message, "Pipeline stage buffer write target is null.");
-    return false;
-  }
-  if (container->storage_kind != algorithm::AlgorithmContainerStorageKind::Array) {
-    _SetErrorMessage(out_error_message, "Pipeline stage buffer must be an array container.");
-    return false;
-  }
-  if (container->element_stride < sizeof(float) || index >= container->element_count) {
-    _SetErrorMessage(out_error_message, "Pipeline stage buffer scalar write is out of range.");
-    return false;
-  }
-  const size_t byte_offset = static_cast<size_t>(index) * static_cast<size_t>(container->element_stride);
-  if (byte_offset + sizeof(float) > container->bytes.size()) {
-    _SetErrorMessage(out_error_message, "Pipeline stage buffer scalar write exceeds container storage.");
-    return false;
-  }
-  std::memcpy(container->bytes.data() + byte_offset, &value, sizeof(float));
-  return true;
-}
-
-bool _ValidateIntegerScalarValue(
-  double value,
-  const std::string& codec_name,
-  const std::string& container_name,
-  std::string* out_error_message) {
-  if (!std::isfinite(value) || std::trunc(value) != value) {
-    _SetErrorMessage(
-      out_error_message,
-      "Descriptor value for container '" + container_name + "' is not an exact " + codec_name + " scalar.");
-    return false;
-  }
-  return true;
-}
-
-bool _WriteDescriptorScalarValue(
-  algorithm::AlgorithmContainer* container,
-  size_t byte_offset,
-  uint32_t scalar_bits,
-  const std::string& value_codec,
-  double value,
-  std::string* out_error_message) {
-  if (!container) {
-    _SetErrorMessage(out_error_message, "Descriptor write target container is null.");
-    return false;
-  }
-  const size_t scalar_bytes = static_cast<size_t>(scalar_bits / 8u);
-  if (scalar_bytes == 0u || byte_offset + scalar_bytes > container->bytes.size()) {
-    _SetErrorMessage(out_error_message, "Descriptor write exceeds target container storage.");
-    return false;
-  }
-
-  void* destination = container->bytes.data() + byte_offset;
-  if (value_codec == "float" || value_codec == "ieee754") {
-    if (scalar_bits == 32u) {
-      const float encoded = static_cast<float>(value);
-      std::memcpy(destination, &encoded, sizeof(encoded));
-      return true;
-    }
-    if (scalar_bits == 64u) {
-      const double encoded = static_cast<double>(value);
-      std::memcpy(destination, &encoded, sizeof(encoded));
-      return true;
-    }
-    _SetErrorMessage(
-      out_error_message,
-      "Float descriptor codec requires 32-bit or 64-bit target storage.");
-    return false;
-  }
-
-  if (value_codec == "int") {
-    if (!_ValidateIntegerScalarValue(value, "signed integer", container->name, out_error_message)) {
-      return false;
-    }
-    const double integral_value = static_cast<double>(value);
-    switch (scalar_bits) {
-      case 8u: {
-        if (integral_value < static_cast<double>(std::numeric_limits<int8_t>::min()) ||
-            integral_value > static_cast<double>(std::numeric_limits<int8_t>::max())) {
-          _SetErrorMessage(out_error_message, "Signed 8-bit descriptor value is out of range.");
-          return false;
-        }
-        const int8_t encoded = static_cast<int8_t>(value);
-        std::memcpy(destination, &encoded, sizeof(encoded));
-        return true;
-      }
-      case 16u: {
-        if (integral_value < static_cast<double>(std::numeric_limits<int16_t>::min()) ||
-            integral_value > static_cast<double>(std::numeric_limits<int16_t>::max())) {
-          _SetErrorMessage(out_error_message, "Signed 16-bit descriptor value is out of range.");
-          return false;
-        }
-        const int16_t encoded = static_cast<int16_t>(value);
-        std::memcpy(destination, &encoded, sizeof(encoded));
-        return true;
-      }
-      case 32u: {
-        if (integral_value < static_cast<double>(std::numeric_limits<int32_t>::min()) ||
-            integral_value > static_cast<double>(std::numeric_limits<int32_t>::max())) {
-          _SetErrorMessage(out_error_message, "Signed 32-bit descriptor value is out of range.");
-          return false;
-        }
-        const int32_t encoded = static_cast<int32_t>(value);
-        std::memcpy(destination, &encoded, sizeof(encoded));
-        return true;
-      }
-      case 64u: {
-        if (integral_value < static_cast<double>(std::numeric_limits<int64_t>::min()) ||
-            integral_value > static_cast<double>(std::numeric_limits<int64_t>::max())) {
-          _SetErrorMessage(out_error_message, "Signed 64-bit descriptor value is out of range.");
-          return false;
-        }
-        const int64_t encoded = static_cast<int64_t>(value);
-        std::memcpy(destination, &encoded, sizeof(encoded));
-        return true;
-      }
-      default:
-        _SetErrorMessage(out_error_message, "Signed integer descriptor codec only supports 8/16/32/64-bit targets.");
-        return false;
-    }
-  }
-
-  if (value_codec == "uint") {
-    if (!_ValidateIntegerScalarValue(value, "unsigned integer", container->name, out_error_message)) {
-      return false;
-    }
-    if (value < 0.0) {
-      _SetErrorMessage(out_error_message, "Unsigned descriptor value cannot be negative.");
-      return false;
-    }
-    const double integral_value = static_cast<double>(value);
-    switch (scalar_bits) {
-      case 8u: {
-        if (integral_value > static_cast<double>(std::numeric_limits<uint8_t>::max())) {
-          _SetErrorMessage(out_error_message, "Unsigned 8-bit descriptor value is out of range.");
-          return false;
-        }
-        const uint8_t encoded = static_cast<uint8_t>(value);
-        std::memcpy(destination, &encoded, sizeof(encoded));
-        return true;
-      }
-      case 16u: {
-        if (integral_value > static_cast<double>(std::numeric_limits<uint16_t>::max())) {
-          _SetErrorMessage(out_error_message, "Unsigned 16-bit descriptor value is out of range.");
-          return false;
-        }
-        const uint16_t encoded = static_cast<uint16_t>(value);
-        std::memcpy(destination, &encoded, sizeof(encoded));
-        return true;
-      }
-      case 32u: {
-        if (integral_value > static_cast<double>(std::numeric_limits<uint32_t>::max())) {
-          _SetErrorMessage(out_error_message, "Unsigned 32-bit descriptor value is out of range.");
-          return false;
-        }
-        const uint32_t encoded = static_cast<uint32_t>(value);
-        std::memcpy(destination, &encoded, sizeof(encoded));
-        return true;
-      }
-      case 64u: {
-        if (integral_value > static_cast<double>(std::numeric_limits<uint64_t>::max())) {
-          _SetErrorMessage(out_error_message, "Unsigned 64-bit descriptor value is out of range.");
-          return false;
-        }
-        const uint64_t encoded = static_cast<uint64_t>(value);
-        std::memcpy(destination, &encoded, sizeof(encoded));
-        return true;
-      }
-      default:
-        _SetErrorMessage(out_error_message, "Unsigned integer descriptor codec only supports 8/16/32/64-bit targets.");
-        return false;
-    }
-  }
-
-  _SetErrorMessage(out_error_message, "Unsupported descriptor codec '" + value_codec + "'.");
-  return false;
-}
-
-bool _ReadJobsInterStageScalarAt(
-  const algomanager::JobsPipelineInterStageBufferRuntimeState& inter_stage_buffer,
-  uint32_t index,
-  float* out_value,
-  std::string* out_error_message) {
-  if (!inter_stage_buffer.valid) {
-    _SetErrorMessage(out_error_message, "JOBS pipeline inter-stage buffer is invalid.");
-    return false;
-  }
-  if (!out_value) {
-    _SetErrorMessage(out_error_message, "JOBS pipeline inter-stage buffer read output pointer is null.");
-    return false;
-  }
-  if (index >= inter_stage_buffer.scalar_slots.size() ||
-      index >= inter_stage_buffer.scalar_slot_count) {
-    _SetErrorMessage(out_error_message, "JOBS pipeline inter-stage buffer scalar read is out of range.");
-    return false;
-  }
-  *out_value = inter_stage_buffer.scalar_slots[index];
-  return true;
-}
-
-bool _WriteJobsInterStageScalarAt(
-  algomanager::JobsPipelineInterStageBufferRuntimeState* inter_stage_buffer,
-  uint32_t index,
-  float value,
-  std::string* out_error_message) {
-  if (!inter_stage_buffer) {
-    _SetErrorMessage(out_error_message, "JOBS pipeline inter-stage buffer write target is null.");
-    return false;
-  }
-  if (!inter_stage_buffer->valid) {
-    _SetErrorMessage(out_error_message, "JOBS pipeline inter-stage buffer is invalid.");
-    return false;
-  }
-  if (index >= inter_stage_buffer->scalar_slots.size() ||
-      index >= inter_stage_buffer->scalar_slot_count) {
-    _SetErrorMessage(out_error_message, "JOBS pipeline inter-stage buffer scalar write is out of range.");
-    return false;
-  }
-  inter_stage_buffer->scalar_slots[index] = value;
-  return true;
-}
-
-bool _ApplyImplicitStageBufferIngress(
-  const algorithm::AlgorithmRuntimeTransferMap& transfer_map,
-  const std::string& target_stage_name,
-  const algomanager::JobsPipelineInterStageBufferRuntimeState* inter_stage_buffer,
-  algorithm::AlgorithmContainerSet* target_container_set,
-  std::unordered_set<std::string>* written_target_names,
-  std::string* out_error_message) {
-  if (!target_container_set || !written_target_names) {
-    _SetErrorMessage(out_error_message, "Pipeline implicit stage buffer ingress inputs are null.");
-    return false;
-  }
-  const algorithm::AlgorithmRuntimeTransferStageLayout* stage_layout =
-    _FindRuntimeTransferStageLayout(transfer_map, target_stage_name);
-  if (!stage_layout) {
-    _SetErrorMessage(
-      out_error_message,
-      "Pipeline implicit stage buffer ingress layout is missing for stage '" + target_stage_name + "'.");
-    return false;
-  }
-  if (stage_layout->extra_array_count != 0u) {
-    _SetErrorMessage(
-      out_error_message,
-      "Pipeline implicit stage buffer ingress does not support extra standard arrays for stage '" +
-        target_stage_name + "'.");
-    return false;
-  }
-  if (stage_layout->extra_variable_count == 0u) {
-    return true;
-  }
-
-  for (uint32_t extra_index = 0u; extra_index < stage_layout->extra_variable_count; ++extra_index) {
-    const std::string variable_name =
-      target_container_set->standard_layout.MakeVariableName(stage_layout->shared_variable_count + extra_index);
-    if (written_target_names->find(variable_name) != written_target_names->end()) {
-      _SetErrorMessage(
-        out_error_message,
-        "Pipeline implicit stage buffer ingress target variable is written more than once: " +
-          target_stage_name + "." + variable_name);
-      return false;
-    }
-
-    algorithm::AlgorithmContainer* target_variable =
-      algorithm::FindAlgorithmContainer(target_container_set, variable_name);
-    if (!target_variable) {
-      _SetErrorMessage(
-        out_error_message,
-        "Pipeline implicit stage buffer ingress target variable is missing: " +
-          target_stage_name + "." + variable_name);
-      return false;
-    }
-    if (target_variable->storage_kind != algorithm::AlgorithmContainerStorageKind::TemporaryRegister ||
-        target_variable->bytes.size() < sizeof(float)) {
-      _SetErrorMessage(
-        out_error_message,
-        "Pipeline implicit stage buffer ingress target variable must be a scalar register: " +
-          target_stage_name + "." + variable_name);
-      return false;
-    }
-
-    float value = 0.0f;
-    if (inter_stage_buffer) {
-      if (!_ReadJobsInterStageScalarAt(
-            *inter_stage_buffer,
-            stage_layout->extra_variable_offset + extra_index,
-            &value,
-            out_error_message)) {
-        return false;
-      }
-    } else {
-      algorithm::AlgorithmContainer* stage_buffer =
-        algorithm::FindAlgorithmContainer(target_container_set, transfer_map.pipeline_shared_stage_buffer_slot_name);
-      if (!stage_buffer) {
-        _SetErrorMessage(
-          out_error_message,
-          "Pipeline implicit stage buffer ingress cannot find shared stage buffer '" +
-            transfer_map.pipeline_shared_stage_buffer_slot_name + "' for stage '" + target_stage_name + "'.");
-        return false;
-      }
-      if (!_ReadArrayScalarAt(
-            *stage_buffer,
-            stage_layout->extra_variable_offset + extra_index,
-            &value,
-            out_error_message)) {
-        return false;
-      }
-    }
-    std::memcpy(target_variable->bytes.data(), &value, sizeof(float));
-    written_target_names->insert(variable_name);
-  }
-
-  return true;
-}
-
-bool _ApplyImplicitStageBufferEgress(
-  const algorithm::AlgorithmRuntimeTransferMap& transfer_map,
-  const std::string& source_stage_name,
-  const algorithm::AlgorithmContainerSet& source_container_set,
-  algomanager::JobsPipelineInterStageBufferRuntimeState* inter_stage_buffer,
-  std::string* out_error_message) {
-  const algorithm::AlgorithmRuntimeTransferStageLayout* stage_layout =
-    _FindRuntimeTransferStageLayout(transfer_map, source_stage_name);
-  if (!stage_layout) {
-    _SetErrorMessage(
-      out_error_message,
-      "Pipeline implicit stage buffer egress layout is missing for stage '" + source_stage_name + "'.");
-    return false;
-  }
-  if (stage_layout->extra_array_count != 0u) {
-    _SetErrorMessage(
-      out_error_message,
-      "Pipeline implicit stage buffer egress does not support extra standard arrays for stage '" +
-        source_stage_name + "'.");
-    return false;
-  }
-  if (stage_layout->extra_variable_count == 0u) {
-    return true;
-  }
-
-  for (uint32_t extra_index = 0u; extra_index < stage_layout->extra_variable_count; ++extra_index) {
-    const std::string variable_name =
-      source_container_set.standard_layout.MakeVariableName(stage_layout->shared_variable_count + extra_index);
-    const algorithm::AlgorithmContainer* source_variable =
-      algorithm::FindAlgorithmContainer(source_container_set, variable_name);
-    if (!source_variable) {
-      _SetErrorMessage(
-        out_error_message,
-        "Pipeline implicit stage buffer egress source variable is missing: " +
-          source_stage_name + "." + variable_name);
-      return false;
-    }
-    if (source_variable->storage_kind != algorithm::AlgorithmContainerStorageKind::TemporaryRegister ||
-        source_variable->bytes.size() < sizeof(float)) {
-      _SetErrorMessage(
-        out_error_message,
-        "Pipeline implicit stage buffer egress source variable must be a scalar register: " +
-          source_stage_name + "." + variable_name);
-      return false;
-    }
-
-    float value = 0.0f;
-    std::memcpy(&value, source_variable->bytes.data(), sizeof(float));
-    if (inter_stage_buffer) {
-      if (!_WriteJobsInterStageScalarAt(
-            inter_stage_buffer,
-            stage_layout->extra_variable_offset + extra_index,
-            value,
-            out_error_message)) {
-        return false;
-      }
-    } else {
-      algorithm::AlgorithmContainer* stage_buffer =
-        algorithm::FindAlgorithmContainer(
-          const_cast<algorithm::AlgorithmContainerSet*>(&source_container_set),
-          transfer_map.pipeline_shared_stage_buffer_slot_name);
-      if (!stage_buffer) {
-        _SetErrorMessage(
-          out_error_message,
-          "Pipeline implicit stage buffer egress cannot find shared stage buffer '" +
-            transfer_map.pipeline_shared_stage_buffer_slot_name + "' for stage '" + source_stage_name + "'.");
-        return false;
-      }
-      if (!_WriteArrayScalarAt(
-            stage_buffer,
-            stage_layout->extra_variable_offset + extra_index,
-            value,
-            out_error_message)) {
-        return false;
-      }
-    }
-  }
-
-  return true;
-}
-
 }  // namespace
 
 bool QueryAlgorithmPackageRequestedBindingsFromLocation(
   const algorithm::AlgorithmPackageLocation& package_location,
-  algomanager::AlgorithmRequestedResources* out_requested_resources,
-  algomanager::AlgorithmRequestedDescriptorBindings* out_requested_descriptor_bindings,
+  algomanager::bridge::AlgorithmRequestedResources* out_requested_resources,
+  algomanager::bridge::AlgorithmRequestedDescriptorBindings* out_requested_descriptor_bindings,
   std::string* out_error_message) {
   if (!package_location.valid) {
     _SetErrorMessage(out_error_message, "Algorithm package location is invalid.");
@@ -2812,250 +2314,10 @@ bool QueryAlgorithmPackageRequestedBindingsFromLocation(
   return true;
 }
 
-bool _PipelineStageBridgeIngressImpl(
-  const algorithm::AlgorithmRuntimeTransferMap& transfer_map,
-  const std::string& target_stage_name,
-  const std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>& stage_container_sets,
-  const algomanager::JobsPipelineInterStageBufferRuntimeState* inter_stage_buffer,
-  algorithm::AlgorithmContainerSet* out_target_container_set,
-  std::string* out_error_message) {
-  if (!transfer_map.valid) {
-    _SetErrorMessage(out_error_message, "Algorithm runtime transfer map is invalid.");
-    return false;
-  }
-  if (!out_target_container_set) {
-    _SetErrorMessage(out_error_message, "Runtime transfer target container set is null.");
-    return false;
-  }
-  (void)stage_container_sets;
-  if (inter_stage_buffer) {
-    std::unordered_set<std::string> written_target_names;
-    if (!_ApplyImplicitStageBufferIngress(
-          transfer_map,
-          target_stage_name,
-          inter_stage_buffer,
-          out_target_container_set,
-          &written_target_names,
-          out_error_message)) {
-      return false;
-    }
-  }
-
-  if (out_error_message) {
-    out_error_message->clear();
-  }
-  return true;
-}
-
-bool PipelineStageBridgeIngress(
-  const algorithm::AlgorithmRuntimeTransferMap& transfer_map,
-  const std::string& target_stage_name,
-  const std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>& stage_container_sets,
-  algorithm::AlgorithmContainerSet* out_target_container_set,
-  std::string* out_error_message) {
-  return _PipelineStageBridgeIngressImpl(
-    transfer_map,
-    target_stage_name,
-    stage_container_sets,
-    nullptr,
-    out_target_container_set,
-    out_error_message);
-}
-
-bool PipelineStageBridgeIngress(
-  const algorithm::AlgorithmRuntimeTransferMap& transfer_map,
-  const std::string& target_stage_name,
-  const std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>& stage_container_sets,
-  const algomanager::JobsPipelineInterStageBufferRuntimeState& inter_stage_buffer,
-  algorithm::AlgorithmContainerSet* out_target_container_set,
-  std::string* out_error_message) {
-  return _PipelineStageBridgeIngressImpl(
-    transfer_map,
-    target_stage_name,
-    stage_container_sets,
-    &inter_stage_buffer,
-    out_target_container_set,
-    out_error_message);
-}
-
-bool _PipelineStageBridgeEgressImpl(
-  const algorithm::AlgorithmRuntimeTransferMap& transfer_map,
-  const std::string& source_stage_name,
-  const algorithm::AlgorithmContainerSet& source_container_set,
-  algomanager::JobsPipelineInterStageBufferRuntimeState* inter_stage_buffer,
-  std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>* stage_container_sets,
-  std::string* out_error_message) {
-  if (!transfer_map.valid) {
-    _SetErrorMessage(out_error_message, "Algorithm runtime transfer map is invalid.");
-    return false;
-  }
-  if (!stage_container_sets) {
-    _SetErrorMessage(out_error_message, "Runtime transfer stage container set map is null.");
-    return false;
-  }
-  (void)stage_container_sets;
-  if (inter_stage_buffer) {
-    if (!_ApplyImplicitStageBufferEgress(
-          transfer_map,
-          source_stage_name,
-          source_container_set,
-          inter_stage_buffer,
-          out_error_message)) {
-      return false;
-    }
-  }
-
-  if (out_error_message) {
-    out_error_message->clear();
-  }
-  return true;
-}
-
-bool PipelineStageBridgeEgress(
-  const algorithm::AlgorithmRuntimeTransferMap& transfer_map,
-  const std::string& source_stage_name,
-  const algorithm::AlgorithmContainerSet& source_container_set,
-  std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>* stage_container_sets,
-  std::string* out_error_message) {
-  return _PipelineStageBridgeEgressImpl(
-    transfer_map,
-    source_stage_name,
-    source_container_set,
-    nullptr,
-    stage_container_sets,
-    out_error_message);
-}
-
-bool PipelineStageBridgeEgress(
-  const algorithm::AlgorithmRuntimeTransferMap& transfer_map,
-  const std::string& source_stage_name,
-  const algorithm::AlgorithmContainerSet& source_container_set,
-  algomanager::JobsPipelineInterStageBufferRuntimeState* inter_stage_buffer,
-  std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>* stage_container_sets,
-  std::string* out_error_message) {
-  return _PipelineStageBridgeEgressImpl(
-    transfer_map,
-    source_stage_name,
-    source_container_set,
-    inter_stage_buffer,
-    stage_container_sets,
-    out_error_message);
-}
-
-bool PipelineStageBridgeCaptureIngressDebugSet(
-  const algorithm::AlgorithmRuntimeTransferMap& transfer_map,
-  const std::string& pipeline_name,
-  const std::string& target_stage_name,
-  const std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>& stage_container_sets,
-  const algorithm::AlgorithmContainerSet& target_container_set,
-  algomanager::algoscheduler::PipelineStageBridgeDebugSet* out_debug_set,
-  std::string* out_error_message) {
-  (void)stage_container_sets;
-  if (!transfer_map.valid) {
-    _SetErrorMessage(out_error_message, "Algorithm runtime transfer map is invalid.");
-    return false;
-  }
-  if (!out_debug_set) {
-    _SetErrorMessage(out_error_message, "Pipeline bridge debug set output pointer is null.");
-    return false;
-  }
-
-  out_debug_set->Clear();
-  out_debug_set->pipeline_name = pipeline_name.empty() ? transfer_map.algorithm_name : pipeline_name;
-  out_debug_set->stage_name = target_stage_name;
-
-  const std::vector<const algorithm::AlgorithmRuntimeTransferEdge*> incoming_edges =
-    transfer_map.FindIncomingEdges(target_stage_name);
-  if (incoming_edges.size() > 1u) {
-    _SetErrorMessage(
-      out_error_message,
-      "Runtime transfer map is not linear: stage '" + target_stage_name + "' has multiple predecessors.");
-    return false;
-  }
-
-  if (!incoming_edges.empty() && incoming_edges.front()) {
-    out_debug_set->previous_stage_name = incoming_edges.front()->source_stage_name;
-    _CopyBridgeDebugBindings(incoming_edges.front(), &out_debug_set->ingress_bindings);
-  }
-
-  (void)target_container_set;
-  out_debug_set->valid = true;
-
-  if (out_error_message) {
-    out_error_message->clear();
-  }
-  return true;
-}
-
-bool PipelineStageBridgeCaptureEgressDebugSet(
-  const algorithm::AlgorithmRuntimeTransferMap& transfer_map,
-  const std::string& pipeline_name,
-  const std::string& source_stage_name,
-  const algorithm::AlgorithmContainerSet& source_container_set,
-  const std::unordered_map<std::string, std::shared_ptr<algorithm::AlgorithmContainerSet>>& stage_container_sets,
-  algomanager::algoscheduler::PipelineStageBridgeDebugSet* in_out_debug_set,
-  std::string* out_error_message) {
-  if (!transfer_map.valid) {
-    _SetErrorMessage(out_error_message, "Algorithm runtime transfer map is invalid.");
-    return false;
-  }
-  if (!in_out_debug_set) {
-    _SetErrorMessage(out_error_message, "Pipeline bridge debug set output pointer is null.");
-    return false;
-  }
-
-  if (!in_out_debug_set->valid) {
-    in_out_debug_set->Clear();
-  }
-  if (in_out_debug_set->pipeline_name.empty()) {
-    in_out_debug_set->pipeline_name = pipeline_name.empty() ? transfer_map.algorithm_name : pipeline_name;
-  }
-  in_out_debug_set->stage_name = source_stage_name;
-
-  (void)source_container_set;
-
-  const std::vector<const algorithm::AlgorithmRuntimeTransferEdge*> outgoing_edges =
-    transfer_map.FindOutgoingEdges(source_stage_name);
-  if (outgoing_edges.size() > 1u) {
-    _SetErrorMessage(
-      out_error_message,
-      "Runtime transfer map is not linear: stage '" + source_stage_name + "' has multiple successors.");
-    return false;
-  }
-
-  in_out_debug_set->next_stage_name.clear();
-  in_out_debug_set->egress_bindings.clear();
-  in_out_debug_set->next_stage_input_container_set = {};
-  in_out_debug_set->has_next_stage_input_container_set = false;
-
-  if (!outgoing_edges.empty() && outgoing_edges.front()) {
-    const algorithm::AlgorithmRuntimeTransferEdge* outgoing_edge = outgoing_edges.front();
-    in_out_debug_set->next_stage_name = outgoing_edge->target_stage_name;
-    _CopyBridgeDebugBindings(outgoing_edge, &in_out_debug_set->egress_bindings);
-
-    const auto target_stage_it = stage_container_sets.find(outgoing_edge->target_stage_name);
-    if (target_stage_it == stage_container_sets.end() || !target_stage_it->second) {
-      _SetErrorMessage(
-        out_error_message,
-        "Runtime transfer target stage is unavailable for bridge debug capture: " +
-          outgoing_edge->target_stage_name);
-      return false;
-    }
-
-    (void)target_stage_it;
-  }
-
-  in_out_debug_set->valid = true;
-  if (out_error_message) {
-    out_error_message->clear();
-  }
-  return true;
-}
-
 bool DecomposeAlgorithmPackageFromLocation(
   const algorithm::AlgorithmPackageLocation& package_location,
-  const std::vector<algomanager::AlgorithmResourceBinding>& resource_bindings,
-  const std::vector<algomanager::AlgorithmDescriptorValue>& descriptor_values,
+  const std::vector<algomanager::bridge::AlgorithmResourceBinding>& resource_bindings,
+  const std::vector<algomanager::bridge::AlgorithmDescriptorValue>& descriptor_values,
   algorithm::AlgorithmContainerSet* container_set,
   std::string* out_error_message) {
   if (!package_location.valid) {

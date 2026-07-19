@@ -3,7 +3,7 @@
 #include "../algorithm_plugin_api.h"
 
 #define PX_SIMD_DISABLED 1
-#include "D:/relyingResourse/physx_dev/physx_5_5_0/install/vc17win64/PhysX/include/PxPhysicsAPI.h"
+#include <PxPhysicsAPI.h>
 
 #include <cstdint>
 #include <cmath>
@@ -213,9 +213,9 @@ class PhysXRigidBodyState final {
   }
 
   void Step(
-      const agent::AlgorithmCompatibilityContainerWriter* container_writer,
+      const algomanager::bridge::AlgorithmCompatibilityContainerWriter* container_writer,
       AlgorithmToAgentSignal* algorithm_to_agent_signal,
-      agent::AlgorithmPackageDebugState* debug_state) {
+      algomanager::bridge::AlgorithmPackageDebugState* debug_state) {
     constexpr float timestep = 1.0f / 60.0f;
     simulation_time_seconds_ += timestep;
     if (simulation_time_seconds_ >= 5.0f) {
@@ -475,15 +475,15 @@ class PhysXRigidBodyState final {
   std::mt19937 random_engine_{0x50485958u};
 };
 
-class PhysXRigidBodyCompatibilityExecutor final : public agent::IAlgorithmCompatibilityExecutor {
+class PhysXRigidBodyCompatibilityExecutor final : public algomanager::bridge::IAlgorithmCompatibilityExecutor {
  public:
   bool ExecuteCompatibleAlgorithm(
-      const agent::AgentTickContext& context,
+      const algomanager::bridge::AgentTickContext& context,
       const algorithm::AlgorithmProfile& algorithm_profile,
       const AgentToAlgorithmSignal& agent_to_algorithm_signal,
-      const agent::AlgorithmCompatibilityContainerWriter* container_writer,
+      const algomanager::bridge::AlgorithmCompatibilityContainerWriter* container_writer,
       AlgorithmToAgentSignal* algorithm_to_agent_signal,
-      agent::AlgorithmPackageDebugState* debug_state) override {
+      algomanager::bridge::AlgorithmPackageDebugState* debug_state) override {
     (void)context;
     (void)algorithm_profile;
     (void)agent_to_algorithm_signal;
@@ -495,15 +495,15 @@ class PhysXRigidBodyCompatibilityExecutor final : public agent::IAlgorithmCompat
   PhysXRigidBodyState state_{};
 };
 
-void DestroyPhysXRigidBodyCompatibilityExecutor(agent::IAlgorithmCompatibilityExecutor* executor) {
+void DestroyPhysXRigidBodyCompatibilityExecutor(algomanager::bridge::IAlgorithmCompatibilityExecutor* executor) {
   delete executor;
 }
 
 }  // namespace
 
 extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateBundle(
-    const algomanager::support::AlgorithmPluginRequest* request,
-    algomanager::support::AlgorithmPluginBundle* out_bundle) {
+    const algomanager::algocatalog::AlgorithmPluginRequest* request,
+    algomanager::algocatalog::AlgorithmPluginBundle* out_bundle) {
   (void)request;
   out_bundle->Clear();
   out_bundle->jobs_symbol = false;

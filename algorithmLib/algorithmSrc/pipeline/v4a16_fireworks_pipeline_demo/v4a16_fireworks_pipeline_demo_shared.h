@@ -83,18 +83,18 @@ inline Vec2 _LogicalVelocityToPixel(Vec2 logical_velocity, Vec2 extent) {
   };
 }
 
-class FireworksJobsExecutor final : public agent::IAlgorithmJobsExecutor {
+class FireworksJobsExecutor final : public algomanager::bridge::IAlgorithmJobsExecutor {
  public:
   explicit FireworksJobsExecutor(std::string algorithm_name)
     : algorithm_name_(std::move(algorithm_name)) {}
 
   bool ExecuteJobsAlgorithm(
-    const agent::AgentTickContext& context,
+    const algomanager::bridge::AgentTickContext& context,
     const algorithm::AlgorithmProfile& algorithm_profile,
     const AgentToAlgorithmSignal& agent_to_algorithm_signal,
     algorithm::AlgorithmContainerSet* algorithm_container_set,
     AlgorithmToAgentSignal* algorithm_to_agent_signal,
-    agent::AlgorithmPackageDebugState* debug_state) override {
+    algomanager::bridge::AlgorithmPackageDebugState* debug_state) override {
     (void)context;
     (void)algorithm_profile;
     (void)agent_to_algorithm_signal;
@@ -589,15 +589,15 @@ class FireworksJobsExecutor final : public agent::IAlgorithmJobsExecutor {
   std::string algorithm_name_;
 };
 
-void DestroyJobsExecutor(agent::IAlgorithmJobsExecutor* executor) {
+void DestroyJobsExecutor(algomanager::bridge::IAlgorithmJobsExecutor* executor) {
   delete executor;
 }
 
 }  // namespace
 
 inline bool CreateBundle(
-  const algomanager::support::AlgorithmPluginRequest* request,
-  algomanager::support::AlgorithmPluginBundle* out_bundle) {
+  const algomanager::algocatalog::AlgorithmPluginRequest* request,
+  algomanager::algocatalog::AlgorithmPluginBundle* out_bundle) {
   out_bundle->Clear();
   out_bundle->jobs_symbol = true;
   out_bundle->vk_symbol = true;
@@ -609,7 +609,7 @@ inline bool CreateBundle(
 }
 
 inline bool CreateRuntimeReflector(
-  const algomanager::support::AlgorithmPluginRequest* request,
+  const algomanager::algocatalog::AlgorithmPluginRequest* request,
   algorithm::AlgorithmReflector* out_reflector) {
   std::shared_ptr<algorithm::AlgorithmReflector> runtime_reflector{};
   algorithm::AlgorithmPackageLocation package_location{};
@@ -619,7 +619,7 @@ inline bool CreateRuntimeReflector(
         nullptr)) {
     return false;
   }
-  if (!algomanager::support::LoadAlgorithmPackageReflectorFromLocation(
+  if (!algomanager::algocatalog::LoadAlgorithmPackageReflectorFromLocation(
         package_location,
         &runtime_reflector,
         nullptr) || !runtime_reflector) {

@@ -249,7 +249,7 @@ bool LoadPackageRuntimeReflector(
 
 bool LoadAlgorithmInterventionFromLocation(
   const algorithm::AlgorithmPackageLocation& package_location,
-  std::shared_ptr<algomanager::algoscheduler::IAlgorithmIntervention>* out_intervention,
+  std::shared_ptr<algomanager::bridge::IAlgorithmIntervention>* out_intervention,
   std::string* out_error_message) {
   return intervention_detail::LoadAlgorithmInterventionFromLocationImpl(
     package_location,

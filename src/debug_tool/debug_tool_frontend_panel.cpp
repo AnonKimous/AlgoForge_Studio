@@ -119,14 +119,14 @@ std::string _FormatAlgorithmRuntimeLabel(
 }
 
 const char* _AlgorithmPhaseKindDisplayName(
-  algomanager::AlgorithmPhaseKind phase_kind) {
+  algomanager::bridge::AlgorithmPhaseKind phase_kind) {
   switch (phase_kind) {
-    case algomanager::AlgorithmPhaseKind::Pretick: return "pretick";
-    case algomanager::AlgorithmPhaseKind::Exec: return "exec";
-    case algomanager::AlgorithmPhaseKind::AfterTick: return "aftertick";
-    case algomanager::AlgorithmPhaseKind::RenderResult: return "renderresult";
-    case algomanager::AlgorithmPhaseKind::Reflect: return "reflect";
-    case algomanager::AlgorithmPhaseKind::Custom: return "custom";
+    case algomanager::bridge::AlgorithmPhaseKind::Pretick: return "pretick";
+    case algomanager::bridge::AlgorithmPhaseKind::Exec: return "exec";
+    case algomanager::bridge::AlgorithmPhaseKind::AfterTick: return "aftertick";
+    case algomanager::bridge::AlgorithmPhaseKind::RenderResult: return "renderresult";
+    case algomanager::bridge::AlgorithmPhaseKind::Reflect: return "reflect";
+    case algomanager::bridge::AlgorithmPhaseKind::Custom: return "custom";
   }
   return "custom";
 }
@@ -143,12 +143,12 @@ const char* _AlgorithmExecutionPreferenceDisplayName(
 }
 
 const char* _AlgorithmExecutionPreferenceDisplayName(
-  algomanager::AlgorithmExecutionPreference execution_preference) {
+  algomanager::bridge::AlgorithmExecutionPreference execution_preference) {
   switch (execution_preference) {
-    case algomanager::AlgorithmExecutionPreference::Jobs: return "jobs";
-    case algomanager::AlgorithmExecutionPreference::Vk: return "vk";
-    case algomanager::AlgorithmExecutionPreference::Cuda: return "cuda";
-    case algomanager::AlgorithmExecutionPreference::Compatibility: return "compatibility";
+    case algomanager::bridge::AlgorithmExecutionPreference::Jobs: return "jobs";
+    case algomanager::bridge::AlgorithmExecutionPreference::Vk: return "vk";
+    case algomanager::bridge::AlgorithmExecutionPreference::Cuda: return "cuda";
+    case algomanager::bridge::AlgorithmExecutionPreference::Compatibility: return "compatibility";
   }
   return "jobs";
 }
@@ -1842,13 +1842,13 @@ void DebugToolFrontendPanel::DrawAgentManagerUi(IDebugToolHost& host) {
 
                 const char* wrapper_label = "body";
                 switch (stage_summary.pipeline_wrapper_role) {
-                  case algomanager::AlgorithmPipelineWrapperRole::Begin:
+                  case algomanager::bridge::AlgorithmPipelineWrapperRole::Begin:
                     wrapper_label = "stageBegin";
                     break;
-                  case algomanager::AlgorithmPipelineWrapperRole::End:
+                  case algomanager::bridge::AlgorithmPipelineWrapperRole::End:
                     wrapper_label = "stageEnd";
                     break;
-                  case algomanager::AlgorithmPipelineWrapperRole::None:
+                  case algomanager::bridge::AlgorithmPipelineWrapperRole::None:
                     break;
                 }
                 const std::string stage_label =
@@ -2052,7 +2052,7 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
         "鎬昏€楁椂: %.3f s",
         selected_algorithm_summary->pipeline_total_elapsed_seconds);
       if (!selected_algorithm_summary->pipeline_stage_runtime_stats.empty()) {
-        for (const algomanager::AlgorithmPipelineStageRuntimeStat& stage_stat :
+        for (const algomanager::bridge::AlgorithmPipelineStageRuntimeStat& stage_stat :
               selected_algorithm_summary->pipeline_stage_runtime_stats) {
           if (!stage_stat.reason.empty()) {
             ImGui::BulletText(
@@ -2115,7 +2115,7 @@ void DebugToolFrontendPanel::DrawAgentDetailUi(IDebugToolHost& host) {
         if (!phase_summary.used_algorithm_containers.empty()) {
           ImGui::Indent();
           ImGui::TextUnformatted("Containers:");
-          for (const algomanager::AlgorithmPhaseContainerBinding& binding :
+          for (const algomanager::bridge::AlgorithmPhaseContainerBinding& binding :
                 phase_summary.used_algorithm_containers) {
             ImGui::BulletText(
               "%s [%s]%s",

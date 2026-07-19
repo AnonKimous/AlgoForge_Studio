@@ -75,7 +75,7 @@ inline bool LoadAlgorithmPackageTransferMapFromLocation(
 
 inline bool LoadAlgorithmPipelineWrapperSpecFromLocation(
   const ::algorithm::AlgorithmPackageLocation& package_location,
-  algomanager::AlgorithmPipelineWrapperSpec* out_wrapper_spec,
+  algomanager::bridge::AlgorithmPipelineWrapperSpec* out_wrapper_spec,
   std::string* out_error_message = nullptr) {
   return algomanager::LoadAlgorithmPipelineWrapperSpecFromLocation(
     package_location,
@@ -85,8 +85,8 @@ inline bool LoadAlgorithmPipelineWrapperSpecFromLocation(
 
 inline bool LoadAlgorithmPackageDefaultBindingsFromLocation(
   const ::algorithm::AlgorithmPackageLocation& package_location,
-  std::vector<algomanager::AlgorithmResourceBinding>* out_resource_bindings,
-  std::vector<algomanager::AlgorithmDescriptorValue>* out_descriptor_values,
+  std::vector<algomanager::bridge::AlgorithmResourceBinding>* out_resource_bindings,
+  std::vector<algomanager::bridge::AlgorithmDescriptorValue>* out_descriptor_values,
   bool* out_has_default_file = nullptr,
   std::string* out_error_message = nullptr) {
   return algomanager::LoadAlgorithmPackageDefaultBindingsFromLocation(
@@ -99,8 +99,8 @@ inline bool LoadAlgorithmPackageDefaultBindingsFromLocation(
 
 inline bool LoadAlgorithmPackageDefaultBindings(
   const std::string& algorithm_name,
-  std::vector<algomanager::AlgorithmResourceBinding>* out_resource_bindings,
-  std::vector<algomanager::AlgorithmDescriptorValue>* out_descriptor_values,
+  std::vector<algomanager::bridge::AlgorithmResourceBinding>* out_resource_bindings,
+  std::vector<algomanager::bridge::AlgorithmDescriptorValue>* out_descriptor_values,
   bool* out_has_default_file = nullptr,
   std::string* out_error_message = nullptr) {
   return algomanager::LoadAlgorithmPackageDefaultBindings(
@@ -113,8 +113,8 @@ inline bool LoadAlgorithmPackageDefaultBindings(
 
 inline bool QueryAlgorithmRequestedBindings(
   const std::string& algorithm_name,
-  algomanager::AlgorithmRequestedResources* out_resources,
-  algomanager::AlgorithmRequestedDescriptorBindings* out_descriptors,
+  algomanager::bridge::AlgorithmRequestedResources* out_resources,
+  algomanager::bridge::AlgorithmRequestedDescriptorBindings* out_descriptors,
   std::string* out_error_message = nullptr) {
   return algomanager::QueryAlgorithmRequestedBindings(
     algorithm_name,
@@ -126,7 +126,7 @@ inline bool QueryAlgorithmRequestedBindings(
 inline bool TryGetMountedPipelineRuntime(
   const std::string& pipeline_name,
   const std::string& agent_name,
-  algomanager::JobsPipelineRuntimeState* out_runtime_state) {
+  algomanager::bridge::JobsPipelineRuntimeState* out_runtime_state) {
   return algomanager::TryGetMountedPipelineRuntime(
     pipeline_name,
     agent_name,
@@ -135,7 +135,7 @@ inline bool TryGetMountedPipelineRuntime(
 
 inline bool TryGetMountedPipelineRegistration(
   const std::string& pipeline_name,
-  algomanager::JobsPipelineRegistration* out_registration) {
+  algomanager::bridge::JobsPipelineRegistration* out_registration) {
   return algomanager::TryGetMountedPipelineRegistration(
     pipeline_name,
     out_registration);
@@ -166,12 +166,12 @@ inline void ClearAlgorithmExecutionCaches() {
 }
 
 inline bool ExecuteJobsAlgorithmObject(
-  const ::agentmanager::agent::AlgorithmObject& object,
-  const ::agentmanager::agent::AgentTickContext& context,
+  const ::algomanager::bridge::AlgorithmObject& object,
+  const ::algomanager::bridge::AgentTickContext& context,
   const common_data::AgentToAlgorithmSignal& agent_to_algorithm_signal,
   ::algorithm::AlgorithmContainerSet* container_set,
   common_data::AlgorithmToAgentSignal* out_algorithm_to_agent_signal,
-  ::agentmanager::agent::AlgorithmPackageDebugState* out_debug_state,
+  ::algomanager::bridge::AlgorithmPackageDebugState* out_debug_state,
   std::string* out_error_message = nullptr) {
   return algomanager::ExecuteJobsAlgorithmObject(
     object,
@@ -184,9 +184,9 @@ inline bool ExecuteJobsAlgorithmObject(
 }
 
 inline bool ExecuteVkAlgorithmObject(
-  const ::agentmanager::agent::AlgorithmObject& object,
+  const ::algomanager::bridge::AlgorithmObject& object,
   ::algorithm::AlgorithmContainerSet* container_set,
-  const ::agentmanager::agent::AgentTickContext& context,
+  const ::algomanager::bridge::AgentTickContext& context,
   std::string* out_error_message = nullptr) {
   return algomanager::ExecuteVkAlgorithmObject(
     object,
@@ -195,12 +195,12 @@ inline bool ExecuteVkAlgorithmObject(
     out_error_message);
 }
 
-inline bool HasExecutableVkAlgorithmStage(const ::agentmanager::agent::AlgorithmObject& object) {
+inline bool HasExecutableVkAlgorithmStage(const ::algomanager::bridge::AlgorithmObject& object) {
   return algomanager::HasExecutableVkAlgorithmStage(object);
 }
 
 inline bool SynchronizeVkAlgorithmObject(
-  const ::agentmanager::agent::AlgorithmObject& object,
+  const ::algomanager::bridge::AlgorithmObject& object,
   ::algorithm::AlgorithmContainerSet* container_set,
   std::string* out_error_message = nullptr) {
   return algomanager::SynchronizeVkAlgorithmObject(

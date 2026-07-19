@@ -12,15 +12,15 @@ struct OpaqueThirdPartyState {
   uint64_t tick_count{0u};
 };
 
-class CompatibilityProbeExecutor final : public agent::IAlgorithmCompatibilityExecutor {
+class CompatibilityProbeExecutor final : public algomanager::bridge::IAlgorithmCompatibilityExecutor {
  public:
   bool ExecuteCompatibleAlgorithm(
-    const agent::AgentTickContext& context,
+    const algomanager::bridge::AgentTickContext& context,
     const algorithm::AlgorithmProfile& algorithm_profile,
     const AgentToAlgorithmSignal& agent_to_algorithm_signal,
-    const agent::AlgorithmCompatibilityContainerWriter* container_writer,
+    const algomanager::bridge::AlgorithmCompatibilityContainerWriter* container_writer,
     AlgorithmToAgentSignal* algorithm_to_agent_signal,
-    agent::AlgorithmPackageDebugState* debug_state) override {
+    algomanager::bridge::AlgorithmPackageDebugState* debug_state) override {
     (void)context;
     (void)algorithm_profile;
     (void)agent_to_algorithm_signal;
@@ -28,7 +28,7 @@ class CompatibilityProbeExecutor final : public agent::IAlgorithmCompatibilityEx
 
     state_.tick_count += 1u;
     algorithm_to_agent_signal->control_bits = static_cast<uint32_t>(state_.tick_count);
-      debug_state->signals.push_back(algomanager::algoscheduler::AdvancedAlgorithmDebugSignal{
+      debug_state->signals.push_back(algomanager::bridge::AdvancedAlgorithmDebugSignal{
       .name = "compatibility_probe.opaque_state",
       .payload = "tick=" + std::to_string(state_.tick_count),
     });
@@ -39,15 +39,15 @@ class CompatibilityProbeExecutor final : public agent::IAlgorithmCompatibilityEx
   OpaqueThirdPartyState state_{};
 };
 
-void DestroyCompatibilityProbeExecutor(agent::IAlgorithmCompatibilityExecutor* executor) {
+void DestroyCompatibilityProbeExecutor(algomanager::bridge::IAlgorithmCompatibilityExecutor* executor) {
   delete executor;
 }
 
 }  // namespace
 
 extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateBundle(
-  const algomanager::support::AlgorithmPluginRequest* request,
-  algomanager::support::AlgorithmPluginBundle* out_bundle) {
+  const algomanager::algocatalog::AlgorithmPluginRequest* request,
+  algomanager::algocatalog::AlgorithmPluginBundle* out_bundle) {
   (void)request;
   assert(out_bundle && "Algorithm plugin bundle output must be valid.");
 

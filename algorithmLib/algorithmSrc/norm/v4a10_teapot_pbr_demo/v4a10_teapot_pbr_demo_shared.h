@@ -766,15 +766,15 @@ inline void WriteMeshCacheToContainers(
   AppendTeapotTrace("WriteMeshCacheToContainers.end");
 }
 
-class TeapotJobsExecutor final : public agent::IAlgorithmJobsExecutor {
+class TeapotJobsExecutor final : public algomanager::bridge::IAlgorithmJobsExecutor {
  public:
   bool ExecuteJobsAlgorithm(
-    const agent::AgentTickContext& context,
+    const algomanager::bridge::AgentTickContext& context,
     const algorithm::AlgorithmProfile& algorithm_profile,
     const AgentToAlgorithmSignal& agent_to_algorithm_signal,
     algorithm::AlgorithmContainerSet* algorithm_container_set,
     AlgorithmToAgentSignal* algorithm_to_agent_signal,
-    agent::AlgorithmPackageDebugState* debug_state) override {
+    algomanager::bridge::AlgorithmPackageDebugState* debug_state) override {
     (void)context;
     (void)algorithm_profile;
     (void)agent_to_algorithm_signal;
@@ -815,7 +815,7 @@ class TeapotJobsExecutor final : public agent::IAlgorithmJobsExecutor {
       *algorithm_to_agent_signal = {};
     }
     if (debug_state) {
-      debug_state->signals.push_back(algomanager::algoscheduler::AdvancedAlgorithmDebugSignal{
+      debug_state->signals.push_back(algomanager::bridge::AdvancedAlgorithmDebugSignal{
         .name = "v4a10_teapot_pbr_demo.jobs",
         .payload = "triangles=" + std::to_string(cache.triangles.size()) +
           ", nodes=" + std::to_string(cache.bvh_nodes.size()) +
@@ -829,13 +829,13 @@ class TeapotJobsExecutor final : public agent::IAlgorithmJobsExecutor {
   }
 };
 
-inline void DestroyJobsExecutor(agent::IAlgorithmJobsExecutor* executor) {
+inline void DestroyJobsExecutor(algomanager::bridge::IAlgorithmJobsExecutor* executor) {
   delete executor;
 }
 
 inline bool CreateBundle(
-  const algomanager::support::AlgorithmPluginRequest* request,
-  algomanager::support::AlgorithmPluginBundle* out_bundle) {
+  const algomanager::algocatalog::AlgorithmPluginRequest* request,
+  algomanager::algocatalog::AlgorithmPluginBundle* out_bundle) {
   if (!request || !out_bundle) {
     return false;
   }
@@ -853,7 +853,7 @@ inline bool CreateBundle(
 }
 
 inline bool CreateRuntimeReflector(
-  const algomanager::support::AlgorithmPluginRequest* request,
+  const algomanager::algocatalog::AlgorithmPluginRequest* request,
   algorithm::AlgorithmReflector* out_reflector) {
   if (!request || !out_reflector) {
     return false;
@@ -867,7 +867,7 @@ inline bool CreateRuntimeReflector(
         nullptr)) {
     return false;
   }
-  if (!algomanager::support::LoadAlgorithmPackageReflectorFromLocation(
+  if (!algomanager::algocatalog::LoadAlgorithmPackageReflectorFromLocation(
         package_location,
         &runtime_reflector,
         nullptr) || !runtime_reflector) {

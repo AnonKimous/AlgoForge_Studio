@@ -346,7 +346,7 @@ bool AgentManager::CreateAgent(AgentCreateSpec spec, size_t* out_agent_index) {
   }
   const bool load_reflector =
     algomanager::GetAlgorithmLibraryRuntimeBuildFlavor() !=
-    algorithm::library_paths::AlgorithmLibraryRuntimeBuildFlavor::ReleaseWithDebugInfo;
+    algomanager::AlgorithmLibraryRuntimeBuildFlavor::ReleaseWithDebugInfo;
   for (const AgentCreateSpec::AlgorithmMountSpec& mount_spec : spec.algorithm_mount_specs) {
     if (!agent_instance->MountAlgorithm(
           mount_spec.algorithm_name,

@@ -37,9 +37,7 @@ When code and docs disagree, follow the code and update the docs.
 - `debug_tool_frontend` is the editor-facing debug surface.
 - `sdk` is the external agent/algorithm submission surface and depends on `agentmanager`.
 - `debugTool` owns startup wiring for the debug executable only.
-- Modules under `src/capabilities` are capability modules, not strict main-trunk hops.
-- Capability modules may aggregate lower-level contracts, but they must not introduce upward dependencies into strict trunk layers.
-- Optional capabilities must be linked explicitly by any consumer.
+- Assimp-backed mesh import is owned by `algomanager/catalog` and is not a sidecar layer.
 - Algorithm package source lives in `algorithmLib/algorithmSrc`, and built DLL/SPV runtime artifacts live in `algorithmLib/algorithmruntimeLib`.
 
 ## Current Module Graph
@@ -48,7 +46,6 @@ Compile dependency graph:
 
 ```mermaid
 graph LR
-  mesh_io --> common_data
   runtimesys --> common_data
   catalog --> common_data
   algomanager --> common_data
@@ -60,7 +57,6 @@ graph LR
   debug_tool_backend --> agentmanager
   debug_tool_backend --> runtimesys
   debug_tool_backend --> algomanager
-  debug_tool_backend --> catalog
   debug_tool_frontend --> runtimesys
   sdk --> agentmanager
   debugTool --> common_data
@@ -76,16 +72,10 @@ UI path:
 
 `debug_tool_frontend -> runtimesys -> common_data`
 
-Capability modules grouped under `src/capabilities`:
-
-- `agent`
-- `sidecar`
-
 Current project-library dependency graph from `CMakeLists.txt`:
 
-- `mesh_io -> common_data`
-- `catalog -> common_data`
-- `algomanager -> common_data + runtimesys + catalog`
+- `algomanager/catalog -> common_data + Assimp`
+- `algomanager -> common_data + runtimesys + Assimp`
 - `runtimesys -> common_data`
 - `agentmanager -> common_data + algomanager`
 - `debug_tool_backend -> common_data + agentmanager + runtimesys + algomanager + catalog`
@@ -95,11 +85,9 @@ Current project-library dependency graph from `CMakeLists.txt`:
 
 Important note:
 
-`catalog` still exists as a helper bundle, but it is meant to remain a
-peer subtree of `algomanager`, not a child of `scheduler`.
-
-`capabilities/agent` is intentionally different: it is consumed by trunk code,
-but it is a capability carrier rather than one strict hop in the layering path.
+`catalog` and `scheduler` are child submodules of `algomanager`. They are
+compiled together through the parent target, but communicate through bridge
+contracts rather than including one another.
 
 ## Ideal `algomanager` Tree
 
@@ -143,14 +131,6 @@ src/
 │  ├─ algorithm_package_location.h
 │  ├─ algorithm_types.h
 │  └─ README.md
-├─ capabilities/
-│  ├─ README.md
-│  ├─ agent/
-│  │  ├─ agent.h/.cpp
-│  │  └─ README.md
-│  └─ sidecar/
-│     ├─ mesh_io.h/.cpp
-│     └─ README.md
 ├─ common_data/
 ├─ algomanager/catalog/
 │  ├─ algorithm_interaction_protocol.h
@@ -196,32 +176,6 @@ It should not:
 
 Code outside `src/algomanager` should include only
 `algomanager/algorithm_manager.h`.
-
-### `capabilities/agent`
-
-Cross-layer capability module for the lightweight `Agent` object and its package
-hook contracts.
-
-It may aggregate:
-
-- algorithm-management container and manifest types
-- algorithm support hook contracts
-- package-provided submission requirements contracts
-- shared interaction and common-data types
-
-It should not:
-
-- own outer runtime scheduling
-- own the runtime shell
-- become a hidden execution graph manager
-
-### `capabilities/sidecar`
-
-Optional external-format and adapter capabilities.
-
-Current sidecar:
-
-- `mesh_io`: OBJ mesh import/export on top of `common_data::Mesh`
 
 ### `debug_tool_backend`
 
@@ -275,12 +229,9 @@ It should:
 When changing code:
 
 1. Start from this file and `src/README.md`.
-2. Decide whether the new behavior belongs in the strict trunk or under `src/capabilities`.
-3. Keep `runtimesys` behind `RuntimeEnvironment`.
-4. Keep packet transport as shared packet structs in `common_data`.
-5. Keep manifest loading and runtime container creation helpers in `algomanager`.
-6. Keep cross-layer package hooks in `capabilities/agent`.
-7. Keep optional adapters in `capabilities/sidecar`.
-8. Keep runtime binding in `debug_tool_backend`.
-9. Keep debug-host behavior in `debug_tool_backend` and editor behavior in `debug_tool_frontend`.
-10. Do not claim a full execution pipeline exists unless you also implement it.
+2. Keep `runtimesys` behind `RuntimeEnvironment`.
+3. Keep packet transport as shared packet structs in `common_data`.
+4. Keep manifest loading, Assimp mesh import, and runtime container creation helpers in `algomanager/catalog`.
+5. Keep runtime binding in `debug_tool_backend`.
+6. Keep debug-host behavior in `debug_tool_backend` and editor behavior in `debug_tool_frontend`.
+7. Do not claim a full execution pipeline exists unless you also implement it.

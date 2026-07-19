@@ -261,6 +261,14 @@ This demo shows that the package description can control storage layout and prec
 
 ![Precise grid algorithm render preview](demo/preciseGrid/priciseGrid.gif)
 
+### phyx block collison
+
+This algo is used to check the phyx compatible works or not
+
+#### PhyX block collsion
+
+![Precise grid algorithm render preview](demo/physics/phyXcollision.gif)
+
 ### DevTools and DebugTool UI
 
 These images show the two development surfaces: one for authoring package structure and one for loading, running, and inspecting it.

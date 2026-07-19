@@ -262,6 +262,17 @@ Python 也可以通过 `aglopy.DebugToolRunner.run_algorithm(..., execution="com
 
 ![Precise Grid 预览](demo/preciseGrid/priciseGrid.gif)
 
+### phyx block collison：phyx方块碰撞
+
+ 通过这个算法检查phyx的兼容是否可用
+
+#### PhyX block collsion
+
+![Precise grid algorithm render preview](demo/physics/phyXcollision.gif)
+
+
+### Demo 6：算法开发工具UI和debug工具UI
+
 ### DevTools 和 DebugTool UI：两种开发视角
 
 DevTools 展示算法开发文档、Agent 协助和构建流程；DebugTool 展示算法载入、运行、预览、调试和耗时测量。

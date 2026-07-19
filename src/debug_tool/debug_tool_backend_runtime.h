@@ -14,12 +14,12 @@
 namespace debug_tool_backend {
 
 using debug_tool::IDebugToolHost;
-using AgentManager = hooker::AgentManagementHooker;
-using RuntimesysHooker = hooker::RuntimesysHooker;
-using RuntimeEnvironment = hooker::RuntimeEnvironment;
-using RenderPreviewRequest = hooker::RenderPreviewRequest;
-using RenderPreviewBuffer = hooker::RenderPreviewBuffer;
-using DebugToolRecordedFrame = hooker::DebugToolRecordedFrame;
+using AgentManager = debug_tool_backend::agent_management_hooker::AgentManagementHooker;
+using RuntimesysHooker = debug_tool_backend::runtimesys_hooker::RuntimesysHooker;
+using RuntimeEnvironment = runtimesys::RuntimeEnvironment;
+using RenderPreviewRequest = runtimesys::RenderPreviewRequest;
+using RenderPreviewBuffer = runtimesys::RenderPreviewBuffer;
+using DebugToolRecordedFrame = runtimesys::DebugToolRecordedFrame;
 
 class DebugToolBackendRuntime : public IDebugToolHost {
  public:

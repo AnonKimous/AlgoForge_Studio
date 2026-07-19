@@ -1,7 +1,8 @@
 # Layer Contract
 
 This project keeps a constrained dependency chain for the strict main trunk and
-separates intentionally cross-layer code into `src/capabilities`.
+keeps domain-specific algorithm package capabilities inside their owning
+manager submodule.
 
 ## Rules
 
@@ -10,9 +11,8 @@ separates intentionally cross-layer code into `src/capabilities`.
 - Each strict trunk layer exposes one public interface to the layer above it.
 - Public interfaces are separated by provider. Do not reach into internal implementation headers from upper layers.
 - `agentmanager` sits above `algomanager` and owns the runtime agent object plus mount and submit entry points.
-- Modules under `src/capabilities` are capability modules, not strict main-trunk hops.
-- Capability modules may aggregate lower-level contracts for their own domain hooks, but they must not create upward dependencies into strict trunk layers.
-- Sidecar-style capabilities must be linked explicitly by any consumer.
+- Assimp-backed mesh import belongs to `algomanager/catalog`; there is no
+  separate mesh sidecar module.
 
 ## Current Public Interfaces
 

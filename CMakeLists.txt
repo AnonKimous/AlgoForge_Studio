@@ -309,12 +309,6 @@ add_library(common_data STATIC
 target_include_directories(common_data PUBLIC ${PROJECT_INCLUDE_DIRS})
 target_compile_definitions(common_data PRIVATE PROJECT_ROOT_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 
-add_library(capabilities_sidecar STATIC
-  src/capabilities/sidecar/mesh_io.cpp
-)
-target_include_directories(capabilities_sidecar PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(capabilities_sidecar PUBLIC common_data ${ASSIMP_LINK_LIBS})
-
 add_library(debug_tool_hooks INTERFACE)
 target_sources(debug_tool_hooks INTERFACE
   src/debug_tool/debug_tool_hooker.h
@@ -324,18 +318,25 @@ target_sources(debug_tool_hooks INTERFACE
   src/debug_tool/runtimesys_hooker.h
 )
 target_include_directories(debug_tool_hooks INTERFACE ${PROJECT_INCLUDE_DIRS})
-target_link_libraries(debug_tool_hooks INTERFACE common_data agentmanager)
+target_link_libraries(debug_tool_hooks INTERFACE common_data agentmanager runtimesys)
 
 add_library(algomanager STATIC
+  src/algomanager/catalog/algorithm_assimp_support.cpp
+  src/algomanager/catalog/algorithm_catalog_bridge.cpp
   src/algomanager/catalog/algorithm_package_location.cpp
   src/algomanager/catalog/algorithm_package_decomposer.cpp
+  src/algomanager/catalog/algorithm_package_descriptor_detail.cpp
+  src/algomanager/catalog/algorithm_package_pipeline_bridge.cpp
   src/algomanager/catalog/algorithm_package_loader.cpp
+  src/algomanager/catalog/algorithm_package_loader_detail.cpp
+  src/algomanager/catalog/algorithm_package_plugin_loader.cpp
+  src/algomanager/catalog/algorithm_package_execution_bridge.cpp
+  src/algomanager/scheduler/algorithm_scheduler.cpp
   ${CJSON_SOURCE_DIR}/cJSON.c
 )
 target_include_directories(algomanager PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_compile_definitions(algomanager PRIVATE
-)
-target_link_libraries(algomanager PUBLIC common_data runtimesys capabilities_sidecar)
+target_link_libraries(algomanager PUBLIC common_data runtimesys ${ASSIMP_LINK_LIBS})
+target_link_libraries(debug_tool_hooks INTERFACE algomanager)
 
 add_library(runtimesys STATIC
   src/runtimesys/window/sdl_window.cpp

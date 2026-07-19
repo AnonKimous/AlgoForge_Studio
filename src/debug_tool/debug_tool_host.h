@@ -1,8 +1,8 @@
 #pragma once
 
-#include "algomanager/algorithm_manager.h"
+#include "debug_tool/algomanager_hooker.h"
 #include "common_data/common_data.h"
-#include "runtimesys/runtime_systems.h"
+#include "debug_tool/runtimesys_hooker.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -54,12 +54,12 @@ struct AlgorithmDescriptorValue {
 
 struct AlgorithmPhaseSummary {
   std::string phase_name;
-  algomanager::AlgorithmPhaseKind phase_kind{
-    algomanager::AlgorithmPhaseKind::Custom};
-  algomanager::AlgorithmExecutionPreference execution_preference{
-    algomanager::AlgorithmExecutionPreference::Jobs};
+  algomanager::bridge::AlgorithmPhaseKind phase_kind{
+    algomanager::bridge::AlgorithmPhaseKind::Custom};
+  algomanager::bridge::AlgorithmExecutionPreference execution_preference{
+    algomanager::bridge::AlgorithmExecutionPreference::Jobs};
   std::vector<std::string> functions;
-  std::vector<algomanager::AlgorithmPhaseContainerBinding> used_algorithm_containers;
+  std::vector<algomanager::bridge::AlgorithmPhaseContainerBinding> used_algorithm_containers;
   std::string vertex_shader_path;
   std::string fragment_shader_path;
   std::string pipeline_kind;
@@ -253,8 +253,8 @@ struct AlgorithmRuntimeSummary {
   uint32_t pipeline_body_stage_count{0u};
   uint32_t pipeline_effective_tail_stage_index{0u};
   bool pipeline_stage{false};
-  algomanager::AlgorithmPipelineWrapperRole pipeline_wrapper_role{
-    algomanager::AlgorithmPipelineWrapperRole::None};
+  algomanager::bridge::AlgorithmPipelineWrapperRole pipeline_wrapper_role{
+    algomanager::bridge::AlgorithmPipelineWrapperRole::None};
   bool pipeline_wrapper_empty{false};
   AlgorithmPipelineTopology pipeline_topology{AlgorithmPipelineTopology::NonCircular};
   AlgorithmPipelineSyncMode pipeline_sync_mode{AlgorithmPipelineSyncMode::Forced};
@@ -278,7 +278,7 @@ struct AlgorithmRuntimeSummary {
   AlgorithmReflectionSnapshot reflection_snapshot{};
   std::vector<AlgorithmPhaseSummary> intervention_phase_summaries;
   float pipeline_total_elapsed_seconds{0.0f};
-  std::vector<algomanager::AlgorithmPipelineStageRuntimeStat> pipeline_stage_runtime_stats;
+  std::vector<algomanager::bridge::AlgorithmPipelineStageRuntimeStat> pipeline_stage_runtime_stats;
   PipelineStageBridgeDebugSummary bridge_debug_set{};
 };
 

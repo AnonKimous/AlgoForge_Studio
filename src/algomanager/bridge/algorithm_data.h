@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace algomanager { namespace algocatalog {
+namespace algomanager { namespace bridge {
 
 struct AdvancedAlgorithmDebugSignal {
   std::string name;
@@ -52,16 +52,5 @@ struct VolumeDescriptor {
   Vec3 driving_dir{};
 };
 
-}  // namespace catalog
-}  // namespace algomanager
-
-namespace algomanager { namespace algoscheduler {
-using algomanager::algocatalog::AdvancedAlgorithmDebugSignal;
-using algomanager::algocatalog::ExplicitPointReflection;
-using algomanager::algocatalog::ImpactModelCoderOutput;
-using algomanager::algocatalog::ImpactModelSource;
-using algomanager::algocatalog::MeshCoderOutput;
-using algomanager::algocatalog::MeshCommonReflection;
-using algomanager::algocatalog::VolumeDescriptor;
-}  // namespace scheduler
+}  // namespace bridge
 }  // namespace algomanager

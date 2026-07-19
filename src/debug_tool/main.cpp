@@ -194,24 +194,24 @@ const char* _ExecutionPreferenceName(debug_tool::AlgorithmExecutionPreference pr
   return "unknown";
 }
 
-const char* _ExecutionPreferenceName(algomanager::AlgorithmExecutionPreference preference) {
+const char* _ExecutionPreferenceName(algomanager::bridge::AlgorithmExecutionPreference preference) {
   switch (preference) {
-    case algomanager::AlgorithmExecutionPreference::Jobs: return "jobs";
-    case algomanager::AlgorithmExecutionPreference::Vk: return "vk";
-    case algomanager::AlgorithmExecutionPreference::Cuda: return "cuda";
-    case algomanager::AlgorithmExecutionPreference::Compatibility: return "compatibility";
+    case algomanager::bridge::AlgorithmExecutionPreference::Jobs: return "jobs";
+    case algomanager::bridge::AlgorithmExecutionPreference::Vk: return "vk";
+    case algomanager::bridge::AlgorithmExecutionPreference::Cuda: return "cuda";
+    case algomanager::bridge::AlgorithmExecutionPreference::Compatibility: return "compatibility";
   }
   return "unknown";
 }
 
-const char* _PhaseKindName(algomanager::AlgorithmPhaseKind phase_kind) {
+const char* _PhaseKindName(algomanager::bridge::AlgorithmPhaseKind phase_kind) {
   switch (phase_kind) {
-    case algomanager::AlgorithmPhaseKind::Pretick: return "pretick";
-    case algomanager::AlgorithmPhaseKind::Exec: return "exec";
-    case algomanager::AlgorithmPhaseKind::AfterTick: return "aftertick";
-    case algomanager::AlgorithmPhaseKind::RenderResult: return "renderresult";
-    case algomanager::AlgorithmPhaseKind::Reflect: return "reflect";
-    case algomanager::AlgorithmPhaseKind::Custom: return "custom";
+    case algomanager::bridge::AlgorithmPhaseKind::Pretick: return "pretick";
+    case algomanager::bridge::AlgorithmPhaseKind::Exec: return "exec";
+    case algomanager::bridge::AlgorithmPhaseKind::AfterTick: return "aftertick";
+    case algomanager::bridge::AlgorithmPhaseKind::RenderResult: return "renderresult";
+    case algomanager::bridge::AlgorithmPhaseKind::Reflect: return "reflect";
+    case algomanager::bridge::AlgorithmPhaseKind::Custom: return "custom";
   }
   return "custom";
 }
@@ -2177,7 +2177,7 @@ bool _RunAlgorithmRunner(const AlgorithmRunnerOptions& options) {
           }
           if (!phase_summary.used_algorithm_containers.empty()) {
             std::cout << "        containers=" << phase_summary.used_algorithm_containers.size() << '\n';
-            for (const algomanager::AlgorithmPhaseContainerBinding& binding :
+            for (const algomanager::bridge::AlgorithmPhaseContainerBinding& binding :
                  phase_summary.used_algorithm_containers) {
               std::cout
                 << "          " << binding.container_name

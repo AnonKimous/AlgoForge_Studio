@@ -112,6 +112,8 @@ set(PROJECT_INCLUDE_DIRS
 option(BUILD_ALGORITHM_SAMPLE_PLUGIN "Build the temporary sample algorithm plugin." OFF)
 option(BUILD_ALGORITHM_CUDA_SAMPLE_PLUGIN_ALGOS "Build algorithm plugin algos that require CUDA sources." OFF)
 set(CORE_BUILD_DIR "${REPO_ROOT}/build" CACHE PATH "Core build directory containing the base libraries for algorithm plugins")
+set(PHYSX_INCLUDE_DIR "$ENV{ALGOFORGE_PHYSX_INCLUDE_DIR}" CACHE PATH "PhysX include directory for compatibility algorithm plugins")
+set(PHYSX_RUNTIME_DIR "$ENV{ALGOFORGE_PHYSX_RUNTIME_DIR}" CACHE PATH "PhysX runtime DLL directory for compatibility algorithm plugins")
 
 function(import_core_static_library target_name library_name)
   add_library(${target_name} STATIC IMPORTED GLOBAL)
@@ -145,7 +147,7 @@ if(BUILD_ALGORITHM_SAMPLE_PLUGIN)
   set(ALGORITHM_PLUGIN_MIRROR_SRC_ROOT "${CMAKE_CURRENT_BINARY_DIR}/plugin_support_mirror/src")
   file(MAKE_DIRECTORY "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}")
   file(COPY "${REPO_ROOT}/src/algomanager/bridge" DESTINATION "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}/algomanager")
-  file(COPY "${REPO_ROOT}/src/algomanager/catalog" DESTINATION "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}")
+  file(COPY "${REPO_ROOT}/src/algomanager/catalog" DESTINATION "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}/algomanager")
   file(COPY "${REPO_ROOT}/src/common_data" DESTINATION "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}")
 
   add_library(algorithm_plugin_support_mirror STATIC
@@ -173,11 +175,11 @@ function(register_algorithm_algo algo_manifest)
   string(MAKE_C_IDENTIFIER "${algorithm_relative_dir}" algorithm_target_name)
   set(algorithm_output_dir "${ALGORITHM_LIBRARY_RUNTIME_OUTPUT_ROOT}/${algorithm_relative_dir}")
   set(algorithm_source_dir "${algorithm_dir}")
-  file(GLOB algorithm_shader_sources
+  file(GLOB algorithm_shader_sources CONFIGURE_DEPENDS
     "${algorithm_source_dir}/*.vert"
     "${algorithm_source_dir}/*.frag"
   )
-  file(GLOB plugin_sources
+  file(GLOB plugin_sources CONFIGURE_DEPENDS
     "${algorithm_source_dir}/*_plugin.cpp"
     "${algorithm_source_dir}/*.cu"
   )
@@ -185,11 +187,11 @@ function(register_algorithm_algo algo_manifest)
     set(stage0_source_dir "${algorithm_dir}/${algorithm_name}_stage0")
     if(EXISTS "${stage0_source_dir}")
       set(algorithm_source_dir "${stage0_source_dir}")
-      file(GLOB algorithm_shader_sources
+      file(GLOB algorithm_shader_sources CONFIGURE_DEPENDS
         "${algorithm_source_dir}/*.vert"
         "${algorithm_source_dir}/*.frag"
       )
-      file(GLOB plugin_sources
+      file(GLOB plugin_sources CONFIGURE_DEPENDS
         "${algorithm_source_dir}/*_plugin.cpp"
         "${algorithm_source_dir}/*.cu"
       )
@@ -241,6 +243,47 @@ function(register_algorithm_algo algo_manifest)
       "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}"
       ${PROJECT_INCLUDE_DIRS}
     )
+    if(algorithm_name MATCHES "physx|physics_sdk_compat_demo")
+      if(NOT PHYSX_INCLUDE_DIR OR NOT EXISTS "${PHYSX_INCLUDE_DIR}/PxPhysicsAPI.h")
+        message(FATAL_ERROR
+          "PHYSX_INCLUDE_DIR must point to a PhysX include directory containing PxPhysicsAPI.h "
+          "when building a PhysX compatibility plugin.")
+      endif()
+      if(NOT PHYSX_RUNTIME_DIR)
+        message(FATAL_ERROR
+          "PHYSX_RUNTIME_DIR must point to the PhysX runtime DLL directory "
+          "when building a PhysX compatibility plugin.")
+      endif()
+      target_include_directories("${algorithm_target_name}_plugin" PRIVATE "${PHYSX_INCLUDE_DIR}")
+      foreach(physx_runtime_name IN ITEMS
+          PhysXCommon_64.dll
+          PhysXFoundation_64.dll
+          PhysX_64.dll)
+        if(NOT EXISTS "${PHYSX_RUNTIME_DIR}/${physx_runtime_name}")
+          message(FATAL_ERROR
+            "Missing PhysX runtime DLL: ${PHYSX_RUNTIME_DIR}/${physx_runtime_name}")
+        endif()
+        add_custom_command(TARGET "${algorithm_target_name}_plugin" POST_BUILD
+          COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${PHYSX_RUNTIME_DIR}/${physx_runtime_name}"
+            "${algorithm_output_dir}/${physx_runtime_name}"
+          VERBATIM
+        )
+      endforeach()
+      if(algorithm_name MATCHES "^physx_lance_(compat|cuda)_demo$")
+        foreach(physx_link_name IN ITEMS
+            PhysX_64.lib
+            PhysXCommon_64.lib
+            PhysXFoundation_64.lib)
+          if(NOT EXISTS "${PHYSX_RUNTIME_DIR}/${physx_link_name}")
+            message(FATAL_ERROR
+              "Missing PhysX import library: ${PHYSX_RUNTIME_DIR}/${physx_link_name}")
+          endif()
+          target_link_libraries("${algorithm_target_name}_plugin" PRIVATE
+            "${PHYSX_RUNTIME_DIR}/${physx_link_name}")
+        endforeach()
+      endif()
+    endif()
     target_compile_definitions("${algorithm_target_name}_plugin" PRIVATE
       ALGORITHM_LIBRARY_PLUGIN_BUILD=1
       ALGORITHM_LIBRARY_RESOURCE_ROOT="${ALGORITHM_LIBRARY_SOURCE_ROOT}"
@@ -288,7 +331,7 @@ function(register_algorithm_algo algo_manifest)
   set_property(GLOBAL APPEND PROPERTY ALGORITHM_ALGO_TARGETS "${algo_target}")
 endfunction()
 
-file(GLOB_RECURSE ALGORITHM_PACKAGE_MANIFESTS
+file(GLOB_RECURSE ALGORITHM_PACKAGE_MANIFESTS CONFIGURE_DEPENDS
   "${ALGORITHM_LIBRARY_SOURCE_ROOT}/manifest.json"
 )
 list(SORT ALGORITHM_PACKAGE_MANIFESTS)

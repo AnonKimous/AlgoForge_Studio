@@ -811,15 +811,15 @@ void _StepCollisionDemo(
   }
 }
 
-class CollisionDemoJobsExecutor final : public agent::IAlgorithmJobsExecutor {
+class CollisionDemoJobsExecutor final : public algomanager::bridge::IAlgorithmJobsExecutor {
  public:
   bool ExecuteJobsAlgorithm(
-    const agent::AgentTickContext& context,
+    const algomanager::bridge::AgentTickContext& context,
     const algorithm::AlgorithmProfile& algorithm_profile,
     const AgentToAlgorithmSignal& agent_to_algorithm_signal,
     algorithm::AlgorithmContainerSet* algorithm_container_set,
     AlgorithmToAgentSignal* algorithm_to_agent_signal,
-    agent::AlgorithmPackageDebugState* debug_state) override {
+    algomanager::bridge::AlgorithmPackageDebugState* debug_state) override {
     (void)algorithm_profile;
     (void)agent_to_algorithm_signal;
     if (!algorithm_container_set) {
@@ -868,7 +868,7 @@ class CollisionDemoJobsExecutor final : public agent::IAlgorithmJobsExecutor {
       *algorithm_to_agent_signal = {};
     }
     if (debug_state) {
-      debug_state->signals.push_back(algomanager::algoscheduler::AdvancedAlgorithmDebugSignal{
+      debug_state->signals.push_back(algomanager::bridge::AdvancedAlgorithmDebugSignal{
         .name = "v6a6_pbd_ball_collision_demo.jobs",
         .payload = "collision_count=" + std::to_string(static_cast<int>(collision_count)),
       });
@@ -877,15 +877,15 @@ class CollisionDemoJobsExecutor final : public agent::IAlgorithmJobsExecutor {
   }
 };
 
-void _DestroyJobsExecutor(agent::IAlgorithmJobsExecutor* executor) {
+void _DestroyJobsExecutor(algomanager::bridge::IAlgorithmJobsExecutor* executor) {
   delete executor;
 }
 
 }  // namespace
 
 extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateBundle(
-  const algomanager::support::AlgorithmPluginRequest* request,
-  algomanager::support::AlgorithmPluginBundle* out_bundle) {
+  const algomanager::algocatalog::AlgorithmPluginRequest* request,
+  algomanager::algocatalog::AlgorithmPluginBundle* out_bundle) {
   if (!request || !out_bundle) {
     return false;
   }
@@ -901,7 +901,7 @@ extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateBundle(
 }
 
 extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateRuntimeReflector(
-  const algomanager::support::AlgorithmPluginRequest* request,
+  const algomanager::algocatalog::AlgorithmPluginRequest* request,
   algorithm::AlgorithmReflector* out_reflector) {
   if (!request || !out_reflector) {
     return false;
@@ -915,7 +915,7 @@ extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateRuntimeReflec
         nullptr)) {
     return false;
   }
-  if (!algomanager::support::LoadAlgorithmPackageReflectorFromLocation(
+  if (!algomanager::algocatalog::LoadAlgorithmPackageReflectorFromLocation(
         package_location,
         &runtime_reflector,
         nullptr)) {

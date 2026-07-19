@@ -51,15 +51,15 @@ uint32_t RotateSplitMask(uint32_t value) {
   return (static_cast<uint32_t>(high_mask) << 16u) | static_cast<uint32_t>(low_mask);
 }
 
-class PrecisionGridMaskJobsExecutor final : public agent::IAlgorithmJobsExecutor {
+class PrecisionGridMaskJobsExecutor final : public algomanager::bridge::IAlgorithmJobsExecutor {
  public:
   bool ExecuteJobsAlgorithm(
-    const agent::AgentTickContext& context,
+    const algomanager::bridge::AgentTickContext& context,
     const algorithm::AlgorithmProfile& algorithm_profile,
     const AgentToAlgorithmSignal& agent_to_algorithm_signal,
     algorithm::AlgorithmContainerSet* algorithm_container_set,
     AlgorithmToAgentSignal* algorithm_to_agent_signal,
-    agent::AlgorithmPackageDebugState* debug_state) override {
+    algomanager::bridge::AlgorithmPackageDebugState* debug_state) override {
     (void)context;
     (void)algorithm_profile;
     (void)agent_to_algorithm_signal;
@@ -85,7 +85,7 @@ class PrecisionGridMaskJobsExecutor final : public agent::IAlgorithmJobsExecutor
     if (debug_state) {
       const uint32_t high_mask = grid_mask >> 16u;
       const uint32_t low_mask = grid_mask & 0xFFFFu;
-      debug_state->signals.push_back(algomanager::algoscheduler::AdvancedAlgorithmDebugSignal{
+      debug_state->signals.push_back(algomanager::bridge::AdvancedAlgorithmDebugSignal{
         .name = "v2a0_precision_grid_mask_demo.jobs",
         .payload = "tick=" + std::to_string(tick_counter) +
           ", grid_mask=" + std::to_string(grid_mask) +
@@ -98,15 +98,15 @@ class PrecisionGridMaskJobsExecutor final : public agent::IAlgorithmJobsExecutor
   }
 };
 
-void DestroyJobsExecutor(agent::IAlgorithmJobsExecutor* executor) {
+void DestroyJobsExecutor(algomanager::bridge::IAlgorithmJobsExecutor* executor) {
   delete executor;
 }
 
 }  // namespace
 
 extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateBundle(
-  const algomanager::support::AlgorithmPluginRequest* request,
-  algomanager::support::AlgorithmPluginBundle* out_bundle) {
+  const algomanager::algocatalog::AlgorithmPluginRequest* request,
+  algomanager::algocatalog::AlgorithmPluginBundle* out_bundle) {
   if (!request || !out_bundle) {
     return false;
   }
@@ -122,7 +122,7 @@ extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateBundle(
 }
 
 extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateRuntimeReflector(
-  const algomanager::support::AlgorithmPluginRequest* request,
+  const algomanager::algocatalog::AlgorithmPluginRequest* request,
   algorithm::AlgorithmReflector* out_reflector) {
   if (!request || !out_reflector) {
     return false;
@@ -136,7 +136,7 @@ extern "C" ALGORITHM_LIBRARY_PLUGIN_API bool AlgorithmPlugin_CreateRuntimeReflec
         nullptr)) {
     return false;
   }
-  if (!algomanager::support::LoadAlgorithmPackageReflectorFromLocation(
+  if (!algomanager::algocatalog::LoadAlgorithmPackageReflectorFromLocation(
         package_location,
         &runtime_reflector,
         nullptr) || !runtime_reflector) {

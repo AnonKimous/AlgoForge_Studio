@@ -1,7 +1,7 @@
 #pragma once
 
 #include "algomanager/catalog/algorithm_intervention_support.h"
-#include "algomanager/catalog/algorithm_library_paths.h"
+#include "algomanager/bridge/algorithm_library_paths.h"
 #include "algomanager/catalog/algorithm_json_utils.h"
 #include "algomanager/bridge/algorithm_package_location.h"
 #include "algomanager/catalog/algorithm_package_paths.h"
@@ -36,7 +36,7 @@ inline void AppendPipelineRunnerProbe(const std::string& file_name, const std::s
 }
 
 struct PhaseSchema {
-  std::vector<algomanager::algoscheduler::AlgorithmPhaseSpec> phase_specs;
+  std::vector<algomanager::bridge::AlgorithmPhaseSpec> phase_specs;
   bool valid{false};
   std::string error_message;
 };
@@ -51,77 +51,77 @@ inline std::string AlgorithmNameFromLocation(const algorithm::AlgorithmPackageLo
 inline bool ParsePhaseKind(
   const std::string& phase_name,
   const std::string& phase_kind_text,
-  algomanager::algoscheduler::AlgorithmPhaseKind* out_phase_kind) {
+  algomanager::bridge::AlgorithmPhaseKind* out_phase_kind) {
   if (!out_phase_kind) {
     return false;
   }
 
   const std::string kind = !phase_kind_text.empty() ? phase_kind_text : phase_name;
   if (kind == "pretick" || kind == "preTick") {
-    *out_phase_kind = algomanager::algoscheduler::AlgorithmPhaseKind::Pretick;
+    *out_phase_kind = algomanager::bridge::AlgorithmPhaseKind::Pretick;
     return true;
   }
   if (kind == "exec") {
-    *out_phase_kind = algomanager::algoscheduler::AlgorithmPhaseKind::Exec;
+    *out_phase_kind = algomanager::bridge::AlgorithmPhaseKind::Exec;
     return true;
   }
   if (kind == "aftertick" || kind == "afterTick" || kind == "postExecution") {
-    *out_phase_kind = algomanager::algoscheduler::AlgorithmPhaseKind::AfterTick;
+    *out_phase_kind = algomanager::bridge::AlgorithmPhaseKind::AfterTick;
     return true;
   }
   if (kind == "renderresult" || kind == "renderResult" || kind == "resultRender") {
-    *out_phase_kind = algomanager::algoscheduler::AlgorithmPhaseKind::RenderResult;
+    *out_phase_kind = algomanager::bridge::AlgorithmPhaseKind::RenderResult;
     return true;
   }
   if (kind == "reflect") {
-    *out_phase_kind = algomanager::algoscheduler::AlgorithmPhaseKind::Reflect;
+    *out_phase_kind = algomanager::bridge::AlgorithmPhaseKind::Reflect;
     return true;
   }
 
-  *out_phase_kind = algomanager::algoscheduler::AlgorithmPhaseKind::Custom;
+  *out_phase_kind = algomanager::bridge::AlgorithmPhaseKind::Custom;
   return true;
 }
 
 inline bool ParseExecutionPreference(
   const std::string& preference_text,
-  algomanager::algoscheduler::AlgorithmExecutionPreference* out_preference) {
+  algomanager::bridge::AlgorithmExecutionPreference* out_preference) {
   if (!out_preference) {
     return false;
   }
   if (preference_text == "jobs" || preference_text == "Jobs" || preference_text == "JOBS") {
-    *out_preference = algomanager::algoscheduler::AlgorithmExecutionPreference::Jobs;
+    *out_preference = algomanager::bridge::AlgorithmExecutionPreference::Jobs;
     return true;
   }
   if (preference_text == "vk" || preference_text == "Vk" || preference_text == "VK") {
-    *out_preference = algomanager::algoscheduler::AlgorithmExecutionPreference::Vk;
+    *out_preference = algomanager::bridge::AlgorithmExecutionPreference::Vk;
     return true;
   }
   if (preference_text == "cuda" || preference_text == "Cuda" || preference_text == "CUDA") {
-    *out_preference = algomanager::algoscheduler::AlgorithmExecutionPreference::Cuda;
+    *out_preference = algomanager::bridge::AlgorithmExecutionPreference::Cuda;
     return true;
   }
   if (preference_text == "compatibility" || preference_text == "Compatibility" || preference_text == "COMPATIBILITY" ||
       preference_text == "compat") {
-    *out_preference = algomanager::algoscheduler::AlgorithmExecutionPreference::Compatibility;
+    *out_preference = algomanager::bridge::AlgorithmExecutionPreference::Compatibility;
     return true;
   }
   return false;
 }
 
-inline algomanager::algoscheduler::AlgorithmExecutionPreference DefaultExecutionPreferenceForPhaseKind(
-  algomanager::algoscheduler::AlgorithmPhaseKind phase_kind) {
+inline algomanager::bridge::AlgorithmExecutionPreference DefaultExecutionPreferenceForPhaseKind(
+  algomanager::bridge::AlgorithmPhaseKind phase_kind) {
   switch (phase_kind) {
-    case algomanager::algoscheduler::AlgorithmPhaseKind::ResultRender:
-      return algomanager::algoscheduler::AlgorithmExecutionPreference::Vk;
-    case algomanager::algoscheduler::AlgorithmPhaseKind::Reflect:
-      return algomanager::algoscheduler::AlgorithmExecutionPreference::Jobs;
-    case algomanager::algoscheduler::AlgorithmPhaseKind::Pretick:
-    case algomanager::algoscheduler::AlgorithmPhaseKind::Exec:
-    case algomanager::algoscheduler::AlgorithmPhaseKind::AfterTick:
-    case algomanager::algoscheduler::AlgorithmPhaseKind::Custom:
-      return algomanager::algoscheduler::AlgorithmExecutionPreference::Jobs;
+    case algomanager::bridge::AlgorithmPhaseKind::ResultRender:
+      return algomanager::bridge::AlgorithmExecutionPreference::Vk;
+    case algomanager::bridge::AlgorithmPhaseKind::Reflect:
+      return algomanager::bridge::AlgorithmExecutionPreference::Jobs;
+    case algomanager::bridge::AlgorithmPhaseKind::Pretick:
+    case algomanager::bridge::AlgorithmPhaseKind::Exec:
+    case algomanager::bridge::AlgorithmPhaseKind::AfterTick:
+    case algomanager::bridge::AlgorithmPhaseKind::Custom:
+      return algomanager::bridge::AlgorithmExecutionPreference::Jobs;
   }
-  return algomanager::algoscheduler::AlgorithmExecutionPreference::Jobs;
+  return algomanager::bridge::AlgorithmExecutionPreference::Jobs;
 }
 
 inline PhaseSchema LoadPhaseSchema(const algorithm::AlgorithmPackageLocation& package_location) {
@@ -204,7 +204,7 @@ inline PhaseSchema LoadPhaseSchema(const algorithm::AlgorithmPackageLocation& pa
     }
 
     const std::string stage_key = stage_item->string;
-    algomanager::algoscheduler::AlgorithmPhaseSpec phase_spec{};
+    algomanager::bridge::AlgorithmPhaseSpec phase_spec{};
     phase_spec.stage_name = json_utils::GetStringField(stage_item, "stage_name");
     if (phase_spec.stage_name.empty()) {
       phase_spec.stage_name = stage_key;
@@ -229,14 +229,14 @@ inline PhaseSchema LoadPhaseSchema(const algorithm::AlgorithmPackageLocation& pa
         return schema;
       }
     }
-    if (phase_spec.stage_kind == algomanager::algoscheduler::AlgorithmPhaseKind::ResultRender &&
-        phase_spec.execution_preference != algomanager::algoscheduler::AlgorithmExecutionPreference::Vk) {
+    if (phase_spec.stage_kind == algomanager::bridge::AlgorithmPhaseKind::ResultRender &&
+        phase_spec.execution_preference != algomanager::bridge::AlgorithmExecutionPreference::Vk) {
       schema.error_message = "Result-render phase must use VK execution preference: " + path.string();
       cJSON_Delete(root);
       return schema;
     }
-    if (phase_spec.stage_kind == algomanager::algoscheduler::AlgorithmPhaseKind::Reflect &&
-        phase_spec.execution_preference != algomanager::algoscheduler::AlgorithmExecutionPreference::Jobs) {
+    if (phase_spec.stage_kind == algomanager::bridge::AlgorithmPhaseKind::Reflect &&
+        phase_spec.execution_preference != algomanager::bridge::AlgorithmExecutionPreference::Jobs) {
       schema.error_message = "Reflect phase must use Jobs execution preference: " + path.string();
       cJSON_Delete(root);
       return schema;
@@ -256,7 +256,7 @@ inline PhaseSchema LoadPhaseSchema(const algorithm::AlgorithmPackageLocation& pa
             continue;
           }
 
-          algomanager::algoscheduler::AlgorithmPhaseContainerBinding binding{};
+          algomanager::bridge::AlgorithmPhaseContainerBinding binding{};
           if (cJSON_IsString(item) && item->valuestring) {
             binding.container_name = item->valuestring;
             binding.container_kind = "array";
@@ -299,7 +299,7 @@ inline PhaseSchema LoadPhaseSchema(const algorithm::AlgorithmPackageLocation& pa
             continue;
           }
 
-          algomanager::algoscheduler::AlgorithmPhaseContainerBinding binding{};
+          algomanager::bridge::AlgorithmPhaseContainerBinding binding{};
           if (cJSON_IsString(item) && item->valuestring) {
             binding.container_name = item->valuestring;
             binding.container_kind = "variable";
@@ -350,7 +350,7 @@ inline PhaseSchema LoadPhaseSchema(const algorithm::AlgorithmPackageLocation& pa
       phase_spec.shader.pipeline_kind = json_utils::GetStringField(shader, "pipeline");
     }
 
-    if (phase_spec.stage_kind == algomanager::algoscheduler::AlgorithmPhaseKind::ResultRender) {
+    if (phase_spec.stage_kind == algomanager::bridge::AlgorithmPhaseKind::ResultRender) {
       if (phase_spec.used_algorithm_containers.empty()) {
         schema.error_message =
           "Result-render phase in package JSON file must bind at least one array container: " + path.string();
@@ -384,7 +384,7 @@ inline PhaseSchema LoadPhaseSchema(const algorithm::AlgorithmPackageLocation& pa
   return schema;
 }
 
-class JsonAlgorithmIntervention final : public algomanager::algoscheduler::IAlgorithmIntervention {
+class JsonAlgorithmIntervention final : public algomanager::bridge::IAlgorithmIntervention {
  public:
   explicit JsonAlgorithmIntervention(PhaseSchema schema)
     : schema_(std::move(schema)) {}
@@ -394,7 +394,7 @@ class JsonAlgorithmIntervention final : public algomanager::algoscheduler::IAlgo
   }
 
   void FillAgentToAlgorithmSignal(
-    const algomanager::algoscheduler::AgentTickContext& context,
+    const algomanager::bridge::AgentTickContext& context,
     AgentToAlgorithmSignal* out_signal) const override {
     if (!out_signal) {
       return;
@@ -406,7 +406,7 @@ class JsonAlgorithmIntervention final : public algomanager::algoscheduler::IAlgo
   }
 
   bool GetInterventionPhaseSpecs(
-    std::vector<algomanager::algoscheduler::AlgorithmPhaseSpec>* out_phase_specs) const override {
+    std::vector<algomanager::bridge::AlgorithmPhaseSpec>* out_phase_specs) const override {
     if (!out_phase_specs) {
       return false;
     }
@@ -420,7 +420,7 @@ class JsonAlgorithmIntervention final : public algomanager::algoscheduler::IAlgo
 
 inline bool LoadAlgorithmInterventionFromLocationImpl(
   const algorithm::AlgorithmPackageLocation& package_location,
-  std::shared_ptr<algomanager::algoscheduler::IAlgorithmIntervention>* out_intervention,
+  std::shared_ptr<algomanager::bridge::IAlgorithmIntervention>* out_intervention,
   std::string* out_error_message) {
   if (!out_intervention) {
     if (out_error_message) {
@@ -446,7 +446,7 @@ inline bool LoadAlgorithmInterventionFromLocationImpl(
     return false;
   }
 
-  std::shared_ptr<algomanager::algoscheduler::IAlgorithmIntervention> intervention =
+  std::shared_ptr<algomanager::bridge::IAlgorithmIntervention> intervention =
     std::make_shared<JsonAlgorithmIntervention>(schema);
   *out_intervention = std::move(intervention);
   if (out_error_message) {

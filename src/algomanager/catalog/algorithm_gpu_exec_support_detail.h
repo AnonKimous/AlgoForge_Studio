@@ -17,7 +17,7 @@ namespace algomanager::algocatalog::vk_exec_detail {
 namespace fs = std::filesystem;
 
 struct VkExecSchema {
-  algomanager::algoscheduler::AlgorithmVkExecSpec spec{};
+  algomanager::bridge::AlgorithmVkExecSpec spec{};
   bool valid{false};
   std::string error_message;
 };
@@ -32,7 +32,7 @@ inline std::string AlgorithmNameFromLocation(
 
 inline void LoadVkExecBindings(
   const cJSON* used_containers,
-  std::vector<algomanager::algoscheduler::AlgorithmVkExecContainerBinding>* out_bindings,
+  std::vector<algomanager::bridge::AlgorithmVkExecContainerBinding>* out_bindings,
   const std::string& package_path,
   std::string* out_error_message) {
   if (!out_bindings) {
@@ -59,7 +59,7 @@ inline void LoadVkExecBindings(
         continue;
       }
 
-      algomanager::algoscheduler::AlgorithmVkExecContainerBinding binding{};
+      algomanager::bridge::AlgorithmVkExecContainerBinding binding{};
       if (cJSON_IsString(item) && item->valuestring) {
         binding.container_name = item->valuestring;
         binding.container_kind = default_kind ? default_kind : "";
@@ -201,12 +201,12 @@ inline VkExecSchema LoadVkExecSchema(
   return schema;
 }
 
-class JsonAlgorithmVkExecutor final : public algomanager::algoscheduler::IAlgorithmVkExecutor {
+class JsonAlgorithmVkExecutor final : public algomanager::bridge::IAlgorithmVkExecutor {
  public:
-  explicit JsonAlgorithmVkExecutor(algomanager::algoscheduler::AlgorithmVkExecSpec spec)
+  explicit JsonAlgorithmVkExecutor(algomanager::bridge::AlgorithmVkExecSpec spec)
     : spec_(std::move(spec)) {}
 
-  bool GetVkExecSpec(algomanager::algoscheduler::AlgorithmVkExecSpec* out_spec) const override {
+  bool GetVkExecSpec(algomanager::bridge::AlgorithmVkExecSpec* out_spec) const override {
     if (!out_spec) {
       return false;
     }
@@ -215,12 +215,12 @@ class JsonAlgorithmVkExecutor final : public algomanager::algoscheduler::IAlgori
   }
 
  private:
-  algomanager::algoscheduler::AlgorithmVkExecSpec spec_{};
+  algomanager::bridge::AlgorithmVkExecSpec spec_{};
 };
 
 inline bool LoadAlgorithmVkExecutorFromLocationImpl(
   const algorithm::AlgorithmPackageLocation& package_location,
-  std::shared_ptr<algomanager::algoscheduler::IAlgorithmVkExecutor>* out_vk_executor,
+  std::shared_ptr<algomanager::bridge::IAlgorithmVkExecutor>* out_vk_executor,
   std::string* out_error_message) {
   if (!out_vk_executor) {
     if (out_error_message) {

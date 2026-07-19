@@ -11,7 +11,7 @@
 #include <utility>
 #include <vector>
 
-namespace algomanager { namespace algoscheduler {
+namespace algomanager { namespace bridge {
 
 struct AlgorithmRequestedResources {
   struct RequiredResource {
@@ -581,77 +581,63 @@ class IAlgorithmIntervention {
   }
 };
 
-}  // namespace scheduler
+}  // namespace bridge
 }  // namespace algomanager
-
 namespace algomanager {
-using ::algorithm::AlgorithmContainer;
-using ::algorithm::AlgorithmContainerSet;
-using ::algorithm::AlgorithmContainerStorageKind;
-using ::algorithm::AlgorithmStandardContainerLayout;
-using ::algorithm::AlgorithmProfile;
-using ::algorithm::AlgorithmReflectionBinding;
-using ::algorithm::AlgorithmReflector;
-using ::algorithm::AlgorithmRuntimeTransferBinding;
-using ::algorithm::AlgorithmRuntimeTransferEdge;
-using ::algorithm::AlgorithmRuntimeTransferMap;
-using ::algorithm::FindAlgorithmContainer;
-using ::algomanager::algoscheduler::JobsPendingPipelineStage0Submission;
-using ::algomanager::algoscheduler::JobsPipelineLaneRuntimeState;
-using ::algomanager::algoscheduler::AgentAlgorithmRuntimeState;
-using ::algomanager::algoscheduler::AgentInitConfig;
-using ::algomanager::algoscheduler::AgentTickContext;
-using ::algomanager::algoscheduler::AgentTickResult;
-using ::algomanager::algoscheduler::AlgorithmAssemblySlot;
-using ::algomanager::algoscheduler::AlgorithmAssemblyState;
-using ::algomanager::algoscheduler::AlgorithmDescriptorValue;
-using ::algomanager::algoscheduler::AlgorithmExecutionPhase;
-using ::algomanager::algoscheduler::AlgorithmExecutionPreference;
-using ::algomanager::algoscheduler::AlgorithmPipelineSubmissionMode;
-using ::algomanager::algoscheduler::AlgorithmPipelineTopology;
-using ::algomanager::algoscheduler::AlgorithmPipelineSyncMode;
-using ::algomanager::algoscheduler::AlgorithmPipelineWrapperRole;
-using ::algomanager::algoscheduler::JobsPipelineInterStageBufferRuntimeState;
-using ::algomanager::algoscheduler::JobsPipelineRegistration;
-using ::algomanager::algoscheduler::JobsPipelineRuntimeState;
-using ::algomanager::algoscheduler::AlgorithmJobPriority;
-using ::algomanager::algoscheduler::AlgorithmPhaseKind;
-using ::algomanager::algoscheduler::AlgorithmInterventionContainerBinding;
-using ::algomanager::algoscheduler::AlgorithmInterventionPackageDebugState;
-using ::algomanager::algoscheduler::AlgorithmInterventionShaderSpec;
-using ::algomanager::algoscheduler::AlgorithmInterventionStageKind;
-using ::algomanager::algoscheduler::AlgorithmInterventionStageSpec;
-using ::algomanager::algoscheduler::AlgorithmPhaseContainerBinding;
-using ::algomanager::algoscheduler::AlgorithmPhaseShaderSpec;
-using ::algomanager::algoscheduler::AlgorithmPhaseSpec;
-using ::algomanager::algoscheduler::AlgorithmVkExecContainerBinding;
-using ::algomanager::algoscheduler::AlgorithmVkExecShaderSpec;
-using ::algomanager::algoscheduler::AlgorithmVkExecSpec;
-using ::algomanager::algoscheduler::AlgorithmMountMode;
-using ::algomanager::algoscheduler::AlgorithmPipelineStageSubmission;
-using ::algomanager::algoscheduler::AlgorithmPipelineStageRuntimeStat;
-using ::algomanager::algoscheduler::AlgorithmObject;
-using ::algomanager::algoscheduler::AlgorithmPackageDebugState;
-using ::algomanager::algoscheduler::AlgorithmReflectionSnapshot;
-using ::algomanager::algoscheduler::AlgorithmReflectionValue;
-using ::algomanager::algoscheduler::AlgorithmTickLifetime;
-using ::algomanager::algoscheduler::AlgorithmRequestedDescriptorBindings;
-using ::algomanager::algoscheduler::AlgorithmRequestedResources;
-using ::algomanager::algoscheduler::AlgorithmResourceBinding;
-using ::algomanager::algoscheduler::IAlgorithmIntervention;
-using ::algomanager::algoscheduler::IAlgorithmPackageSupport;
-using ::algomanager::algoscheduler::IAlgorithmJobsExecutor;
-using ::algomanager::algoscheduler::IAlgorithmVkExecutor;
-using ::algomanager::algoscheduler::IAlgorithmCudaExecutor;
-using ::algomanager::algoscheduler::IAlgorithmCompatibilityExecutor;
-using ::algomanager::algoscheduler::AlgorithmCompatibilityContainerWriter;
-using ::algomanager::algoscheduler::IComplexAlgorithmPackageSupport;
-using ::algomanager::algoscheduler::ISimpleAlgorithmPackageSupport;
-namespace algocatalog {}
-namespace algoscheduler {}
-}  // namespace algomanager
-
-namespace algomanager {
-namespace scheduler = algoscheduler;
-namespace catalog = algocatalog;
+namespace algoscheduler {
+using ::algomanager::bridge::JobsPendingPipelineStage0Submission;
+using ::algomanager::bridge::JobsPipelineLaneRuntimeState;
+using ::algomanager::bridge::AgentAlgorithmRuntimeState;
+using ::algomanager::bridge::AgentInitConfig;
+using ::algomanager::bridge::AgentTickContext;
+using ::algomanager::bridge::AgentTickResult;
+using ::algomanager::bridge::AlgorithmAssemblySlot;
+using ::algomanager::bridge::AlgorithmAssemblyState;
+using ::algomanager::bridge::AlgorithmDescriptorValue;
+using ::algomanager::bridge::AlgorithmExecutionPhase;
+using ::algomanager::bridge::AlgorithmExecutionPreference;
+using ::algomanager::bridge::AlgorithmPipelineSubmissionMode;
+using ::algomanager::bridge::AlgorithmPipelineTopology;
+using ::algomanager::bridge::AlgorithmPipelineSyncMode;
+using ::algomanager::bridge::AlgorithmPipelineWrapperRole;
+using ::algomanager::bridge::JobsPipelineInterStageBufferRuntimeState;
+using ::algomanager::bridge::JobsPipelineRegistration;
+using ::algomanager::bridge::JobsPipelineRuntimeState;
+using ::algomanager::bridge::AlgorithmJobPriority;
+using ::algomanager::bridge::AlgorithmPhaseKind;
+using ::algomanager::bridge::AlgorithmInterventionContainerBinding;
+using ::algomanager::bridge::AlgorithmInterventionPackageDebugState;
+using ::algomanager::bridge::AlgorithmInterventionShaderSpec;
+using ::algomanager::bridge::AlgorithmInterventionStageKind;
+using ::algomanager::bridge::AlgorithmInterventionStageSpec;
+using ::algomanager::bridge::AlgorithmPhaseContainerBinding;
+using ::algomanager::bridge::AlgorithmPhaseShaderSpec;
+using ::algomanager::bridge::AlgorithmPhaseSpec;
+using ::algomanager::bridge::AlgorithmVkExecContainerBinding;
+using ::algomanager::bridge::AlgorithmVkExecShaderSpec;
+using ::algomanager::bridge::AlgorithmVkExecSpec;
+using ::algomanager::bridge::AlgorithmMountMode;
+using ::algomanager::bridge::AlgorithmPipelineStageSubmission;
+using ::algomanager::bridge::AlgorithmPipelineStageRuntimeStat;
+using ::algomanager::bridge::AlgorithmObject;
+using ::algomanager::bridge::AlgorithmObjectChildStorage;
+using ::algomanager::bridge::AlgorithmPackageDebugState;
+using ::algomanager::bridge::PipelineStageBridgeDebugBinding;
+using ::algomanager::bridge::PipelineStageBridgeDebugSet;
+using ::algomanager::bridge::AlgorithmReflectionSnapshot;
+using ::algomanager::bridge::AlgorithmReflectionValue;
+using ::algomanager::bridge::AlgorithmTickLifetime;
+using ::algomanager::bridge::AlgorithmRequestedDescriptorBindings;
+using ::algomanager::bridge::AlgorithmRequestedResources;
+using ::algomanager::bridge::AlgorithmResourceBinding;
+using ::algomanager::bridge::IAlgorithmIntervention;
+using ::algomanager::bridge::IAlgorithmPackageSupport;
+using ::algomanager::bridge::IAlgorithmJobsExecutor;
+using ::algomanager::bridge::IAlgorithmVkExecutor;
+using ::algomanager::bridge::IAlgorithmCudaExecutor;
+using ::algomanager::bridge::IAlgorithmCompatibilityExecutor;
+using ::algomanager::bridge::AlgorithmCompatibilityContainerWriter;
+using ::algomanager::bridge::IComplexAlgorithmPackageSupport;
+using ::algomanager::bridge::ISimpleAlgorithmPackageSupport;
 }
+}  // namespace algomanager

@@ -20,9 +20,9 @@ namespace agent {
 
 namespace {
 
-using PendingPipelineStage0Submission = algomanager::JobsPendingPipelineStage0Submission;
-using PipelineLaneRuntimeState = algomanager::JobsPipelineLaneRuntimeState;
-using PipelineRuntimeState = algomanager::JobsPipelineRuntimeState;
+using PendingPipelineStage0Submission = algomanager::bridge::JobsPendingPipelineStage0Submission;
+using PipelineLaneRuntimeState = algomanager::bridge::JobsPipelineLaneRuntimeState;
+using PipelineRuntimeState = algomanager::bridge::JobsPipelineRuntimeState;
 
 #ifndef NDEBUG
 #define DEBUG_TOOL_ASSERT(condition, message) do { \
@@ -148,7 +148,7 @@ bool _ShouldEmitPipelineRunnerProbe(const std::string& pipeline_name) {
 
 void _AppendPipelineRunnerProbe(const std::string& file_name, const std::string& line) {
   const std::filesystem::path path =
-    algorithm::library_paths::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot() / file_name;
+    algomanager::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot() / file_name;
   std::error_code ec;
   std::filesystem::create_directories(path.parent_path(), ec);
   std::ofstream file(path, std::ios::binary | std::ios::app);
