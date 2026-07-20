@@ -50,7 +50,9 @@ class RuntimeVkContextRegistry {
   static RuntimeVkContextRegistry& Instance();
 
   void Set(RuntimeVkExecutionContext context);
-  void SetAlgorithmQueues(std::vector<VkQueue> queues);
+  void SetAlgorithmQueues(
+    std::vector<VkQueue> queues,
+    uint32_t first_queue_index);
   RuntimeVkExecutionContext Snapshot(const void* execution_key = nullptr) const;
   void PublishExecutionProgress(const void* execution_key);
   uint64_t SnapshotExecutionProgress(const void* execution_key) const;
@@ -66,6 +68,7 @@ class RuntimeVkContextRegistry {
   mutable std::mutex mutex_{};
   RuntimeVkExecutionContext context_{};
   std::vector<VkQueue> algorithm_queues_{};
+  uint32_t algorithm_queue_first_index_{1u};
   mutable std::unordered_map<const void*, uint32_t> queue_assignments_{};
   mutable uint32_t next_algorithm_queue_index_{0u};
   std::unordered_map<const void*, uint64_t> execution_progress_{};
