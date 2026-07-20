@@ -2,78 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+
 ROOT = Path(__file__).resolve().parent.parent
-
-
-def replace_once(path: Path, old: str, new: str) -> None:
-    text = path.read_text(encoding="utf-8")
-    if text.count(old) != 1:
-        raise RuntimeError(f"expected one match in {path}: {old[:120]!r}")
-    path.write_text(text.replace(old, new, 1), encoding="utf-8")
-
-
-header = ROOT / "src/runtimesys/runtime_gpu_context.h"
-replace_once(
-    header,
-    "  void SetAlgorithmQueues(std::vector<VkQueue> queues);\n",
-    "  void SetAlgorithmQueues(\n"
-    "    std::vector<VkQueue> queues,\n"
-    "    uint32_t first_queue_index);\n",
-)
-replace_once(
-    header,
-    "  std::vector<VkQueue> algorithm_queues_{};\n"
-    "  mutable std::unordered_map<const void*, uint32_t> queue_assignments_{};\n",
-    "  std::vector<VkQueue> algorithm_queues_{};\n"
-    "  uint32_t algorithm_queue_first_index_{1u};\n"
-    "  mutable std::unordered_map<const void*, uint32_t> queue_assignments_{};\n",
-)
-
-registry = ROOT / "src/runtimesys/algorithm_gpu_context.cpp"
-replace_once(
-    registry,
-    "  algorithm_queues_.clear();\n"
-    "  queue_assignments_.clear();\n",
-    "  algorithm_queues_.clear();\n"
-    "  algorithm_queue_first_index_ = 1u;\n"
-    "  queue_assignments_.clear();\n",
-)
-replace_once(
-    registry,
-    "void RuntimeVkContextRegistry::SetAlgorithmQueues(std::vector<VkQueue> queues) {\n"
-    "  std::lock_guard<std::mutex> lock(mutex_);\n"
-    "  algorithm_queues_ = std::move(queues);\n",
-    "void RuntimeVkContextRegistry::SetAlgorithmQueues(\n"
-    "  std::vector<VkQueue> queues,\n"
-    "  uint32_t first_queue_index) {\n"
-    "  std::lock_guard<std::mutex> lock(mutex_);\n"
-    "  algorithm_queues_ = std::move(queues);\n"
-    "  algorithm_queue_first_index_ = first_queue_index;\n",
-)
-replace_once(
-    registry,
-    "  result.queue = algorithm_queues_[assignment->second];\n"
-    "  result.queue_index = assignment->second + 1u;\n",
-    "  result.queue = algorithm_queues_[assignment->second];\n"
-    "  result.queue_index = algorithm_queue_first_index_ + assignment->second;\n",
-)
-# Reset the first index in Clear as well. The first identical clear block was
-# already changed in Set(), so this targets the remaining block.
-replace_once(
-    registry,
-    "  context_ = {};\n"
-    "  algorithm_queues_.clear();\n"
-    "  queue_assignments_.clear();\n",
-    "  context_ = {};\n"
-    "  algorithm_queues_.clear();\n"
-    "  algorithm_queue_first_index_ = 1u;\n"
-    "  queue_assignments_.clear();\n",
-)
-
 runtime = ROOT / "src/runtimesys/render/imgui_vulkan_runtime.cpp"
+text = runtime.read_text(encoding="utf-8")
+
 selection_begin = "  for (VkPhysicalDevice device : physical_devices) {\n"
 selection_end = "  if (physical_device_ == VK_NULL_HANDLE || queue_family_ == UINT32_MAX) {\n"
-text = runtime.read_text(encoding="utf-8")
 begin = text.index(selection_begin)
 end = text.index(selection_end, begin)
 selection = '''  bool selected_multiple_queues = false;
@@ -109,52 +44,66 @@ selection = '''  bool selected_multiple_queues = false;
   }
 
 '''
-runtime.write_text(text[:begin] + selection + text[end:], encoding="utf-8")
-replace_once(
-    runtime,
-    "  if (physical_device_ == VK_NULL_HANDLE || queue_family_ == UINT32_MAX) {\n"
-    "    throw std::runtime_error(\"No suitable Vulkan device queue family found for ImGui\");\n"
-    "  }\n",
-    "  if (physical_device_ == VK_NULL_HANDLE || queue_family_ == UINT32_MAX) {\n"
-    "    throw std::runtime_error(\n"
-    "      \"No Vulkan queue family supports both graphics and presentation.\");\n"
-    "  }\n",
-)
-replace_once(
-    runtime,
-    "  const uint32_t queue_count = selected_queue_families[queue_family_].queueCount;\n"
-    "  if (queue_count < 2u) {\n"
-    "    throw std::runtime_error(\"The Vulkan present queue family must expose a second queue for algorithms\");\n"
-    "  }\n",
-    "  const uint32_t queue_count = selected_queue_families[queue_family_].queueCount;\n",
-)
-replace_once(
-    runtime,
-    "  algorithm_queues_.clear();\n"
-    "  algorithm_queues_.reserve(queue_count - 1u);\n"
-    "  for (uint32_t queue_index = 1u; queue_index < queue_count; ++queue_index) {\n"
-    "    VkQueue algorithm_queue = VK_NULL_HANDLE;\n"
-    "    vkGetDeviceQueue(device_, queue_family_, queue_index, &algorithm_queue);\n"
-    "    algorithm_queues_.push_back(algorithm_queue);\n"
-    "  }\n",
-    "  algorithm_queues_.clear();\n"
-    "  uint32_t first_algorithm_queue_index = 0u;\n"
-    "  if (queue_count > 1u) {\n"
-    "    first_algorithm_queue_index = 1u;\n"
-    "    algorithm_queues_.reserve(queue_count - 1u);\n"
-    "    for (uint32_t queue_index = 1u; queue_index < queue_count; ++queue_index) {\n"
-    "      VkQueue algorithm_queue = VK_NULL_HANDLE;\n"
-    "      vkGetDeviceQueue(device_, queue_family_, queue_index, &algorithm_queue);\n"
-    "      algorithm_queues_.push_back(algorithm_queue);\n"
-    "    }\n"
-    "  } else {\n"
-    "    algorithm_queues_.push_back(queue_);\n"
-    "  }\n",
-)
-replace_once(
-    runtime,
-    "  RuntimeVkContextRegistry::Instance().SetAlgorithmQueues(algorithm_queues_);\n",
-    "  RuntimeVkContextRegistry::Instance().SetAlgorithmQueues(\n"
-    "    algorithm_queues_,\n"
-    "    first_algorithm_queue_index);\n",
-)
+text = text[:begin] + selection + text[end:]
+
+old_error = '''  if (physical_device_ == VK_NULL_HANDLE || queue_family_ == UINT32_MAX) {
+    throw std::runtime_error("No suitable Vulkan device queue family found for ImGui");
+  }
+'''
+new_error = '''  if (physical_device_ == VK_NULL_HANDLE || queue_family_ == UINT32_MAX) {
+    throw std::runtime_error(
+      "No Vulkan queue family supports both graphics and presentation.");
+  }
+'''
+if text.count(old_error) != 1:
+    raise RuntimeError("Vulkan queue-selection error block was not found exactly once")
+text = text.replace(old_error, new_error, 1)
+
+old_count = '''  const uint32_t queue_count = selected_queue_families[queue_family_].queueCount;
+  if (queue_count < 2u) {
+    throw std::runtime_error("The Vulkan present queue family must expose a second queue for algorithms");
+  }
+'''
+new_count = '''  const uint32_t queue_count = selected_queue_families[queue_family_].queueCount;
+'''
+if text.count(old_count) != 1:
+    raise RuntimeError("Vulkan two-queue requirement block was not found exactly once")
+text = text.replace(old_count, new_count, 1)
+
+old_algorithm_queues = '''  algorithm_queues_.clear();
+  algorithm_queues_.reserve(queue_count - 1u);
+  for (uint32_t queue_index = 1u; queue_index < queue_count; ++queue_index) {
+    VkQueue algorithm_queue = VK_NULL_HANDLE;
+    vkGetDeviceQueue(device_, queue_family_, queue_index, &algorithm_queue);
+    algorithm_queues_.push_back(algorithm_queue);
+  }
+'''
+new_algorithm_queues = '''  algorithm_queues_.clear();
+  uint32_t first_algorithm_queue_index = 0u;
+  if (queue_count > 1u) {
+    first_algorithm_queue_index = 1u;
+    algorithm_queues_.reserve(queue_count - 1u);
+    for (uint32_t queue_index = 1u; queue_index < queue_count; ++queue_index) {
+      VkQueue algorithm_queue = VK_NULL_HANDLE;
+      vkGetDeviceQueue(device_, queue_family_, queue_index, &algorithm_queue);
+      algorithm_queues_.push_back(algorithm_queue);
+    }
+  } else {
+    algorithm_queues_.push_back(queue_);
+  }
+'''
+if text.count(old_algorithm_queues) != 1:
+    raise RuntimeError("Vulkan algorithm queue initialization block was not found exactly once")
+text = text.replace(old_algorithm_queues, new_algorithm_queues, 1)
+
+old_registry_call = '''  RuntimeVkContextRegistry::Instance().SetAlgorithmQueues(algorithm_queues_);
+'''
+new_registry_call = '''  RuntimeVkContextRegistry::Instance().SetAlgorithmQueues(
+    algorithm_queues_,
+    first_algorithm_queue_index);
+'''
+if text.count(old_registry_call) != 1:
+    raise RuntimeError("RuntimeVkContextRegistry queue registration was not found exactly once")
+text = text.replace(old_registry_call, new_registry_call, 1)
+
+runtime.write_text(text, encoding="utf-8")
