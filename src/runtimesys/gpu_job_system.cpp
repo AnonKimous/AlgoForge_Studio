@@ -17,14 +17,6 @@
 #include <utility>
 #include <vector>
 
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
-
 namespace runtimesys {
 
 namespace {
@@ -167,16 +159,12 @@ std::string _ExecutionStateKey(
     *out_error_message = message;
   }
   std::cerr << message << '\n';
-  OutputDebugStringA((message + "\n").c_str());
-  MessageBoxA(nullptr, message.c_str(), "VK tick execution failed", MB_OK | MB_ICONERROR);
   assert(false && "VK tick execution failed");
   throw std::runtime_error(std::move(message));
 }
 
 [[noreturn]] void _AbortVkTick(std::string message) {
   std::cerr << message << '\n';
-  OutputDebugStringA((message + "\n").c_str());
-  MessageBoxA(nullptr, message.c_str(), "VK tick execution failed", MB_OK | MB_ICONERROR);
   assert(false && "VK tick execution failed");
   throw std::runtime_error(std::move(message));
 }

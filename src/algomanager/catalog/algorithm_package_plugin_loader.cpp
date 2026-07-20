@@ -27,13 +27,8 @@
 #include <unordered_set>
 #include <utility>
 
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
+#include <SDL3/SDL_error.h>
+#include <SDL3/SDL_loadso.h>
 
 namespace algomanager { namespace algocatalog {
 
@@ -54,38 +49,34 @@ void _SetErrorMessage(std::string* out_error_message, std::string message) {
   }
 }
 
-std::shared_ptr<void> _LoadModule(
+using SharedObjectGuard = std::shared_ptr<SDL_SharedObject>;
+
+SharedObjectGuard _LoadModule(
   const std::filesystem::path& path,
   std::string* out_error_message) {
   const fs::path absolute_path = fs::absolute(path).lexically_normal();
-  const std::wstring wide_path = absolute_path.wstring();
-  HMODULE module = LoadLibraryExW(
-    wide_path.c_str(),
-    nullptr,
-    LOAD_WITH_ALTERED_SEARCH_PATH);
+  SDL_SharedObject* module = SDL_LoadObject(absolute_path.string().c_str());
   if (!module) {
     if (out_error_message) {
       *out_error_message =
-        "LoadLibraryExW failed for " + absolute_path.string() +
-        " (GetLastError=" + std::to_string(static_cast<unsigned long>(GetLastError())) + ")";
+        "SDL_LoadObject failed for " + absolute_path.string() +
+        ": " + SDL_GetError();
     }
     return {};
   }
 
-  return std::shared_ptr<void>(
-    module,
-    [](void* handle) {
-      if (handle) {
-        FreeLibrary(static_cast<HMODULE>(handle));
-      }
-    });
+  return SharedObjectGuard(module, [](SDL_SharedObject* handle) {
+    if (handle) {
+      SDL_UnloadObject(handle);
+    }
+  });
 }
 
 template <typename T>
 std::shared_ptr<T> _WrapPluginObject(
   T* object,
   void (*destroy_fn)(T*),
-  const std::shared_ptr<void>& module_guard) {
+  const SharedObjectGuard& module_guard) {
   if (!object || !destroy_fn) {
     return {};
   }
@@ -130,7 +121,7 @@ bool TryLoadAlgorithmPluginComponents(
       "create_from_location.plugin_load.module.begin path=" +
         std::filesystem::absolute(plugin_path).lexically_normal().string());
   }
-  const std::shared_ptr<void> module_guard = _LoadModule(plugin_path, &load_error_message);
+  const SharedObjectGuard module_guard = _LoadModule(plugin_path, &load_error_message);
   if (!module_guard) {
     if (loader_detail::ShouldEmitPipelineRunnerProbe(package_location.algorithm_name.empty()
           ? package_location.manifest_name
@@ -159,7 +150,7 @@ bool TryLoadAlgorithmPluginComponents(
     loader_detail::AppendPipelineRunnerProbe("cache_loader_probe.log", "create_from_location.plugin_load.proc.begin");
   }
   const auto create_bundle_fn = reinterpret_cast<CreateBundleFn>(
-    GetProcAddress(static_cast<HMODULE>(module_guard.get()), "AlgorithmPlugin_CreateBundle"));
+    SDL_LoadFunction(module_guard.get(), "AlgorithmPlugin_CreateBundle"));
   if (!create_bundle_fn) {
     if (loader_detail::ShouldEmitPipelineRunnerProbe(package_location.algorithm_name.empty()
           ? package_location.manifest_name

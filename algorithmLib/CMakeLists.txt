@@ -238,6 +238,7 @@ function(register_algorithm_algo algo_manifest)
   add_custom_target("${shader_target}" DEPENDS ${algorithm_shader_outputs})
 
   if(plugin_source_count GREATER 0 AND BUILD_ALGORITHM_SAMPLE_PLUGIN)
+    set(algorithm_runtime_files "")
     add_library("${algorithm_target_name}_plugin" MODULE ${plugin_sources_for_build})
     target_include_directories("${algorithm_target_name}_plugin" PUBLIC
       "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}"
@@ -269,6 +270,7 @@ function(register_algorithm_algo algo_manifest)
             "${algorithm_output_dir}/${physx_runtime_name}"
           VERBATIM
         )
+        list(APPEND algorithm_runtime_files "${physx_runtime_name}")
       endforeach()
       if(algorithm_name MATCHES "^physx_lance_(compat|cuda)_demo$")
         foreach(physx_link_name IN ITEMS
@@ -302,10 +304,19 @@ function(register_algorithm_algo algo_manifest)
     set_target_properties("${algorithm_target_name}_plugin" PROPERTIES
       PREFIX ""
       OUTPUT_NAME "${algorithm_name}"
+      WINDOWS_EXPORT_ALL_SYMBOLS ON
       RUNTIME_OUTPUT_DIRECTORY "${algorithm_output_dir}"
       LIBRARY_OUTPUT_DIRECTORY "${algorithm_output_dir}"
-      ARCHIVE_OUTPUT_DIRECTORY "${algorithm_output_dir}"
+      ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/algorithm_import_libraries/${algorithm_relative_dir}"
       PDB_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+    )
+    add_custom_command(TARGET "${algorithm_target_name}_plugin" POST_BUILD
+      COMMAND ${CMAKE_COMMAND}
+        "-DOUTPUT_FILE=${algorithm_output_dir}/runtime.artifacts"
+        "-DPLUGIN_MODULE=$<TARGET_FILE_NAME:${algorithm_target_name}_plugin>"
+        "-DRUNTIME_FILES=${algorithm_runtime_files}"
+        -P "${REPO_ROOT}/cmake/write_algorithm_runtime_artifacts.cmake"
+      VERBATIM
     )
     add_dependencies("${algorithm_target_name}_plugin" "${shader_target}")
   endif()

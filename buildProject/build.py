@@ -119,27 +119,27 @@ def run(command: list[str], environment: dict[str, str]) -> None:
 
 
 def export_sdk(toolchain: str) -> None:
-    build_debug = ROOT / "build" / toolchain / BUILD_CONFIGURATION
+    _ = toolchain
     python_sdk = SDK_ROOT / "python"
     cpp_sdk = SDK_ROOT / "cpp"
+    cpp_include = cpp_sdk / "include"
+    cpp_library = cpp_sdk / "lib"
     shutil.rmtree(python_sdk, ignore_errors=True)
-    shutil.rmtree(cpp_sdk, ignore_errors=True)
+    shutil.rmtree(cpp_include, ignore_errors=True)
     shutil.copytree(ROOT / "aglopy", python_sdk / "aglopy")
     shutil.copy2(ROOT / "requirements.txt", python_sdk / "requirements.txt")
-    shutil.copytree(ROOT / "src" / "sdk", cpp_sdk / "include", ignore=shutil.ignore_patterns("*.cpp", "README.md"))
-    sdk_library = next(build_debug.glob("sdk*.lib"), SDK_ROOT / "sdk.lib")
-    (cpp_sdk / "lib").mkdir(parents=True, exist_ok=True)
-    shutil.copy2(sdk_library, cpp_sdk / "lib" / sdk_library.name)
-    dll_sources = list(build_debug.glob("*.dll")) + list((ROOT / "build" / toolchain / "assimp-build" / "bin" / BUILD_CONFIGURATION).glob("*.dll"))
-    (cpp_sdk / "bin").mkdir(parents=True, exist_ok=True)
-    for dll in dll_sources:
-        shutil.copy2(dll, cpp_sdk / "bin" / dll.name)
+    shutil.copytree(ROOT / "src" / "sdk", cpp_include, ignore=shutil.ignore_patterns("*.cpp", "README.md"))
+    if not cpp_library.is_dir() or not any(path.is_file() for path in cpp_library.iterdir()):
+        raise RuntimeError(
+            "The SDK target did not export a library into sdk/cpp/lib. "
+            "CMake must copy $<TARGET_FILE:sdk> during the sdk POST_BUILD step."
+        )
     (python_sdk / "README.md").write_text(
         "Use the aglopy package with DebugToolRunner to submit algorithms and pipelines.\n",
         encoding="utf-8",
     )
     (cpp_sdk / "README.md").write_text(
-        "Headers are under include, the SDK library is under lib, and runtime DLLs are under bin.\n",
+        "Headers are under include and the platform-selected SDK library is under lib.\n",
         encoding="utf-8",
     )
 
@@ -199,12 +199,65 @@ def path_is_under(path: Path, root: Path) -> bool:
         return False
 
 
-def runtime_file_allowed(package_relative_dir: str, relative_file: Path, configuration: str) -> bool:
+def read_runtime_artifacts(runtime_dir: Path) -> set[Path]:
+    artifact_manifest = runtime_dir / "runtime.artifacts"
+    if not artifact_manifest.is_file():
+        return set()
+
+    format_version = None
+    plugin_path = None
+    artifact_paths: set[Path] = {Path("runtime.artifacts")}
+    for line_number, raw_line in enumerate(artifact_manifest.read_text(encoding="utf-8").splitlines(), start=1):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, separator, value = line.partition("=")
+        if not separator or not key.strip() or not value.strip():
+            raise RuntimeError(
+                f"Invalid runtime.artifacts entry at {artifact_manifest}:{line_number}: {raw_line!r}"
+            )
+        key = key.strip()
+        value = value.strip()
+        if key == "format":
+            if format_version is not None:
+                raise RuntimeError(f"Duplicate format entry in {artifact_manifest}")
+            format_version = value
+            continue
+        if key not in {"plugin", "runtime"}:
+            raise RuntimeError(f"Unknown runtime.artifacts key {key!r} in {artifact_manifest}")
+        relative_path = Path(value)
+        if relative_path.is_absolute() or not relative_path.parts or ".." in relative_path.parts:
+            raise RuntimeError(f"Unsafe runtime artifact path {value!r} in {artifact_manifest}")
+        relative_path = Path(*relative_path.parts)
+        artifact_path = runtime_dir / relative_path
+        if not artifact_path.is_file():
+            raise RuntimeError(
+                f"Runtime artifact {relative_path.as_posix()!r} declared by {artifact_manifest} does not exist"
+            )
+        artifact_paths.add(relative_path)
+        if key == "plugin":
+            if plugin_path is not None:
+                raise RuntimeError(f"Duplicate plugin entry in {artifact_manifest}")
+            plugin_path = relative_path
+
+    if format_version != "1":
+        raise RuntimeError(f"Unsupported runtime.artifacts format in {artifact_manifest}: {format_version!r}")
+    if plugin_path is None:
+        raise RuntimeError(f"Missing plugin entry in {artifact_manifest}")
+    return artifact_paths
+
+
+def runtime_file_allowed(
+    package_relative_dir: str,
+    relative_file: Path,
+    configuration: str,
+    runtime_artifact_paths: set[Path],
+) -> bool:
+    if relative_file in runtime_artifact_paths:
+        return True
     if configuration != "RelWithDebInfo":
         return True
     name = relative_file.name
-    if name.endswith(".dll"):
-        return True
     if package_relative_dir.startswith("norm/"):
         return "_exec." in name or "_result_render." in name
     if package_relative_dir.startswith("pipeline/"):
@@ -252,22 +305,22 @@ def package_runtime(source_root: Path, runtime_root: Path, configuration: str, a
                 shutil.copy2(default_json, runtime_dir / "default.json")
                 shutil.copy2(default_json, staging_dir / "default.json")
 
-            for dependency in source_dir.glob("*.dll"):
-                shutil.copy2(dependency, runtime_dir / dependency.name)
-                shutil.copy2(dependency, staging_dir / dependency.name)
-
-            dll_candidates = [runtime_dir / "Debug" / f"{package_name}.dll", runtime_dir / "RelWithDebInfo" / f"{package_name}.dll", runtime_dir / f"{package_name}.dll"]
-            next(path for path in dll_candidates if path.is_file())
+            runtime_artifact_paths = read_runtime_artifacts(runtime_dir)
             nested_dirs = [path for path in all_runtime_dirs if path != runtime_dir and path_is_under(path, runtime_dir)]
             for runtime_file in sorted(path for path in runtime_dir.rglob("*") if path.is_file()):
                 relative_file = runtime_file.relative_to(runtime_dir)
-                if runtime_file.suffix in {".algo", ".exp", ".lib", ".pdb", ".ilk", ".obj", ".manifest"}:
+                if runtime_file.name == f"{package_name}.algo":
                     continue
                 if "algocache" in runtime_file.parts:
                     continue
                 if any(path_is_under(runtime_file, nested_dir) for nested_dir in nested_dirs):
                     continue
-                if not runtime_file_allowed(relative_dir.as_posix(), relative_file, configuration):
+                if not runtime_file_allowed(
+                    relative_dir.as_posix(),
+                    relative_file,
+                    configuration,
+                    runtime_artifact_paths,
+                ):
                     continue
                 destination = staging_dir / relative_file
                 destination.parent.mkdir(parents=True, exist_ok=True)

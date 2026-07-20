@@ -179,6 +179,149 @@ bool _IsSafeAlgoFileRelativePath(const fs::path& path) {
   return true;
 }
 
+bool _ResolveRuntimePluginModule(
+  const fs::path& package_root,
+  fs::path* out_plugin_module_path,
+  bool* out_has_plugin_module,
+  std::string* out_error_message) {
+  if (!out_plugin_module_path || !out_has_plugin_module) {
+    if (out_error_message) {
+      *out_error_message = "Runtime plugin module outputs are null.";
+    }
+    return false;
+  }
+
+  out_plugin_module_path->clear();
+  *out_has_plugin_module = false;
+  const fs::path artifact_manifest_path = package_root / "runtime.artifacts";
+  std::error_code ec;
+  if (!fs::exists(artifact_manifest_path, ec)) {
+    if (out_error_message) {
+      out_error_message->clear();
+    }
+    return true;
+  }
+  if (!fs::is_regular_file(artifact_manifest_path, ec)) {
+    if (out_error_message) {
+      *out_error_message =
+        "Runtime artifact manifest is not a regular file: " + artifact_manifest_path.generic_string();
+    }
+    return false;
+  }
+
+  std::ifstream file(artifact_manifest_path, std::ios::binary);
+  if (!file) {
+    if (out_error_message) {
+      *out_error_message =
+        "Failed to open runtime artifact manifest: " + artifact_manifest_path.generic_string();
+    }
+    return false;
+  }
+
+  bool format_seen = false;
+  bool plugin_seen = false;
+  std::string line;
+  size_t line_number = 0u;
+  while (std::getline(file, line)) {
+    ++line_number;
+    line = _Trim(std::move(line));
+    if (line.empty() || line.front() == '#') {
+      continue;
+    }
+    const size_t separator = line.find('=');
+    if (separator == std::string::npos) {
+      if (out_error_message) {
+        *out_error_message =
+          "Invalid runtime.artifacts entry at line " + std::to_string(line_number) +
+          " in " + artifact_manifest_path.generic_string() + ".";
+      }
+      return false;
+    }
+
+    const std::string key = _Trim(line.substr(0u, separator));
+    const std::string value = _Trim(line.substr(separator + 1u));
+    if (key.empty() || value.empty()) {
+      if (out_error_message) {
+        *out_error_message =
+          "Empty runtime.artifacts key or value at line " + std::to_string(line_number) +
+          " in " + artifact_manifest_path.generic_string() + ".";
+      }
+      return false;
+    }
+
+    if (key == "format") {
+      if (format_seen || value != "1") {
+        if (out_error_message) {
+          *out_error_message =
+            "Unsupported or duplicate runtime.artifacts format in " + artifact_manifest_path.generic_string() + ".";
+        }
+        return false;
+      }
+      format_seen = true;
+      continue;
+    }
+    if (key == "runtime") {
+      const fs::path relative_runtime_path = fs::path(value).lexically_normal();
+      if (!_IsSafeAlgoFileRelativePath(relative_runtime_path)) {
+        if (out_error_message) {
+          *out_error_message =
+            "Unsafe runtime artifact path '" + value + "' in " + artifact_manifest_path.generic_string() + ".";
+        }
+        return false;
+      }
+      const fs::path runtime_path = (package_root / relative_runtime_path).lexically_normal();
+      if (!fs::exists(runtime_path, ec) || !fs::is_regular_file(runtime_path, ec)) {
+        if (out_error_message) {
+          *out_error_message =
+            "Declared runtime artifact is missing: " + runtime_path.generic_string();
+        }
+        return false;
+      }
+      continue;
+    }
+    if (key != "plugin" || plugin_seen) {
+      if (out_error_message) {
+        *out_error_message =
+          "Unknown or duplicate runtime.artifacts key '" + key + "' in " +
+          artifact_manifest_path.generic_string() + ".";
+      }
+      return false;
+    }
+
+    const fs::path relative_plugin_path = fs::path(value).lexically_normal();
+    if (!_IsSafeAlgoFileRelativePath(relative_plugin_path)) {
+      if (out_error_message) {
+        *out_error_message =
+          "Unsafe plugin module path '" + value + "' in " + artifact_manifest_path.generic_string() + ".";
+      }
+      return false;
+    }
+    const fs::path plugin_path = (package_root / relative_plugin_path).lexically_normal();
+    if (!fs::exists(plugin_path, ec) || !fs::is_regular_file(plugin_path, ec)) {
+      if (out_error_message) {
+        *out_error_message = "Declared plugin module is missing: " + plugin_path.generic_string();
+      }
+      return false;
+    }
+    *out_plugin_module_path = plugin_path;
+    *out_has_plugin_module = true;
+    plugin_seen = true;
+  }
+
+  if (!format_seen || !plugin_seen) {
+    if (out_error_message) {
+      *out_error_message =
+        "runtime.artifacts must contain format=1 and exactly one plugin entry: " +
+        artifact_manifest_path.generic_string();
+    }
+    return false;
+  }
+  if (out_error_message) {
+    out_error_message->clear();
+  }
+  return true;
+}
+
 bool _ExtractAlgoPackageFileToDirectory(
   const fs::path& package_file_path,
   const fs::path& destination_root,
@@ -700,17 +843,12 @@ bool _TryResolveAlgorithmPackageLocationFromAlgoFile(
     }
     return false;
   }
-  const fs::path plugin_candidates[] = {
-      out_location->source_package_root / (trimmed_name + ".dll"),
-      out_location->runtime_package_root / (trimmed_name + ".dll"),
-    };
-
-  for (const fs::path& candidate : plugin_candidates) {
-    if (fs::exists(candidate, ec) && fs::is_regular_file(candidate, ec)) {
-      out_location->plugin_module_path = candidate;
-      out_location->has_plugin_module = true;
-      break;
-    }
+  if (!_ResolveRuntimePluginModule(
+        out_location->runtime_package_root,
+        &out_location->plugin_module_path,
+        &out_location->has_plugin_module,
+        out_error_message)) {
+    return false;
   }
 
   out_location->valid = true;
@@ -818,15 +956,12 @@ bool _TryResolveAlgorithmPackageLocationFromAlgocacheLayout(
   out_location->package_root = best_package_root;
   out_location->runtime_package_root = best_package_root;
 
-  const fs::path plugin_candidates[] = {
-    out_location->runtime_package_root / (trimmed_name + ".dll"),
-  };
-  for (const fs::path& candidate : plugin_candidates) {
-    if (fs::exists(candidate, ec) && fs::is_regular_file(candidate, ec)) {
-      out_location->plugin_module_path = candidate;
-      out_location->has_plugin_module = true;
-      break;
-    }
+  if (!_ResolveRuntimePluginModule(
+        out_location->runtime_package_root,
+        &out_location->plugin_module_path,
+        &out_location->has_plugin_module,
+        out_error_message)) {
+    return false;
   }
 
   out_location->valid = true;
@@ -886,17 +1021,12 @@ bool _TryResolveAlgorithmPackageLocationForPluginCompileLayout(
   }
   out_location->runtime_package_root = loose_runtime_package_root;
 
-  std::error_code ec;
-    const fs::path plugin_candidates[] = {
-      out_location->runtime_package_root / (trimmed_name + ".dll"),
-    };
-
-  for (const fs::path& candidate : plugin_candidates) {
-    if (fs::exists(candidate, ec) && fs::is_regular_file(candidate, ec)) {
-      out_location->plugin_module_path = candidate;
-      out_location->has_plugin_module = true;
-      break;
-    }
+  if (!_ResolveRuntimePluginModule(
+        out_location->runtime_package_root,
+        &out_location->plugin_module_path,
+        &out_location->has_plugin_module,
+        out_error_message)) {
+    return false;
   }
 
   out_location->valid = true;

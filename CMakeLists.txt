@@ -393,9 +393,11 @@ target_link_libraries(sdk PUBLIC agentmanager)
 
 set(SDK_PACKAGE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/sdk")
 set(SDK_PACKAGE_INCLUDE_DIR "${SDK_PACKAGE_ROOT}/cpp/include")
+set(SDK_PACKAGE_LIBRARY_DIR "${SDK_PACKAGE_ROOT}/cpp/lib")
 
 add_custom_command(TARGET sdk POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E make_directory "${SDK_PACKAGE_INCLUDE_DIR}"
+  COMMAND ${CMAKE_COMMAND} -E make_directory "${SDK_PACKAGE_LIBRARY_DIR}"
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
     "${CMAKE_CURRENT_SOURCE_DIR}/src/sdk/sdk.h"
     "${SDK_PACKAGE_INCLUDE_DIR}/sdk.h"
@@ -407,7 +409,7 @@ add_custom_command(TARGET sdk POST_BUILD
     "${SDK_PACKAGE_INCLUDE_DIR}/sdk_decomposer.h"
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
     "$<TARGET_FILE:sdk>"
-    "${SDK_PACKAGE_ROOT}/$<TARGET_FILE_NAME:sdk>"
+    "${SDK_PACKAGE_LIBRARY_DIR}/$<TARGET_FILE_NAME:sdk>"
   VERBATIM
 )
 
