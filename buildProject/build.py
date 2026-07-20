@@ -11,6 +11,7 @@ import tempfile
 from pathlib import Path
 
 from anaconda import require_anaconda
+from dependencies import inspect_algorithm_requirements
 from toolchain import ensure_windows_clang_toolchain
 
 
@@ -332,8 +333,8 @@ def package_runtime(source_root: Path, runtime_root: Path, configuration: str, a
             shutil.rmtree(staging_dir)
 
 
-def flatten_runtime_configuration(runtime_dir: Path) -> None:
-    configuration_dir = runtime_dir / BUILD_CONFIGURATION
+def flatten_runtime_configuration(runtime_dir: Path, configuration: str) -> None:
+    configuration_dir = runtime_dir / configuration
     if not configuration_dir.is_dir():
         return
     for path in configuration_dir.iterdir():
@@ -341,9 +342,38 @@ def flatten_runtime_configuration(runtime_dir: Path) -> None:
     configuration_dir.rmdir()
 
 
+def _environment_feature(environment: dict[str, str], name: str, default: bool) -> bool:
+    raw_value = environment.get(name)
+    if raw_value is None:
+        return default
+    normalized = raw_value.strip().lower()
+    if normalized in {"1", "on", "true", "yes"}:
+        return True
+    if normalized in {"0", "off", "false", "no"}:
+        return False
+    raise RuntimeError(f"{name} must be ON or OFF, got {raw_value!r}.")
+
+
 def build_algorithm(toolchain: str, algorithm_name: str) -> None:
     environment = build_environment(toolchain)
     algorithm_dir = find_algorithm(algorithm_name)
+    requirements = inspect_algorithm_requirements([algorithm_name])
+    physx_enabled = _environment_feature(
+        environment,
+        "ALGOFORGE_ENABLE_PHYSX",
+        requirements.physx,
+    )
+    cuda_enabled = _environment_feature(environment, "ALGOFORGE_ENABLE_CUDA", False)
+    if requirements.physx and not physx_enabled:
+        raise RuntimeError(
+            f"Algorithm {algorithm_name!r} requires PhysX, but ALGOFORGE_ENABLE_PHYSX is OFF."
+        )
+
+    # PhysX's official FetchContent entry point uses the lowercase custom
+    # configurations debug/checked/profile/release. Other algorithms retain the
+    # project's standard RelWithDebInfo package configuration.
+    configuration = "release" if requirements.physx else BUILD_CONFIGURATION
+
     build_dir = ALGORITHM_ROOT / (".build_" + toolchain.lower())
     core_build_dir = ROOT / "build" / toolchain
     targets = algorithm_targets(algorithm_dir)
@@ -360,21 +390,36 @@ def build_algorithm(toolchain: str, algorithm_name: str) -> None:
         f"-DALGORITHM_LIBRARY_SELECTED_ROOT={algorithm_dir}",
         f"-DCORE_BUILD_DIR={core_build_dir}",
         "-DBUILD_ALGORITHM_SAMPLE_PLUGIN=ON",
+        f"-DALGOFORGE_ENABLE_PHYSX={'ON' if physx_enabled else 'OFF'}",
+        f"-DALGOFORGE_ENABLE_CUDA={'ON' if cuda_enabled else 'OFF'}",
+        f"-DBUILD_ALGORITHM_CUDA_SAMPLE_PLUGIN_ALGOS={'ON' if cuda_enabled else 'OFF'}",
     ]
+    physx_root = environment.get("ALGOFORGE_PHYSX_ROOT", "").strip()
+    if physx_root:
+        configure.append(f"-DALGOFORGE_PHYSX_ROOT={physx_root}")
+    cuda_root = environment.get("CUDAToolkit_ROOT", "").strip()
+    if cuda_root:
+        configure.append(f"-DCUDAToolkit_ROOT={cuda_root}")
+    cuda_compiler = environment.get("CUDACXX", "").strip()
+    if cuda_compiler:
+        configure.append(f"-DCMAKE_CUDA_COMPILER={cuda_compiler}")
     if toolchain == "OpenSource":
         configure.append(f"-DCMAKE_MAKE_PROGRAM={environment['NINJA_EXE']}")
         configure.append(f"-DALGOFORGE_CLANG_CL={environment['CXX']}")
     run(configure, environment)
     for target in targets:
-        run(["cmake", "--build", str(build_dir), "--config", BUILD_CONFIGURATION, "--target", target, "--parallel"], environment)
+        run([
+            "cmake", "--build", str(build_dir), "--config", configuration,
+            "--target", target, "--parallel",
+        ], environment)
     runtime_algorithm_root = RUNTIME_ROOT / algorithm_dir.relative_to(SOURCE_ROOT)
     for manifest in sorted(algorithm_dir.rglob("manifest.json")):
         runtime_directory = runtime_algorithm_root / manifest.parent.relative_to(algorithm_dir)
-        flatten_runtime_configuration(runtime_directory)
+        flatten_runtime_configuration(runtime_directory, configuration)
     package_runtime(
-      algorithm_dir,
-      runtime_algorithm_root,
-        BUILD_CONFIGURATION,
+        algorithm_dir,
+        runtime_algorithm_root,
+        configuration,
         SOURCE_ROOT,
     )
     export_sdk(toolchain)
