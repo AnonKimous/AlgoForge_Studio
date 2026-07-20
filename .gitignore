@@ -63,6 +63,8 @@ third_party/
 *.ilk
 *.ipch
 *.obj
+# Wavefront model resource; do not treat it as an MSVC object file.
+!/data/teapot.obj
 *.exe
 *.dll
 *.lib
