@@ -1,46 +1,121 @@
-name: Apply Cross-Platform Packaging Patch
+name: Linux Build Probe
 
 on:
   push:
     branches:
       - ci/linux-build-probe
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  apply-patch:
+  build-mainline-and-package:
     runs-on: ubuntu-22.04
+    timeout-minutes: 90
     env:
-      PATCH_B64: H4sIAHkKXmoC/+08+3PaSJO/+6+YKFsbEUA2xm+v833Exgm12PgAb3Yrm1MJNNhag8RJIrbP6//9uuchzUji5WSv9q42VTEgTff09Ht6WnK90YhUqzdeTJzN0wvnjra9KI6s+CEmg8yFDc936QM5oMPD7ZprWTsD6g5HA1Lb2trb2dmoVqs5HBvlcjmP59//JtX6Yb1ySMr4UasRuBI74Q2N7bHn38GfQeiEHo3MyL0jV9fv261T4txQP544PnyGpQ2yQSIam72zn+2rxunPjQ9Nu9vp9Inxw9PpRePnpn163e02L/t2r3PdPW3aZ63u8yZgM0p5wNblafv6jI1B+CzO583hdLrp+cPxzKUAX87Ct1vvu43ub4vhYU0GI9txXXs4i+JgYg+DCSzINfuN7odmn7DFdnp9+/11q322QQg57VxcNC7PSLIo/vuZVJtkAjy1XS+kwzgIH7MTK2t6NjbK34JKWR6gWkLVMJg+2t4IsI1GNASJIQBZIpZwiKLB/9atkQDMW44ch2q0s7Vf2Sflna1D+IAL6zB36SS2SwHJNIhoKOh60cp/4hTY56128wjQvjM2qgWzc1XRRtuXjQsJUi4AUSUzHxLgfml23zf6rYsNgiroqkbvjG+C0ItvJ21vkPcAC+4KdzBwDg939keWdbC/f7i74+ruYBE89w2LRqCEt+sHlT1Sxg8m4dHMH8Ze4JshvYGBNLQTDOwbwT82SN4b0Sgu4eoVpeBexgQ+RreOC8D8wrNBzppXzcuzHog2xSfGBLN4OoujZ2a+hHgjczqe3Xi+HQWzcEhB02Z+TD50m41+s0u2CGoI0zK70f7Q6bb6Hy/sXuPiCsRy1b7+0LoscWmiH0knCwGJN6H2yBvTiBhGiesPEs/94SOSnY4XDtN3JvTZ5gQZ5KJzdt1uwiI0CiN7FIT2YOaN3WeBVkALr5YYP/rc5bNwj8wRMaVM18kXaF+0ut1O1+51T7lec2vd3jtkstzferEs038amVxEuAwwhKfp7WP0kDCU0W6owKk5yH9CIvhvDJSYjSvUBjJXOsVzJBRS3wWOU2d4aybXQG1SdDieXDT6px+bPWL8J0c2dnzQJhN9jhP/OZy5Tglc0CT4wVCWLvEKEAyXDFnrkrT6zYsej65b2xhWy/Wtncr21otZDQoqFWAaBlMaxivqR7dz1ez2W82epPuq2zxv/QpaLS90rvtX133mpnRJCmkJcXxqXZ51PvXs5q9XnW4f7Klt9367eN9p90jnUuLqXl+CMJu2wAnesHna73R/m6siCRXSga4BWeWQje7px9Yva81ZXg7Jo8r71mXi1VNcHkSiME5zo011opCOndj7SvXlXZ29X20aASGsYH4QXUH0aYgV650XM1OLM6pngkoMXSfz7FrYmuWAGo6cYRwZGgrpeZgHPCmIhktof6ejk0qF8D2NJs0VPCtQ1StkULd51ZF5HyZWm/cARu08fLIOi41LECXeqcxlkoQBl07BsVB/uJoV5oMcwwUowBXl8gAWHa7C4A+IA5sdmKjHQsdmHATj4a3j+ZxKiNgrjhT5gbO/uzesY37gHDi7O0M9P1gVF88VVh2NLrBWq+ySMvyto/uj44hyV4xBVygiquIViBey9iH43huDnDbAIRMU+VWj/5EY7fYvF+SUoEcGYYcGOe9A1prF8+uvWUzl8jxcsI48NimSqkrcebvxoQc5aUvd1ChXn8nmGcZdQAKpYL/TaZ9+bIABnLYblx9OaoaODmgsRKhdX45yvsrAxmwY+K5jTR+zklJuCaXYHrp1d3vHsvYGo9FhbbBAKVTgAi1QbzOxV+pbIPZKbRvEvkFGYTAhtj2axbOQ2jbhTpQ4vh/EDsbDCOygKq4G8EN8jR6jjSoDhlB8Cz5X3riCn5gGbhCXjkhI/2sGmZMtqTBLpPqOXAY+PeKBgl2F4ElH3oMdU8ipT2Aai/pfvTDwLZaLnnYuzxo2j5BGhWV+VZ4wEKAyj+KIO4bX5CMEcnAAQ2cMGhSHj9Vp4EEiytKBkMZgD9TFfIHwjMIbeGMvfrRIA/zGeQAugQT++FFiE2uJiEOi2RQXC9BXj/Ft4BNAS0MgAf4C71wS31JgzPAO9uIR3JSwEyCDZe4WRworAEZaX2kYAash2RwF5Cdi1isg79JRmtOEjhdR0uV+sRmGQWjKOCv8cUMwmHiRnMyFhUBK89WJKdBE5IjNC8/3+FjBZaSKDCgmTmQWef4NkA9oGMsIY5llpNMB8/OiA6mh4M2cLEoWcCwYf0XnwoWmcEoAIQvoAx3OYmcwpnmIUTqMY1aGkFcnGiFHKaEvZRpAcAaI2E7uIYQwiRYIm5kA3nMEq12S422Ge4rqavwim+Ac8Xd1ArpplCwvwrhulr7DmvqSwsJFwFCkxvMjz4VxS1fAf9CHKTgY6tq6SDNLMo0pmxAlbOC6wbqZAZ6cEMOPDRZ5uICNAUTlErKBgyh2rk4BEi+aOtWJ78Cva4BSJJ5qJ9jJOPBvmJEERPVMlpLoMMwCtm7Vtgj4GJ/ec1ans7T8KHbG45x3QI8RpxLTBaFsyeYHG/ajINLI6yLMbO0c7GztQJip7x7SmusuCDMJZEGMSe7xvOKwsr2PmQX7hEssEMx8U9jTEdtBfo7i8EtFXdsRcb0hu14heFMJFUk8AcFjjh+5d2aS0xzh6GxcYSRBQjiY3YBOsson6BW7asC3BBi+80oEiPK89eG6C4klbJyYJG2ATAZyvnPFxPnhHlaaJGahsXzUcDotGAJXhYrgfVFYQIMRo2GIrKGmw0RlQx+GpVKxAb2dxd7YCidxSKmZUlch3o0P/tymqPPRST+cUWFNOojAWjy+XDxeUFkMo5KFFT8GJVng3IzhEsRwhY/p5TzwdgKZNZEcjtwAfbk5UqJwaLBP9w5wFchALu9EYBCLhTwBnI0P+4u3FkoU8pFus3F20bQmrlGSk7p3iuR8iIOmopAWLHdg4sxvLVb1rmh6gtVbXgxnuMyM4EvW5A7DwtTBGipnO9jRA9iUHdwVSJozUiGpktUl+FRuM/csULjjsSyRwUJY5Se/kLcWDIO1kzIfYS40N8OJIsgVq8lN5vaL7bCUmSHPERYyVuYI5nqACf2rsjIlXmgsgyEaqwSdcFmwqLyegmXsZk3FKqspb+oZkiyBxZgAU/dHE3NyvIE7cLiDy8ZLuG4NFCZksKWjNHYVhUw9sGEyAQorSqTgtV02MffNkD5IzYfgHKBiyeMdi2RDJCtnk8ksitnpAMkfBRB3FvKMlGZOKMDr06kadIX7MHW/oPDQ4oUGTEvNNIwaMtZzLyTTdp71naGa90F7gR8+hG9c0GwwwYArawsRS/in3pSOYT8RWb/7RiXFTv1h4MICToxZPKoeyFuSVkW75hGa6KbxkWKxAubDPB3iN2QTUqNiIZKE9ZEYARcqjEBRVCFn7baKAXSaU1xePk26sxk7MejUBPbPY5aHzZ17ZW7w1OHwEPelZfzc25WpA2quDcrMkDLVPmL5YoWEQRDz7yz8D0BO6qaJwp7WJ+cOJJgsg6iKRCQpTtmQfAX31DWFzLUqIUsrYA55CQHkxJAxjrybWch2yGn+wQko842v4+YLWaa8wvAnhEc0/ow/vggzlOOTcjP4XgWShbs5tT7hIHIYUm+gmjrnEFZBwL/w6yhXJ7bFlhQmxqSK3xJHJsyTqNeTyfBOdJQuB0Y98cw+T27pOZmPoOHY/mwyoMhw5x6r9hSdFYWLFLhMzfyCGIeZiWS1qmRFU9jIM3M0S5hMAvRJTV05m+AkmcsCCXpTUznkEHxk4wSFFsMToV8wjdeGik5sh2PPn9H06h2FUBtRCEtOHMDKvjrjGWVhFJBNcUXswME4MfITJ2DSrQMySaW8xPDJixlqlnpxxnuj5QMSL/EOqXzE7t+JyVOO9c9HT4rEno/Ik+Tjq/A54+JLGjtg8co60luSM9qKNJ4wYNgxcvU0MquFARm9FVtaviPILbyAOyPjbAZaM8RqCcclWABqWMACVWSFZsOWskxDxML45ps8GaIyXUns23heLteRce3f+cG9XyBFxP4Ef0AwKywk8XXCxJntsoXowtDGoWdxBrD1nsU01U19CCp7hLcMyzJ4PSx3e7WFRs6IJrFMroYnN0+M0m9Y6dsCqhQYzc3lPLIGmzNnDbbQF69htN3s8p90wp3IngaR92CWkBkuHY4hlLtk8FjEFeIGNBL5GyTM881X9/KW47qmNm2xvQqNzturGky+yVg5orWMVQ9kGcklcTRj0q9gNTVjcaLMNDSpDefNUTiWYirBj+pTojdN8/4MwzLMKiTmwotYOXcNFomUQBc2MkWkNUXZk8gO5uZQEnM+kRJ1jlw2JUEy+VMuwYBxauKVdU84E/M2xXhyiRDuFDekgmpUMel36fgTBH/YE7T8UWDkU80Unlc4dUrYpjEt/8IPi/quyCf4BletXBaQVMRiLSuBjeRk0yjlKTNsLGFy38toQ18MeKLZOIYPzKzTm6vPJ3c9bE7WwLK7Xdnexr6KXfxMMniBh8vBFG1BafpeSUSkXivQC+JsZN1DZs9ORw6u6Y8o8CvZpFnctPCmUVoLE6wai77zMOlFZVZmkGfRzOLEipF/WkXjSAcsIEJiyS4mvaPWa1ZCpK8lj0hHhYWSIez8PBe8LVaBPme4yvbIWOoYGU9S0uygnS0xJ4SMFa0KVzjoi04qK7QxB6lWPDIL8PiOMg3CmeBQ7CyYMS/b0mVUCrYfeEYBNxjbcoSB/7QV6IQ0dDbq4ll9IbcJ1hhU+qJPjdOovprrIEalPH8UNFYotNMoFfDpKG8xuqs90ea0kptxoHMpp6qeHlmsaDbC0yOWE1tYacGU2KIPrCrGiqP4OXX5pze+Y5/B4A/2KYNaLnkumkqeReX0i01bsGQtkycF6A2EHDrDW2qo7GWziUx3faSyqpfqgIq3ougaL/elv5lXTzWxtGz2IuGwjL4o9GuRIc07M2WTjCsvFYtl7iT50ZrqZaZeMprRUzxGI3IenkLvUDC4tLaUXRCS5/N04yTjpDXyF4JavAq+SklcOz5cqxWLDNYbv+HTe8JcxCRwqTxlFGeQ/J9lHe4O6nRrix0+brr066Y/G4/FceN6s2EmslXhbS572OZS9kbmZadPzprnrcvmGVG66Uinq/3s9bvN/7hutFmbCUh1QqMInIJ53ug32nYTu3aJoQIoJ7oIIVuVslNq3Xc4qX5hpWl1kHkTb5Sx1Q25jY7MZh36PmiBmfYKYn+Tsgbs7pbtj4CAuXvW/aQ1Raq9mnLUp26r38xjE2Wak9rvfjJUdAznx/LdyckPT9ryngWo6ObVglnrkrRbvX6PaD2IjG+C69pwhbes9Xz+AI0CkRcsJl7gAepVjIL4tJewrDU8a4aHD3egSosndzYHoefeUKWvdRoGcTAMxtYtGMIao4V97R/uOKP6wLJ2DmiNjur6Gf86+LgprgPB+wHqlRraInwe4I4AN2ukHThuQ4L8ctdkDRZBeB4GkzYET1YY3SDPhGxusj1JBMGZErjhjIOb/A2FIEzGX0M4gRQd+7vMtPVeNjMLKbNTJEhGXvORZO7AxlWL2Pisyzia0iEeC/KjLoTF7pUXoeDtcqAZQKuPm6RFsDBqhRk2yGumb3jYAZkwxX3fqUGeFuub4KkqQJEH8a4XbEzjMsZjyQIFWA+B0Ep36/BgmzqWVXccd2+ntlgr15yiWFHXRMKfx6jUdkgZPlgYIa/lSdhPM9hqQxYGSVVE43fanZh1Eb4Teshke9m5aF1eNH5NNUW5wmWWjP3Uuqxv2+1mA2R6eWZfwJcUrPhmgkHScA9MDu4j6/Yd7OaKzQTUgqi3+MrJk3IpyxZblLZerlHjAI8W19ajFCx5pmpUOxwdWNaWszXY39l/qfYoiNfVGQWUacoh15TD/4+akrkumJLVoG/QCu7wX6AXKaDQDDrY396vUcva2z7cHda3X64ZCur1dUMBZjFwnz3XhR+1ncMkCNqtqOeMKGs3hqyhK5J82UkbxWQUHR3hDuNHthcvIcuTml4MSfwxhEKQQpmj6/IOSFEFvmJ51UXgziCBwWQkj1KU5YIgZjsYeestgVxPPCZhTxgCts9hg3AqPuAWd13qIHY/it2jIzzC82/4MNYeZouEFpfA0jRiviqehPz5J3lViF7Acuh5mPHf29xNguVbcWwiquEcJxHPLrJuB9xwWMYxR/OsFcRH2EXA7jzzI4Ji4qvvhmPqhGaJDX1buAygJcWmyyR/bi8PKVRZFZ//HyfM5ysf4k6LDo8TduMkbAcYmcXTwAZxWFqZybl7+tqzDOTaWhaXE4K8yA7pzWzshLzK9D0oKxK/0t+SOz5LuizEOZRDBEmEH1UYpDxHMNYN9WnoDW2u73OWntMdJiVvBEDUmZCF6+ZDA+DUADb44WNJkaf3jSah8OTcAWQutjcFU+rnD1glVX8BM5jrEgdfEaW+Zh7spnxUN3tT8TSsp4Jf9P6b2rHaUgIwWzN27/4Wd3smg4M9Mo4xeX0Kv6YKVi4r4GIVomPE7ofehGOYBF+pyQGPUyGw5g46mcaPZgldGfs9CgPYf5ewzvjm9RtFLLIapLOKOwWxkrQTRHSOQHh3zTcnb9RZlUEnKl+OjvxpECkTLtOTZZoCurJCzwhjFmoKIyUOpEoobC2RsoYVy5Rr6BaMNBJXnTCuQMsSPUvYqmgNb0nhMuUtPrMB3DK3ZkrjTiLePLzsW8ljSAVSJrWZpiHYAaMoCO95ERe+r6SaiHROVwhQxqn/24pL8Ept+8mwR/UakpPinF5j1HJWLmcmNooqZ/t4wpe0ICw66H85kxQ2FTJKua+7zyTUzvcwKm9lq5HultSsJKk+yxqXSErkANEjZI0hvRg64/GjjQfRzjgJASJiLcp3C+co/UVinN9E9AblxRUJpPHmf02CWY7rjDYz6V8xs5byX8kAVUCWXbG0uygjy438K2RyJpuUclKBnGzC21h47qGSMy/jWJfzCwzkVdrDhBxSUpHv66plC98Sv4IkMRXFL4qCqrj+8gia9wt6Q9XKbmF1p6BMUPrejGfeQN8Ufn9XsIS9BczVeTrXA6icWcJpxfwVqMXWnx34zcxXbF3nedbQlZnn2/kKbH07p8xwos5wrIwt2rArIVXfjajb2nRnpuclr4q8xjdu2PKuQTxF4+Nj7USev7HeEfoAA8aQ8vl6t+SR7jm+265u2eKWVA4YBr1qgMwVJbPmQxwCkegurrhJoNfoB2fy7Wzs0Z55pS7WV8BLWQWjlGN0URTD4t3+1laltk/KBzt1/tYEQUk/fBQFt+QgS1AkT7DwNEv6NfHE0fNGgbqy69V5HiDtXfrMnqiQHRrIRllprL4THWYZN2GC0CYT6vJXIKFLYm1nlWIcaWxdA8nzMe8Yw66TXNUyoZ0c5ZdTkmthuXzqnJIR3DX9+CMp8kz6qNI8vhRafgJ7XAw03wWI4YOQOnfiV1rQWlaAXZXnSjvJj8tWM39scXl2TvEudewFqsne6qYj5yUAyRU0k4PaQaW2S8qHu3svNBPWM9V2HmEmMz+jppQnZMAdVHrteGM1fS4GXdf8vtlwno//MZp/jObgYI/FltrWdm1dqwlCzqtT/rokxXCeVzaFcRBE6i4yZxNFBwrV+dnqarHqnzjzj8m8yGReeMAsqHth90EOWhw179a3d/cGu5a17ezRAX3xUXMe/7rnzXkMrCVhv1Kr48tEWdvV/8mWhHJ6tXfWrm/CH65O824iC6IA75KXdDMg23Z3KvUDUt45rNR30B9/DUAB7R6N2VNVF6Ivc/Epd0U7JVD2P1zNUdOrfMQt7oTtaRz+hPO8IzY2xiWmzN/G1WODOgN8186HmRO6RJ7xpNC4eHXcu2Pcj+YhNfz6mQZ7XeNjFNOJ2nPANkrLz/TzEUE+E6pWhZLnROeXK6oaTfeChfeemyDSEFv36b4UQD+K3tjEm+Jy2/zFBM2HT+JtCgk2i21rTRli8Px/ik+fsV/tTuPM/tTqf7Qb7X6z2zyze018N6mNryvkW9Us19+mE+MtnJzfMHWiJc1y/tLxhizSpK0Oi4ssi+pb6Ssj9OWDs2XHvBhCWSmrkChSVhAQ8wON207Etf+k4JAowvcEDiHcRjE4lsi7wZfq4Tuy3mmgsEhWEyup5XFD59LK9KUIeK0I0XygcqLjoq3203MSZKrpmw+KbFAoiYxl7MfnLybee0tuIaJz8VTTKljuIiHnIaWC8RqHhIK+kzClJNQ/iyjPNUsQmDNgU5CFFOW1LyWknKdNMA2hrv1xqppihFrXQSJ4PAZvgG/7AB8bP05ZQznpg3PNMq4PnutT6Ex5KiIQI7/74C/YL+ZHmC8132KdJQwe7ZFfMvtvufWph6sZgfwoZGHfIAfEUvj4HH/yY6VhcTJYPU6ZX1pSVktY11YdX8NdrkFqvp9k5pCYa73LaQ7Omuyj5M0yxhByN9BdfENg2hGmhGqLU2oNKFbkUMXRvNKHO3JOOfWei2u+iaWUsqWl4pijcgwPs5UQoZV/f0SqM57oeIEsvhGx7hE1gYpWC5bv2C6+yXN8dNS7DWZjtznx4ivxWCp/ac9VGAyomevN09+oLQ/g1Wdr/kVyQElplD0ny5Rk95Apye7W+kqSWUBjik9iFhFvsNKISPCwwX5ALchZ8Gm3pVoGo4dcxwypD0mwdmZxQASGwQzdANgEe9QxebEid1unbMx7NuTcly4SXC7QN2y4bghSK/ZzqvTY61xLJaA6wxlbxW8k3RIyOpzLd7Pnka2CSypSdqF/L2XK7W3Ejg2sf/NmOrP/CAY29wTKDmbhGLlPobvOwU7dsnbp3t7IPczvUxZjSXcji8fxRlfWBg0fuTboZGeRXvvKKvZ/y/7ndKn5Nme20L19fLasjObP6zZqxm83Zet8D2yC/kwfhcUXnoiJb6lxMlRDGEZ++knexa9vfvffsHyhw5pW2YPXPTZjwzTlOMix8OkjJbUEALFteR88NEyZ5UrMSRJMjF9+JmDBd2nnv8jIwNFcvLc7P5M/8bN12rlkT6Rx23KiiIaxyTbyWESZj4WPj2/D4J6vURYlGEeUrrqkWCDTkM+f8R15GKK/fBE7ssYgCONf7vowkzl/t/UPKzVW/g9IhsrYz2oAAA==
-    steps:
-      - name: Checkout branch
-        uses: actions/checkout@v4
-        with:
-          ref: ci/linux-build-probe
-          fetch-depth: 0
+      CMAKE_BUILD_PARALLEL_LEVEL: "2"
 
-      - name: Apply source patch once
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            clang \
+            cmake \
+            ninja-build \
+            python3-pip \
+            pkg-config \
+            libvulkan-dev \
+            vulkan-tools \
+            glslang-tools \
+            glslc \
+            libx11-dev \
+            libxext-dev \
+            libxrandr-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxinerama-dev \
+            libxfixes-dev \
+            libxss-dev \
+            libxtst-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            libwayland-dev \
+            wayland-protocols \
+            libdrm-dev \
+            libgbm-dev \
+            libegl1-mesa-dev \
+            libgl1-mesa-dev \
+            libgles2-mesa-dev \
+            libudev-dev \
+            libdbus-1-dev \
+            libasound2-dev \
+            libpulse-dev \
+            libpipewire-0.3-dev \
+            libdecor-0-dev \
+            liburing-dev \
+            libfribidi-dev \
+            libibus-1.0-dev \
+            libthai-dev \
+            libusb-1.0-0-dev
+
+      - name: Install Python requirements
+        run: python3 -m pip install -r requirements.txt
+
+      - name: Record tool versions
+        run: |
+          mkdir -p testData/ci
+          {
+            uname -a
+            clang --version
+            clang++ --version
+            cmake --version
+            ninja --version
+            python3 --version
+            glslc --version
+            vulkaninfo --summary || true
+          } | tee testData/ci/tool-versions.log
+
+      - name: Build mainline and one algorithm package
         shell: bash
         run: |
-          python3 - <<'PY'
-          import base64
-          import gzip
-          import os
-          from pathlib import Path
+          set -o pipefail
+          python3 boot/booterNinjaClang.py compatibility_probe \
+            2>&1 | tee testData/ci/linux-build.log
 
-          patch = gzip.decompress(base64.b64decode(os.environ["PATCH_B64"]))
-          Path("/tmp/cross-platform-package.patch").write_bytes(patch)
-          PY
+      - name: Record generated files
+        if: always()
+        run: |
+          mkdir -p testData/ci
+          find build/OpenSource sdk algorithmLib/algorithmruntimeLib \
+            -maxdepth 6 -type f -printf '%p\n' 2>/dev/null \
+            | sort > testData/ci/generated-files.txt || true
 
-          if git apply --check /tmp/cross-platform-package.patch; then
-            git apply /tmp/cross-platform-package.patch
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add -A
-            git commit -m "build: add platform-neutral algorithm package artifacts"
-            git push origin HEAD:ci/linux-build-probe
-          else
-            echo "Patch is already applied or no longer matches; leaving the branch unchanged."
-          fi
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: algoforge-linux-build-probe
+          path: testData/ci
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload Linux package output
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: algoforge-linux-package
+          path: |
+            build/OpenSource/RelWithDebInfo/debugTool
+            sdk/cpp
+            algorithmLib/algorithmruntimeLib
+          if-no-files-found: error
+          retention-days: 7
