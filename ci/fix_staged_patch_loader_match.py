@@ -57,7 +57,7 @@ text = replace_section(text, foundation_marker, physics_marker, foundation_code)
 physics_code = (
     'plugin_text = plugin_cpp.read_text(encoding="utf-8")\n'
     'physics_begin = plugin_text.index("  PxPhysics* CreatePhysics() {")\n'
-    'physics_end = plugin_text.index("  ErrorCallback error_callback_;", physics_begin)\n'
+    'physics_end = plugin_text.index("  PxScene* CreateScene()", physics_begin)\n'
     'physics_replacement = (\n'
     "    '  PxPhysics* CreatePhysics() {\\n'\n"
     "    '    trace_ << \"physics.begin\\\\n\" << std::flush;\\n'\n"
