@@ -58,7 +58,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            build-essential clang cmake ninja-build ccache python3-pip pkg-config xz-utils \
+            build-essential clang cmake ninja-build ccache python3-pip pkg-config \
             libvulkan-dev vulkan-tools mesa-vulkan-drivers glslang-tools \
             xvfb xauth \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
@@ -69,21 +69,23 @@ jobs:
             libpipewire-0.3-dev libdecor-0-dev liburing-dev libfribidi-dev \
             libibus-1.0-dev libthai-dev libusb-1.0-0-dev
 
-      - name: Materialize teapot OBJ resource
+      - name: Pull teapot OBJ directly from main
         shell: bash
         run: |
           set -euo pipefail
-          if test ! -f data/teapot.obj; then
-            test -d ci/teapot_obj_parts
-            cat ci/teapot_obj_parts/part*.txt \
-              | base64 --decode \
-              | xz --decompress \
-              > data/teapot.obj
-          fi
+          mkdir -p data testData/ci
+          git fetch origin main
+          git show origin/main:data/teapot.obj > data/teapot.obj
+          test "$(wc -c < data/teapot.obj)" -eq 540580
           echo "6d34f9f06e8547c2237fb5b33d4902fc4c34c84690698f3a7f06681ff3df948f  data/teapot.obj" \
             | sha256sum --check -
           test -s data/teapot.mtl
           test -s data/teapot_gold_tile.png
+          {
+            echo "source=origin/main:data/teapot.obj"
+            wc -c data/teapot.obj
+            sha256sum data/teapot.obj
+          } | tee testData/ci/teapot-main-pull.log
 
       - name: Initialize compiler cache
         run: |
@@ -291,23 +293,17 @@ jobs:
             exit 1
           fi
 
-      - name: Commit validated source fixes and teapot asset
+      - name: Remove temporary teapot transfer files
         shell: bash
         run: |
           set -euo pipefail
           rm -rf ci/teapot_obj_parts
+          rm -f .github/workflows/teapot-asset-diagnostic.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A \
-            ':!.build*' \
-            ':!build' \
-            ':!algorithmLib/.build_*' \
-            ':!algorithmLib/algorithmruntimeLib' \
-            ':!sdk/cpp/lib' \
-            ':!testData' \
-            ':!.ci-cache'
+          git add -A -- ci/teapot_obj_parts .github/workflows/teapot-asset-diagnostic.yml
           if ! git diff --cached --quiet; then
-            git commit -m "assets: add validated teapot mesh"
+            git commit -m "ci: remove temporary teapot transfer files [skip ci]"
             git push origin HEAD:ci/linux-build-probe
           fi
 
