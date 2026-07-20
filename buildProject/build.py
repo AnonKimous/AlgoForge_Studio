@@ -357,6 +357,7 @@ def build_algorithm(toolchain: str, algorithm_name: str) -> None:
         f"-DCMAKE_TOOLCHAIN_FILE={toolchain_file(toolchain)}",
         f"-DALGORITHM_LIBRARY_SOURCE_ROOT={SOURCE_ROOT}",
         f"-DALGORITHM_LIBRARY_RUNTIME_OUTPUT_ROOT={RUNTIME_ROOT}",
+        f"-DALGORITHM_LIBRARY_SELECTED_ROOT={algorithm_dir}",
         f"-DCORE_BUILD_DIR={core_build_dir}",
         "-DBUILD_ALGORITHM_SAMPLE_PLUGIN=ON",
     ]

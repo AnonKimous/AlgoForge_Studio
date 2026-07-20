@@ -93,8 +93,23 @@ endif()
 
 set(ALGORITHM_LIBRARY_SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/algorithmSrc" CACHE PATH "Root directory containing algorithm algo source files")
 set(ALGORITHM_LIBRARY_RUNTIME_OUTPUT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/algorithmruntimeLib" CACHE PATH "Root directory for built algorithm runtime artifacts")
+set(ALGORITHM_LIBRARY_SELECTED_ROOT "" CACHE PATH "Optional source package root to configure in isolation")
 file(TO_CMAKE_PATH "${ALGORITHM_LIBRARY_SOURCE_ROOT}" ALGORITHM_LIBRARY_SOURCE_ROOT)
 file(TO_CMAKE_PATH "${ALGORITHM_LIBRARY_RUNTIME_OUTPUT_ROOT}" ALGORITHM_LIBRARY_RUNTIME_OUTPUT_ROOT)
+if(ALGORITHM_LIBRARY_SELECTED_ROOT)
+  file(TO_CMAKE_PATH "${ALGORITHM_LIBRARY_SELECTED_ROOT}" ALGORITHM_LIBRARY_SELECTED_ROOT)
+  file(RELATIVE_PATH _selected_algorithm_relative_root
+    "${ALGORITHM_LIBRARY_SOURCE_ROOT}"
+    "${ALGORITHM_LIBRARY_SELECTED_ROOT}")
+  if(_selected_algorithm_relative_root STREQUAL "" OR
+     _selected_algorithm_relative_root MATCHES "^\.\.")
+    message(FATAL_ERROR
+      "ALGORITHM_LIBRARY_SELECTED_ROOT must be inside ALGORITHM_LIBRARY_SOURCE_ROOT: "
+      "${ALGORITHM_LIBRARY_SELECTED_ROOT}")
+  endif()
+  message(STATUS
+    "Configuring selected algorithm package tree: ${_selected_algorithm_relative_root}")
+endif()
 
 require_file("${ALGORITHM_LIBRARY_SOURCE_ROOT}/algorithm_plugin_api.h" "Set ALGORITHM_LIBRARY_SOURCE_ROOT to the mirrored algorithm source root.")
 
@@ -346,9 +361,15 @@ function(register_algorithm_algo algo_manifest)
   set_property(GLOBAL APPEND PROPERTY ALGORITHM_ALGO_TARGETS "${algo_target}")
 endfunction()
 
-file(GLOB_RECURSE ALGORITHM_PACKAGE_MANIFESTS CONFIGURE_DEPENDS
-  "${ALGORITHM_LIBRARY_SOURCE_ROOT}/manifest.json"
-)
+if(ALGORITHM_LIBRARY_SELECTED_ROOT)
+  file(GLOB_RECURSE ALGORITHM_PACKAGE_MANIFESTS CONFIGURE_DEPENDS
+    "${ALGORITHM_LIBRARY_SELECTED_ROOT}/manifest.json"
+  )
+else()
+  file(GLOB_RECURSE ALGORITHM_PACKAGE_MANIFESTS CONFIGURE_DEPENDS
+    "${ALGORITHM_LIBRARY_SOURCE_ROOT}/manifest.json"
+  )
+endif()
 list(SORT ALGORITHM_PACKAGE_MANIFESTS)
 set(ALGORITHM_ALGO_COUNT 0)
 foreach(algo_manifest IN LISTS ALGORITHM_PACKAGE_MANIFESTS)
