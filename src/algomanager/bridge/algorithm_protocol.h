@@ -113,10 +113,8 @@ bool LoadAlgorithmVkExecutorFromLocation(
 }  // namespace catalog
 }  // namespace algomanager
 
-#if defined(ALGORITHM_LIBRARY_PLUGIN_BUILD)
-#define ALGORITHM_LIBRARY_PLUGIN_API __declspec(dllexport)
-#else
-#define ALGORITHM_LIBRARY_PLUGIN_API __declspec(dllimport)
+#ifndef ALGORITHM_LIBRARY_PLUGIN_API
+#define ALGORITHM_LIBRARY_PLUGIN_API
 #endif
 
 extern "C" {

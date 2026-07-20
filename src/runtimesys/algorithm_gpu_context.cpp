@@ -13,15 +13,19 @@ void RuntimeVkContextRegistry::Set(RuntimeVkExecutionContext context) {
   std::lock_guard<std::mutex> lock(mutex_);
   context_ = context;
   algorithm_queues_.clear();
+  algorithm_queue_first_index_ = 1u;
   queue_assignments_.clear();
   execution_progress_.clear();
   result_images_.clear();
   next_algorithm_queue_index_ = 0u;
 }
 
-void RuntimeVkContextRegistry::SetAlgorithmQueues(std::vector<VkQueue> queues) {
+void RuntimeVkContextRegistry::SetAlgorithmQueues(
+  std::vector<VkQueue> queues,
+  uint32_t first_queue_index) {
   std::lock_guard<std::mutex> lock(mutex_);
   algorithm_queues_ = std::move(queues);
+  algorithm_queue_first_index_ = first_queue_index;
   queue_assignments_.clear();
   execution_progress_.clear();
   result_images_.clear();
@@ -55,7 +59,7 @@ RuntimeVkExecutionContext RuntimeVkContextRegistry::Snapshot(const void* executi
     assignment = queue_assignments_.emplace(execution_key, queue_index).first;
   }
   result.queue = algorithm_queues_[assignment->second];
-  result.queue_index = assignment->second + 1u;
+  result.queue_index = algorithm_queue_first_index_ + assignment->second;
   return result;
 }
 
@@ -89,6 +93,7 @@ void RuntimeVkContextRegistry::Clear() {
   std::lock_guard<std::mutex> lock(mutex_);
   context_ = {};
   algorithm_queues_.clear();
+  algorithm_queue_first_index_ = 1u;
   queue_assignments_.clear();
   execution_progress_.clear();
   result_images_.clear();

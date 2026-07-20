@@ -5,17 +5,8 @@
 #include <initializer_list>
 #include <string>
 
-#if defined(_WIN32)
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#elif defined(__linux__)
-#include <limits.h>
-#include <unistd.h>
-#elif defined(__APPLE__)
-#include <mach-o/dyld.h>
-#include <limits.h>
+#ifndef ALGOFORGE_PROJECT_ROOT
+#define ALGOFORGE_PROJECT_ROOT ""
 #endif
 
 namespace algorithm {
@@ -76,43 +67,25 @@ inline fs::path ResolveFirstExistingPathFromPaths(
 }
 
 inline fs::path ResolveExecutableDirectory() {
-#if defined(_WIN32)
-  std::array<wchar_t, 32768> buffer{};
-  const DWORD length = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
-  return fs::path(std::wstring(buffer.data(), length)).parent_path();
-#elif defined(__linux__)
-  std::array<char, PATH_MAX> buffer{};
-  const ssize_t length = readlink("/proc/self/exe", buffer.data(), buffer.size());
-  return fs::path(std::string(buffer.data(), static_cast<size_t>(length))).parent_path();
-#elif defined(__APPLE__)
-  std::array<char, PATH_MAX> buffer{};
-  uint32_t size = static_cast<uint32_t>(buffer.size());
-  _NSGetExecutablePath(buffer.data(), &size);
-  return fs::path(buffer.data()).parent_path();
-#else
-  return {};
-#endif
+  std::error_code ec;
+  return fs::current_path(ec);
 }
 
 inline fs::path ResolveExecutableProjectRoot() {
-  const fs::path executable_directory = ResolveExecutableDirectory();
-  if (executable_directory.empty()) {
-    return {};
+  std::error_code ec;
+  const fs::path configured_root(ALGOFORGE_PROJECT_ROOT);
+  if (!configured_root.empty() &&
+      fs::is_directory(configured_root / "algorithmLib/algorithmSrc", ec)) {
+    return configured_root;
   }
 
-  const std::array<fs::path, 3> runtime_root_candidates = {
-    executable_directory / "../../algorithmLib/algorithmruntimeLib",
-    executable_directory / "../../../algorithmLib/algorithmruntimeLib",
-    executable_directory / "../../../../algorithmLib/algorithmruntimeLib"};
-  for (const fs::path& runtime_root : runtime_root_candidates) {
-    std::error_code ec;
-    if (!fs::is_directory(runtime_root, ec)) {
-      continue;
+  fs::path candidate = ResolveExecutableDirectory();
+  for (size_t depth = 0u; depth < 6u && !candidate.empty(); ++depth) {
+    ec.clear();
+    if (fs::is_directory(candidate / "algorithmLib/algorithmSrc", ec)) {
+      return candidate;
     }
-    const fs::path project_root = runtime_root.parent_path().parent_path();
-    if (fs::is_directory(project_root / "algorithmLib/algorithmSrc", ec)) {
-      return project_root;
-    }
+    candidate = candidate.parent_path();
   }
   return {};
 }

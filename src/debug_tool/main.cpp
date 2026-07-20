@@ -23,13 +23,6 @@
 #include <utility>
 #include <vector>
 
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#include <dbghelp.h>
-#pragma comment(lib, "Dbghelp.lib")
-#endif
-
 namespace {
 
 #ifndef ALGOFORGE_VERBOSE_RUNTIME_LOGGING
@@ -112,67 +105,6 @@ double _MeasureGifSamplingFrequency(debug_tool_backend::DebugToolBackendRuntime&
     std::chrono::steady_clock::now() - probe_begin).count();
   return static_cast<double>(probe_tick_count) / elapsed_seconds;
 }
-
-#ifdef _WIN32
-LONG WINAPI _WriteCrashDump(EXCEPTION_POINTERS* exception_pointers) {
-  const std::filesystem::path dump_dir = std::filesystem::path("testData") / "dumps";
-  std::error_code ec;
-  std::filesystem::create_directories(dump_dir, ec);
-
-  const std::filesystem::path dump_path =
-    dump_dir /
-    (std::string("debugTool_") +
-      std::to_string(static_cast<unsigned long>(GetCurrentProcessId())) +
-      "_" +
-      std::to_string(static_cast<unsigned long long>(GetTickCount64())) +
-      ".dmp");
-
-  HANDLE dump_file = CreateFileW(
-    dump_path.wstring().c_str(),
-    GENERIC_WRITE,
-    0,
-    nullptr,
-    CREATE_ALWAYS,
-    FILE_ATTRIBUTE_NORMAL,
-    nullptr);
-  if (dump_file == INVALID_HANDLE_VALUE) {
-    return EXCEPTION_EXECUTE_HANDLER;
-  }
-
-  MINIDUMP_EXCEPTION_INFORMATION info{};
-  info.ThreadId = GetCurrentThreadId();
-  info.ExceptionPointers = exception_pointers;
-  info.ClientPointers = FALSE;
-
-  const BOOL dumped = MiniDumpWriteDump(
-    GetCurrentProcess(),
-    GetCurrentProcessId(),
-    dump_file,
-    static_cast<MINIDUMP_TYPE>(
-      MiniDumpNormal |
-      MiniDumpWithThreadInfo |
-      MiniDumpWithUnloadedModules |
-      MiniDumpWithIndirectlyReferencedMemory),
-    &info,
-    nullptr,
-    nullptr);
-  CloseHandle(dump_file);
-
-  std::ofstream crash_log(dump_dir / "last_crash.txt", std::ios::binary | std::ios::trunc);
-  crash_log
-    << "dump_path=" << dump_path.string() << '\n'
-    << "dumped=" << (dumped ? "true" : "false") << '\n';
-  return EXCEPTION_EXECUTE_HANDLER;
-}
-
-void _InstallCrashDumpHandler() {
-  SetErrorMode(
-    SEM_FAILCRITICALERRORS |
-    SEM_NOGPFAULTERRORBOX |
-    SEM_NOOPENFILEERRORBOX);
-  SetUnhandledExceptionFilter(&_WriteCrashDump);
-}
-#endif
 
 const char* _AssemblyStateName(debug_tool::AlgorithmAssemblyState state) {
   switch (state) {
@@ -2751,9 +2683,6 @@ bool _RunPreviewRenderServer(const PreviewRenderServerOptions& options) {
 
 int main(int argc, char** argv) {
   try {
-#ifdef _WIN32
-    _InstallCrashDumpHandler();
-#endif
     {
       const std::filesystem::path main_entry_probe_path =
         algomanager::ResolveAlgorithmLibraryRuntimePipelineDebugInfoRoot() / "main_entry_probe.log";

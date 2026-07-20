@@ -111,6 +111,7 @@ void ImGuiVulkanRuntime::SetupVulkan(const char* app_name, SDL_Window* window) {
   std::vector<VkPhysicalDevice> physical_devices(physical_device_count);
   CheckVkResult(vkEnumeratePhysicalDevices(instance_, &physical_device_count, physical_devices.data()));
 
+  bool selected_multiple_queues = false;
   for (VkPhysicalDevice device : physical_devices) {
     uint32_t queue_family_count = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(device, &queue_family_count, nullptr);
@@ -120,21 +121,31 @@ void ImGuiVulkanRuntime::SetupVulkan(const char* app_name, SDL_Window* window) {
     for (uint32_t family = 0; family < queue_family_count; ++family) {
       VkBool32 present_supported = VK_FALSE;
       vkGetPhysicalDeviceSurfaceSupportKHR(device, family, surface_, &present_supported);
-      const bool graphics_supported = (queue_families[family].queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0;
-      if (graphics_supported && present_supported && queue_families[family].queueCount >= 2u) {
+      const bool graphics_supported =
+        (queue_families[family].queueFlags & VK_QUEUE_GRAPHICS_BIT) != 0;
+      if (!graphics_supported || !present_supported || queue_families[family].queueCount == 0u) {
+        continue;
+      }
+
+      const bool has_multiple_queues = queue_families[family].queueCount >= 2u;
+      if (physical_device_ == VK_NULL_HANDLE || has_multiple_queues) {
         physical_device_ = device;
         queue_family_ = family;
+        selected_multiple_queues = has_multiple_queues;
+      }
+      if (selected_multiple_queues) {
         break;
       }
     }
 
-    if (physical_device_ != VK_NULL_HANDLE) {
+    if (selected_multiple_queues) {
       break;
     }
   }
 
   if (physical_device_ == VK_NULL_HANDLE || queue_family_ == UINT32_MAX) {
-    throw std::runtime_error("No suitable Vulkan device queue family found for ImGui");
+    throw std::runtime_error(
+      "No Vulkan queue family supports both graphics and presentation.");
   }
 
   uint32_t selected_queue_family_count = 0u;
@@ -148,9 +159,6 @@ void ImGuiVulkanRuntime::SetupVulkan(const char* app_name, SDL_Window* window) {
     &selected_queue_family_count,
     selected_queue_families.data());
   const uint32_t queue_count = selected_queue_families[queue_family_].queueCount;
-  if (queue_count < 2u) {
-    throw std::runtime_error("The Vulkan present queue family must expose a second queue for algorithms");
-  }
   const std::vector<float> queue_priorities(queue_count, 1.0f);
   VkDeviceQueueCreateInfo queue_create_info{};
   queue_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
@@ -180,11 +188,17 @@ void ImGuiVulkanRuntime::SetupVulkan(const char* app_name, SDL_Window* window) {
   CheckVkResult(vkCreateDevice(physical_device_, &device_create_info, allocator_, &device_));
   vkGetDeviceQueue(device_, queue_family_, 0, &queue_);
   algorithm_queues_.clear();
-  algorithm_queues_.reserve(queue_count - 1u);
-  for (uint32_t queue_index = 1u; queue_index < queue_count; ++queue_index) {
-    VkQueue algorithm_queue = VK_NULL_HANDLE;
-    vkGetDeviceQueue(device_, queue_family_, queue_index, &algorithm_queue);
-    algorithm_queues_.push_back(algorithm_queue);
+  uint32_t first_algorithm_queue_index = 0u;
+  if (queue_count > 1u) {
+    first_algorithm_queue_index = 1u;
+    algorithm_queues_.reserve(queue_count - 1u);
+    for (uint32_t queue_index = 1u; queue_index < queue_count; ++queue_index) {
+      VkQueue algorithm_queue = VK_NULL_HANDLE;
+      vkGetDeviceQueue(device_, queue_family_, queue_index, &algorithm_queue);
+      algorithm_queues_.push_back(algorithm_queue);
+    }
+  } else {
+    algorithm_queues_.push_back(queue_);
   }
 
   VmaAllocatorCreateInfo vma_create_info{};
@@ -220,7 +234,9 @@ void ImGuiVulkanRuntime::SetupVulkan(const char* app_name, SDL_Window* window) {
     .descriptor_pool = descriptor_pool_,
     .allocator = vma_allocator_,
   });
-  RuntimeVkContextRegistry::Instance().SetAlgorithmQueues(algorithm_queues_);
+  RuntimeVkContextRegistry::Instance().SetAlgorithmQueues(
+    algorithm_queues_,
+    first_algorithm_queue_index);
 }
 
 void ImGuiVulkanRuntime::CreateSwapchainCaptureBuffers() {

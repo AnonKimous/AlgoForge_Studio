@@ -2,7 +2,6 @@
 
 #include "../algorithm_plugin_api.h"
 
-#define PX_SIMD_DISABLED 1
 #include <PxPhysicsAPI.h>
 
 #include <cstdint>
@@ -13,7 +12,7 @@
 #include <random>
 #include <string>
 #include <vector>
-#include <windows.h>
+#include <stdexcept>
 
 namespace {
 
@@ -175,9 +174,6 @@ class PhysXRigidBodyState final {
   }
 
   void Initialize() {
-    common_module_ = LoadPhysXModule(L"PhysXCommon_64.dll");
-    foundation_module_ = LoadPhysXModule(L"PhysXFoundation_64.dll");
-    physics_module_ = LoadPhysXModule(L"PhysX_64.dll");
     foundation_ = CreateFoundation();
     physics_ = CreatePhysics();
     constexpr float material_hardness = 0.92f;
@@ -188,13 +184,13 @@ class PhysXRigidBodyState final {
     ground_ = CreateGround();
     box_a_ = CreateBox(PxVec3(-1.5f, 3.5f, 0.0f), PxVec3(0.75f, 0.75f, 0.75f));
     box_b_ = CreateBox(PxVec3(1.5f, 5.5f, 0.0f), PxVec3(0.65f, 0.65f, 0.65f));
-    ResetBodies();
     scene_->addActor(*ground_);
     trace_ << "ground.added\n" << std::flush;
     scene_->addActor(*box_a_);
     trace_ << "box_a.added\n" << std::flush;
     scene_->addActor(*box_b_);
     trace_ << "box_b.added\n" << std::flush;
+    ResetBodies();
     trace_ << "physics_sdk_compat_demo.begin\n";
   }
 
@@ -207,9 +203,6 @@ class PhysXRigidBodyState final {
     material_->release();
     physics_->release();
     foundation_->release();
-    FreeLibrary(physics_module_);
-    FreeLibrary(foundation_module_);
-    FreeLibrary(common_module_);
   }
 
   void Step(
@@ -343,37 +336,30 @@ class PhysXRigidBodyState final {
   }
 
  private:
-  static std::wstring PluginDirectory() {
-    wchar_t module_path[MAX_PATH]{};
-    HMODULE module{};
-    GetModuleHandleExW(
-      GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-      reinterpret_cast<LPCWSTR>(&PluginDirectory),
-      &module);
-    GetModuleFileNameW(module, module_path, MAX_PATH);
-    std::wstring path(module_path);
-    path.resize(path.find_last_of(L"\\/"));
-    return path;
-  }
-
-  static HMODULE LoadPhysXModule(const wchar_t* name) {
-    return LoadLibraryW((PluginDirectory() + L"\\" + name).c_str());
-  }
-
   PxFoundation* CreateFoundation() {
     trace_ << "foundation.begin\n" << std::flush;
-    using CreateFoundationFn = PxFoundation* (PX_CALL_CONV*)(PxU32, PxAllocatorCallback&, PxErrorCallback&);
-    const auto create_foundation = reinterpret_cast<CreateFoundationFn>(GetProcAddress(foundation_module_, "PxCreateFoundation"));
-    PxFoundation* foundation = create_foundation(PX_PHYSICS_VERSION, allocator_, error_callback_);
+    PxFoundation* foundation = PxCreateFoundation(
+      PX_PHYSICS_VERSION,
+      allocator_,
+      error_callback_);
+    if (!foundation) {
+      throw std::runtime_error("PxCreateFoundation failed.");
+    }
     trace_ << "foundation.end\n" << std::flush;
     return foundation;
   }
-
   PxPhysics* CreatePhysics() {
     trace_ << "physics.begin\n" << std::flush;
-    using CreatePhysicsFn = PxPhysics* (PX_CALL_CONV*)(PxU32, PxFoundation&, const PxTolerancesScale&, bool, PxPvd*, PxOmniPvd*);
-    const auto create_physics = reinterpret_cast<CreatePhysicsFn>(GetProcAddress(physics_module_, "PxCreatePhysics"));
-    PxPhysics* physics = create_physics(PX_PHYSICS_VERSION, *foundation_, PxTolerancesScale(), false, nullptr, nullptr);
+    PxPhysics* physics = PxCreatePhysics(
+      PX_PHYSICS_VERSION,
+      *foundation_,
+      PxTolerancesScale(),
+      false,
+      nullptr,
+      nullptr);
+    if (!physics) {
+      throw std::runtime_error("PxCreatePhysics failed.");
+    }
     trace_ << "physics.end\n" << std::flush;
     return physics;
   }
@@ -454,9 +440,6 @@ class PhysXRigidBodyState final {
   }
 
   std::ofstream trace_;
-  HMODULE common_module_;
-  HMODULE foundation_module_;
-  HMODULE physics_module_;
   PxDefaultAllocator allocator_{};
   PhysXErrorCallback error_callback_{};
   PhysXContactCallback contact_callback_{};

@@ -21,9 +21,10 @@ endif()
 
 get_filename_component(REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
 
-find_package(Vulkan REQUIRED)
-find_program(GLSLC glslc REQUIRED)
 include(FetchContent)
+include("${REPO_ROOT}/cmake/resolve_vulkan_dependency.cmake")
+resolve_algoforge_vulkan_dependency()
+find_program(GLSLC glslc REQUIRED)
 include("${REPO_ROOT}/cmake/shared_dependencies.cmake")
 resolve_sdl3_dependency("${REPO_ROOT}")
 resolve_eigen_dependency("${REPO_ROOT}")
@@ -92,10 +93,83 @@ endif()
 
 set(ALGORITHM_LIBRARY_SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/algorithmSrc" CACHE PATH "Root directory containing algorithm algo source files")
 set(ALGORITHM_LIBRARY_RUNTIME_OUTPUT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/algorithmruntimeLib" CACHE PATH "Root directory for built algorithm runtime artifacts")
+set(ALGORITHM_LIBRARY_SELECTED_ROOT "" CACHE PATH "Optional source package root to configure in isolation")
 file(TO_CMAKE_PATH "${ALGORITHM_LIBRARY_SOURCE_ROOT}" ALGORITHM_LIBRARY_SOURCE_ROOT)
 file(TO_CMAKE_PATH "${ALGORITHM_LIBRARY_RUNTIME_OUTPUT_ROOT}" ALGORITHM_LIBRARY_RUNTIME_OUTPUT_ROOT)
+if(ALGORITHM_LIBRARY_SELECTED_ROOT)
+  file(TO_CMAKE_PATH "${ALGORITHM_LIBRARY_SELECTED_ROOT}" ALGORITHM_LIBRARY_SELECTED_ROOT)
+  file(RELATIVE_PATH _selected_algorithm_relative_root
+    "${ALGORITHM_LIBRARY_SOURCE_ROOT}"
+    "${ALGORITHM_LIBRARY_SELECTED_ROOT}")
+  file(REAL_PATH "${ALGORITHM_LIBRARY_SOURCE_ROOT}" _algorithm_source_root_real)
+  file(REAL_PATH "${ALGORITHM_LIBRARY_SELECTED_ROOT}" _algorithm_selected_root_real)
+  cmake_path(IS_PREFIX _algorithm_source_root_real
+    "${_algorithm_selected_root_real}" NORMALIZE _algorithm_selected_is_inside)
+  if(NOT _algorithm_selected_is_inside)
+    message(FATAL_ERROR
+      "ALGORITHM_LIBRARY_SELECTED_ROOT must be inside ALGORITHM_LIBRARY_SOURCE_ROOT: "
+      "${ALGORITHM_LIBRARY_SELECTED_ROOT}")
+  endif()
+  message(STATUS
+    "Configuring selected algorithm package tree: ${_selected_algorithm_relative_root}")
+endif()
 
 require_file("${ALGORITHM_LIBRARY_SOURCE_ROOT}/algorithm_plugin_api.h" "Set ALGORITHM_LIBRARY_SOURCE_ROOT to the mirrored algorithm source root.")
+
+set(_algoforge_dependency_probe_root "${ALGORITHM_LIBRARY_SOURCE_ROOT}")
+if(ALGORITHM_LIBRARY_SELECTED_ROOT)
+  set(_algoforge_dependency_probe_root "${ALGORITHM_LIBRARY_SELECTED_ROOT}")
+endif()
+file(GLOB_RECURSE _algoforge_dependency_probe_sources CONFIGURE_DEPENDS
+  "${_algoforge_dependency_probe_root}/*.c"
+  "${_algoforge_dependency_probe_root}/*.cc"
+  "${_algoforge_dependency_probe_root}/*.cpp"
+  "${_algoforge_dependency_probe_root}/*.cxx"
+  "${_algoforge_dependency_probe_root}/*.h"
+  "${_algoforge_dependency_probe_root}/*.hpp"
+  "${_algoforge_dependency_probe_root}/*.cu"
+)
+set(ALGOFORGE_SELECTED_REQUIRES_PHYSX OFF)
+set(ALGOFORGE_SELECTED_HAS_CUDA OFF)
+foreach(_algoforge_probe_source IN LISTS _algoforge_dependency_probe_sources)
+  if(_algoforge_probe_source MATCHES "\.cu$")
+    set(ALGOFORGE_SELECTED_HAS_CUDA ON)
+  endif()
+  if(NOT ALGOFORGE_SELECTED_REQUIRES_PHYSX)
+    file(STRINGS "${_algoforge_probe_source}" _algoforge_physx_reference
+      REGEX "PxPhysicsAPI\.h" LIMIT_COUNT 1)
+    if(_algoforge_physx_reference)
+      set(ALGOFORGE_SELECTED_REQUIRES_PHYSX ON)
+    endif()
+  endif()
+endforeach()
+
+if(ALGOFORGE_SELECTED_REQUIRES_PHYSX)
+  if(NOT ALGOFORGE_ENABLE_PHYSX)
+    message(FATAL_ERROR
+      "The selected algorithm package requires PhysX. Re-run the boot script "
+      "with --physx auto or --physx on.")
+  endif()
+  include("${REPO_ROOT}/cmake/resolve_physx_dependency.cmake")
+  resolve_algoforge_physx_dependency()
+endif()
+
+if(ALGOFORGE_SELECTED_HAS_CUDA AND ALGOFORGE_ENABLE_CUDA)
+  include(CheckLanguage)
+  check_language(CUDA)
+  if(NOT CMAKE_CUDA_COMPILER)
+    message(FATAL_ERROR
+      "CUDA sources were enabled, but CMake could not find nvcc. "
+      "Set CUDAToolkit_ROOT/CUDACXX or use --cuda off.")
+  endif()
+  enable_language(CUDA)
+  find_package(CUDAToolkit REQUIRED)
+  set(BUILD_ALGORITHM_CUDA_SAMPLE_PLUGIN_ALGOS ON CACHE BOOL
+    "Build algorithm CUDA sources" FORCE)
+else()
+  set(BUILD_ALGORITHM_CUDA_SAMPLE_PLUGIN_ALGOS OFF CACHE BOOL
+    "Build algorithm CUDA sources" FORCE)
+endif()
 
 set(PROJECT_INCLUDE_DIRS
   ${REPO_ROOT}/src
@@ -111,9 +185,11 @@ set(PROJECT_INCLUDE_DIRS
 
 option(BUILD_ALGORITHM_SAMPLE_PLUGIN "Build the temporary sample algorithm plugin." OFF)
 option(BUILD_ALGORITHM_CUDA_SAMPLE_PLUGIN_ALGOS "Build algorithm plugin algos that require CUDA sources." OFF)
+option(ALGOFORGE_ENABLE_CUDA "Enable CUDA sources for selected algorithm packages." OFF)
+option(ALGOFORGE_ENABLE_PHYSX "Enable PhysX for selected algorithm packages." OFF)
+set(ALGOFORGE_PHYSX_ROOT "$ENV{ALGOFORGE_PHYSX_ROOT}" CACHE PATH
+  "Optional local PhysX SDK source directory")
 set(CORE_BUILD_DIR "${REPO_ROOT}/build" CACHE PATH "Core build directory containing the base libraries for algorithm plugins")
-set(PHYSX_INCLUDE_DIR "$ENV{ALGOFORGE_PHYSX_INCLUDE_DIR}" CACHE PATH "PhysX include directory for compatibility algorithm plugins")
-set(PHYSX_RUNTIME_DIR "$ENV{ALGOFORGE_PHYSX_RUNTIME_DIR}" CACHE PATH "PhysX runtime DLL directory for compatibility algorithm plugins")
 
 function(import_core_static_library target_name library_name)
   add_library(${target_name} STATIC IMPORTED GLOBAL)
@@ -158,6 +234,12 @@ if(BUILD_ALGORITHM_SAMPLE_PLUGIN)
   target_include_directories(algorithm_plugin_support_mirror PUBLIC
     "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}"
     "${CJSON_SOURCE_DIR}"
+  )
+  target_compile_definitions(algorithm_plugin_support_mirror PUBLIC
+    ALGOFORGE_PROJECT_ROOT="${REPO_ROOT}"
+  )
+  set_target_properties(algorithm_plugin_support_mirror PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
   )
 endif()
 
@@ -210,6 +292,16 @@ function(register_algorithm_algo algo_manifest)
   endif()
   list(SORT plugin_sources_for_build)
   list(LENGTH plugin_sources_for_build plugin_source_count)
+  set(plugin_requires_physx OFF)
+  foreach(plugin_source IN LISTS plugin_sources_for_build)
+    if(NOT plugin_requires_physx)
+      file(STRINGS "${plugin_source}" plugin_physx_reference
+        REGEX "PxPhysicsAPI\.h" LIMIT_COUNT 1)
+      if(plugin_physx_reference)
+        set(plugin_requires_physx ON)
+      endif()
+    endif()
+  endforeach()
 
   file(MAKE_DIRECTORY "${algorithm_output_dir}")
 
@@ -238,51 +330,31 @@ function(register_algorithm_algo algo_manifest)
   add_custom_target("${shader_target}" DEPENDS ${algorithm_shader_outputs})
 
   if(plugin_source_count GREATER 0 AND BUILD_ALGORITHM_SAMPLE_PLUGIN)
+    set(algorithm_runtime_files "")
     add_library("${algorithm_target_name}_plugin" MODULE ${plugin_sources_for_build})
     target_include_directories("${algorithm_target_name}_plugin" PUBLIC
       "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}"
       ${PROJECT_INCLUDE_DIRS}
     )
-    if(algorithm_name MATCHES "physx|physics_sdk_compat_demo")
-      if(NOT PHYSX_INCLUDE_DIR OR NOT EXISTS "${PHYSX_INCLUDE_DIR}/PxPhysicsAPI.h")
+    if(plugin_requires_physx)
+      if(NOT TARGET physx_lib)
         message(FATAL_ERROR
-          "PHYSX_INCLUDE_DIR must point to a PhysX include directory containing PxPhysicsAPI.h "
-          "when building a PhysX compatibility plugin.")
+          "The plugin includes PxPhysicsAPI.h, but the PhysX CMake target is unavailable.")
       endif()
-      if(NOT PHYSX_RUNTIME_DIR)
-        message(FATAL_ERROR
-          "PHYSX_RUNTIME_DIR must point to the PhysX runtime DLL directory "
-          "when building a PhysX compatibility plugin.")
-      endif()
-      target_include_directories("${algorithm_target_name}_plugin" PRIVATE "${PHYSX_INCLUDE_DIR}")
-      foreach(physx_runtime_name IN ITEMS
-          PhysXCommon_64.dll
-          PhysXFoundation_64.dll
-          PhysX_64.dll)
-        if(NOT EXISTS "${PHYSX_RUNTIME_DIR}/${physx_runtime_name}")
-          message(FATAL_ERROR
-            "Missing PhysX runtime DLL: ${PHYSX_RUNTIME_DIR}/${physx_runtime_name}")
-        endif()
-        add_custom_command(TARGET "${algorithm_target_name}_plugin" POST_BUILD
-          COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${PHYSX_RUNTIME_DIR}/${physx_runtime_name}"
-            "${algorithm_output_dir}/${physx_runtime_name}"
-          VERBATIM
-        )
-      endforeach()
-      if(algorithm_name MATCHES "^physx_lance_(compat|cuda)_demo$")
-        foreach(physx_link_name IN ITEMS
-            PhysX_64.lib
-            PhysXCommon_64.lib
-            PhysXFoundation_64.lib)
-          if(NOT EXISTS "${PHYSX_RUNTIME_DIR}/${physx_link_name}")
-            message(FATAL_ERROR
-              "Missing PhysX import library: ${PHYSX_RUNTIME_DIR}/${physx_link_name}")
-          endif()
-          target_link_libraries("${algorithm_target_name}_plugin" PRIVATE
-            "${PHYSX_RUNTIME_DIR}/${physx_link_name}")
-        endforeach()
-      endif()
+      target_link_libraries("${algorithm_target_name}_plugin" PRIVATE physx_lib)
+      target_compile_definitions("${algorithm_target_name}_plugin" PRIVATE
+        PX_PHYSX_STATIC_LIB=1
+      )
+      set(physx_license_relative_path "licenses/PhysX-LICENSE.md")
+      add_custom_command(TARGET "${algorithm_target_name}_plugin" POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+          "${algorithm_output_dir}/licenses"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          "${ALGOFORGE_PHYSX_LICENSE_FILE}"
+          "${algorithm_output_dir}/${physx_license_relative_path}"
+        VERBATIM
+      )
+      list(APPEND algorithm_runtime_files "${physx_license_relative_path}")
     endif()
     target_compile_definitions("${algorithm_target_name}_plugin" PRIVATE
       ALGORITHM_LIBRARY_PLUGIN_BUILD=1
@@ -298,14 +370,27 @@ function(register_algorithm_algo algo_manifest)
     )
     if(plugin_has_cuda_source AND BUILD_ALGORITHM_CUDA_SAMPLE_PLUGIN_ALGOS)
       target_link_libraries("${algorithm_target_name}_plugin" PRIVATE CUDA::cudart)
+      set_target_properties("${algorithm_target_name}_plugin" PROPERTIES
+        CUDA_STANDARD 17
+        CUDA_STANDARD_REQUIRED ON
+      )
     endif()
     set_target_properties("${algorithm_target_name}_plugin" PROPERTIES
       PREFIX ""
       OUTPUT_NAME "${algorithm_name}"
+      WINDOWS_EXPORT_ALL_SYMBOLS ON
       RUNTIME_OUTPUT_DIRECTORY "${algorithm_output_dir}"
       LIBRARY_OUTPUT_DIRECTORY "${algorithm_output_dir}"
-      ARCHIVE_OUTPUT_DIRECTORY "${algorithm_output_dir}"
+      ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/algorithm_import_libraries/${algorithm_relative_dir}"
       PDB_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+    )
+    add_custom_command(TARGET "${algorithm_target_name}_plugin" POST_BUILD
+      COMMAND ${CMAKE_COMMAND}
+        "-DOUTPUT_FILE=${algorithm_output_dir}/runtime.artifacts"
+        "-DPLUGIN_MODULE=$<TARGET_FILE_NAME:${algorithm_target_name}_plugin>"
+        "-DRUNTIME_FILES=${algorithm_runtime_files}"
+        -P "${REPO_ROOT}/cmake/write_algorithm_runtime_artifacts.cmake"
+      VERBATIM
     )
     add_dependencies("${algorithm_target_name}_plugin" "${shader_target}")
   endif()
@@ -331,9 +416,15 @@ function(register_algorithm_algo algo_manifest)
   set_property(GLOBAL APPEND PROPERTY ALGORITHM_ALGO_TARGETS "${algo_target}")
 endfunction()
 
-file(GLOB_RECURSE ALGORITHM_PACKAGE_MANIFESTS CONFIGURE_DEPENDS
-  "${ALGORITHM_LIBRARY_SOURCE_ROOT}/manifest.json"
-)
+if(ALGORITHM_LIBRARY_SELECTED_ROOT)
+  file(GLOB_RECURSE ALGORITHM_PACKAGE_MANIFESTS CONFIGURE_DEPENDS
+    "${ALGORITHM_LIBRARY_SELECTED_ROOT}/manifest.json"
+  )
+else()
+  file(GLOB_RECURSE ALGORITHM_PACKAGE_MANIFESTS CONFIGURE_DEPENDS
+    "${ALGORITHM_LIBRARY_SOURCE_ROOT}/manifest.json"
+  )
+endif()
 list(SORT ALGORITHM_PACKAGE_MANIFESTS)
 set(ALGORITHM_ALGO_COUNT 0)
 foreach(algo_manifest IN LISTS ALGORITHM_PACKAGE_MANIFESTS)

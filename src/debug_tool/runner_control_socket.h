@@ -1,24 +1,18 @@
 #pragma once
 
-#include <cstddef>
+#include <asio.hpp>
+
 #include <algorithm>
+#include <array>
 #include <cctype>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
-#include <filesystem>
 #include <functional>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
-
-#ifdef _WIN32
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN 1
-#endif
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#pragma comment(lib, "Ws2_32.lib")
-#endif
 
 namespace debug_tool_backend::runner_control {
 
@@ -36,20 +30,19 @@ inline bool ParseEndpoint(const std::string& text, Endpoint* out_endpoint) {
   if (!out_endpoint) {
     return false;
   }
-  const std::string trimmed = text;
-  const size_t colon = trimmed.rfind(':');
-  if (colon == std::string::npos || colon == 0u || colon + 1u >= trimmed.size()) {
+  const size_t colon = text.rfind(':');
+  if (colon == std::string::npos || colon == 0u || colon + 1u >= text.size()) {
     return false;
   }
 
   Endpoint endpoint{};
-  endpoint.host = trimmed.substr(0u, colon);
+  endpoint.host = text.substr(0u, colon);
   if (endpoint.host == "localhost") {
     endpoint.host = "127.0.0.1";
   }
 
   char* end = nullptr;
-  const unsigned long parsed_port = std::strtoul(trimmed.c_str() + colon + 1u, &end, 10);
+  const unsigned long parsed_port = std::strtoul(text.c_str() + colon + 1u, &end, 10);
   if (!end || *end != '\0' || parsed_port > 65535ul) {
     return false;
   }
@@ -119,157 +112,101 @@ inline std::vector<std::string> TokenizeCommandLine(const std::string& command_l
   return tokens;
 }
 
-inline bool _WriteAll(SOCKET socket, const std::string& payload) {
-  size_t offset = 0u;
-  while (offset < payload.size()) {
-    const int written = send(
-      socket,
-      payload.data() + offset,
-      static_cast<int>(payload.size() - offset),
-      0);
-    if (written == SOCKET_ERROR) {
-      return false;
-    }
-    offset += static_cast<size_t>(written);
-  }
-  return true;
+namespace detail {
+
+using Tcp = asio::ip::tcp;
+
+inline asio::ip::address Address(const Endpoint& endpoint) {
+  return asio::ip::make_address(endpoint.host.empty() ? "127.0.0.1" : endpoint.host);
 }
 
-inline bool _WriteAll(SOCKET socket, const std::byte* payload, size_t payload_size) {
-  size_t offset = 0u;
-  while (offset < payload_size) {
-    const int written = send(
-      socket,
-      reinterpret_cast<const char*>(payload + offset),
-      static_cast<int>(payload_size - offset),
-      0);
-    if (written == SOCKET_ERROR) {
-      return false;
-    }
-    offset += static_cast<size_t>(written);
-  }
-  return true;
+inline bool WriteAll(Tcp::socket& socket, const std::string& payload) {
+  asio::error_code ec;
+  asio::write(socket, asio::buffer(payload.data(), payload.size()), ec);
+  return !ec;
 }
 
-inline bool _ReadLine(SOCKET socket, std::string* out_line) {
+inline bool WriteAll(Tcp::socket& socket, const std::byte* payload, size_t payload_size) {
+  asio::error_code ec;
+  asio::write(socket, asio::buffer(payload, payload_size), ec);
+  return !ec;
+}
+
+inline bool ReadLine(Tcp::socket& socket, std::string* out_line) {
   if (!out_line) {
     return false;
   }
-  out_line->clear();
-  char buffer[4096]{};
-  while (true) {
-    const int received = recv(socket, buffer, static_cast<int>(sizeof(buffer)), 0);
-    if (received == SOCKET_ERROR || received == 0) {
-      return !out_line->empty();
-    }
-    for (int i = 0; i < received; ++i) {
-      const char ch = buffer[i];
-      if (ch == '\n') {
-        return true;
-      }
-      if (ch != '\r') {
-        out_line->push_back(ch);
-      }
-    }
+  asio::streambuf buffer;
+  asio::error_code ec;
+  asio::read_until(socket, buffer, '\n', ec);
+  if (ec && ec != asio::error::eof) {
+    return false;
+  }
+  std::istream stream(&buffer);
+  std::getline(stream, *out_line);
+  if (!out_line->empty() && out_line->back() == '\r') {
+    out_line->pop_back();
+  }
+  return !out_line->empty();
+}
+
+inline void SetError(std::string* out_error_message, const std::string& message) {
+  if (out_error_message) {
+    *out_error_message = message;
   }
 }
+
+}  // namespace detail
 
 inline bool SendCommand(
   const Endpoint& endpoint,
   const std::string& request,
   std::string* out_response,
   std::string* out_error_message) {
-#ifndef _WIN32
-  (void)endpoint;
-  (void)request;
-  (void)out_response;
-  if (out_error_message) {
-    *out_error_message = "Runner control is only supported on Windows.";
-  }
-  return false;
-#else
-  if (out_response) {
-    out_response->clear();
-  }
-
-  WSADATA wsa_data{};
-  if (WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0) {
-    if (out_error_message) {
-      *out_error_message = "WSAStartup failed.";
+  try {
+    if (out_response) {
+      out_response->clear();
     }
-    return false;
-  }
+    asio::io_context io_context;
+    detail::Tcp::socket socket(io_context);
+    socket.connect(detail::Tcp::endpoint(detail::Address(endpoint), endpoint.port));
 
-  SOCKET socket_handle = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-  if (socket_handle == INVALID_SOCKET) {
-    WSACleanup();
-    if (out_error_message) {
-      *out_error_message = "Failed to create runner control socket.";
-    }
-    return false;
-  }
-
-  sockaddr_in address{};
-  address.sin_family = AF_INET;
-  address.sin_port = htons(endpoint.port);
-  if (endpoint.host == "127.0.0.1" || endpoint.host.empty()) {
-    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  } else if (inet_pton(AF_INET, endpoint.host.c_str(), &address.sin_addr) != 1) {
-    closesocket(socket_handle);
-    WSACleanup();
-    if (out_error_message) {
-      *out_error_message = "Failed to parse runner control endpoint host '" + endpoint.host + "'.";
-    }
-    return false;
-  }
-
-  if (connect(socket_handle, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == SOCKET_ERROR) {
-    closesocket(socket_handle);
-    WSACleanup();
-    if (out_error_message) {
-      *out_error_message = "Failed to connect to runner control endpoint " + FormatEndpoint(endpoint) + ".";
-    }
-    return false;
-  }
-
-  std::string payload = request;
-  payload.push_back('\n');
-  if (!_WriteAll(socket_handle, payload)) {
-    closesocket(socket_handle);
-    WSACleanup();
-    if (out_error_message) {
-      *out_error_message = "Failed to send runner control request.";
-    }
-    return false;
-  }
-
-  shutdown(socket_handle, SD_SEND);
-
-  std::string response{};
-  char buffer[4096]{};
-  while (true) {
-    const int received = recv(socket_handle, buffer, static_cast<int>(sizeof(buffer)), 0);
-    if (received == SOCKET_ERROR) {
-      closesocket(socket_handle);
-      WSACleanup();
-      if (out_error_message) {
-        *out_error_message = "Failed to read runner control response.";
-      }
+    std::string payload = request;
+    payload.push_back('\n');
+    if (!detail::WriteAll(socket, payload)) {
+      detail::SetError(out_error_message, "Failed to send runner control request.");
       return false;
     }
-    if (received == 0) {
-      break;
-    }
-    response.append(buffer, buffer + received);
-  }
 
-  closesocket(socket_handle);
-  WSACleanup();
-  if (out_response) {
-    *out_response = std::move(response);
+    asio::error_code shutdown_error;
+    socket.shutdown(detail::Tcp::socket::shutdown_send, shutdown_error);
+
+    std::string response;
+    std::array<char, 4096> buffer{};
+    for (;;) {
+      asio::error_code read_error;
+      const size_t received = socket.read_some(asio::buffer(buffer), read_error);
+      if (received > 0u) {
+        response.append(buffer.data(), received);
+      }
+      if (read_error == asio::error::eof) {
+        break;
+      }
+      if (read_error) {
+        detail::SetError(out_error_message, "Failed to read runner control response: " + read_error.message());
+        return false;
+      }
+    }
+
+    if (out_response) {
+      *out_response = std::move(response);
+    }
+    detail::SetError(out_error_message, {});
+    return true;
+  } catch (const std::exception& error) {
+    detail::SetError(out_error_message, "Runner control client failed: " + std::string(error.what()));
+    return false;
   }
-  return true;
-#endif
 }
 
 inline bool RunServer(
@@ -277,118 +214,49 @@ inline bool RunServer(
   const std::function<std::string(const std::string&, bool* out_shutdown_requested)>& handler,
   const std::function<void(const Endpoint&)>& on_bound_endpoint = {},
   std::string* out_error_message = nullptr) {
-#ifndef _WIN32
-  (void)endpoint;
-  (void)handler;
-  if (out_error_message) {
-    *out_error_message = "Runner control is only supported on Windows.";
-  }
-  return false;
-#else
-  WSADATA wsa_data{};
-  if (WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0) {
-    if (out_error_message) {
-      *out_error_message = "WSAStartup failed.";
-    }
-    return false;
-  }
+  try {
+    asio::io_context io_context;
+    detail::Tcp::acceptor acceptor(io_context);
+    const detail::Tcp::endpoint listen_endpoint(detail::Address(endpoint), endpoint.port);
+    acceptor.open(listen_endpoint.protocol());
+    acceptor.set_option(detail::Tcp::acceptor::reuse_address(true));
+    acceptor.bind(listen_endpoint);
+    acceptor.listen();
 
-  SOCKET listen_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-  if (listen_socket == INVALID_SOCKET) {
-    WSACleanup();
-    if (out_error_message) {
-      *out_error_message = "Failed to create runner control server socket.";
+    Endpoint bound_endpoint = endpoint;
+    bound_endpoint.port = acceptor.local_endpoint().port();
+    if (on_bound_endpoint) {
+      on_bound_endpoint(bound_endpoint);
     }
-    return false;
-  }
 
-  sockaddr_in address{};
-  address.sin_family = AF_INET;
-  address.sin_port = htons(endpoint.port);
-  if (endpoint.host == "127.0.0.1" || endpoint.host.empty()) {
-    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  } else if (inet_pton(AF_INET, endpoint.host.c_str(), &address.sin_addr) != 1) {
-    closesocket(listen_socket);
-    WSACleanup();
-    if (out_error_message) {
-      *out_error_message = "Failed to parse runner control server host '" + endpoint.host + "'.";
-    }
-    return false;
-  }
+    bool should_shutdown = false;
+    while (!should_shutdown) {
+      detail::Tcp::socket client_socket(io_context);
+      acceptor.accept(client_socket);
 
-  if (bind(listen_socket, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == SOCKET_ERROR) {
-    closesocket(listen_socket);
-    WSACleanup();
-    if (out_error_message) {
-      *out_error_message = "Failed to bind runner control server to " + FormatEndpoint(endpoint) + ".";
-    }
-    return false;
-  }
-
-  if (listen(listen_socket, SOMAXCONN) == SOCKET_ERROR) {
-    closesocket(listen_socket);
-    WSACleanup();
-    if (out_error_message) {
-      *out_error_message = "Failed to listen on runner control server socket.";
-    }
-    return false;
-  }
-
-  Endpoint bound_endpoint = endpoint;
-  sockaddr_in bound_address{};
-  int bound_address_size = sizeof(bound_address);
-  if (getsockname(listen_socket, reinterpret_cast<sockaddr*>(&bound_address), &bound_address_size) == SOCKET_ERROR) {
-    closesocket(listen_socket);
-    WSACleanup();
-    if (out_error_message) {
-      *out_error_message = "Failed to resolve runner control server port.";
-    }
-    return false;
-  }
-  bound_endpoint.port = ntohs(bound_address.sin_port);
-  if (on_bound_endpoint) {
-    on_bound_endpoint(bound_endpoint);
-  }
-
-  bool should_shutdown = false;
-  while (!should_shutdown) {
-    SOCKET client_socket = accept(listen_socket, nullptr, nullptr);
-    if (client_socket == INVALID_SOCKET) {
-      closesocket(listen_socket);
-      WSACleanup();
-      if (out_error_message) {
-        *out_error_message = "Failed to accept runner control client connection.";
+      std::string request;
+      if (!detail::ReadLine(client_socket, &request)) {
+        (void)detail::WriteAll(client_socket, "ERR empty request\n");
+        continue;
       }
-      return false;
+
+      bool request_shutdown = false;
+      std::string response = handler(request, &request_shutdown);
+      if (response.empty()) {
+        response = "OK\n";
+      } else if (response.back() != '\n') {
+        response.push_back('\n');
+      }
+      (void)detail::WriteAll(client_socket, response);
+      should_shutdown = request_shutdown;
     }
 
-    std::string request{};
-    if (!_ReadLine(client_socket, &request)) {
-      const std::string response = "ERR empty request\n";
-      (void)_WriteAll(client_socket, response);
-      closesocket(client_socket);
-      continue;
-    }
-
-    bool request_shutdown = false;
-    std::string response = handler(request, &request_shutdown);
-    if (response.empty()) {
-      response = "OK\n";
-    } else if (response.back() != '\n') {
-      response.push_back('\n');
-    }
-    (void)_WriteAll(client_socket, response);
-    closesocket(client_socket);
-
-    if (request_shutdown) {
-      should_shutdown = true;
-    }
+    detail::SetError(out_error_message, {});
+    return true;
+  } catch (const std::exception& error) {
+    detail::SetError(out_error_message, "Runner control server failed: " + std::string(error.what()));
+    return false;
   }
-
-  closesocket(listen_socket);
-  WSACleanup();
-  return true;
-#endif
 }
 
 inline bool RunBinaryServer(
@@ -396,122 +264,53 @@ inline bool RunBinaryServer(
   const std::function<BinaryResponse(const std::string&, bool* out_shutdown_requested)>& handler,
   const std::function<void(const Endpoint&)>& on_bound_endpoint = {},
   std::string* out_error_message = nullptr) {
-#ifndef _WIN32
-  (void)endpoint;
-  (void)handler;
-  if (out_error_message) {
-    *out_error_message = "Runner control is only supported on Windows.";
-  }
-  return false;
-#else
-  WSADATA wsa_data{};
-  if (WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0) {
-    if (out_error_message) {
-      *out_error_message = "WSAStartup failed.";
-    }
-    return false;
-  }
+  try {
+    asio::io_context io_context;
+    detail::Tcp::acceptor acceptor(io_context);
+    const detail::Tcp::endpoint listen_endpoint(detail::Address(endpoint), endpoint.port);
+    acceptor.open(listen_endpoint.protocol());
+    acceptor.set_option(detail::Tcp::acceptor::reuse_address(true));
+    acceptor.bind(listen_endpoint);
+    acceptor.listen();
 
-  SOCKET listen_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-  if (listen_socket == INVALID_SOCKET) {
-    WSACleanup();
-    if (out_error_message) {
-      *out_error_message = "Failed to create runner control server socket.";
+    Endpoint bound_endpoint = endpoint;
+    bound_endpoint.port = acceptor.local_endpoint().port();
+    if (on_bound_endpoint) {
+      on_bound_endpoint(bound_endpoint);
     }
-    return false;
-  }
 
-  sockaddr_in address{};
-  address.sin_family = AF_INET;
-  address.sin_port = htons(endpoint.port);
-  if (endpoint.host == "127.0.0.1" || endpoint.host.empty()) {
-    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  } else if (inet_pton(AF_INET, endpoint.host.c_str(), &address.sin_addr) != 1) {
-    closesocket(listen_socket);
-    WSACleanup();
-    if (out_error_message) {
-      *out_error_message = "Failed to parse runner control server host '" + endpoint.host + "'.";
-    }
-    return false;
-  }
+    bool should_shutdown = false;
+    while (!should_shutdown) {
+      detail::Tcp::socket client_socket(io_context);
+      acceptor.accept(client_socket);
 
-  if (bind(listen_socket, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == SOCKET_ERROR) {
-    closesocket(listen_socket);
-    WSACleanup();
-    if (out_error_message) {
-      *out_error_message = "Failed to bind runner control server to " + FormatEndpoint(endpoint) + ".";
-    }
-    return false;
-  }
-
-  if (listen(listen_socket, SOMAXCONN) == SOCKET_ERROR) {
-    closesocket(listen_socket);
-    WSACleanup();
-    if (out_error_message) {
-      *out_error_message = "Failed to listen on runner control server socket.";
-    }
-    return false;
-  }
-
-  Endpoint bound_endpoint = endpoint;
-  sockaddr_in bound_address{};
-  int bound_address_size = sizeof(bound_address);
-  if (getsockname(listen_socket, reinterpret_cast<sockaddr*>(&bound_address), &bound_address_size) == SOCKET_ERROR) {
-    closesocket(listen_socket);
-    WSACleanup();
-    if (out_error_message) {
-      *out_error_message = "Failed to resolve runner control server port.";
-    }
-    return false;
-  }
-  bound_endpoint.port = ntohs(bound_address.sin_port);
-  if (on_bound_endpoint) {
-    on_bound_endpoint(bound_endpoint);
-  }
-
-  bool should_shutdown = false;
-  while (!should_shutdown) {
-    SOCKET client_socket = accept(listen_socket, nullptr, nullptr);
-    if (client_socket == INVALID_SOCKET) {
-      closesocket(listen_socket);
-      WSACleanup();
-      if (out_error_message) {
-        *out_error_message = "Failed to accept runner control client connection.";
+      std::string request;
+      if (!detail::ReadLine(client_socket, &request)) {
+        (void)detail::WriteAll(client_socket, "ERR empty request\n");
+        continue;
       }
-      return false;
+
+      bool request_shutdown = false;
+      BinaryResponse response = handler(request, &request_shutdown);
+      if (response.header.empty()) {
+        response.header = "OK";
+      }
+      if (response.header.back() != '\n') {
+        response.header.push_back('\n');
+      }
+      (void)detail::WriteAll(client_socket, response.header);
+      if (!response.body.empty()) {
+        (void)detail::WriteAll(client_socket, response.body.data(), response.body.size());
+      }
+      should_shutdown = request_shutdown;
     }
 
-    std::string request{};
-    if (!_ReadLine(client_socket, &request)) {
-      const std::string response = "ERR empty request\n";
-      (void)_WriteAll(client_socket, response);
-      closesocket(client_socket);
-      continue;
-    }
-
-    bool request_shutdown = false;
-    BinaryResponse response = handler(request, &request_shutdown);
-    if (response.header.empty()) {
-      response.header = "OK";
-    }
-    if (response.header.back() != '\n') {
-      response.header.push_back('\n');
-    }
-    (void)_WriteAll(client_socket, response.header);
-    if (!response.body.empty()) {
-      (void)_WriteAll(client_socket, response.body.data(), response.body.size());
-    }
-    closesocket(client_socket);
-
-    if (request_shutdown) {
-      should_shutdown = true;
-    }
+    detail::SetError(out_error_message, {});
+    return true;
+  } catch (const std::exception& error) {
+    detail::SetError(out_error_message, "Runner control binary server failed: " + std::string(error.what()));
+    return false;
   }
-
-  closesocket(listen_socket);
-  WSACleanup();
-  return true;
-#endif
 }
 
 }  // namespace debug_tool_backend::runner_control
