@@ -27,13 +27,14 @@ jobs:
           mkdir -p testData/ci data
           find ci/teapot_obj_parts -maxdepth 1 -type f -name 'part[0-9][0-9].txt' \
             -printf '%f %s\n' | sort | tee testData/ci/teapot-parts.txt
-          test "$(find ci/teapot_obj_parts -maxdepth 1 -type f -name 'part[0-9][0-9].txt' | wc -l)" -eq 19
+          test "$(find ci/teapot_obj_parts -maxdepth 1 -type f -name 'part[0-9][0-9].txt' | wc -l)" -eq 17
           cat ci/teapot_obj_parts/part[0-9][0-9].txt > testData/ci/teapot.obj.xz.b64
-          test "$(wc -c < testData/ci/teapot.obj.xz.b64)" -eq 148240
-          echo '67bf1953140966333c5b42668c48585a67c785f72b4459b767f98cbbc3dc2081  testData/ci/teapot.obj.xz.b64' \
+          test "$(wc -c < testData/ci/teapot.obj.xz.b64)" -eq 148752
+          echo '6360f37a264b2c82ea07b61e417e420e9d5803aa8695c3caa35a27c22eb49ff5  testData/ci/teapot.obj.xz.b64' \
             | sha256sum --check -
           base64 --decode testData/ci/teapot.obj.xz.b64 > testData/ci/teapot.obj.xz
-          echo '61d86be70018b1b45c050f0227504649cc01de005b2cbe8600c233a8b1c7eec2  testData/ci/teapot.obj.xz' \
+          test "$(wc -c < testData/ci/teapot.obj.xz)" -eq 111564
+          echo '7422cf2368e006818a1aeaae2058f6988a57d24b950ed1fc775ff47a78b9a98a  testData/ci/teapot.obj.xz' \
             | sha256sum --check -
           xz --test testData/ci/teapot.obj.xz
           xz --decompress --stdout testData/ci/teapot.obj.xz > data/teapot.obj
