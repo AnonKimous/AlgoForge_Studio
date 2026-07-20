@@ -1,0 +1,131 @@
+name: Linux Build Probe
+
+on:
+  push:
+    branches:
+      - ci/linux-build-probe
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-mainline:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: "2"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang \
+            cmake \
+            ninja-build \
+            python3-pip \
+            pkg-config \
+            libvulkan-dev \
+            vulkan-tools \
+            glslang-tools \
+            libx11-dev \
+            libxext-dev \
+            libxrandr-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libxinerama-dev \
+            libxfixes-dev \
+            libxkbcommon-dev \
+            libwayland-dev \
+            wayland-protocols \
+            libegl1-mesa-dev \
+            libgl1-mesa-dev \
+            libudev-dev \
+            libdbus-1-dev \
+            libasound2-dev \
+            libpulse-dev
+
+      - name: Install Python requirements
+        run: python3 -m pip install -r requirements.txt
+
+      - name: Record tool versions
+        run: |
+          mkdir -p testData/ci
+          {
+            uname -a
+            clang --version
+            clang++ --version
+            cmake --version
+            ninja --version
+            python3 --version
+            vulkaninfo --summary || true
+          } | tee testData/ci/tool-versions.log
+
+      - name: Adapt the OpenSource toolchain for Linux Clang
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("buildProject/OpenSource/toolchain.cmake")
+          text = path.read_text(encoding="utf-8")
+          old = "/DALGOFORGE_TOOLCHAIN_CLANG=1"
+          new = "-DALGOFORGE_TOOLCHAIN_CLANG=1"
+          if old not in text:
+              raise SystemExit(f"expected toolchain flag not found in {path}")
+          path.write_text(text.replace(old, new), encoding="utf-8")
+          PY
+
+      - name: Configure mainline
+        shell: bash
+        run: |
+          set -o pipefail
+          cmake \
+            -S . \
+            -B build/OpenSource \
+            --fresh \
+            -G "Ninja Multi-Config" \
+            -DCMAKE_TOOLCHAIN_FILE="$PWD/buildProject/OpenSource/toolchain.cmake" \
+            -DCMAKE_MAKE_PROGRAM="$(command -v ninja)" \
+            -DALGOFORGE_CLANG_CL="$(command -v clang++)" \
+            2>&1 | tee testData/ci/configure-mainline.log
+
+      - name: Build debugTool
+        shell: bash
+        run: |
+          set -o pipefail
+          cmake --build build/OpenSource \
+            --config RelWithDebInfo \
+            --target debugTool \
+            --parallel 2 \
+            2>&1 | tee testData/ci/build-debugTool.log
+
+      - name: Build SDK
+        shell: bash
+        run: |
+          set -o pipefail
+          cmake --build build/OpenSource \
+            --config RelWithDebInfo \
+            --target sdk \
+            --parallel 2 \
+            2>&1 | tee testData/ci/build-sdk.log
+
+      - name: Record generated files
+        if: always()
+        run: |
+          mkdir -p testData/ci
+          find build/OpenSource -maxdepth 4 -type f -printf '%p\n' 2>/dev/null \
+            | sort \
+            > testData/ci/generated-files.txt || true
+
+      - name: Upload build probe logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: algoforge-linux-build-probe
+          path: testData/ci
+          if-no-files-found: warn
+          retention-days: 7
