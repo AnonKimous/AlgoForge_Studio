@@ -27,6 +27,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            build-essential \
             clang \
             cmake \
             ninja-build \
@@ -43,15 +44,27 @@ jobs:
             libxinerama-dev \
             libxfixes-dev \
             libxss-dev \
+            libxtst-dev \
             libxkbcommon-dev \
+            libxkbcommon-x11-dev \
             libwayland-dev \
             wayland-protocols \
+            libdrm-dev \
+            libgbm-dev \
             libegl1-mesa-dev \
             libgl1-mesa-dev \
+            libgles2-mesa-dev \
             libudev-dev \
             libdbus-1-dev \
             libasound2-dev \
-            libpulse-dev
+            libpulse-dev \
+            libpipewire-0.3-dev \
+            libdecor-0-dev \
+            liburing-dev \
+            libfribidi-dev \
+            libibus-1.0-dev \
+            libthai-dev \
+            libusb-1.0-0-dev
 
       - name: Install Python requirements
         run: python3 -m pip install -r requirements.txt
