@@ -1,4 +1,4 @@
-name: Teapot Asset Diagnostic
+name: Publish Teapot OBJ To Main
 
 on:
   pull_request:
@@ -6,40 +6,77 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
-  diagnose:
+  publish-teapot-obj:
     runs-on: ubuntu-22.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout validation branch
+        uses: actions/checkout@v4
         with:
           ref: ci/linux-build-probe
+          fetch-depth: 0
 
-      - name: Reconstruct and verify teapot OBJ
+      - name: Reconstruct and verify uploaded teapot OBJ
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p testData/ci data
-          find ci/teapot_obj_parts -maxdepth 1 -type f -name 'part*.txt' \
+          find ci/teapot_obj_parts -maxdepth 1 -type f -name 'part[0-9][0-9].txt' \
             -printf '%f %s\n' | sort | tee testData/ci/teapot-parts.txt
-          cat ci/teapot_obj_parts/part*.txt > testData/ci/teapot.obj.xz.b64
-          wc -c testData/ci/teapot.obj.xz.b64 | tee testData/ci/teapot-b64-size.txt
-          sha256sum testData/ci/teapot.obj.xz.b64 | tee testData/ci/teapot-b64-sha256.txt
+          test "$(find ci/teapot_obj_parts -maxdepth 1 -type f -name 'part[0-9][0-9].txt' | wc -l)" -eq 19
+          cat ci/teapot_obj_parts/part[0-9][0-9].txt > testData/ci/teapot.obj.xz.b64
+          test "$(wc -c < testData/ci/teapot.obj.xz.b64)" -eq 148240
+          echo '67bf1953140966333c5b42668c48585a67c785f72b4459b767f98cbbc3dc2081  testData/ci/teapot.obj.xz.b64' \
+            | sha256sum --check -
           base64 --decode testData/ci/teapot.obj.xz.b64 > testData/ci/teapot.obj.xz
-          wc -c testData/ci/teapot.obj.xz | tee testData/ci/teapot-xz-size.txt
-          sha256sum testData/ci/teapot.obj.xz | tee testData/ci/teapot-xz-sha256.txt
+          echo '61d86be70018b1b45c050f0227504649cc01de005b2cbe8600c233a8b1c7eec2  testData/ci/teapot.obj.xz' \
+            | sha256sum --check -
           xz --test testData/ci/teapot.obj.xz
           xz --decompress --stdout testData/ci/teapot.obj.xz > data/teapot.obj
-          wc -c data/teapot.obj | tee testData/ci/teapot-obj-size.txt
-          sha256sum data/teapot.obj | tee testData/ci/teapot-obj-sha256.txt
+          test "$(wc -c < data/teapot.obj)" -eq 540580
           echo '6d34f9f06e8547c2237fb5b33d4902fc4c34c84690698f3a7f06681ff3df948f  data/teapot.obj' \
             | sha256sum --check -
+          cp data/teapot.obj /tmp/teapot.obj
 
-      - name: Upload diagnostics
+      - name: Commit the single OBJ file directly to main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git switch -C main origin/main
+          mkdir -p data
+          cp /tmp/teapot.obj data/teapot.obj
+          echo '6d34f9f06e8547c2237fb5b33d4902fc4c34c84690698f3a7f06681ff3df948f  data/teapot.obj' \
+            | sha256sum --check -
+          git add data/teapot.obj
+          if ! git diff --cached --quiet; then
+            git commit -m "asset: add teapot OBJ resource"
+            git push origin HEAD:main
+          fi
+
+      - name: Pull the OBJ back from main and verify it
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git show origin/main:data/teapot.obj > testData/ci/teapot-from-main.obj
+          test "$(wc -c < testData/ci/teapot-from-main.obj)" -eq 540580
+          echo '6d34f9f06e8547c2237fb5b33d4902fc4c34c84690698f3a7f06681ff3df948f  testData/ci/teapot-from-main.obj' \
+            | sha256sum --check -
+
+      - name: Upload publication evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: teapot-asset-diagnostic
-          path: testData/ci
+          name: teapot-obj-main-publication
+          path: |
+            testData/ci/teapot-parts.txt
+            testData/ci/teapot-from-main.obj
           if-no-files-found: warn
           retention-days: 2
