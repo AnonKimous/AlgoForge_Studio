@@ -1,0 +1,31 @@
+name: Apply Single Vulkan Queue Fallback
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ci/linux-build-probe
+          fetch-depth: 0
+
+      - name: Apply source fix
+        run: python3 ci/apply_single_queue_fallback.py
+
+      - name: Commit source fix
+        run: |
+          rm ci/apply_single_queue_fallback.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "runtime: support single Vulkan queue families"
+          git push origin HEAD:ci/linux-build-probe
