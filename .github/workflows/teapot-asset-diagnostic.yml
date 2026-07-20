@@ -25,6 +25,19 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p testData/ci data
+
+          # One character was altered while the uploaded archive was transported
+          # through the text-only connector. Restore that byte before joining it.
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('ci/teapot_obj_parts/part08.txt')
+          text = path.read_text(encoding='ascii')
+          assert len(text) == 8000
+          assert text[3334] == '7'
+          text = text[:3334] + '9' + text[3335:]
+          path.write_text(text, encoding='ascii')
+          PY
+
           find ci/teapot_obj_parts -maxdepth 1 -type f -name 'part[0-9][0-9].txt' \
             -printf '%f %s\n' | sort | tee testData/ci/teapot-parts.txt
           test "$(find ci/teapot_obj_parts -maxdepth 1 -type f -name 'part[0-9][0-9].txt' | wc -l)" -eq 17
