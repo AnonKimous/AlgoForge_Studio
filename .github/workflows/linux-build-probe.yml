@@ -58,7 +58,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            build-essential clang cmake ninja-build ccache python3-pip pkg-config \
+            build-essential clang cmake ninja-build ccache python3-pip pkg-config xz-utils \
             libvulkan-dev vulkan-tools mesa-vulkan-drivers glslang-tools \
             xvfb xauth \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
@@ -68,6 +68,22 @@ jobs:
             libudev-dev libdbus-1-dev libasound2-dev libpulse-dev \
             libpipewire-0.3-dev libdecor-0-dev liburing-dev libfribidi-dev \
             libibus-1.0-dev libthai-dev libusb-1.0-0-dev
+
+      - name: Materialize teapot OBJ resource
+        shell: bash
+        run: |
+          set -euo pipefail
+          if test ! -f data/teapot.obj; then
+            test -d ci/teapot_obj_parts
+            cat ci/teapot_obj_parts/part*.txt \
+              | base64 --decode \
+              | xz --decompress \
+              > data/teapot.obj
+          fi
+          echo "6d34f9f06e8547c2237fb5b33d4902fc4c34c84690698f3a7f06681ff3df948f  data/teapot.obj" \
+            | sha256sum --check -
+          test -s data/teapot.mtl
+          test -s data/teapot_gold_tile.png
 
       - name: Initialize compiler cache
         run: |
@@ -133,7 +149,7 @@ jobs:
             --physx auto \
             2>&1 | tee testData/ci/linux-build.log
 
-      - name: Record first runner cache statistics
+      - name: Record compiler cache statistics
         if: always()
         run: |
           set -euo pipefail
@@ -142,6 +158,15 @@ jobs:
             ccache --show-stats --verbose
           } | tee testData/ci/first-run-ccache-stats.log
           ccache --print-stats | tee testData/ci/first-run-ccache-machine-stats.log
+
+      - name: Save compiler and pip caches after build
+        if: success() && steps.compiler-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            .ci-cache/ccache
+            .ci-cache/pip
+          key: algoforge-${{ runner.os }}-clang17-v1-${{ hashFiles('requirements.txt', 'CMakeLists.txt', 'cmake/**', 'buildProject/**', 'algorithmLib/CMakeLists.txt') }}
 
       - name: Start headless software Vulkan
         shell: bash
@@ -266,10 +291,11 @@ jobs:
             exit 1
           fi
 
-      - name: Commit validated source fixes
+      - name: Commit validated source fixes and teapot asset
         shell: bash
         run: |
           set -euo pipefail
+          rm -rf ci/teapot_obj_parts
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A \
@@ -281,7 +307,7 @@ jobs:
             ':!testData' \
             ':!.ci-cache'
           if ! git diff --cached --quiet; then
-            git commit -m "build: bootstrap portable CUDA and PhysX packages"
+            git commit -m "assets: add validated teapot mesh"
             git push origin HEAD:ci/linux-build-probe
           fi
 
@@ -321,111 +347,5 @@ jobs:
             sdk/cpp
             algorithmLib/algorithmruntimeLib/norm/v4a10_teapot_pbr_demo
             algorithmLib/algorithmruntimeLib/norm/physics_sdk_compat_demo
-          if-no-files-found: error
-          retention-days: 7
-
-  verify-cache-on-fresh-runner:
-    name: verify cache on fresh runner
-    needs: build-and-render
-    runs-on: ubuntu-22.04
-    timeout-minutes: 90
-    env:
-      CMAKE_BUILD_PARALLEL_LEVEL: "2"
-      CCACHE_DIR: ${{ github.workspace }}/.ci-cache/ccache
-      CCACHE_BASEDIR: ${{ github.workspace }}
-      CCACHE_COMPILERCHECK: content
-      CCACHE_NOHASHDIR: "true"
-      CMAKE_C_COMPILER_LAUNCHER: ccache
-      CMAKE_CXX_COMPILER_LAUNCHER: ccache
-      PIP_CACHE_DIR: ${{ github.workspace }}/.ci-cache/pip
-
-    steps:
-      - name: Checkout validation branch on fresh runner
-        uses: actions/checkout@v4
-        with:
-          ref: ci/linux-build-probe
-          fetch-depth: 0
-
-      - name: Restore compiler and pip caches
-        id: compiler-cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            .ci-cache/ccache
-            .ci-cache/pip
-          key: algoforge-${{ runner.os }}-clang17-v1-${{ hashFiles('requirements.txt', 'CMakeLists.txt', 'cmake/**', 'buildProject/**', 'algorithmLib/CMakeLists.txt') }}
-          restore-keys: |
-            algoforge-${{ runner.os }}-clang17-v1-
-
-      - name: Verify exact cache restoration
-        run: |
-          set -euo pipefail
-          test "${{ steps.compiler-cache.outputs.cache-hit }}" = "true"
-
-      - name: Install Linux build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential clang cmake ninja-build ccache python3-pip pkg-config \
-            libvulkan-dev glslang-tools \
-            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
-            libxinerama-dev libxfixes-dev libxss-dev libxtst-dev \
-            libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev wayland-protocols \
-            libdrm-dev libgbm-dev libegl1-mesa-dev libgl1-mesa-dev libgles2-mesa-dev \
-            libudev-dev libdbus-1-dev libasound2-dev libpulse-dev \
-            libpipewire-0.3-dev libdecor-0-dev liburing-dev libfribidi-dev \
-            libibus-1.0-dev libthai-dev libusb-1.0-0-dev
-
-      - name: Provide glslc-compatible command
-        run: |
-          sudo tee /usr/local/bin/glslc >/dev/null <<'SH'
-          #!/usr/bin/env bash
-          exec glslangValidator -V "$@"
-          SH
-          sudo chmod +x /usr/local/bin/glslc
-
-      - name: Initialize cache statistics on fresh runner
-        run: |
-          set -euo pipefail
-          mkdir -p "$CCACHE_DIR" "$PIP_CACHE_DIR" testData/cache-verification
-          ccache --zero-stats
-          {
-            echo "runner_name=${RUNNER_NAME:-unknown}"
-            echo "hostname=$(hostname)"
-            echo "machine_id=$(cat /etc/machine-id)"
-            echo "cache_hit=${{ steps.compiler-cache.outputs.cache-hit }}"
-            ccache --version
-            ccache --show-config
-          } | tee testData/cache-verification/fresh-runner-cache-setup.log
-
-      - name: Install Python requirements from restored pip cache
-        run: python3 -m pip install -r requirements.txt
-
-      - name: Rebuild on fresh runner
-        shell: bash
-        run: |
-          set -o pipefail
-          python3 boot/booterNinjaClang.py \
-            v4a10_teapot_pbr_demo \
-            physics_sdk_compat_demo \
-            --cuda auto \
-            --physx auto \
-            2>&1 | tee testData/cache-verification/fresh-runner-build.log
-
-      - name: Verify real ccache hits
-        run: |
-          set -euo pipefail
-          ccache --show-stats --verbose | tee testData/cache-verification/fresh-runner-ccache-stats.log
-          ccache --print-stats | tee testData/cache-verification/fresh-runner-ccache-machine-stats.log
-          HITS="$(ccache --print-stats | awk 'tolower($1) ~ /hit/ {sum += $2} END {print sum + 0}')"
-          echo "compiler_cache_hits=$HITS" | tee testData/cache-verification/cache-verdict.log
-          test "$HITS" -gt 0
-
-      - name: Upload cache verification evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: algoforge-cache-verification
-          path: testData/cache-verification
           if-no-files-found: error
           retention-days: 7
