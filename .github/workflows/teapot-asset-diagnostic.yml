@@ -1,0 +1,45 @@
+name: Teapot Asset Diagnostic
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ci/linux-build-probe
+
+      - name: Reconstruct and verify teapot OBJ
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p testData/ci data
+          find ci/teapot_obj_parts -maxdepth 1 -type f -name 'part*.txt' \
+            -printf '%f %s\n' | sort | tee testData/ci/teapot-parts.txt
+          cat ci/teapot_obj_parts/part*.txt > testData/ci/teapot.obj.xz.b64
+          wc -c testData/ci/teapot.obj.xz.b64 | tee testData/ci/teapot-b64-size.txt
+          sha256sum testData/ci/teapot.obj.xz.b64 | tee testData/ci/teapot-b64-sha256.txt
+          base64 --decode testData/ci/teapot.obj.xz.b64 > testData/ci/teapot.obj.xz
+          wc -c testData/ci/teapot.obj.xz | tee testData/ci/teapot-xz-size.txt
+          sha256sum testData/ci/teapot.obj.xz | tee testData/ci/teapot-xz-sha256.txt
+          xz --test testData/ci/teapot.obj.xz
+          xz --decompress --stdout testData/ci/teapot.obj.xz > data/teapot.obj
+          wc -c data/teapot.obj | tee testData/ci/teapot-obj-size.txt
+          sha256sum data/teapot.obj | tee testData/ci/teapot-obj-sha256.txt
+          echo '6d34f9f06e8547c2237fb5b33d4902fc4c34c84690698f3a7f06681ff3df948f  data/teapot.obj' \
+            | sha256sum --check -
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: teapot-asset-diagnostic
+          path: testData/ci
+          if-no-files-found: warn
+          retention-days: 2
