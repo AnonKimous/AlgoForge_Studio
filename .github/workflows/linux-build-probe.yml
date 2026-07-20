@@ -1,13 +1,31 @@
-name: Linux Build Acceptance
+name: Apply Dependency Bootstrap And PhysX Portability
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - ci/linux-build-probe
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  paused:
+  apply:
     runs-on: ubuntu-22.04
     steps:
-      - run: echo "Acceptance is paused while boot dependency setup and PhysX packaging are updated."
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: ci/linux-build-probe
+          fetch-depth: 0
+
+      - name: Apply source edits
+        run: python3 ci/apply_dependency_bootstrap_and_physx.py
+
+      - name: Commit edits
+        run: |
+          rm ci/apply_dependency_bootstrap_and_physx.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "build: bootstrap CUDA and PhysX dependencies"
+          git push origin HEAD:ci/linux-build-probe
