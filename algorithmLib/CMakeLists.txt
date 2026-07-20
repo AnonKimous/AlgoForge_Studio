@@ -21,9 +21,10 @@ endif()
 
 get_filename_component(REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
 
-find_package(Vulkan REQUIRED)
-find_program(GLSLC glslc REQUIRED)
 include(FetchContent)
+include("${REPO_ROOT}/cmake/resolve_vulkan_dependency.cmake")
+resolve_algoforge_vulkan_dependency()
+find_program(GLSLC glslc REQUIRED)
 include("${REPO_ROOT}/cmake/shared_dependencies.cmake")
 resolve_sdl3_dependency("${REPO_ROOT}")
 resolve_eigen_dependency("${REPO_ROOT}")
@@ -158,6 +159,9 @@ if(BUILD_ALGORITHM_SAMPLE_PLUGIN)
   target_include_directories(algorithm_plugin_support_mirror PUBLIC
     "${ALGORITHM_PLUGIN_MIRROR_SRC_ROOT}"
     "${CJSON_SOURCE_DIR}"
+  )
+  target_compile_definitions(algorithm_plugin_support_mirror PUBLIC
+    ALGOFORGE_PROJECT_ROOT="${REPO_ROOT}"
   )
 endif()
 

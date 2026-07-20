@@ -17,8 +17,9 @@ if(WIN32)
   endif()
 endif()
 
-find_package(Vulkan REQUIRED)
 include(FetchContent)
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/resolve_vulkan_dependency.cmake")
+resolve_algoforge_vulkan_dependency()
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/shared_dependencies.cmake")
 resolve_sdl3_dependency("${CMAKE_CURRENT_SOURCE_DIR}")
 resolve_eigen_dependency("${CMAKE_CURRENT_SOURCE_DIR}")
@@ -29,6 +30,16 @@ resolve_spirv_reflect_dependency("${CMAKE_CURRENT_SOURCE_DIR}")
 resolve_cjson_dependency("${CMAKE_CURRENT_SOURCE_DIR}")
 resolve_mimalloc_dependency("${CMAKE_CURRENT_SOURCE_DIR}")
 resolve_assimp_dependency("${CMAKE_CURRENT_SOURCE_DIR}")
+
+FetchContent_Declare(asio_source
+  URL "https://github.com/chriskohlhoff/asio/archive/refs/tags/asio-1-30-2.zip"
+)
+FetchContent_GetProperties(asio_source)
+if(NOT asio_source_POPULATED)
+  FetchContent_Populate(asio_source)
+endif()
+set(ASIO_INCLUDE_DIR "${asio_source_SOURCE_DIR}/asio/include")
+find_package(Threads REQUIRED)
 
 if(WIN32 AND MSVC)
   add_compile_options("/utf-8")
@@ -307,7 +318,10 @@ add_library(common_data STATIC
   src/common_data/kernel_cfg.cpp
 )
 target_include_directories(common_data PUBLIC ${PROJECT_INCLUDE_DIRS})
-target_compile_definitions(common_data PRIVATE PROJECT_ROOT_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+target_compile_definitions(common_data
+  PUBLIC ALGOFORGE_PROJECT_ROOT="${CMAKE_CURRENT_SOURCE_DIR}"
+  PRIVATE PROJECT_ROOT_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+)
 
 add_library(debug_tool_hooks INTERFACE)
 target_sources(debug_tool_hooks INTERFACE
@@ -419,19 +433,22 @@ add_executable(debugTool WIN32
   src/debug_tool/main.cpp
 )
 
+target_include_directories(debugTool PRIVATE "${ASIO_INCLUDE_DIR}")
+
 target_link_libraries(debugTool PRIVATE
   debug_tool_frontend
   debug_tool_backend
   common_data
+  Threads::Threads
 )
 
 target_compile_definitions(debugTool PRIVATE
-  WIN32_LEAN_AND_MEAN
-  NOMINMAX
+  ASIO_STANDALONE
+  ASIO_NO_DEPRECATED
 )
 
 if(WIN32)
-  target_link_libraries(debugTool PRIVATE advapi32 user32 gdi32 shell32)
+  target_link_libraries(debugTool PRIVATE advapi32 user32 gdi32 shell32 ws2_32)
 
   if(NOT TARGET SDL3::SDL3)
     add_custom_command(TARGET debugTool PRE_BUILD
