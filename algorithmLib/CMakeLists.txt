@@ -238,6 +238,9 @@ if(BUILD_ALGORITHM_SAMPLE_PLUGIN)
   target_compile_definitions(algorithm_plugin_support_mirror PUBLIC
     ALGOFORGE_PROJECT_ROOT="${REPO_ROOT}"
   )
+  set_target_properties(algorithm_plugin_support_mirror PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+  )
 endif()
 
 add_custom_target(algorithm_algos)
