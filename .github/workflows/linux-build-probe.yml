@@ -1,12 +1,6 @@
 name: Linux Build And Teapot Acceptance
 
 on:
-  push:
-    branches:
-      - ci/linux-build-probe
-  pull_request:
-    branches:
-      - main
   workflow_dispatch:
 
 permissions:
