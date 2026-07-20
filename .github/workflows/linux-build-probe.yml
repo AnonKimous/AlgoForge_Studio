@@ -1,31 +1,288 @@
-name: Apply Dependency Bootstrap And PhysX Portability
+name: Linux Teapot And PhysX Acceptance
 
 on:
   push:
     branches:
       - ci/linux-build-probe
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  apply:
+  build-and-render:
     runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: "2"
+      LIBGL_ALWAYS_SOFTWARE: "1"
+
     steps:
-      - name: Checkout branch
+      - name: Checkout validation branch
         uses: actions/checkout@v4
         with:
           ref: ci/linux-build-probe
           fetch-depth: 0
 
-      - name: Apply source edits
-        run: python3 ci/apply_dependency_bootstrap_and_physx.py
-
-      - name: Commit edits
+      - name: Apply staged source changes
         run: |
-          rm ci/apply_dependency_bootstrap_and_physx.py
+          set -euo pipefail
+          if test -f ci/apply_dependency_bootstrap_and_physx.py; then
+            python3 ci/apply_dependency_bootstrap_and_physx.py
+            rm ci/apply_dependency_bootstrap_and_physx.py
+          fi
+          if test -f ci/apply_physx_static_consumer.py; then
+            python3 ci/apply_physx_static_consumer.py
+            rm ci/apply_physx_static_consumer.py
+          fi
+
+      - name: Install Linux build and headless Vulkan dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential clang cmake ninja-build python3-pip pkg-config \
+            libvulkan-dev vulkan-tools mesa-vulkan-drivers glslang-tools \
+            xvfb xauth \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
+            libxinerama-dev libxfixes-dev libxss-dev libxtst-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev wayland-protocols \
+            libdrm-dev libgbm-dev libegl1-mesa-dev libgl1-mesa-dev libgles2-mesa-dev \
+            libudev-dev libdbus-1-dev libasound2-dev libpulse-dev \
+            libpipewire-0.3-dev libdecor-0-dev liburing-dev libfribidi-dev \
+            libibus-1.0-dev libthai-dev libusb-1.0-0-dev
+
+      - name: Provide glslc-compatible command
+        run: |
+          sudo tee /usr/local/bin/glslc >/dev/null <<'SH'
+          #!/usr/bin/env bash
+          exec glslangValidator -V "$@"
+          SH
+          sudo chmod +x /usr/local/bin/glslc
+
+      - name: Install Python requirements
+        run: python3 -m pip install -r requirements.txt
+
+      - name: Record tool and dependency probe
+        run: |
+          mkdir -p testData/ci
+          {
+            uname -a
+            clang --version
+            clang++ --version
+            cmake --version
+            ninja --version
+            python3 --version
+            glslangValidator --version
+            vulkaninfo --summary || true
+          } | tee testData/ci/tool-versions.log
+
+          python3 - <<'PY' | tee testData/ci/dependency-preflight.log
+          import sys
+          from pathlib import Path
+          root = Path.cwd()
+          sys.path.insert(0, str(root / "buildProject"))
+          from dependencies import configure_optional_dependencies
+          _, plan = configure_optional_dependencies(
+              ["v4a10_teapot_pbr_demo", "physics_sdk_compat_demo"],
+              cuda_mode="auto",
+              physx_mode="auto",
+          )
+          print(plan)
+          PY
+
+      - name: Build mainline, teapot, and PhysX packages
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 boot/booterNinjaClang.py \
+            v4a10_teapot_pbr_demo \
+            physics_sdk_compat_demo \
+            --cuda auto \
+            --physx auto \
+            2>&1 | tee testData/ci/linux-build.log
+
+      - name: Start headless software Vulkan
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p testData/ci
+          LVP_ICD="$(find /usr/share/vulkan/icd.d -maxdepth 1 -type f -name 'lvp_icd*.json' | head -n 1)"
+          test -n "$LVP_ICD"
+          echo "VK_ICD_FILENAMES=$LVP_ICD" >> "$GITHUB_ENV"
+          echo "DISPLAY=:99" >> "$GITHUB_ENV"
+          Xvfb :99 -screen 0 1280x720x24 >testData/ci/xvfb.log 2>&1 &
+          echo "XVFB_PID=$!" >> "$GITHUB_ENV"
+          sleep 2
+
+      - name: Export teapot GIF
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEBUG_TOOL="build/OpenSource/RelWithDebInfo/debugTool"
+          test -x "$DEBUG_TOOL"
+          rm -f testData/runner_control/endpoint.txt
+
+          "$DEBUG_TOOL" \
+            --runner-server --runner-server-once \
+            --runner-endpoint 127.0.0.1:0 \
+            >testData/ci/teapot-server.log 2>&1 &
+          SERVER_PID=$!
+
+          for _ in $(seq 1 200); do
+            if test -s testData/runner_control/endpoint.txt; then break; fi
+            if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+              cat testData/ci/teapot-server.log
+              exit 1
+            fi
+            sleep 0.1
+          done
+          test -s testData/runner_control/endpoint.txt
+
+          set +e
+          "$DEBUG_TOOL" \
+            --algorithm-runner \
+            --algorithm v4a10_teapot_pbr_demo \
+            --execution vk \
+            --preview-width 640 --preview-height 480 \
+            --preview-output testData/ci/teapot.png \
+            --preview-gif testData/ci/teapot.gif \
+            --gif-duration 3 \
+            --runner-endpoint 127.0.0.1:0 \
+            2>&1 | tee testData/ci/teapot-runner.log
+          STATUS=${PIPESTATUS[0]}
+          set -e
+
+          wait "$SERVER_PID" || true
+          cat testData/ci/teapot-server.log
+          test "$STATUS" -eq 0
+          grep -q "OK algorithm_runner" testData/ci/teapot-runner.log
+          test -s testData/ci/teapot.png
+          test -s testData/ci/teapot.gif
+          test -s testData/norm/debugInfo/last_run.log
+          cp testData/norm/debugInfo/last_run.log testData/ci/teapot-last-run.log
+          grep -Eq "preview_pixels=[1-9][0-9]*" testData/ci/teapot-last-run.log
+
+      - name: Export PhysX square collision GIF
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEBUG_TOOL="build/OpenSource/RelWithDebInfo/debugTool"
+          rm -f testData/runner_control/endpoint.txt
+          rm -f testData/physics_sdk_compat_demo_trace.log
+
+          "$DEBUG_TOOL" \
+            --runner-server --runner-server-once \
+            --runner-endpoint 127.0.0.1:0 \
+            >testData/ci/physx-server.log 2>&1 &
+          SERVER_PID=$!
+
+          for _ in $(seq 1 200); do
+            if test -s testData/runner_control/endpoint.txt; then break; fi
+            if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+              cat testData/ci/physx-server.log
+              exit 1
+            fi
+            sleep 0.1
+          done
+          test -s testData/runner_control/endpoint.txt
+
+          set +e
+          "$DEBUG_TOOL" \
+            --algorithm-runner \
+            --algorithm physics_sdk_compat_demo \
+            --execution compatibility \
+            --preview-width 640 --preview-height 480 \
+            --preview-output testData/ci/physx-collision.png \
+            --preview-gif testData/ci/physx-collision.gif \
+            --gif-duration 4 \
+            --runner-endpoint 127.0.0.1:0 \
+            2>&1 | tee testData/ci/physx-runner.log
+          STATUS=${PIPESTATUS[0]}
+          set -e
+
+          wait "$SERVER_PID" || true
+          cat testData/ci/physx-server.log
+          test "$STATUS" -eq 0
+          grep -q "OK algorithm_runner" testData/ci/physx-runner.log
+          test -s testData/ci/physx-collision.png
+          test -s testData/ci/physx-collision.gif
+          test -s testData/norm/debugInfo/last_run.log
+          cp testData/norm/debugInfo/last_run.log testData/ci/physx-last-run.log
+          grep -Eq "preview_pixels=[1-9][0-9]*" testData/ci/physx-last-run.log
+          test -s testData/physics_sdk_compat_demo_trace.log
+          cp testData/physics_sdk_compat_demo_trace.log testData/ci/physx-collision-trace.log
+          grep -q "contact.point=" testData/ci/physx-collision-trace.log
+
+      - name: Validate packaged platform artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          TEAPOT_ROOT="algorithmLib/algorithmruntimeLib/norm/v4a10_teapot_pbr_demo"
+          PHYSX_ROOT="algorithmLib/algorithmruntimeLib/norm/physics_sdk_compat_demo"
+          test -s "$TEAPOT_ROOT/v4a10_teapot_pbr_demo.algo"
+          test -s "$PHYSX_ROOT/physics_sdk_compat_demo.algo"
+          grep -Eq '^plugin=.*\.so$' "$TEAPOT_ROOT/runtime.artifacts"
+          grep -Eq '^plugin=.*\.so$' "$PHYSX_ROOT/runtime.artifacts"
+          grep -q '^runtime=licenses/PhysX-LICENSE.md$' "$PHYSX_ROOT/runtime.artifacts"
+          test -s "$PHYSX_ROOT/licenses/PhysX-LICENSE.md"
+          if find "$TEAPOT_ROOT" "$PHYSX_ROOT" -type f \( -name '*.dll' -o -name '*.lib' -o -name '*.exe' \) | grep -q .; then
+            echo "Windows-only artifacts leaked into Linux packages." >&2
+            exit 1
+          fi
+
+      - name: Commit validated source fixes
+        shell: bash
+        run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "build: bootstrap CUDA and PhysX dependencies"
-          git push origin HEAD:ci/linux-build-probe
+          git add -A \
+            ':!.build*' \
+            ':!build' \
+            ':!algorithmLib/.build_*' \
+            ':!algorithmLib/algorithmruntimeLib' \
+            ':!sdk/cpp/lib' \
+            ':!testData'
+          if ! git diff --cached --quiet; then
+            git commit -m "build: bootstrap portable CUDA and PhysX packages"
+            git push origin HEAD:ci/linux-build-probe
+          fi
+
+      - name: Record generated files
+        if: always()
+        run: |
+          mkdir -p testData/ci
+          find build/OpenSource sdk algorithmLib/algorithmruntimeLib testData \
+            -maxdepth 10 -type f -printf '%p\n' 2>/dev/null \
+            | sort > testData/ci/generated-files.txt || true
+
+      - name: Stop Xvfb
+        if: always()
+        run: |
+          if test -n "${XVFB_PID:-}"; then kill "$XVFB_PID" 2>/dev/null || true; fi
+
+      - name: Upload acceptance artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: algoforge-linux-dual-gif-acceptance
+          path: |
+            testData/ci
+            testData/norm/debugInfo
+            testData/dependency_probe.json
+            testData/physics_sdk_compat_demo_trace.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload Linux packages
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: algoforge-linux-packages
+          path: |
+            build/OpenSource/RelWithDebInfo/debugTool
+            sdk/cpp
+            algorithmLib/algorithmruntimeLib/norm/v4a10_teapot_pbr_demo
+            algorithmLib/algorithmruntimeLib/norm/physics_sdk_compat_demo
+          if-no-files-found: error
+          retention-days: 7
