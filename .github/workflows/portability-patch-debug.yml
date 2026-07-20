@@ -1,0 +1,46 @@
+name: Portability Patch Diagnostics
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ci/linux-build-probe
+
+      - name: Run staged patches with full log
+        shell: bash
+        run: |
+          set +e
+          mkdir -p testData/ci
+          python3 ci/apply_dependency_bootstrap_and_physx.py \
+            >testData/ci/portability-patch.log 2>&1
+          FIRST_STATUS=$?
+          if test "$FIRST_STATUS" -eq 0; then
+            python3 ci/apply_physx_static_consumer.py \
+              >>testData/ci/portability-patch.log 2>&1
+            SECOND_STATUS=$?
+          else
+            SECOND_STATUS=0
+          fi
+          cat testData/ci/portability-patch.log
+          if test "$FIRST_STATUS" -ne 0; then exit "$FIRST_STATUS"; fi
+          exit "$SECOND_STATUS"
+
+      - name: Upload patch diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: portability-patch-diagnostics
+          path: testData/ci/portability-patch.log
+          if-no-files-found: error
+          retention-days: 7
