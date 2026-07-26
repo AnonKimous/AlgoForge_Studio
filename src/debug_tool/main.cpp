@@ -2,6 +2,7 @@
 #include "debug_tool/debug_tool_backend_runtime.h"
 #include "debug_tool/debug_cmd.h"
 #include "debug_tool/debug_tool_frontend_panel.h"
+#include "debug_tool/crash_dump.h"
 #include "debug_tool/gif_writer.h"
 #include "common_data/kernel_cfg.h"
 
@@ -2683,6 +2684,7 @@ bool _RunPreviewRenderServer(const PreviewRenderServerOptions& options) {
 }  // namespace
 
 int main(int argc, char** argv) {
+  debug_tool::crash_dump::Install();
   try {
     {
       const std::filesystem::path main_entry_probe_path =

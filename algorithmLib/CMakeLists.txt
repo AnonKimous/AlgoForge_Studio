@@ -238,6 +238,9 @@ if(BUILD_ALGORITHM_SAMPLE_PLUGIN)
   target_compile_definitions(algorithm_plugin_support_mirror PUBLIC
     ALGOFORGE_PROJECT_ROOT="${REPO_ROOT}"
   )
+  if(MSVC)
+    target_compile_definitions(algorithm_plugin_support_mirror PUBLIC _ITERATOR_DEBUG_LEVEL=0)
+  endif()
   set_target_properties(algorithm_plugin_support_mirror PROPERTIES
     POSITION_INDEPENDENT_CODE ON
   )
@@ -360,6 +363,9 @@ function(register_algorithm_algo algo_manifest)
       ALGORITHM_LIBRARY_PLUGIN_BUILD=1
       ALGORITHM_LIBRARY_RESOURCE_ROOT="${ALGORITHM_LIBRARY_SOURCE_ROOT}"
     )
+    if(MSVC)
+      target_compile_definitions("${algorithm_target_name}_plugin" PRIVATE _ITERATOR_DEBUG_LEVEL=0)
+    endif()
     if(plugin_has_cuda_source AND BUILD_ALGORITHM_CUDA_SAMPLE_PLUGIN_ALGOS)
       target_compile_definitions("${algorithm_target_name}_plugin" PRIVATE
         ALGORITHM_LIBRARY_PLUGIN_HAS_CUDA=1

@@ -30,6 +30,9 @@ resolve_spirv_reflect_dependency("${CMAKE_CURRENT_SOURCE_DIR}")
 resolve_cjson_dependency("${CMAKE_CURRENT_SOURCE_DIR}")
 resolve_mimalloc_dependency("${CMAKE_CURRENT_SOURCE_DIR}")
 resolve_assimp_dependency("${CMAKE_CURRENT_SOURCE_DIR}")
+if(MSVC AND TARGET assimp)
+  target_compile_definitions(assimp PRIVATE _ITERATOR_DEBUG_LEVEL=0)
+endif()
 
 FetchContent_Declare(asio_source
   URL "https://github.com/chriskohlhoff/asio/archive/refs/tags/asio-1-30-2.zip"
@@ -322,6 +325,9 @@ target_compile_definitions(common_data
   PUBLIC ALGOFORGE_PROJECT_ROOT="${CMAKE_CURRENT_SOURCE_DIR}"
   PRIVATE PROJECT_ROOT_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
 )
+if(MSVC)
+  target_compile_definitions(common_data PUBLIC _ITERATOR_DEBUG_LEVEL=0)
+endif()
 
 add_library(debug_tool_hooks INTERFACE)
 target_sources(debug_tool_hooks INTERFACE
@@ -448,7 +454,7 @@ target_compile_definitions(debugTool PRIVATE
 )
 
 if(WIN32)
-  target_link_libraries(debugTool PRIVATE advapi32 user32 gdi32 shell32 ws2_32)
+  target_link_libraries(debugTool PRIVATE advapi32 user32 gdi32 shell32 ws2_32 DbgHelp)
 
   if(NOT TARGET SDL3::SDL3)
     add_custom_command(TARGET debugTool PRE_BUILD

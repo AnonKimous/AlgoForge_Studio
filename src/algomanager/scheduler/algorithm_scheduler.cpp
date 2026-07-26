@@ -68,8 +68,6 @@ bool ExecuteJobsAlgorithmObject(
     return false;
   }
 
-
-
   std::shared_ptr<::algomanager::algoscheduler::IAlgorithmJobsExecutor> jobs_executor = object.jobs_executor;
   algorithm::AlgorithmProfile algorithm_profile = object.algorithm_profile;
   const bool submit_ok = runtimesys::SubmitBlockingJob(
