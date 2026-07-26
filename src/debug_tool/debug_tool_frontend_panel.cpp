@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cctype>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <iostream>
@@ -2292,13 +2293,131 @@ void DebugToolFrontendPanel::DrawAlgorithmPreviewUi(IDebugToolHost& host) {
       .preview_extent = preview_size,
     });
   }
+  DrawRenderPreviewImage(host, preview_size);
+  ImGui::End();
+}
+
+void DebugToolFrontendPanel::UpdatePreviewCameraFromMouse(bool hovered) {
+  if (!hovered) {
+    return;
+  }
+
+  const ImVec2 mouse_delta = ImGui::GetIO().MouseDelta;
+  if (ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
+    preview_camera_ui_state_.enabled = true;
+    preview_camera_ui_state_.yaw += mouse_delta.x * 0.010f;
+    preview_camera_ui_state_.pitch -= mouse_delta.y * 0.010f;
+    preview_camera_ui_state_.pitch = std::clamp(
+      preview_camera_ui_state_.pitch,
+      -1.45f,
+      1.45f);
+  } else if (ImGui::IsMouseDragging(ImGuiMouseButton_Right)) {
+    preview_camera_ui_state_.enabled = true;
+
+    const float pitch_cosine = std::cos(preview_camera_ui_state_.pitch);
+    const float pitch_sine = std::sin(preview_camera_ui_state_.pitch);
+    const float yaw_sine = std::sin(preview_camera_ui_state_.yaw);
+    const float yaw_cosine = std::cos(preview_camera_ui_state_.yaw);
+    const Vec3 camera_position{
+      preview_camera_ui_state_.target.x + yaw_sine * pitch_cosine * preview_camera_ui_state_.distance,
+      preview_camera_ui_state_.target.y - yaw_cosine * pitch_cosine * preview_camera_ui_state_.distance,
+      preview_camera_ui_state_.target.z + pitch_sine * preview_camera_ui_state_.distance,
+    };
+    const Vec3 forward{
+      preview_camera_ui_state_.target.x - camera_position.x,
+      preview_camera_ui_state_.target.y - camera_position.y,
+      preview_camera_ui_state_.target.z - camera_position.z,
+    };
+    const float forward_length = std::sqrt(
+      forward.x * forward.x + forward.y * forward.y + forward.z * forward.z);
+    const Vec3 normalized_forward{
+      forward.x / forward_length,
+      forward.y / forward_length,
+      forward.z / forward_length,
+    };
+    const Vec3 right{
+      -normalized_forward.y,
+      normalized_forward.x,
+      0.0f,
+    };
+    const Vec3 up{
+      -normalized_forward.z * right.y,
+      normalized_forward.z * right.x,
+      normalized_forward.x * right.y - normalized_forward.y * right.x,
+    };
+    const float pan_scale = preview_camera_ui_state_.distance * 0.0035f;
+    preview_camera_ui_state_.target.x +=
+      (-mouse_delta.x * right.x + mouse_delta.y * up.x) * pan_scale;
+    preview_camera_ui_state_.target.y +=
+      (-mouse_delta.x * right.y + mouse_delta.y * up.y) * pan_scale;
+    preview_camera_ui_state_.target.z +=
+      (-mouse_delta.x * right.z + mouse_delta.y * up.z) * pan_scale;
+  }
+}
+
+runtimesys::RenderPreviewCamera DebugToolFrontendPanel::BuildPreviewCamera() const {
+  runtimesys::RenderPreviewCamera camera{};
+  if (!preview_camera_ui_state_.enabled) {
+    return camera;
+  }
+
+  const float pitch_cosine = std::cos(preview_camera_ui_state_.pitch);
+  const float pitch_sine = std::sin(preview_camera_ui_state_.pitch);
+  const float yaw_sine = std::sin(preview_camera_ui_state_.yaw);
+  const float yaw_cosine = std::cos(preview_camera_ui_state_.yaw);
+  const Vec3 position{
+    preview_camera_ui_state_.target.x + yaw_sine * pitch_cosine * preview_camera_ui_state_.distance,
+    preview_camera_ui_state_.target.y - yaw_cosine * pitch_cosine * preview_camera_ui_state_.distance,
+    preview_camera_ui_state_.target.z + pitch_sine * preview_camera_ui_state_.distance,
+  };
+  const Vec3 forward{
+    preview_camera_ui_state_.target.x - position.x,
+    preview_camera_ui_state_.target.y - position.y,
+    preview_camera_ui_state_.target.z - position.z,
+  };
+  const float forward_length = std::sqrt(
+    forward.x * forward.x + forward.y * forward.y + forward.z * forward.z);
+  const Vec3 normalized_forward{
+    forward.x / forward_length,
+    forward.y / forward_length,
+    forward.z / forward_length,
+  };
+  const Vec3 right{
+    -normalized_forward.y,
+    normalized_forward.x,
+    0.0f,
+  };
+  const float right_length = std::sqrt(right.x * right.x + right.y * right.y);
+  const Vec3 normalized_right{
+    right.x / right_length,
+    right.y / right_length,
+    0.0f,
+  };
+  const Vec3 up{
+    -normalized_forward.z * normalized_right.y,
+    normalized_forward.z * normalized_right.x,
+    normalized_forward.x * normalized_right.y - normalized_forward.y * normalized_right.x,
+  };
+  camera.position = {position.x, position.y, position.z, 1.0f};
+  camera.target = {
+    preview_camera_ui_state_.target.x,
+    preview_camera_ui_state_.target.y,
+    preview_camera_ui_state_.target.z,
+    0.0f,
+  };
+  camera.up = {up.x, up.y, up.z, 0.0f};
+  return camera;
+}
+
+void DebugToolFrontendPanel::DrawRenderPreviewImage(IDebugToolHost& host, ImVec2 preview_size) {
   if (host.has_render_preview_texture()) {
     ImGui::Image(host.render_preview_texture_id(), preview_size);
+    UpdatePreviewCameraFromMouse(ImGui::IsItemHovered());
   } else {
     ImGui::TextUnformatted("Render preview is not ready.");
     ImGui::TextUnformatted("Load an algorithm with a drawable intervention package.");
   }
-  ImGui::End();
+  host.SetRenderPreviewCamera(BuildPreviewCamera());
 }
 
 void DebugToolFrontendPanel::DrawDebugToolFrontend(IDebugToolHost& host) {
@@ -2359,17 +2478,14 @@ void DebugToolFrontendPanel::DrawRenderPreviewOnly(IDebugToolHost& host) {
       .preview_extent = preview_size,
     });
   }
-  if (host.has_render_preview_texture()) {
-    ImGui::Image(host.render_preview_texture_id(), preview_size);
-  } else {
-    ImGui::TextUnformatted("Render preview is not ready.");
-  }
+  DrawRenderPreviewImage(host, preview_size);
   ImGui::End();
 }
 
 void DebugToolFrontendPanel::Destroy() {
   agent_composer_ui_state_ = {};
   agent_composer_defaults_initialized_ = false;
+  preview_camera_ui_state_ = {};
   show_agent_manager_window_ = true;
   show_agent_detail_window_ = true;
   show_file_browser_window_ = true;

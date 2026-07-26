@@ -1,0 +1,12 @@
+{
+  "algorithm_name": "agent_adaptive_prism_raw_sphere_probe",
+  "resource_bindings": [
+    {
+      "resource_name": "sphere_mesh",
+      "resource_kind": "mesh",
+      "source_path": "data/agent_adaptive_prism_banana_decomposition_probe/banana.obj",
+      "required": true
+    }
+  ],
+  "descriptor_values": []
+}

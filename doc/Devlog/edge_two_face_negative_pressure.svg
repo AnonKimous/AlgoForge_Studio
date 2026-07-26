@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">三棱柱公共棱两侧负压受力图</title>
+  <desc id="desc">展示公共棱 AA' 两侧的两个侧面。相同负压产生大小相等但沿各自外法线方向的镜像力；同时展示同方向载荷场的另一种解释。</desc>
+  <defs>
+    <marker id="red-arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#d94b4b"/></marker>
+    <marker id="blue-arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#2f6fbd"/></marker>
+    <style>
+      .title { font: 600 32px 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; fill: #17202a; }
+      .heading { font: 600 25px 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; fill: #17202a; }
+      .label { font: 500 21px 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; fill: #25313d; }
+      .small { font: 400 18px 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; fill: #52606d; }
+      .value { font: 600 23px 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; fill: #17202a; }
+      .panel { fill: #f7f9fb; stroke: #cbd4df; stroke-width: 2; }
+      .triangle { fill: #e8f1fb; stroke: #315d88; stroke-width: 4; }
+      .face { fill: #f9d1d1; stroke: #b83c3c; stroke-width: 4; }
+      .edge { stroke: #17202a; stroke-width: 8; }
+      .force { stroke: #d94b4b; stroke-width: 5; marker-end: url(#red-arrow); }
+      .sum { stroke: #2f6fbd; stroke-width: 5; marker-end: url(#blue-arrow); }
+      .guide { stroke: #9ba7b4; stroke-width: 2; stroke-dasharray: 8 8; }
+      .node { fill: #ffffff; stroke: #20364d; stroke-width: 4; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="900" fill="#ffffff"/>
+  <text x="65" y="65" class="title">公共棱 AA' 两侧的负压：两个结果要先区分</text>
+  <text x="65" y="102" class="small">相同标量负压 ≠ 相同全局向量；面法线不同，力的方向也不同</text>
+
+  <rect x="45" y="145" width="620" height="690" class="panel"/>
+  <text x="80" y="195" class="heading">① 负压是“法向压力”</text>
+  <text x="80" y="232" class="label">两个侧面压力大小相同，方向沿各自外法线</text>
+
+  <polygon points="180,650 470,650 325,400" class="triangle"/>
+  <line x1="180" y1="650" x2="325" y2="400" class="face"/>
+  <line x1="180" y1="650" x2="470" y2="650" class="face"/>
+  <line x1="180" y1="650" x2="180" y2="650" class="edge"/>
+  <circle cx="180" cy="650" r="11" class="node"/>
+  <circle cx="470" cy="650" r="11" class="node"/>
+  <circle cx="325" cy="400" r="11" class="node"/>
+  <text x="145" y="690" class="label">A（公共棱）</text>
+  <text x="480" y="670" class="label">B</text>
+  <text x="320" y="375" class="label">C</text>
+
+  <line x1="315" y1="575" x2="205" y2="535" class="force"/>
+  <line x1="260" y1="575" x2="205" y2="500" class="force"/>
+  <text x="92" y="500" class="value">F_AB = 4000N</text>
+  <text x="92" y="530" class="small">沿 AB 面外法线</text>
+
+  <line x1="275" y1="535" x2="345" y2="480" class="force"/>
+  <line x1="255" y1="565" x2="335" y2="500" class="force"/>
+  <text x="365" y="470" class="value">F_AC = 4000N</text>
+  <text x="365" y="500" class="small">沿 AC 面外法线</text>
+
+  <line x1="270" y1="590" x2="135" y2="485" class="sum"/>
+  <text x="90" y="455" class="value">F_total</text>
+  <text x="90" y="760" class="small">大小相等：|F_AB|=|F_AC|</text>
+  <text x="90" y="790" class="small">向量镜像：F_AB≠F_AC</text>
+
+  <rect x="700" y="145" width="450" height="690" class="panel"/>
+  <text x="735" y="195" class="heading">② 三棱柱空间图</text>
+  <polygon points="770,650 980,650 875,470" class="triangle"/>
+  <polygon points="850,590 1060,590 955,410" class="triangle"/>
+  <polygon points="770,650 980,650 1060,590 850,590" class="face"/>
+  <polygon points="770,650 875,470 955,410 850,590" class="face"/>
+  <polygon points="875,470 980,650 1060,590 955,410" fill="#e8f1fb" stroke="#315d88" stroke-width="4"/>
+  <line x1="770" y1="650" x2="850" y2="590" class="edge"/>
+  <text x="750" y="700" class="label">A</text><text x="1000" y="675" class="label">B</text><text x="865" y="450" class="label">C</text>
+  <text x="825" y="580" class="label">A'</text><text x="1065" y="575" class="label">B'</text><text x="960" y="395" class="label">C'</text>
+  <text x="755" y="760" class="small">红色两面共享公共棱 AA'</text>
+  <text x="755" y="792" class="small">两个压力区面积相同、压力值相同</text>
+
+  <rect x="1185" y="145" width="370" height="690" class="panel"/>
+  <text x="1220" y="195" class="heading">③ 另一种解释</text>
+  <text x="1220" y="235" class="label">如果是同方向载荷场</text>
+  <text x="1220" y="275" class="small">例如外部算法给每个压力单元</text>
+  <text x="1220" y="303" class="small">同一个向量 traction，而非面法向压力</text>
+  <line x1="1260" y1="390" x2="1430" y2="390" class="force"/>
+  <line x1="1260" y1="520" x2="1430" y2="520" class="force"/>
+  <text x="1220" y="370" class="value">F_left</text>
+  <text x="1220" y="500" class="value">F_right</text>
+  <text x="1220" y="595" class="value">F_left = F_right</text>
+  <text x="1220" y="640" class="small">这种输入应命名为</text>
+  <text x="1220" y="670" class="small">定向牵引力场，而不是标量压力</text>
+  <line x1="1220" y1="720" x2="1500" y2="720" class="guide"/>
+  <text x="1220" y="765" class="label">你需要先选定这两种模型中的一种</text>
+</svg>

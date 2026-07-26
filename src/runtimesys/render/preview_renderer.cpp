@@ -853,8 +853,26 @@ bool PreviewRenderer::Record(VkCommandBuffer command_buffer) {
     0,
     nullptr);
   const PreviewViewportPushConstants push_constants{
-    static_cast<float>(target_.extent.width),
-    static_cast<float>(target_.extent.height),
+    .width = static_cast<float>(target_.extent.width),
+    .height = static_cast<float>(target_.extent.height),
+    .camera_position = {
+      request_.camera.position[0],
+      request_.camera.position[1],
+      request_.camera.position[2],
+      request_.camera.position[3],
+    },
+    .camera_target = {
+      request_.camera.target[0],
+      request_.camera.target[1],
+      request_.camera.target[2],
+      request_.camera.target[3],
+    },
+    .camera_up = {
+      request_.camera.up[0],
+      request_.camera.up[1],
+      request_.camera.up[2],
+      request_.camera.up[3],
+    },
   };
   vkCmdPushConstants(
     command_buffer,

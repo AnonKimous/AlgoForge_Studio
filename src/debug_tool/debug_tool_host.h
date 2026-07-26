@@ -394,6 +394,7 @@ class IDebugToolHost {
   virtual ImVec2 render_preview_texture_size() const = 0;
   virtual void SetRenderPreviewExtent(ImVec2 extent) = 0;
   virtual void SetRenderPreviewRequest(runtimesys::RenderPreviewRequest request) = 0;
+  virtual void SetRenderPreviewCamera(runtimesys::RenderPreviewCamera camera) = 0;
 
   virtual std::string& ui_status_message() = 0;
   virtual const std::string& ui_status_message() const = 0;

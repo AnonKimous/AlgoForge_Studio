@@ -1,0 +1,8 @@
+{
+  "algorithm_name":"agent_adaptive_prism_pipeline_probe_wrapperEnd",
+  "version":"1.0.0",
+  "reflector":{"name":"agent_adaptive_prism_pipeline_probe_wrapperEnd_state","functionName":"direct","items":[]},
+  "exec":{"stage_name":"exec","used_algorithm_containers":{"arrays":[],"variables":[]},"shader":{"pipeline":"graphics","vertex":"agent_adaptive_prism_pipeline_probe_wrapperEnd_exec.vert","fragment":"agent_adaptive_prism_pipeline_probe_wrapperEnd_exec.frag"}},
+  "decomposer":{"res":{},"description":[]},
+  "runtime":{"pipeline":{"supportsCircularTick":true,"mappings":{}}}
+}

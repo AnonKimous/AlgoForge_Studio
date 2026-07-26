@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">六节点三棱柱受压与细化示意图</title>
+  <desc id="desc">展示底面 ABC、顶面 A'B'C' 的三棱柱，受力侧面为 ABB'A'，有限压力区位于纵向 t=2/5 附近，并分配给四个受压角点。</desc>
+  <defs>
+    <marker id="red-arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#d94b4b"/></marker>
+    <marker id="blue-arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#2f6fbd"/></marker>
+    <style>
+      .title { font: 600 32px 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; fill: #17202a; }
+      .heading { font: 600 25px 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; fill: #17202a; }
+      .label { font: 500 21px 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; fill: #25313d; }
+      .small { font: 400 18px 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; fill: #52606d; }
+      .value { font: 600 23px 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; fill: #17202a; }
+      .panel { fill: #f7f9fb; stroke: #cbd4df; stroke-width: 2; }
+      .end { fill: #dceafa; stroke: #315d88; stroke-width: 4; }
+      .side { fill: #eaf2fa; stroke: #315d88; stroke-width: 4; }
+      .loaded-side { fill: #f9d1d1; stroke: #b83c3c; stroke-width: 5; }
+      .pressure { fill: #e87474; stroke: #b83c3c; stroke-width: 3; opacity: 0.9; }
+      .node { fill: #ffffff; stroke: #20364d; stroke-width: 4; }
+      .force { stroke: #d94b4b; stroke-width: 4; marker-end: url(#red-arrow); }
+      .transfer { stroke: #2f6fbd; stroke-width: 4; marker-end: url(#blue-arrow); }
+      .guide { stroke: #9ba7b4; stroke-width: 2; stroke-dasharray: 8 8; }
+      .fine { fill: #e8f1fb; stroke: #315d88; stroke-width: 3; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="900" fill="#ffffff"/>
+  <text x="65" y="65" class="title">真正的六节点三棱柱：t = 2/5 受压</text>
+  <text x="65" y="102" class="small">两个三角形端面 + 三张四边形侧面；本例只给 ABB'A' 侧面施加外部压力</text>
+
+  <rect x="45" y="145" width="610" height="680" class="panel"/>
+  <text x="80" y="195" class="heading">① 三棱柱本体</text>
+  <text x="80" y="232" class="label">红色侧面 = 受力面 ABB'A'</text>
+
+  <!-- front triangular end ABC -->
+  <polygon points="155,650 385,650 270,405" class="end"/>
+  <!-- back triangular end A'B'C' -->
+  <polygon points="275,575 505,575 390,330" class="end"/>
+  <!-- three lateral faces -->
+  <polygon points="155,650 385,650 505,575 275,575" class="loaded-side"/>
+  <polygon points="385,650 270,405 390,330 505,575" class="side"/>
+  <polygon points="270,405 155,650 275,575 390,330" class="side"/>
+
+  <circle cx="155" cy="650" r="10" class="node"/><circle cx="385" cy="650" r="10" class="node"/><circle cx="270" cy="405" r="10" class="node"/>
+  <circle cx="275" cy="575" r="10" class="node"/><circle cx="505" cy="575" r="10" class="node"/><circle cx="390" cy="330" r="10" class="node"/>
+  <text x="120" y="690" class="label">A</text><text x="395" y="690" class="label">B</text><text x="252" y="380" class="label">C</text>
+  <text x="238" y="570" class="label">A'</text><text x="515" y="570" class="label">B'</text><text x="398" y="320" class="label">C'</text>
+  <text x="215" y="625" class="value">ABB'A'</text>
+  <rect x="248" y="590" width="164" height="42" class="pressure"/>
+  <line x1="330" y1="560" x2="330" y2="590" class="force"/>
+  <text x="286" y="545" class="small">ΓL，t=2/5</text>
+  <text x="95" y="765" class="small">三角形端面：ABC、A'B'C'</text>
+  <text x="95" y="795" class="small">四边形侧面：ABB'A'、BCC'B'、CAA'C'</text>
+
+  <rect x="690" y="145" width="430" height="680" class="panel"/>
+  <text x="725" y="195" class="heading">② 受力面展开</text>
+  <text x="725" y="232" class="label">只看 ABB'A' 这张四边形面</text>
+  <polygon points="775,380 1010,380 1010,670 775,670" class="loaded-side"/>
+  <rect x="775" y="490" width="235" height="58" class="pressure"/>
+  <text x="845" y="527" class="label">压力区</text>
+  <circle cx="775" cy="380" r="10" class="node"/><circle cx="1010" cy="380" r="10" class="node"/>
+  <circle cx="775" cy="670" r="10" class="node"/><circle cx="1010" cy="670" r="10" class="node"/>
+  <text x="742" y="360" class="label">A'</text><text x="1018" y="360" class="label">B'</text>
+  <text x="742" y="710" class="label">A</text><text x="1018" y="710" class="label">B</text>
+  <line x1="892" y1="520" x2="800" y2="650" class="force"/>
+  <line x1="892" y1="520" x2="985" y2="650" class="force"/>
+  <line x1="892" y1="520" x2="800" y2="400" class="force"/>
+  <line x1="892" y1="520" x2="985" y2="400" class="force"/>
+  <text x="755" y="755" class="value">A=30%  B=30%</text>
+  <text x="755" y="790" class="value">A'=20% B'=20%</text>
+
+  <rect x="1155" y="145" width="400" height="680" class="panel"/>
+  <text x="1190" y="195" class="heading">③ 细化判断</text>
+  <text x="1190" y="232" class="label">同一压力，算两次</text>
+  <text x="1190" y="280" class="label">lg0 粗算</text>
+  <polygon points="1190,330 1300,330 1260,400 1150,400" class="fine"/>
+  <polygon points="1190,330 1300,330 1300,440 1190,440" class="fine"/>
+  <text x="1190" y="475" class="small">大棱柱</text>
+  <line x1="1350" y1="385" x2="1410" y2="385" class="transfer"/>
+  <text x="1360" y="350" class="small">比较</text>
+  <text x="1410" y="280" class="label">-lg1 精算</text>
+  <rect x="1410" y="330" width="105" height="110" class="fine"/>
+  <line x1="1462" y1="330" x2="1462" y2="440" stroke="#315d88" stroke-width="3"/>
+  <line x1="1410" y1="385" x2="1515" y2="385" stroke="#315d88" stroke-width="3"/>
+  <text x="1410" y="475" class="small">8 个更小棱柱</text>
+  <text x="1190" y="560" class="label">比较总力、力矩、应力</text>
+  <line x1="1190" y1="600" x2="1495" y2="600" class="guide"/>
+  <text x="1190" y="650" class="value">差不多：留在 lg0</text>
+  <text x="1190" y="700" class="value">差很多：生成 -lg1</text>
+  <text x="1190" y="770" class="small">C、C' 不在受力面，</text>
+  <text x="1190" y="800" class="small">由内部传力后再响应</text>
+</svg>

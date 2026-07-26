@@ -122,6 +122,14 @@ class DebugToolFrontendPanel {
     std::string error_message;
   };
 
+  struct PreviewCameraUiState {
+    bool enabled{false};
+    float yaw{0.0f};
+    float pitch{0.0f};
+    float distance{1.55f};
+    Vec3 target{};
+  };
+
   struct ManagedAgentInterventionUiBindings {
     size_t agent_index{0u};
     std::vector<AgentInterventionUiBinding> bindings{};
@@ -136,6 +144,9 @@ class DebugToolFrontendPanel {
   void DrawAgentDetailUi(IDebugToolHost& host);
   void DrawFileBrowserUi(IDebugToolHost& host);
   void DrawAlgorithmPreviewUi(IDebugToolHost& host);
+  void DrawRenderPreviewImage(IDebugToolHost& host, ImVec2 preview_size);
+  void UpdatePreviewCameraFromMouse(bool hovered);
+  runtimesys::RenderPreviewCamera BuildPreviewCamera() const;
   void InitializeAgentComposerDefaults();
   void InitializeFileBrowserDefaults();
   bool RefreshAlgorithmComposerBindings(IDebugToolHost& host, const std::string& algorithm_name);
@@ -153,6 +164,7 @@ class DebugToolFrontendPanel {
 
   AgentComposerUiState agent_composer_ui_state_{};
   FileBrowserUiState file_browser_ui_state_{};
+  PreviewCameraUiState preview_camera_ui_state_{};
   bool agent_composer_defaults_initialized_{false};
   bool file_browser_defaults_initialized_{false};
   UiPage selected_page_{UiPage::Agents};

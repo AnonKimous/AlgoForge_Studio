@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">t=2/5 棱柱受压与细化示意图</title>
+  <desc id="desc">一个有限压力区作用在六节点棱柱侧面，压力按距离分给四个受压角点，并与细化后的结果比较。</desc>
+  <defs>
+    <marker id="arrow-red" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 z" fill="#d94b4b"/>
+    </marker>
+    <marker id="arrow-blue" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 z" fill="#2f6fbd"/>
+    </marker>
+    <marker id="arrow-gray" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 z" fill="#6c7480"/>
+    </marker>
+    <style>
+      .title { font: 600 32px 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; fill: #17202a; }
+      .heading { font: 600 25px 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; fill: #17202a; }
+      .label { font: 500 22px 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; fill: #25313d; }
+      .small { font: 400 19px 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; fill: #52606d; }
+      .value { font: 600 24px 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif; fill: #17202a; }
+      .panel { fill: #f7f9fb; stroke: #cbd4df; stroke-width: 2; rx: 22; }
+      .prism { fill: #e8f1fb; stroke: #315d88; stroke-width: 4; }
+      .pressure { fill: #f5a3a3; stroke: #d94b4b; stroke-width: 3; opacity: 0.9; }
+      .node { fill: #ffffff; stroke: #20364d; stroke-width: 4; }
+      .force { stroke: #d94b4b; stroke-width: 5; marker-end: url(#arrow-red); }
+      .transfer { stroke: #2f6fbd; stroke-width: 4; marker-end: url(#arrow-blue); }
+      .guide { stroke: #9ba7b4; stroke-width: 2; stroke-dasharray: 8 8; }
+      .fine { stroke: #315d88; stroke-width: 3; fill: #e8f1fb; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="900" fill="#ffffff"/>
+  <text x="70" y="65" class="title">t = 2/5：有限压力如何进入棱柱</text>
+  <text x="70" y="102" class="small">先把“点力”变成一小块压力，再分给受压面上的角点</text>
+
+  <rect x="50" y="145" width="470" height="680" class="panel"/>
+  <text x="85" y="195" class="heading">① 不是一个点</text>
+  <text x="85" y="232" class="label">压力作用在一小块区域 ΓL</text>
+
+  <polygon points="145,690 390,690 445,620 200,620" class="prism"/>
+  <polygon points="145,390 390,390 445,320 200,320" class="prism"/>
+  <line x1="145" y1="390" x2="145" y2="690" stroke="#315d88" stroke-width="4"/>
+  <line x1="390" y1="390" x2="390" y2="690" stroke="#315d88" stroke-width="4"/>
+  <line x1="200" y1="320" x2="200" y2="620" stroke="#315d88" stroke-width="4"/>
+  <line x1="445" y1="320" x2="445" y2="620" stroke="#315d88" stroke-width="4"/>
+
+  <rect x="145" y="500" width="245" height="80" class="pressure"/>
+  <text x="166" y="548" class="value">有限压力区 ΓL</text>
+  <line x1="270" y1="500" x2="270" y2="390" class="guide"/>
+  <line x1="270" y1="580" x2="270" y2="690" class="guide"/>
+  <text x="285" y="478" class="small">t = 2/5 附近</text>
+  <line x1="270" y1="455" x2="270" y2="495" class="force"/>
+  <text x="282" y="440" class="label">外部方向 F</text>
+
+  <circle cx="145" cy="390" r="9" class="node"/><circle cx="390" cy="390" r="9" class="node"/>
+  <circle cx="145" cy="690" r="9" class="node"/><circle cx="390" cy="690" r="9" class="node"/>
+  <text x="116" y="372" class="label">A'</text><text x="398" y="372" class="label">B'</text>
+  <text x="112" y="728" class="label">A</text><text x="398" y="728" class="label">B</text>
+  <text x="95" y="780" class="small">下方距离较近：60%</text>
+  <text x="95" y="807" class="small">上方距离较远：40%</text>
+
+  <rect x="560" y="145" width="490" height="680" class="panel"/>
+  <text x="595" y="195" class="heading">② 四个角点分账</text>
+  <text x="595" y="232" class="label">左右各一半；上下按距离分</text>
+
+  <rect x="650" y="355" width="300" height="300" fill="#e8f1fb" stroke="#315d88" stroke-width="4"/>
+  <line x1="650" y1="475" x2="950" y2="475" class="guide"/>
+  <line x1="650" y1="535" x2="950" y2="535" class="guide"/>
+  <rect x="650" y="475" width="300" height="60" class="pressure"/>
+  <text x="735" y="512" class="label">压力区</text>
+  <circle cx="650" cy="355" r="11" class="node"/><circle cx="950" cy="355" r="11" class="node"/>
+  <circle cx="650" cy="655" r="11" class="node"/><circle cx="950" cy="655" r="11" class="node"/>
+  <text x="614" y="337" class="label">A'</text><text x="960" y="337" class="label">B'</text>
+  <text x="614" y="697" class="label">A</text><text x="960" y="697" class="label">B</text>
+
+  <line x1="800" y1="505" x2="690" y2="640" class="force"/>
+  <line x1="800" y1="505" x2="910" y2="640" class="force"/>
+  <line x1="800" y1="505" x2="690" y2="370" class="force"/>
+  <line x1="800" y1="505" x2="910" y2="370" class="force"/>
+  <text x="610" y="745" class="value">A=30%  B=30%</text>
+  <text x="610" y="780" class="value">A'=20% B'=20%</text>
+  <text x="610" y="810" class="small">合计 = 100%</text>
+
+  <rect x="1090" y="145" width="460" height="680" class="panel"/>
+  <text x="1125" y="195" class="heading">③ 是否细化</text>
+  <text x="1125" y="232" class="label">同一压力，粗算和细算比较</text>
+
+  <text x="1130" y="285" class="label">lg0 粗算</text>
+  <rect x="1130" y="310" width="190" height="150" class="fine"/>
+  <rect x="1250" y="310" width="70" height="75" fill="#f5a3a3" stroke="#d94b4b" stroke-width="3"/>
+  <text x="1130" y="495" class="small">压力被一块大棱柱描述</text>
+
+  <line x1="1345" y1="390" x2="1430" y2="390" class="transfer"/>
+  <text x="1350" y="360" class="small">重新算一遍</text>
+
+  <text x="1400" y="285" class="label">-lg1 细算</text>
+  <rect x="1375" y="310" width="150" height="150" class="fine"/>
+  <line x1="1450" y1="310" x2="1450" y2="460" stroke="#315d88" stroke-width="3"/>
+  <line x1="1375" y1="385" x2="1525" y2="385" stroke="#315d88" stroke-width="3"/>
+  <rect x="1450" y="385" width="75" height="75" class="pressure"/>
+  <text x="1375" y="495" class="small">压力被更小棱柱描述</text>
+
+  <text x="1130" y="570" class="label">比较：</text>
+  <text x="1130" y="610" class="small">总力是否一样？</text>
+  <text x="1130" y="642" class="small">力矩是否一样？</text>
+  <text x="1130" y="674" class="small">应力和传力是否差很多？</text>
+  <line x1="1130" y1="725" x2="1480" y2="725" class="guide"/>
+  <text x="1130" y="765" class="value">差不多 → 留在 lg0</text>
+  <text x="1130" y="800" class="value">差很多 → 生成 -lg1</text>
+</svg>

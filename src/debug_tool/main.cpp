@@ -1500,25 +1500,26 @@ bool _RunPipelineRunner(const PipelineRunnerOptions& options) {
     }
     append_progress("tick_complete_" + std::to_string(tick_index + 1u));
 
-    if (options.export_swapchain_gif) {
-      runtimesys::RenderPreviewRequest gif_preview_request{};
-      if (!runtime.BuildRenderPreviewRequest(
-            0u,
-            mounted_pipeline_index,
-            &gif_preview_request,
-            &error_message) ||
-          !gif_preview_request.valid) {
-        throw std::runtime_error(
-          error_message.empty()
-            ? "Render preview request is invalid during pipeline GIF recording."
-            : error_message);
-      }
-      if (!debug_tool::DebugCmd::Execute(runtime, debug_tool::DebugCommand{
-            .id = debug_tool::DebugCommandId::SetRenderPreviewRequest,
-            .preview_request = std::move(gif_preview_request),
-          }, nullptr)) {
-        throw std::runtime_error("Failed to update pipeline render preview request during GIF recording.");
-      }
+    runtimesys::RenderPreviewRequest frame_preview_request{};
+    if (!runtime.BuildRenderPreviewRequest(
+          0u,
+          mounted_pipeline_index,
+          &frame_preview_request,
+          &error_message) ||
+        !frame_preview_request.valid) {
+      throw std::runtime_error(
+        error_message.empty()
+          ? "Render preview request is invalid after pipeline tick."
+          : error_message);
+    }
+    if (!debug_tool::DebugCmd::Execute(runtime, debug_tool::DebugCommand{
+          .id = debug_tool::DebugCommandId::SetRenderPreviewRequest,
+          .preview_request = std::move(frame_preview_request),
+        }, nullptr)) {
+      throw std::runtime_error("Failed to refresh pipeline render preview request after tick.");
+    }
+    if (!runtime.runtime_environment().Tick()) {
+      throw std::runtime_error("Runtime environment failed while rendering the refreshed pipeline preview.");
     }
 
     std::vector<std::byte> frame_rgba{};

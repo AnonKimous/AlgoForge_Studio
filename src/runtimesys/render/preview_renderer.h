@@ -17,6 +17,10 @@ namespace runtimesys {
 struct PreviewViewportPushConstants {
   float width{0.0f};
   float height{0.0f};
+  float reserved[2]{0.0f, 0.0f};
+  float camera_position[4]{0.0f, 0.0f, 0.0f, 0.0f};
+  float camera_target[4]{0.0f, 0.0f, 0.0f, 0.0f};
+  float camera_up[4]{0.0f, 0.0f, 1.0f, 0.0f};
 };
 
 class PreviewRenderer {

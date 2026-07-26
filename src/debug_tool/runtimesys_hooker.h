@@ -80,6 +80,11 @@ class RuntimesysHooker {
     runtime_environment_.SetRenderPreviewRequest(render_preview_request_);
   }
 
+  void SetRenderPreviewCamera(runtimesys::RenderPreviewCamera camera) {
+    render_preview_request_.camera = std::move(camera);
+    runtime_environment_.SetRenderPreviewRequest(render_preview_request_);
+  }
+
   runtimesys::RuntimeEnvironment& runtime_environment() {
     return runtime_environment_;
   }

@@ -1,0 +1,149 @@
+{
+  "algorithm_name": "agent_adaptive_prism_decomposition_probe",
+  "package_name": "agent_adaptive_prism_decomposition_probe",
+  "jobs_available": true,
+  "vk_available": false,
+  "cuda_available": false,
+  "container": {
+    "variable": {
+      "v1": {"count": 1},
+      "v2": {"count": 1},
+      "v3": {"count": 1},
+      "v4": {"count": 1},
+      "v5": {"count": 1},
+      "v6": {"count": 1},
+      "v7": {"count": 1},
+      "v8": {"count": 1},
+      "v9": {"count": 1},
+      "v10": {"count": 1}
+    },
+    "variableArray": {
+      "a1": {"count": 1, "tuple_width": 4},
+      "a2": {"count": 120320, "tuple_width": 4},
+      "a3": {"count": 12000, "tuple_width": 28},
+      "a4": {"count": 36000, "tuple_width": 12},
+      "a5": {"count": 6000, "tuple_width": 3},
+      "a6": {"count": 256, "tuple_width": 3},
+      "a7": {"count": 512, "tuple_width": 3},
+      "a8": {"count": 256, "tuple_width": 3},
+      "a9": {"count": 256, "tuple_width": 2},
+      "a10": {"count": 1, "tuple_width": 12},
+      "a11": {"count": 12000, "tuple_width": 4},
+      "a12": {"count": 12000, "tuple_width": 4}
+    },
+    "aliases": [
+      "v1:frame_tick",
+      "v2:prism_count",
+      "v3:node_count",
+      "v4:tetra_count",
+      "v5:source_triangle_count",
+      "v6:prism_checksum",
+      "v7:lod_level_count",
+      "v8:lod_vertex_count",
+      "v9:lod_checksum",
+      "v10:render_triangle_count",
+      "a1:render_scene",
+      "a2:render_triangle_buffer",
+      "a3:prism_debug",
+      "a4:prism_tetra_indices",
+      "a5:prism_node_positions",
+      "a6:source_positions,vertex_mesh_0",
+      "a7:source_triangles,triangle_mesh_0",
+      "a8:source_normals,normal_mesh_0",
+      "a9:source_uvs,uv_mesh_0",
+      "a10:lod_level_summary",
+      "a11:lod_vertex_buffer",
+      "a12:render_source_triangle_buffer"
+    ]
+  },
+  "decomposer": {
+    "res": {
+      "mesh": {
+        "vertex": "vertex_mesh_0",
+        "triangle": "triangle_mesh_0",
+        "normal": "normal_mesh_0",
+        "uv": "uv_mesh_0"
+      }
+    },
+    "description": []
+  },
+  "reflector": {
+    "name": "agent_adaptive_prism_decomposition_probe_state",
+    "functionName": "direct",
+    "items": [
+      {"name": "frame_tick", "from": ["frame_tick"], "to": ["frame_tick"], "reflectFun": "direct"},
+      {"name": "prism_count", "from": ["prism_count"], "to": ["prism_count"], "reflectFun": "direct"},
+      {"name": "node_count", "from": ["node_count"], "to": ["node_count"], "reflectFun": "direct"},
+      {"name": "tetra_count", "from": ["tetra_count"], "to": ["tetra_count"], "reflectFun": "direct"},
+      {"name": "source_triangle_count", "from": ["source_triangle_count"], "to": ["source_triangle_count"], "reflectFun": "direct"},
+      {"name": "prism_checksum", "from": ["prism_checksum"], "to": ["prism_checksum"], "reflectFun": "direct"},
+      {"name": "lod_level_count", "from": ["lod_level_count"], "to": ["lod_level_count"], "reflectFun": "direct"},
+      {"name": "lod_vertex_count", "from": ["lod_vertex_count"], "to": ["lod_vertex_count"], "reflectFun": "direct"},
+      {"name": "lod_checksum", "from": ["lod_checksum"], "to": ["lod_checksum"], "reflectFun": "direct"},
+      {"name": "render_triangle_count", "from": ["render_triangle_count"], "to": ["render_triangle_count"], "reflectFun": "direct"},
+      {"name": "prism_debug", "from": ["prism_debug"], "to": ["prism_debug"], "reflectFun": "direct"},
+      {"name": "prism_tetra_indices", "from": ["prism_tetra_indices"], "to": ["prism_tetra_indices"], "reflectFun": "direct"},
+      {"name": "prism_node_positions", "from": ["prism_node_positions"], "to": ["prism_node_positions"], "reflectFun": "direct"},
+      {"name": "lod_level_summary", "from": ["lod_level_summary"], "to": ["lod_level_summary"], "reflectFun": "direct"},
+      {"name": "lod_vertex_buffer", "from": ["lod_vertex_buffer"], "to": ["lod_vertex_buffer"], "reflectFun": "direct"},
+      {"name": "source_positions", "from": ["source_positions"], "to": ["source_positions"], "reflectFun": "direct"},
+      {"name": "source_triangles", "from": ["source_triangles"], "to": ["source_triangles"], "reflectFun": "direct"}
+    ]
+  },
+  "exec": {
+    "stage_name": "exec",
+    "functions": ["BuildMinusLg4Prisms", "ExportPrismReflection"],
+    "used_algorithm_containers": {
+      "arrays": [
+        {"name": "render_scene", "kind": "array", "tuple_width": 1, "required": true},
+            {"name": "render_triangle_buffer", "kind": "array", "tuple_width": 1, "required": true},
+            {"name": "render_source_triangle_buffer", "kind": "array", "tuple_width": 1, "required": true},
+        {"name": "prism_debug", "kind": "array", "tuple_width": 1, "required": true},
+        {"name": "prism_tetra_indices", "kind": "array", "tuple_width": 1, "required": true},
+        {"name": "prism_node_positions", "kind": "array", "tuple_width": 1, "required": true},
+        {"name": "lod_level_summary", "kind": "array", "tuple_width": 1, "required": true},
+        {"name": "lod_vertex_buffer", "kind": "array", "tuple_width": 1, "required": true}
+      ],
+      "variables": [
+        {"name": "frame_tick", "kind": "variable", "tuple_width": 1, "required": true},
+        {"name": "prism_count", "kind": "variable", "tuple_width": 1, "required": true},
+        {"name": "node_count", "kind": "variable", "tuple_width": 1, "required": true},
+        {"name": "tetra_count", "kind": "variable", "tuple_width": 1, "required": true},
+        {"name": "lod_level_count", "kind": "variable", "tuple_width": 1, "required": true},
+        {"name": "lod_vertex_count", "kind": "variable", "tuple_width": 1, "required": true},
+        {"name": "render_triangle_count", "kind": "variable", "tuple_width": 1, "required": true}
+      ]
+    },
+    "shader": {
+      "pipeline": "graphics",
+      "vertex": "agent_adaptive_prism_decomposition_probe_result_render.vert",
+      "fragment": "agent_adaptive_prism_decomposition_probe_result_render.frag"
+    }
+  },
+  "intervention": {
+    "stage": {
+      "resultRender": {
+        "stage_name": "resultRender",
+        "stage_kind": "resultRender",
+        "functions": ["RenderDecompositionSourceMesh"],
+        "used_algorithm_containers": {
+          "arrays": [
+            {"name": "render_scene", "kind": "array", "tuple_width": 1, "required": true},
+            {"name": "render_triangle_buffer", "kind": "array", "tuple_width": 1, "required": true},
+            {"name": "render_source_triangle_buffer", "kind": "array", "tuple_width": 1, "required": true}
+          ],
+          "variables": [
+            {"name": "frame_tick", "kind": "variable", "tuple_width": 1, "required": true},
+            {"name": "render_triangle_count", "kind": "variable", "tuple_width": 1, "required": true},
+            {"name": "source_triangle_count", "kind": "variable", "tuple_width": 1, "required": true}
+          ]
+        },
+        "shader": {
+          "pipeline": "graphics",
+          "vertex": "agent_adaptive_prism_decomposition_probe_result_render.vert",
+          "fragment": "agent_adaptive_prism_decomposition_probe_result_render.frag"
+        }
+      }
+    }
+  }
+}

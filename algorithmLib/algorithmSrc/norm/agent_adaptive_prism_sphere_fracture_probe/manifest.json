@@ -1,0 +1,119 @@
+{
+  "algorithm_name": "agent_adaptive_prism_sphere_fracture_probe",
+  "package_name": "agent_adaptive_prism_sphere_fracture_probe",
+  "jobs_available": true,
+    "vk_available": false,
+  "cuda_available": false,
+  "container": {
+    "variable": {
+      "v1": {"count": 1},
+      "v2": {"count": 1},
+      "v3": {"count": 1},
+      "v4": {"count": 1},
+      "v5": {"count": 1},
+      "v6": {"count": 1},
+      "v7": {"count": 1},
+      "v8": {"count": 1},
+      "v9": {"count": 1}
+    },
+    "variableArray": {
+      "a1": {"count": 1, "tuple_width": 4},
+      "a2": {"count": 100000, "tuple_width": 4},
+      "a3": {"count": 100000, "tuple_width": 4},
+      "a4": {"count": 256, "tuple_width": 3},
+      "a5": {"count": 256, "tuple_width": 3},
+      "a6": {"count": 256, "tuple_width": 2},
+      "a7": {"count": 512, "tuple_width": 3}
+    },
+    "aliases": [
+      "v1:frame_tick",
+      "v2:source_triangle_count",
+      "v3:render_triangle_count",
+      "v4:render_bvh_count",
+      "v5:active_tetra_count",
+      "v6:interface_face_count",
+      "v7:broken_face_count",
+      "v8:component_count",
+      "v9:fracture_state",
+      "a1:render_scene",
+      "a2:render_triangle_buffer",
+      "a3:render_bvh_buffer",
+      "a4:source_positions,vertex_mesh_0",
+      "a5:source_normals,normal_mesh_0",
+      "a6:source_uvs,uv_mesh_0",
+      "a7:source_triangles,triangle_mesh_0"
+    ]
+  },
+  "decomposer": {
+    "res": {
+      "mesh": {
+        "vertex": "vertex_mesh_0",
+        "normal": "normal_mesh_0",
+        "uv": "uv_mesh_0",
+        "triangle": "triangle_mesh_0"
+      }
+    },
+    "description": []
+  },
+  "reflector": {
+    "name": "agent_adaptive_prism_sphere_fracture_probe_state",
+    "functionName": "direct",
+    "items": [
+      {"name": "frame_tick", "from": ["frame_tick"], "to": ["frame_tick"], "reflectFun": "direct"},
+      {"name": "source_triangle_count", "from": ["source_triangle_count"], "to": ["source_triangle_count"], "reflectFun": "direct"},
+      {"name": "render_triangle_count", "from": ["render_triangle_count"], "to": ["render_triangle_count"], "reflectFun": "direct"},
+      {"name": "active_tetra_count", "from": ["active_tetra_count"], "to": ["active_tetra_count"], "reflectFun": "direct"},
+      {"name": "interface_face_count", "from": ["interface_face_count"], "to": ["interface_face_count"], "reflectFun": "direct"},
+      {"name": "broken_face_count", "from": ["broken_face_count"], "to": ["broken_face_count"], "reflectFun": "direct"},
+      {"name": "component_count", "from": ["component_count"], "to": ["component_count"], "reflectFun": "direct"},
+      {"name": "fracture_state", "from": ["fracture_state"], "to": ["fracture_state"], "reflectFun": "direct"}
+    ]
+  },
+  "exec": {
+    "stage_name": "exec",
+    "functions": ["BuildMinusLg4Field", "SolveImpactAndFracture"],
+    "used_algorithm_containers": {
+      "arrays": [
+        {"name": "render_scene", "kind": "array", "tuple_width": 1, "required": true},
+        {"name": "render_triangle_buffer", "kind": "array", "tuple_width": 1, "required": true},
+        {"name": "render_bvh_buffer", "kind": "array", "tuple_width": 1, "required": true}
+      ],
+      "variables": [
+        {"name": "frame_tick", "kind": "variable", "tuple_width": 1, "required": true},
+        {"name": "render_triangle_count", "kind": "variable", "tuple_width": 1, "required": true},
+        {"name": "render_bvh_count", "kind": "variable", "tuple_width": 1, "required": true}
+      ]
+    },
+    "shader": {
+      "pipeline": "graphics",
+      "vertex": "agent_adaptive_prism_sphere_fracture_probe_result_render.vert",
+      "fragment": "agent_adaptive_prism_sphere_fracture_probe_result_render.frag"
+    }
+  },
+  "intervention": {
+    "stage": {
+      "resultRender": {
+        "stage_name": "resultRender",
+        "stage_kind": "resultRender",
+        "functions": ["RenderPrismFractureProbe"],
+        "used_algorithm_containers": {
+          "arrays": [
+            {"name": "render_scene", "kind": "array", "tuple_width": 1, "required": true},
+            {"name": "render_triangle_buffer", "kind": "array", "tuple_width": 1, "required": true},
+            {"name": "render_bvh_buffer", "kind": "array", "tuple_width": 1, "required": true}
+          ],
+          "variables": [
+            {"name": "frame_tick", "kind": "variable", "tuple_width": 1, "required": true},
+            {"name": "render_triangle_count", "kind": "variable", "tuple_width": 1, "required": true},
+            {"name": "render_bvh_count", "kind": "variable", "tuple_width": 1, "required": true}
+          ]
+        },
+        "shader": {
+          "pipeline": "graphics",
+          "vertex": "agent_adaptive_prism_sphere_fracture_probe_result_render.vert",
+          "fragment": "agent_adaptive_prism_sphere_fracture_probe_result_render.frag"
+        }
+      }
+    }
+  }
+}

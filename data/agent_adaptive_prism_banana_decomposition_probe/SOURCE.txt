@@ -1,0 +1,6 @@
+Source: https://opengameart.org/content/32-low-poly-models
+Asset: banana.obj
+Author: drummyfish
+License: CC0 1.0 Public Domain
+
+The mesh is used as a decomposition test input. No texture or material is required.

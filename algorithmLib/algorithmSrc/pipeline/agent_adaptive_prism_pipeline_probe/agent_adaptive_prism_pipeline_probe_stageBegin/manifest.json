@@ -1,0 +1,9 @@
+{
+  "algorithm_name":"agent_adaptive_prism_pipeline_probe_stageBegin",
+  "globalCfg":{"solvePrecision":"32","defaultPrecision":"32"},
+  "container":{"variable":{"v1":{"count":1},"v2":{"count":1},"v3":{"count":1},"v4":{"count":1},"v5":{"count":1},"v6":{"count":1},"v7":{"count":1},"v8":{"count":1}},"variableArray":{"a1":{"count":1,"tuple_width":4},"a2":{"count":40000,"tuple_width":4},"a3":{"count":20000,"tuple_width":3},"a4":{"count":40000,"tuple_width":3},"a5":{"count":20000,"tuple_width":28},"a6":{"count":20000,"tuple_width":4},"a7":{"count":4,"tuple_width":4}},"aliases":["v1:frame_tick","v2:source_vertex_count","v3:source_triangle_count","v4:prism_count","v5:audit_status","v6:render_triangle_count","v7:paired_count","v8:lod_level_count","a1:render_scene","a2:render_triangle_buffer","a3:mesh_positions,vertex_mesh_0","a4:mesh_triangles,triangle_mesh_0","a5:prism_buffer","a6:lod_buffer","a7:audit_buffer"]},
+  "decomposer":{"res":{},"description":[]},
+  "reflector":{"name":"agent_adaptive_prism_pipeline_probe_stageBegin_state","functionName":"direct","items":[{"name":"frame_tick","from":["frame_tick"],"to":["frame_tick"],"reflectFun":"direct"}]},
+  "exec":{"stage_name":"exec","used_algorithm_containers":{"arrays":[],"variables":[{"name":"frame_tick","kind":"variable","tuple_width":1,"required":true}]},"shader":{"pipeline":"graphics","vertex":"agent_adaptive_prism_pipeline_probe_stageBegin_exec.vert","fragment":"agent_adaptive_prism_pipeline_probe_stageBegin_exec.frag"}},
+  "res":{"items":[]}
+}

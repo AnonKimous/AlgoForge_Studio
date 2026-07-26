@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="900" viewBox="0 0 1500 900" role="img" aria-labelledby="title desc">
+  <title id="title">三棱柱公共棱两侧的同方向牵引力场</title>
+  <desc id="desc">AA' 是公共纵向棱。两侧受力面积相等，所有牵引力向量都与 AA' 平行并指向同一方向，因此两侧合力向量完全一致。</desc>
+  <defs>
+    <marker id="force-arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 z" fill="#d34343"/>
+    </marker>
+    <marker id="axis-arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 z" fill="#245e9a"/>
+    </marker>
+    <style>
+      .title { font: 600 32px 'Microsoft YaHei','Noto Sans CJK SC',sans-serif; fill:#17202a; }
+      .heading { font: 600 24px 'Microsoft YaHei','Noto Sans CJK SC',sans-serif; fill:#17202a; }
+      .label { font: 500 21px 'Microsoft YaHei','Noto Sans CJK SC',sans-serif; fill:#25313d; }
+      .small { font: 400 18px 'Microsoft YaHei','Noto Sans CJK SC',sans-serif; fill:#52606d; }
+      .value { font: 600 22px 'Microsoft YaHei','Noto Sans CJK SC',sans-serif; fill:#17202a; }
+      .panel { fill:#f7f9fb; stroke:#cbd4df; stroke-width:2; }
+      .left-face { fill:#dceafa; stroke:#315d88; stroke-width:4; }
+      .right-face { fill:#e9e1f7; stroke:#6a4f9a; stroke-width:4; }
+      .end-face { fill:#edf2f7; stroke:#52606d; stroke-width:3; }
+      .patch-left { fill:#f4a3a3; fill-opacity:.72; stroke:#b83c3c; stroke-width:3; stroke-dasharray:9 7; }
+      .patch-right { fill:#f4a3a3; fill-opacity:.72; stroke:#b83c3c; stroke-width:3; stroke-dasharray:9 7; }
+      .edge { stroke:#17202a; stroke-width:8; }
+      .force { stroke:#d34343; stroke-width:4; marker-end:url(#force-arrow); }
+      .axis { stroke:#245e9a; stroke-width:4; marker-end:url(#axis-arrow); }
+      .guide { stroke:#9ba7b4; stroke-width:2; stroke-dasharray:8 8; }
+      .node { fill:#fff; stroke:#20364d; stroke-width:4; }
+    </style>
+  </defs>
+
+  <rect width="1500" height="900" fill="#ffffff"/>
+  <text x="60" y="65" class="title">AA' 两侧等面积、同方向牵引：F ∥ AA'</text>
+  <text x="60" y="102" class="small">所有红色箭头方向相同；它们不随两张侧面的法线旋转</text>
+
+  <rect x="45" y="140" width="870" height="700" class="panel"/>
+  <text x="80" y="190" class="heading">受力结构</text>
+
+  <!-- Open-book view of the two adjacent prism faces -->
+  <polygon points="465,215 465,710 145,630 145,285" class="left-face"/>
+  <polygon points="465,215 465,710 785,630 785,285" class="right-face"/>
+  <polygon points="145,285 465,215 785,285 465,365" class="end-face"/>
+  <polygon points="145,630 465,710 785,630 465,550" class="end-face"/>
+  <line x1="465" y1="215" x2="465" y2="710" class="edge"/>
+
+  <!-- Equal-area patches centered at t=0.4 -->
+  <polygon points="465,370 465,475 300,442 300,336" class="patch-left"/>
+  <polygon points="465,370 465,475 630,442 630,336" class="patch-right"/>
+
+  <!-- Parallel traction vectors -->
+  <line x1="350" y1="355" x2="350" y2="430" class="force"/>
+  <line x1="405" y1="370" x2="405" y2="445" class="force"/>
+  <line x1="525" y1="370" x2="525" y2="445" class="force"/>
+  <line x1="580" y1="355" x2="580" y2="430" class="force"/>
+
+  <circle cx="465" cy="215" r="10" class="node"/>
+  <circle cx="465" cy="710" r="10" class="node"/>
+  <circle cx="145" cy="285" r="10" class="node"/>
+  <circle cx="145" cy="630" r="10" class="node"/>
+  <circle cx="785" cy="285" r="10" class="node"/>
+  <circle cx="785" cy="630" r="10" class="node"/>
+
+  <text x="482" y="212" class="label">A</text>
+  <text x="482" y="735" class="label">A'</text>
+  <text x="108" y="278" class="label">B</text>
+  <text x="103" y="660" class="label">B'</text>
+  <text x="796" y="278" class="label">C</text>
+  <text x="796" y="660" class="label">C'</text>
+  <text x="486" y="515" class="value">AA' 公共棱</text>
+  <text x="230" y="325" class="label">ΓL</text>
+  <text x="670" y="325" class="label">ΓR</text>
+
+  <line x1="865" y1="250" x2="865" y2="410" class="axis"/>
+  <text x="815" y="235" class="value">d ∥ AA'</text>
+  <text x="815" y="440" class="small">F 沿 d 方向</text>
+  <text x="90" y="785" class="value">area(ΓL)=area(ΓR)，tractionL=tractionR=p·d</text>
+  <text x="90" y="815" class="value">因此：F_left = F_right</text>
+
+  <rect x="950" y="140" width="505" height="700" class="panel"/>
+  <text x="985" y="190" class="heading">粗算节点映射</text>
+  <text x="985" y="230" class="small">设每侧合力都是 F₀·d，压力中心 t=2/5</text>
+  <text x="985" y="270" class="small">横向平均位置 ū=0.1（从 AA' 向外量）</text>
+
+  <text x="985" y="330" class="label">左侧面 ABB'A'</text>
+  <text x="1010" y="370" class="value">A  = 0.54 F₀·d</text>
+  <text x="1010" y="405" class="value">B  = 0.06 F₀·d</text>
+  <text x="1010" y="440" class="value">A' = 0.36 F₀·d</text>
+  <text x="1010" y="475" class="value">B' = 0.04 F₀·d</text>
+
+  <line x1="985" y1="510" x2="1415" y2="510" class="guide"/>
+  <text x="985" y="555" class="label">右侧面 ACA'C'</text>
+  <text x="1010" y="595" class="value">A  = 0.54 F₀·d</text>
+  <text x="1010" y="630" class="value">C  = 0.06 F₀·d</text>
+  <text x="1010" y="665" class="value">A' = 0.36 F₀·d</text>
+  <text x="1010" y="700" class="value">C' = 0.04 F₀·d</text>
+
+  <line x1="985" y1="735" x2="1415" y2="735" class="guide"/>
+  <text x="985" y="780" class="value">合并：A=1.08F₀，A'=0.72F₀</text>
+  <text x="985" y="815" class="small">B=C=0.06F₀，B'=C'=0.04F₀；总力=2F₀</text>
+</svg>

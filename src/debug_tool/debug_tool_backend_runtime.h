@@ -167,6 +167,9 @@ class DebugToolBackendRuntime : public IDebugToolHost {
     }
     runtime_environment_.SetRenderPreviewRequest(std::move(request));
   }
+  void SetRenderPreviewCamera(runtimesys::RenderPreviewCamera camera) override {
+    runtime_environment_.SetRenderPreviewCamera(std::move(camera));
+  }
   std::string& ui_status_message() override { return ui_status_message_; }
   const std::string& ui_status_message() const override { return ui_status_message_; }
   RuntimeEnvironment& runtime_environment() { return runtime_environment_.runtime_environment(); }
