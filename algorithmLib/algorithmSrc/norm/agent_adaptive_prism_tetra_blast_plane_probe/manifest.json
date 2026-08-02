@@ -1,0 +1,190 @@
+{
+  "algorithm_name": "agent_adaptive_prism_tetra_blast_plane_probe",
+  "package_name": "agent_adaptive_prism_tetra_blast_plane_probe",
+  "jobs_available": true,
+  "vk_available": false,
+  "cuda_available": false,
+  "container": {
+    "variable": {
+      "v1": {"count": 1},
+      "v2": {"count": 1},
+      "v3": {"count": 1},
+      "v4": {"count": 1},
+      "v5": {"count": 1},
+      "v6": {"count": 1},
+      "v7": {"count": 1},
+      "v8": {"count": 1},
+      "v9": {"count": 1},
+      "v10": {"count": 1},
+      "v11": {"count": 1},
+      "v12": {"count": 1},
+      "v13": {"count": 1},
+      "v14": {"count": 1},
+      "v15": {"count": 1},
+      "v16": {"count": 1}
+    },
+    "variableArray": {
+      "a1": {"count": 41, "tuple_width": 1},
+      "a2": {"count": 32, "tuple_width": 1},
+      "a3": {"count": 2, "tuple_width": 4},
+      "a4": {"count": 65536, "tuple_width": 4},
+      "a5": {"count": 16, "tuple_width": 1},
+      "a6": {"count": 32, "tuple_width": 1}
+    },
+    "aliases": [
+      "v1:frame_tick",
+      "v2:render_triangle_count",
+      "v3:loaded_face_count",
+      "v4:cut_vertex_count",
+      "v5:fracture_candidate",
+      "v6:refine_decision",
+      "v7:precision_group_count",
+      "v8:accepted_lg_depth",
+      "v9:precision_leaf_count",
+      "v10:precision_group_executed",
+      "v11:fracture_committed",
+      "v12:fine_node_count",
+      "v13:fine_tetra_count",
+      "v14:broken_face_count",
+      "v15:fragment_count",
+      "v16:interface_face_count",
+      "a1:blast_plane_config",
+      "a2:blast_plane_metrics",
+      "a3:render_scene",
+      "a4:render_triangle_buffer",
+      "a5:refine_decision_packet",
+      "a6:fracture_metrics"
+    ]
+  },
+  "decomposer": {
+    "res": {},
+    "description": [
+      {"name":"tetra_v0_x","from":["tetra_v0_x"],"to":{"container":"blast_plane_config","indices":[1]}},
+      {"name":"tetra_v0_y","from":["tetra_v0_y"],"to":{"container":"blast_plane_config","indices":[2]}},
+      {"name":"tetra_v0_z","from":["tetra_v0_z"],"to":{"container":"blast_plane_config","indices":[3]}},
+      {"name":"tetra_v1_x","from":["tetra_v1_x"],"to":{"container":"blast_plane_config","indices":[4]}},
+      {"name":"tetra_v1_y","from":["tetra_v1_y"],"to":{"container":"blast_plane_config","indices":[5]}},
+      {"name":"tetra_v1_z","from":["tetra_v1_z"],"to":{"container":"blast_plane_config","indices":[6]}},
+      {"name":"tetra_v2_x","from":["tetra_v2_x"],"to":{"container":"blast_plane_config","indices":[7]}},
+      {"name":"tetra_v2_y","from":["tetra_v2_y"],"to":{"container":"blast_plane_config","indices":[8]}},
+      {"name":"tetra_v2_z","from":["tetra_v2_z"],"to":{"container":"blast_plane_config","indices":[9]}},
+      {"name":"tetra_v3_x","from":["tetra_v3_x"],"to":{"container":"blast_plane_config","indices":[10]}},
+      {"name":"tetra_v3_y","from":["tetra_v3_y"],"to":{"container":"blast_plane_config","indices":[11]}},
+      {"name":"tetra_v3_z","from":["tetra_v3_z"],"to":{"container":"blast_plane_config","indices":[12]}},
+      {"name":"blast_x","from":["blast_x"],"to":{"container":"blast_plane_config","indices":[13]}},
+      {"name":"blast_y","from":["blast_y"],"to":{"container":"blast_plane_config","indices":[14]}},
+      {"name":"blast_z","from":["blast_z"],"to":{"container":"blast_plane_config","indices":[15]}},
+      {"name":"plane_nx","from":["plane_nx"],"to":{"container":"blast_plane_config","indices":[16]}},
+      {"name":"plane_ny","from":["plane_ny"],"to":{"container":"blast_plane_config","indices":[17]}},
+      {"name":"plane_nz","from":["plane_nz"],"to":{"container":"blast_plane_config","indices":[18]}},
+      {"name":"plane_offset","from":["plane_offset"],"to":{"container":"blast_plane_config","indices":[19]}},
+      {"name":"peak_pressure_pa","from":["peak_pressure_pa"],"to":{"container":"blast_plane_config","indices":[20]}},
+      {"name":"decay_length_m","from":["decay_length_m"],"to":{"container":"blast_plane_config","indices":[21]}},
+      {"name":"wave_speed_mps","from":["wave_speed_mps"],"to":{"container":"blast_plane_config","indices":[22]}},
+      {"name":"sample_time_s","from":["sample_time_s"],"to":{"container":"blast_plane_config","indices":[23]}},
+      {"name":"pulse_width_s","from":["pulse_width_s"],"to":{"container":"blast_plane_config","indices":[24]}},
+      {"name":"density_kg_m3","from":["density_kg_m3"],"to":{"container":"blast_plane_config","indices":[25]}},
+      {"name":"tensile_strength_pa","from":["tensile_strength_pa"],"to":{"container":"blast_plane_config","indices":[26]}},
+      {"name":"shear_strength_pa","from":["shear_strength_pa"],"to":{"container":"blast_plane_config","indices":[27]}},
+      {"name":"pressure_tolerance_ratio","from":["pressure_tolerance_ratio"],"to":{"container":"blast_plane_config","indices":[28]}},
+      {"name":"force_tolerance_ratio","from":["force_tolerance_ratio"],"to":{"container":"blast_plane_config","indices":[29]}},
+      {"name":"moment_tolerance_ratio","from":["moment_tolerance_ratio"],"to":{"container":"blast_plane_config","indices":[30]}},
+      {"name":"refine_threshold","from":["refine_threshold"],"to":{"container":"blast_plane_config","indices":[31]}},
+      {"name":"fracture_observation_time_s","from":["fracture_observation_time_s"],"to":{"container":"blast_plane_config","indices":[32]}},
+      {"name":"external_pressure_dir_x","from":["external_pressure_dir_x"],"to":{"container":"blast_plane_config","indices":[33]}},
+      {"name":"external_pressure_dir_y","from":["external_pressure_dir_y"],"to":{"container":"blast_plane_config","indices":[34]}},
+      {"name":"external_pressure_dir_z","from":["external_pressure_dir_z"],"to":{"container":"blast_plane_config","indices":[35]}},
+      {"name":"external_pressure_pa","from":["external_pressure_pa"],"to":{"container":"blast_plane_config","indices":[36]}},
+      {"name":"secondary_plane_nx","from":["secondary_plane_nx"],"to":{"container":"blast_plane_config","indices":[37]}},
+      {"name":"secondary_plane_ny","from":["secondary_plane_ny"],"to":{"container":"blast_plane_config","indices":[38]}},
+      {"name":"secondary_plane_nz","from":["secondary_plane_nz"],"to":{"container":"blast_plane_config","indices":[39]}},
+      {"name":"secondary_plane_offset","from":["secondary_plane_offset"],"to":{"container":"blast_plane_config","indices":[40]}},
+      {"name":"external_pressure_duration_s","from":["external_pressure_duration_s"],"to":{"container":"blast_plane_config","indices":[41]}}
+    ]
+  },
+  "reflector": {
+    "name": "agent_adaptive_prism_tetra_blast_plane_probe_state",
+    "functionName": "direct",
+    "items": [
+      {"name":"frame_tick","from":["frame_tick"],"to":["frame_tick"],"reflectFun":"direct"},
+      {"name":"loaded_face_count","from":["loaded_face_count"],"to":["loaded_face_count"],"reflectFun":"direct"},
+      {"name":"cut_vertex_count","from":["cut_vertex_count"],"to":["cut_vertex_count"],"reflectFun":"direct"},
+      {"name":"fracture_candidate","from":["fracture_candidate"],"to":["fracture_candidate"],"reflectFun":"direct"},
+      {"name":"refine_decision","from":["refine_decision"],"to":["refine_decision"],"reflectFun":"direct"},
+      {"name":"precision_group_count","from":["precision_group_count"],"to":["precision_group_count"],"reflectFun":"direct"},
+      {"name":"accepted_lg_depth","from":["accepted_lg_depth"],"to":["accepted_lg_depth"],"reflectFun":"direct"},
+      {"name":"precision_leaf_count","from":["precision_leaf_count"],"to":["precision_leaf_count"],"reflectFun":"direct"},
+      {"name":"precision_group_executed","from":["precision_group_executed"],"to":["precision_group_executed"],"reflectFun":"direct"},
+      {"name":"fracture_committed","from":["fracture_committed"],"to":["fracture_committed"],"reflectFun":"direct"},
+      {"name":"fine_node_count","from":["fine_node_count"],"to":["fine_node_count"],"reflectFun":"direct"},
+      {"name":"fine_tetra_count","from":["fine_tetra_count"],"to":["fine_tetra_count"],"reflectFun":"direct"},
+      {"name":"broken_face_count","from":["broken_face_count"],"to":["broken_face_count"],"reflectFun":"direct"},
+      {"name":"fragment_count","from":["fragment_count"],"to":["fragment_count"],"reflectFun":"direct"},
+      {"name":"interface_face_count","from":["interface_face_count"],"to":["interface_face_count"],"reflectFun":"direct"},
+      {"name":"blast_plane_metrics","from":["blast_plane_metrics"],"to":["blast_plane_metrics"],"reflectFun":"direct"},
+      {"name":"refine_decision_packet","from":["refine_decision_packet"],"to":["refine_decision_packet"],"reflectFun":"direct"},
+      {"name":"fracture_metrics","from":["fracture_metrics"],"to":["fracture_metrics"],"reflectFun":"direct"}
+    ]
+  },
+  "exec": {
+    "stage_name": "exec",
+    "functions": ["IntegrateFiniteBlastPressure", "EvaluateTetraCutTraction"],
+    "used_algorithm_containers": {
+      "arrays": [
+        {"name":"blast_plane_config","kind":"array","tuple_width":1,"required":true},
+        {"name":"blast_plane_metrics","kind":"array","tuple_width":1,"required":true},
+        {"name":"render_scene","kind":"array","tuple_width":4,"required":true},
+        {"name":"render_triangle_buffer","kind":"array","tuple_width":4,"required":true},
+        {"name":"refine_decision_packet","kind":"array","tuple_width":1,"required":true},
+        {"name":"fracture_metrics","kind":"array","tuple_width":1,"required":true}
+      ],
+      "variables": [
+        {"name":"frame_tick","kind":"variable","tuple_width":1,"required":true},
+        {"name":"render_triangle_count","kind":"variable","tuple_width":1,"required":true},
+        {"name":"loaded_face_count","kind":"variable","tuple_width":1,"required":true},
+        {"name":"cut_vertex_count","kind":"variable","tuple_width":1,"required":true},
+        {"name":"fracture_candidate","kind":"variable","tuple_width":1,"required":true},
+        {"name":"refine_decision","kind":"variable","tuple_width":1,"required":true},
+        {"name":"precision_group_count","kind":"variable","tuple_width":1,"required":true},
+        {"name":"accepted_lg_depth","kind":"variable","tuple_width":1,"required":true},
+        {"name":"precision_leaf_count","kind":"variable","tuple_width":1,"required":true},
+        {"name":"precision_group_executed","kind":"variable","tuple_width":1,"required":true},
+        {"name":"fracture_committed","kind":"variable","tuple_width":1,"required":true},
+        {"name":"fine_node_count","kind":"variable","tuple_width":1,"required":true},
+        {"name":"fine_tetra_count","kind":"variable","tuple_width":1,"required":true},
+        {"name":"broken_face_count","kind":"variable","tuple_width":1,"required":true},
+        {"name":"fragment_count","kind":"variable","tuple_width":1,"required":true},
+        {"name":"interface_face_count","kind":"variable","tuple_width":1,"required":true}
+      ]
+    },
+    "shader": {
+      "pipeline": "graphics",
+      "vertex": "agent_adaptive_prism_tetra_blast_plane_probe_result_render.vert",
+      "fragment": "agent_adaptive_prism_tetra_blast_plane_probe_result_render.frag"
+    }
+  },
+  "intervention": {
+    "stage": {
+      "resultRender": {
+        "stage_name": "resultRender",
+        "stage_kind": "resultRender",
+        "functions": ["RenderTetraBlastPlaneProbe"],
+        "used_algorithm_containers": {
+          "arrays": [
+            {"name":"render_scene","kind":"array","tuple_width":4,"required":true},
+            {"name":"render_triangle_buffer","kind":"array","tuple_width":4,"required":true}
+          ],
+          "variables": [
+            {"name":"frame_tick","kind":"variable","tuple_width":1,"required":true},
+            {"name":"render_triangle_count","kind":"variable","tuple_width":1,"required":true}
+          ]
+        },
+        "shader": {
+          "pipeline": "graphics",
+          "vertex": "agent_adaptive_prism_tetra_blast_plane_probe_result_render.vert",
+          "fragment": "agent_adaptive_prism_tetra_blast_plane_probe_result_render.frag"
+        }
+      }
+    }
+  }
+}
